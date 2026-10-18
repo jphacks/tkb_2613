@@ -1,0 +1,9 @@
+# api イメージ用（コンテキストはリポジトリのルート）
+**
+!pyproject.toml
+!uv.lock
+!api/
+!detect/
+**/__pycache__
+**/.pytest_cache
+**/tests

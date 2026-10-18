@@ -1,0 +1,42 @@
+# 起動：make up（または docker compose -f infra/docker-compose.yml up --build）
+# VLM と OCR はチームのサーバーで動かすので、ここには含めない
+
+name: tkb_2613
+
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: api/Dockerfile
+    env_file:
+      - path: ../.env
+        required: false
+    environment:
+      MOCK_MODE: ${MOCK_MODE:-1}
+      CORS_ORIGINS: '["http://localhost:3000"]'
+    ports:
+      - "127.0.0.1:8001:8001"
+    # 写真をディスクに残さないよう、ファイルシステムを読み取り専用にする
+    read_only: true
+    tmpfs:
+      - /tmp
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  web:
+    build:
+      context: ../web
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8001}
+    ports:
+      - "127.0.0.1:3000:3000"
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /app/.next/cache:uid=1000,gid=1000
+    depends_on:
+      api:
+        condition: service_healthy

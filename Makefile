@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help setup dev dev-api dev-web test lint secrets
+.PHONY: help setup dev dev-api dev-web up down test lint secrets
 
 help: ## コマンド一覧
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-10s %s\n", $$1, $$2}'
@@ -16,6 +16,12 @@ dev-api: ## api だけを起動（http://localhost:8001）
 
 dev-web: ## web だけを起動（http://localhost:3000）
 	pnpm -C web dev
+
+up: ## Docker Compose で web と api を起動（モックモード）
+	docker compose -f infra/docker-compose.yml up --build
+
+down: ## Docker Compose を止める
+	docker compose -f infra/docker-compose.yml down
 
 test: ## テスト
 	@test ! -f pyproject.toml || uv run pytest
