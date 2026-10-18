@@ -1,0 +1,45 @@
+[project]
+name = "tkb-2613"
+version = "0.0.0"
+requires-python = ">=3.13,<3.14"
+dependencies = []
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = ["api"]
+
+[dependency-groups]
+dev = [
+  "httpx>=0.28",
+  "mypy>=1.13",
+  "pytest>=8.3",
+  "pytest-cov>=6.0",
+  "ruff>=0.8",
+]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "SIM", "RUF"]
+# 日本語のコメントや文字列では全角括弧などを普通に使う
+ignore = ["RUF001", "RUF002", "RUF003"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["tkb_api"]
+
+[tool.ruff.lint.per-file-ignores]
+"**/tests/**" = ["S101"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+files = ["api/src", "api/tests"]
+plugins = ["pydantic.mypy"]
+
+[tool.pytest.ini_options]
+testpaths = ["api/tests"]
+addopts = "--import-mode=importlib --cov=tkb_api --cov-report=term-missing --cov-fail-under=80"

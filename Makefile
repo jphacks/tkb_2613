@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help setup dev test lint secrets
+.PHONY: help setup dev dev-api test lint secrets
 
 help: ## コマンド一覧
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-10s %s\n", $$1, $$2}'
@@ -9,7 +9,10 @@ setup: ## 依存関係のインストール
 	@test ! -d web || pnpm -C web install
 
 dev: ## web と api をローカルで起動（モックモード）
-	@echo "api と web を作成後に有効になる"
+	$(MAKE) dev-api
+
+dev-api: ## api だけを起動（http://localhost:8001）
+	MOCK_MODE=1 uv run uvicorn tkb_api.main:app --reload --port 8001
 
 test: ## テスト
 	@test ! -f pyproject.toml || uv run pytest
