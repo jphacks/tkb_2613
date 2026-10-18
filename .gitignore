@@ -1,0 +1,50 @@
+# 秘密情報（.env.example だけコミットする）
+.env
+.env.*
+!.env.example
+
+# 写真・公開データ・モデルの重み（コミットしない）
+*.jpg
+*.jpeg
+*.png
+*.heic
+*.heif
+*.webp
+!web/public/**/*.png
+!web/public/**/*.svg
+data-prep/raw/
+data-prep/out/
+eval/photos/
+*.safetensors
+*.gguf
+*.onnx
+*.pt
+*.pth
+*.bin
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+coverage/
+*.tsbuildinfo
+next-env.d.ts
+.pnpm-store/
+
+# エディタ・OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db

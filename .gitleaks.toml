@@ -1,0 +1,9 @@
+title = "tkb_2613 gitleaks config"
+
+# 既定のルールをすべて使う
+[extend]
+useDefault = true
+
+[allowlist]
+description = "秘密情報を含まない雛形"
+paths = ['''\.env\.example$''']
