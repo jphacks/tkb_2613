@@ -1,7 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  // Docker イメージを小さくするため、必要なファイルだけを .next/standalone に出力する
+  output: "standalone",
   cacheComponents: true,
   partialPrefetching: true,
   turbopack: {
