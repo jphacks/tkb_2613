@@ -1,0 +1,32 @@
+@import "tailwindcss";
+
+/* 方向性：かくれんぼ ── 生成りの紙、墨、鬼の朱 */
+:root {
+  --paper: oklch(96% 0.02 85);
+  --paper-deep: oklch(91% 0.03 80);
+  --ink: oklch(22% 0.02 260);
+  --seeker: oklch(58% 0.19 32);
+}
+
+@theme inline {
+  --color-paper: var(--paper);
+  --color-paper-deep: var(--paper-deep);
+  --color-ink: var(--ink);
+  --color-seeker: var(--seeker);
+  --font-sans: "Zen Kaku Gothic New", system-ui, sans-serif;
+  --font-display: "Dela Gothic One", "Zen Kaku Gothic New", sans-serif;
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+  }
+}
