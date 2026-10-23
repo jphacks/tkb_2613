@@ -592,14 +592,12 @@ version = "0.0.0"
 source = { editable = "data-prep" }
 dependencies = [
     { name = "jismesh" },
-    { name = "numpy" },
     { name = "pyarrow" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "jismesh", specifier = ">=2.1" },
-    { name = "numpy", specifier = ">=2.1" },
     { name = "pyarrow", specifier = ">=18.0" },
 ]
 

@@ -5,7 +5,6 @@ description = "公開データ（郵便番号、メッシュ、駅、世帯数�
 requires-python = ">=3.13,<3.14"
 dependencies = [
   "jismesh>=2.1",
-  "numpy>=2.1",
   "pyarrow>=18.0",
 ]
 
