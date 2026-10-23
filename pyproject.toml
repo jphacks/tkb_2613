@@ -8,7 +8,7 @@ dependencies = []
 package = false
 
 [tool.uv.workspace]
-members = ["api", "detect"]
+members = ["api", "detect", "data-prep"]
 
 [dependency-groups]
 dev = [
@@ -30,7 +30,7 @@ select = ["E", "F", "W", "I", "B", "UP", "S", "SIM", "RUF"]
 ignore = ["RUF001", "RUF002", "RUF003"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["tkb_api", "tkb_detect"]
+known-first-party = ["tkb_api", "tkb_detect", "tkb_data_prep"]
 
 [tool.ruff.lint.per-file-ignores]
 "**/tests/**" = ["S101"]
@@ -38,9 +38,21 @@ known-first-party = ["tkb_api", "tkb_detect"]
 [tool.mypy]
 python_version = "3.13"
 strict = true
-files = ["api/src", "api/tests", "detect/src", "detect/tests"]
+files = [
+  "api/src",
+  "api/tests",
+  "detect/src",
+  "detect/tests",
+  "data-prep/src",
+  "data-prep/tests",
+]
 plugins = ["pydantic.mypy"]
 
+# 型情報を持たないライブラリ
+[[tool.mypy.overrides]]
+module = ["jismesh.*", "pyarrow.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
-testpaths = ["api/tests", "detect/tests"]
-addopts = "--import-mode=importlib --cov=tkb_api --cov=tkb_detect --cov-report=term-missing --cov-fail-under=80"
+testpaths = ["api/tests", "detect/tests", "data-prep/tests"]
+addopts = "--import-mode=importlib --cov=tkb_api --cov=tkb_detect --cov=tkb_data_prep --cov-report=term-missing --cov-fail-under=80"
