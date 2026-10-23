@@ -14,6 +14,7 @@
 !web/public/**/*.svg
 data-prep/raw/
 data-prep/out/
+data/
 eval/photos/
 *.safetensors
 *.gguf
