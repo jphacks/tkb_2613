@@ -13,3 +13,5 @@ README の「HackDay以前に作成したもの」はここから書く。
 | 2026-10-19 | CI（GitHub Actions）：Python の lint・型・テスト、web の lint・型・テスト・ビルド、Docker イメージのビルド、gitleaks。action はコミットの SHA で固定 | .github/workflows/ci.yml |
 | 2026-10-19 | モデル呼び出しのクライアント（vLLM の OpenAI 互換 API、PP-OCRv5 の HTTP サービス）。応答をそのまま返すだけで、手がかりの形式への変換は含まない。第三者の AI サービスへの送信を拒否する確認 | detect/ |
 | 2026-10-23 | メンバー向けの環境構築手順書（Mac と Windows〈WSL2〉の手順、動作確認、よくあるつまずき） | docs/setup.md |
+| 2026-10-23 | 公開データの取得と表への変換（1都3県）。`make data` で郵便番号・市区町村別メッシュ・鉄道データ（N02）を取得し、e-Stat の地域メッシュ統計と合わせて、市区町村と 1km メッシュ、500m メッシュの世帯数・人口、郵便番号、駅、市外局番の 5 つの表を Parquet で書き出す。表を使った計算（絞り込み、世帯数の計算、徒歩圏の判定）は含まない | data-prep/、Makefile |
+| 2026-10-23 | 市外局番と市区町村の対応表（総務省「市外局番の一覧」から 1都3県を含む 51 行を写したもの） | data-prep/manual/area_codes.csv |
