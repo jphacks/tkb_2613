@@ -3,7 +3,7 @@
 import csv
 import io
 import zipfile
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 import pyarrow as pa
@@ -47,7 +47,7 @@ def require_file(path: Path) -> Path:
     return path
 
 
-def write_parquet(columns: dict[str, Sequence[object]], schema: pa.Schema, path: Path) -> None:
+def write_parquet(columns: Mapping[str, Sequence[object]], schema: pa.Schema, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     table = pa.table({name: list(values) for name, values in columns.items()}, schema=schema)
     pq.write_table(table, path)
