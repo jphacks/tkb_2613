@@ -4,6 +4,8 @@
 !uv.lock
 !api/
 !detect/
+# ワークスペースの解決に pyproject だけ使う
+!data-prep/pyproject.toml
 **/__pycache__
 **/.pytest_cache
 **/tests
