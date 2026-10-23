@@ -12,3 +12,4 @@ README の「HackDay以前に作成したもの」はここから書く。
 | 2026-10-19 | Dockerfile（api、web）と Docker Compose、起動手順。コンテナは読み取り専用、ポートは 127.0.0.1 のみ、`make up` / `make down` | api/Dockerfile、web/Dockerfile、infra/ |
 | 2026-10-19 | CI（GitHub Actions）：Python の lint・型・テスト、web の lint・型・テスト・ビルド、Docker イメージのビルド、gitleaks。action はコミットの SHA で固定 | .github/workflows/ci.yml |
 | 2026-10-19 | モデル呼び出しのクライアント（vLLM の OpenAI 互換 API、PP-OCRv5 の HTTP サービス）。応答をそのまま返すだけで、手がかりの形式への変換は含まない。第三者の AI サービスへの送信を拒否する確認 | detect/ |
+| 2026-10-23 | メンバー向けの環境構築手順書（Mac と Windows〈WSL2〉の手順、動作確認、よくあるつまずき） | docs/setup.md |
