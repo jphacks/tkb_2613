@@ -83,3 +83,7 @@ Python は `api/` の Pydantic モデル、TypeScript は `web/` の型を正と
 - Python は型ヒント必須、ruff と pytest。TypeScript は strict
 - README.md は JPHACKS の雛形の見出しを消さずに埋めていく
 - 迷ったら推測で進めず、確認を求める
+- コミットメッセージは「種類: 内容」の形で日本語で書く（例: feat: 手がかり形式の型を追加、fix: …、chore: …、docs: …）
+- 1コミット1目的。動かないコードや生成物（node_modules、.venv、ビルド結果）はコミットしない
+- main への強制 push と履歴の書き換えはしない
+- Hack Day 前の最後のコミットには pre-hackday タグを打つ
