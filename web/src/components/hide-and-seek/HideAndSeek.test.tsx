@@ -12,7 +12,17 @@ vi.mock("@/lib/api", async (importOriginal) => {
 });
 
 const RESPONSE: DetectResponse = {
-  clues: [{ type: "station_sign", value: "新宿", region: [1, 1, 2, 2], confidence: 0.9, source: "vlm" }],
+  clues: [
+    {
+      post_id: "at://did:plc:xxxx/app.bsky.feed.post/3kxxxx",
+      image_index: 0,
+      type: "station_sign",
+      value: "新宿",
+      region: [1, 1, 2, 2],
+      confidence: 0.9,
+      source: "vlm",
+    },
+  ],
 };
 
 function choosePhoto() {

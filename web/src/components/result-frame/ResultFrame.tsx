@@ -38,19 +38,21 @@ export function ResultFrame({ imageUrl, clues }: ResultFrameProps) {
           }
         />
         {size &&
-          clues.map((clue, i) => (
-            <span
-              key={i}
-              data-testid={`clue-region-${i}`}
-              aria-hidden
-              className="absolute border-2 border-seeker bg-seeker/15"
-              style={toPercentBox(clue.region, size)}
-            >
-              <span className="absolute -top-6 left-0 bg-seeker px-1.5 text-xs font-bold text-paper">
-                {i + 1}
+          clues.map((clue, i) =>
+            clue.region === null ? null : (
+              <span
+                key={i}
+                data-testid={`clue-region-${i}`}
+                aria-hidden
+                className="absolute border-2 border-seeker bg-seeker/15"
+                style={toPercentBox(clue.region, size)}
+              >
+                <span className="absolute -top-6 left-0 bg-seeker px-1.5 text-xs font-bold text-paper">
+                  {i + 1}
+                </span>
               </span>
-            </span>
-          ))}
+            ),
+          )}
       </figure>
 
       {clues.length === 0 ? (
