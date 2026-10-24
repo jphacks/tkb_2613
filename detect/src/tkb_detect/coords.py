@@ -1,7 +1,9 @@
 """VLM が返した座標を、元の画像のピクセル座標 [左上x, 左上y, 右下x, 右下y] に直す。
 
-Qwen の座標が 0〜1000 の相対値か、送った画像のピクセルかは、合成画像で確かめてから
-COORDINATE_SPACE を決める。決まるまでは None にしておき、座標が来たら止める。
+qwen3.6-27b（vLLM）は、画像の大きさによらず 0〜1000 の相対値で返す。
+2026-10-24 に合成画像で確かめた（縮めずに送った 1600×900 と、1280×720 に縮めて送った
+2560×1440 のどちらも 0〜1000 の相対値。json_schema の有無でも同じ）。
+モデルを替えたら確かめ直し、COORDINATE_SPACE を見直すこと。None にすると座標が来たら止まる。
 """
 
 from enum import StrEnum
@@ -19,8 +21,7 @@ class CoordinateSpace(StrEnum):
     SENT_PIXELS = "sent_pixels"
 
 
-# TODO: 合成画像での確認の結果で決める
-COORDINATE_SPACE: CoordinateSpace | None = None
+COORDINATE_SPACE: CoordinateSpace | None = CoordinateSpace.RELATIVE_1000
 
 
 def to_original_region(

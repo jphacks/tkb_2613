@@ -16,5 +16,6 @@
 
 ## 座標の単位
 
-Qwen が返す座標が 0〜1000 の相対値か、送った画像のピクセルかは、合成画像で確かめてから `coords.COORDINATE_SPACE` を決める。
-決まるまでは、VLM が座標を返すと `DetectError` で止まる。
+qwen3.6-27b は、画像の大きさによらず 0〜1000 の相対値で返す（2026-10-24 に合成画像で確認）。
+`coords.COORDINATE_SPACE = RELATIVE_1000` にして、元の画像のピクセルに直している。
+モデルを替えたら確かめ直すこと（`eval/try_detect.py --space` で切り替えて試せる）。
