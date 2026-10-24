@@ -12,6 +12,7 @@ COPY common/pyproject.toml common/
 COPY api/pyproject.toml api/
 COPY detect/pyproject.toml detect/
 # ワークスペースの解決に必要なだけで、api のイメージには入れない
+COPY engine/pyproject.toml engine/
 COPY data-prep/pyproject.toml data-prep/
 RUN uv sync --frozen --no-dev --package tkb-api --no-install-workspace
 

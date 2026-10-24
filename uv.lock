@@ -9,6 +9,7 @@ members = [
     "tkb-common",
     "tkb-data-prep",
     "tkb-detect",
+    "tkb-engine",
 ]
 
 [[package]]
@@ -786,6 +787,21 @@ dependencies = [
 requires-dist = [
     { name = "httpx", specifier = ">=0.28" },
     { name = "pillow", specifier = ">=13.0.0" },
+    { name = "tkb-common", editable = "common" },
+]
+
+[[package]]
+name = "tkb-engine"
+version = "0.0.0"
+source = { editable = "engine" }
+dependencies = [
+    { name = "pyarrow" },
+    { name = "tkb-common" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pyarrow", specifier = ">=18.0" },
     { name = "tkb-common", editable = "common" },
 ]
 
