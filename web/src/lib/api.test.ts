@@ -4,7 +4,15 @@ import { ApiError, detectClues, MAX_IMAGE_BYTES } from "./api";
 
 const RESPONSE = {
   clues: [
-    { type: "phone", value: "03-0000-0000", region: [1, 2, 3, 4], confidence: 0.8, source: "ocr" },
+    {
+      post_id: "at://did:plc:xxxx/app.bsky.feed.post/3kxxxx",
+      image_index: 0,
+      type: "phone",
+      value: "03-0000-0000",
+      region: [1, 2, 3, 4],
+      confidence: 0.8,
+      source: "ocr",
+    },
   ],
 };
 

@@ -5,9 +5,36 @@ import type { Clue } from "@/types/clue";
 
 import { ResultFrame } from "./ResultFrame";
 
+const POST_ID = "at://did:plc:xxxx/app.bsky.feed.post/3kxxxx";
+
 const CLUES: Clue[] = [
-  { type: "station_sign", value: "新宿", region: [100, 50, 300, 150], confidence: 0.92, source: "vlm" },
-  { type: "phone", value: "03-0000-0000", region: [0, 0, 100, 25], confidence: 0.5, source: "ocr" },
+  {
+    post_id: POST_ID,
+    image_index: 0,
+    type: "station_sign",
+    value: "新宿",
+    region: [100, 50, 300, 150],
+    confidence: 0.92,
+    source: "vlm",
+  },
+  {
+    post_id: POST_ID,
+    image_index: 0,
+    type: "phone",
+    value: "03-0000-0000",
+    region: [0, 0, 100, 25],
+    confidence: 0.5,
+    source: "ocr",
+  },
+  {
+    post_id: POST_ID,
+    image_index: null,
+    type: "routine_text",
+    value: "夜勤明け",
+    region: null,
+    confidence: 0.9,
+    source: "text",
+  },
 ];
 
 function loadImage(width: number, height: number) {
@@ -24,7 +51,7 @@ describe("ResultFrame", () => {
     const items = within(screen.getByRole("list", { name: "見つかった手がかり" })).getAllByRole(
       "listitem",
     );
-    expect(items).toHaveLength(2);
+    expect(items).toHaveLength(3);
     expect(items[0]).toHaveTextContent("駅名標");
     expect(items[0]).toHaveTextContent("新宿");
     expect(items[0]).toHaveTextContent("92%");
@@ -39,6 +66,14 @@ describe("ResultFrame", () => {
 
     const box = screen.getByTestId("clue-region-0");
     expect(box).toHaveStyle({ left: "10%", top: "10%", width: "20%", height: "20%" });
+  });
+
+  it("lists clues without a region but draws no box for them", () => {
+    render(<ResultFrame imageUrl="blob:photo" clues={CLUES} />);
+    loadImage(1000, 500);
+
+    expect(screen.getByText("夜勤明け")).toBeInTheDocument();
+    expect(screen.queryByTestId("clue-region-2")).not.toBeInTheDocument();
   });
 
   it("shows a message when no clues were found", () => {
