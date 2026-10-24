@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
+import type { Clue } from "@/types/clue";
 import type { Post } from "@/types/post";
 
 import { PostCard } from "./PostCard";
@@ -58,5 +59,26 @@ describe("PostCard", () => {
     render(<PostCard post={{ ...POST, images: [] }} />);
 
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
+  });
+
+  it("shakes the card only when a clue is found", () => {
+    const clue: Clue = {
+      post_id: POST.post_id,
+      image_index: null,
+      type: "place_text",
+      value: "新宿",
+      region: null,
+      confidence: 0.8,
+      source: "text",
+    };
+    const { container, rerender } = render(<PostCard post={POST} />);
+    const card = container.querySelector("article");
+    expect(card).not.toHaveClass("clue-hit");
+
+    rerender(<PostCard post={POST} found={{ clues: [], error: null }} />);
+    expect(card).not.toHaveClass("clue-hit");
+
+    rerender(<PostCard post={POST} found={{ clues: [clue], error: null }} />);
+    expect(card).toHaveClass("clue-hit");
   });
 });

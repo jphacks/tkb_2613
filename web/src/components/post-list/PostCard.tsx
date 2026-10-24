@@ -53,8 +53,10 @@ export interface PostClues {
 
 /** 診断で読んだ投稿 1 件。本文・投稿時刻・写真と、取り出した手がかりを出す。 */
 export function PostCard({ post, found }: { post: Post; found?: PostClues }) {
+  // 手がかりが届いた瞬間にクラスが付き、そのとき 1 回だけ揺れる
+  const hit = (found?.clues.length ?? 0) > 0;
   return (
-    <article className="space-y-3 border-b border-dashed border-ink/25 pb-5">
+    <article className={`space-y-3 border-b border-dashed border-ink/25 pb-5 ${hit ? "clue-hit" : ""}`}>
       <time dateTime={post.created_at} className="block text-xs tracking-widest text-ink/60">
         {TIME_FORMAT.format(new Date(post.created_at))}
       </time>

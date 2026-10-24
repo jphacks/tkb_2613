@@ -140,6 +140,31 @@ body::after {
   }
 }
 
+/* 手がかりが見つかった投稿：1 回だけガタッと揺れて赤く光る。投稿が多くてもうるさくないよう、小さく短く */
+.clue-hit {
+  animation: clue-hit 0.45s ease-out;
+}
+
+@keyframes clue-hit {
+  0% {
+    transform: translateX(0);
+    background-color: oklch(60% 0.23 27 / 0.18);
+  }
+  20% {
+    transform: translateX(-4px);
+  }
+  40% {
+    transform: translateX(3px);
+  }
+  60% {
+    transform: translateX(-2px);
+  }
+  100% {
+    transform: translateX(0);
+    background-color: transparent;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
