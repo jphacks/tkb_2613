@@ -2,7 +2,10 @@
 
 import { useState } from "react";
 
+import type { Clue } from "@/types/clue";
 import type { Post, PostImage } from "@/types/post";
+
+import { ClueList } from "./ClueList";
 
 const TIME_FORMAT = new Intl.DateTimeFormat("ja-JP", {
   timeZone: "Asia/Tokyo",
@@ -42,8 +45,14 @@ function PostPhoto({ image }: { image: PostImage }) {
   );
 }
 
-/** 診断で読んだ投稿 1 件。本文・投稿時刻・写真を出す。 */
-export function PostCard({ post }: { post: Post }) {
+/** 投稿から取り出した手がかり。まだ取り出していなければ undefined */
+export interface PostClues {
+  clues: readonly Clue[];
+  error: string | null;
+}
+
+/** 診断で読んだ投稿 1 件。本文・投稿時刻・写真と、取り出した手がかりを出す。 */
+export function PostCard({ post, found }: { post: Post; found?: PostClues }) {
   return (
     <article className="space-y-3 border-b border-dashed border-ink/25 pb-5">
       <time dateTime={post.created_at} className="block text-xs tracking-widest text-ink/60">
@@ -57,6 +66,7 @@ export function PostCard({ post }: { post: Post }) {
           ))}
         </div>
       )}
+      {found && <ClueList clues={found.clues} error={found.error} label="この投稿の手がかり" />}
     </article>
   );
 }
