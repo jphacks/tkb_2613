@@ -68,11 +68,15 @@ Python は `api/` の Pydantic モデル、TypeScript は `web/` の型を正と
 {"clues": [{"post_id": "at://.../3kxxxx", "image_index": 0, "type": "station_sign", "value": "新宿", "region": [120, 80, 340, 150], "confidence": 0.92, "source": "vlm"}]}
 ```
 
+手がかりは「見えたもの・書いてあるもの」の観測だけにする。「この人は看護師」「最寄りは〇〇駅」のような推理は手がかりに入れない（推理は engine の推理ルールで行う）。
+
 - `type`：
-  - 写真から：station_sign / address_text / postal_code / phone / shop / plate / landmark / face / iris / key / code / uniform（制服・作業着・社員証）
-  - 写真と本文の両方から：name_text（ケーキのプレート、名札、宛名、返信での呼びかけなど名前らしい文字）、workplace_text（職業・勤務先・学校をにおわせるもの）、routine_text（「夜勤明け」「毎週火曜のジム」など生活の決まり）、relation_text（家族・同居人など）
-- `image_index`、`region`：写真から出た手がかりだけに入れる。本文から出たものは null
-- `region`：画像上の矩形 [左上x, 左上y, 右下x, 右下y]（ピクセル）
+  - 写真から：station_sign（駅名標・駅名の文字。一部でも）/ rail_view（窓の外のホーム・線路・電車。駅名なしでも）/ reflection（瞳・窓ガラス・鏡などに映ったもの。何が映っているかを value に）/ shop（店名・看板・ロゴ）/ landmark（目立つ建物・橋・塔など）/ address_text / postal_code（一部でも）/ phone（一部でも）/ plate / uniform（制服・作業着・作業靴・社員証・名札）/ face / key / code（QRコード・バーコード）
+  - 写真と本文の両方から：name_text（ケーキのプレート、名札、宛名、返信での呼びかけなど）/ org_text（会社・学校・団体の名前やロゴ）/ handle_text（SNSのユーザー名・URL）/ place_text（地名・駅名・店名）
+  - 本文から：age_text（「25歳になりました」「誕生日」など）/ routine_text（「夜勤明け」「電車混んでる」「毎週火曜のジム」など生活の決まり）/ relation_text（家族・同居人・ペット）
+- `value`：一部しか読めない文字は、読めた所だけを入れ、読めない桁や文字は x にする（例：郵便番号 `270-01xx`）
+- `image_index`：写真から出た手がかり（source が ocr / vlm）だけに入れる。本文から出たもの（text / meta）は null
+- `region`：画像上の矩形 [左上x, 左上y, 右下x, 右下y]（元の画像のピクセル）。写真の手がかりで位置がないもの、本文の手がかりは null
 - `confidence`：0〜1
 - `source`：ocr / vlm / text（本文から）/ meta（投稿時刻などから）
 
