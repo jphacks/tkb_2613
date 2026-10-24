@@ -1,0 +1,386 @@
+{
+  "note": "JPHACKS 2026 デモ用の架空アカウント。実在の人物・場所の写真ではない。役割C（推理ルール）と役割A（画面のモック）用",
+  "account": {
+    "did": "did:plc:demo00000000000000000000",
+    "display_name": "デモ用の架空アカウント"
+  },
+  "posts": [
+    {
+      "post_id": "at://did:plc:demo00000000000000000000/app.bsky.feed.post/3demo0000001",
+      "text": "夜勤明け。電車混んでる",
+      "created_at": "2026-10-01T08:12:00+09:00",
+      "images": [
+        {
+          "index": 0,
+          "url": "https://cdn.bsky.app/img/feed_fullsize/plain/did:plc:demo00000000000000000000/demo01@jpeg",
+          "alt": "",
+          "width": 1200,
+          "height": 900
+        }
+      ]
+    },
+    {
+      "post_id": "at://did:plc:demo00000000000000000000/app.bsky.feed.post/3demo0000002",
+      "text": "ジムおわり 毎週火曜はここ",
+      "created_at": "2026-10-06T20:15:00+09:00",
+      "images": [
+        {
+          "index": 0,
+          "url": "https://cdn.bsky.app/img/feed_fullsize/plain/did:plc:demo00000000000000000000/demo02@jpeg",
+          "alt": "",
+          "width": 900,
+          "height": 1200
+        }
+      ]
+    },
+    {
+      "post_id": "at://did:plc:demo00000000000000000000/app.bsky.feed.post/3demo0000003",
+      "text": "夜勤明けのラーメン",
+      "created_at": "2026-10-08T08:05:00+09:00",
+      "images": [
+        {
+          "index": 0,
+          "url": "https://cdn.bsky.app/img/feed_fullsize/plain/did:plc:demo00000000000000000000/demo03@jpeg",
+          "alt": "",
+          "width": 1200,
+          "height": 900
+        }
+      ]
+    },
+    {
+      "post_id": "at://did:plc:demo00000000000000000000/app.bsky.feed.post/3demo0000004",
+      "text": "今日もジム",
+      "created_at": "2026-10-13T20:22:00+09:00",
+      "images": []
+    },
+    {
+      "post_id": "at://did:plc:demo00000000000000000000/app.bsky.feed.post/3demo0000005",
+      "text": "新しい靴、重い",
+      "created_at": "2026-10-15T12:30:00+09:00",
+      "images": [
+        {
+          "index": 0,
+          "url": "https://cdn.bsky.app/img/feed_fullsize/plain/did:plc:demo00000000000000000000/demo05@jpeg",
+          "alt": "",
+          "width": 1200,
+          "height": 1200
+        }
+      ]
+    },
+    {
+      "post_id": "at://did:plc:demo00000000000000000000/app.bsky.feed.post/3demo0000006",
+      "text": "25歳になりました！姉がケーキ用意してくれた",
+      "created_at": "2026-10-17T19:40:00+09:00",
+      "images": [
+        {
+          "index": 0,
+          "url": "https://cdn.bsky.app/img/feed_fullsize/plain/did:plc:demo00000000000000000000/demo06@jpeg",
+          "alt": "",
+          "width": 1200,
+          "height": 900
+        }
+      ]
+    },
+    {
+      "post_id": "at://did:plc:demo00000000000000000000/app.bsky.feed.post/3demo0000007",
+      "text": "月曜の朝から電車混んでる",
+      "created_at": "2026-10-19T08:20:00+09:00",
+      "images": []
+    },
+    {
+      "post_id": "at://did:plc:demo00000000000000000000/app.bsky.feed.post/3demo0000008",
+      "text": "ジム！",
+      "created_at": "2026-10-20T20:10:00+09:00",
+      "images": []
+    },
+    {
+      "post_id": "at://did:plc:demo00000000000000000000/app.bsky.feed.post/3demo0000009",
+      "text": "荷物届いた",
+      "created_at": "2026-10-22T15:00:00+09:00",
+      "images": [
+        {
+          "index": 0,
+          "url": "https://cdn.bsky.app/img/feed_fullsize/plain/did:plc:demo00000000000000000000/demo09@jpeg",
+          "alt": "",
+          "width": 1200,
+          "height": 900
+        }
+      ]
+    },
+    {
+      "post_id": "at://did:plc:demo00000000000000000000/app.bsky.feed.post/3demo0000010",
+      "text": "うちの猫",
+      "created_at": "2026-10-23T18:00:00+09:00",
+      "images": [
+        {
+          "index": 0,
+          "url": "https://cdn.bsky.app/img/feed_fullsize/plain/did:plc:demo00000000000000000000/demo10@jpeg",
+          "alt": "",
+          "width": 1200,
+          "height": 1200
+        }
+      ]
+    }
+  ],
+  "clues": [
+    {
+      "post_id": "at://did:plc:demo00000000000000000000/app.bsky.feed.post/3demo0000001",
+      "image_index": 0,
+      "type": "rail_view",
+      "value": "窓の外にホームと停車中の電車",
+      "region": [
+        0,
+        120,
+        1200,
+        760
+      ],
+      "confidence": 0.88,
+      "source": "vlm"
+    },
+    {
+      "post_id": "at://did:plc:demo00000000000000000000/app.bsky.feed.post/3demo0000001",
+      "image_index": 0,
+      "type": "station_sign",
+      "value": "西船x",
+      "region": [
+        820,
+        180,
+        1010,
+        250
+      ],
+      "confidence": 0.62,
+      "source": "vlm"
+    },
+    {
+      "post_id": "at://did:plc:demo00000000000000000000/app.bsky.feed.post/3demo0000001",
+      "image_index": null,
+      "type": "routine_text",
+      "value": "夜勤明け",
+      "region": null,
+      "confidence": 0.95,
+      "source": "text"
+    },
+    {
+      "post_id": "at://did:plc:demo00000000000000000000/app.bsky.feed.post/3demo0000001",
+      "image_index": null,
+      "type": "routine_text",
+      "value": "電車混んでる",
+      "region": null,
+      "confidence": 0.9,
+      "source": "text"
+    },
+    {
+      "post_id": "at://did:plc:demo00000000000000000000/app.bsky.feed.post/3demo0000002",
+      "image_index": 0,
+      "type": "reflection",
+      "value": "鏡に映ったトレーニングマシンとジムのロゴの一部「xxフィットネス」",
+      "region": [
+        80,
+        140,
+        820,
+        900
+      ],
+      "confidence": 0.58,
+      "source": "vlm"
+    },
+    {
+      "post_id": "at://did:plc:demo00000000000000000000/app.bsky.feed.post/3demo0000002",
+      "image_index": null,
+      "type": "routine_text",
+      "value": "毎週火曜のジム",
+      "region": null,
+      "confidence": 0.92,
+      "source": "text"
+    },
+    {
+      "post_id": "at://did:plc:demo00000000000000000000/app.bsky.feed.post/3demo0000003",
+      "image_index": 0,
+      "type": "shop",
+      "value": "麺屋そらまめ",
+      "region": [
+        310,
+        40,
+        890,
+        150
+      ],
+      "confidence": 0.81,
+      "source": "ocr"
+    },
+    {
+      "post_id": "at://did:plc:demo00000000000000000000/app.bsky.feed.post/3demo0000003",
+      "image_index": null,
+      "type": "routine_text",
+      "value": "夜勤明け",
+      "region": null,
+      "confidence": 0.95,
+      "source": "text"
+    },
+    {
+      "post_id": "at://did:plc:demo00000000000000000000/app.bsky.feed.post/3demo0000004",
+      "image_index": null,
+      "type": "routine_text",
+      "value": "ジム",
+      "region": null,
+      "confidence": 0.85,
+      "source": "text"
+    },
+    {
+      "post_id": "at://did:plc:demo00000000000000000000/app.bsky.feed.post/3demo0000005",
+      "image_index": 0,
+      "type": "uniform",
+      "value": "つま先に保護の入った作業靴（安全靴）",
+      "region": [
+        260,
+        420,
+        980,
+        1080
+      ],
+      "confidence": 0.77,
+      "source": "vlm"
+    },
+    {
+      "post_id": "at://did:plc:demo00000000000000000000/app.bsky.feed.post/3demo0000006",
+      "image_index": 0,
+      "type": "name_text",
+      "value": "ゆうか",
+      "region": [
+        450,
+        380,
+        760,
+        470
+      ],
+      "confidence": 0.86,
+      "source": "vlm"
+    },
+    {
+      "post_id": "at://did:plc:demo00000000000000000000/app.bsky.feed.post/3demo0000006",
+      "image_index": null,
+      "type": "age_text",
+      "value": "25歳になりました",
+      "region": null,
+      "confidence": 0.97,
+      "source": "text"
+    },
+    {
+      "post_id": "at://did:plc:demo00000000000000000000/app.bsky.feed.post/3demo0000006",
+      "image_index": null,
+      "type": "relation_text",
+      "value": "姉",
+      "region": null,
+      "confidence": 0.9,
+      "source": "text"
+    },
+    {
+      "post_id": "at://did:plc:demo00000000000000000000/app.bsky.feed.post/3demo0000007",
+      "image_index": null,
+      "type": "routine_text",
+      "value": "電車混んでる",
+      "region": null,
+      "confidence": 0.9,
+      "source": "text"
+    },
+    {
+      "post_id": "at://did:plc:demo00000000000000000000/app.bsky.feed.post/3demo0000008",
+      "image_index": null,
+      "type": "routine_text",
+      "value": "ジム",
+      "region": null,
+      "confidence": 0.85,
+      "source": "text"
+    },
+    {
+      "post_id": "at://did:plc:demo00000000000000000000/app.bsky.feed.post/3demo0000009",
+      "image_index": 0,
+      "type": "postal_code",
+      "value": "273-0xxx",
+      "region": [
+        140,
+        220,
+        360,
+        270
+      ],
+      "confidence": 0.7,
+      "source": "ocr"
+    },
+    {
+      "post_id": "at://did:plc:demo00000000000000000000/app.bsky.feed.post/3demo0000009",
+      "image_index": 0,
+      "type": "name_text",
+      "value": "xx ゆうか 様",
+      "region": [
+        140,
+        300,
+        520,
+        360
+      ],
+      "confidence": 0.45,
+      "source": "ocr"
+    },
+    {
+      "post_id": "at://did:plc:demo00000000000000000000/app.bsky.feed.post/3demo0000010",
+      "image_index": null,
+      "type": "relation_text",
+      "value": "猫（ペット）",
+      "region": null,
+      "confidence": 0.88,
+      "source": "text"
+    },
+    {
+      "post_id": "at://did:plc:demo00000000000000000000/app.bsky.feed.post/3demo0000010",
+      "image_index": 0,
+      "type": "reflection",
+      "value": "猫の瞳に窓の明かりが映っている（文字は読めない）",
+      "region": [
+        540,
+        500,
+        620,
+        560
+      ],
+      "confidence": 0.4,
+      "source": "vlm"
+    }
+  ],
+  "expected": [
+    {
+      "attribute": "station",
+      "value": "西船橋駅",
+      "note": "駅名標の一部＋平日朝の「電車混んでる」＋郵便番号の一部（船橋市）",
+      "clue_indices": [
+        1,
+        3,
+        13,
+        15
+      ]
+    },
+    {
+      "attribute": "occupation",
+      "value": "夜勤のある現場仕事",
+      "note": "「夜勤明け」×2＋作業靴",
+      "clue_indices": [
+        2,
+        7,
+        9
+      ]
+    },
+    {
+      "attribute": "name",
+      "value": "ゆうか（25歳、誕生日は10月17日ごろ）",
+      "note": "ケーキのプレート＋「25歳になりました」の投稿日。宛名の一部が裏づけ",
+      "clue_indices": [
+        10,
+        11,
+        16
+      ]
+    },
+    {
+      "attribute": "routine",
+      "value": "毎週火曜の20時ごろにジム",
+      "note": "火曜20時台の投稿3件（投稿時刻から）＋「毎週火曜のジム」",
+      "clue_indices": [
+        5,
+        8,
+        14
+      ]
+    }
+  ]
+}
