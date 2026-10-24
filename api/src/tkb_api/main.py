@@ -6,10 +6,37 @@ from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.datastructures import MutableHeaders
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from tkb_api.bluesky import SessionStore
 from tkb_api.config import Settings, get_settings
 from tkb_api.routes import detect, diagnose, session
+
+
+class NoStoreMiddleware:
+    """api のすべての応答に Cache-Control: no-store を付ける。
+
+    途中の中継（Vercel の CDN など）に保存させない。ログイン状態の応答がキャッシュされると、
+    別の人に他人のログイン情報が返るおそれがあるため。
+    応答本文には触らないので、SSE もためこまずにそのまま流れる。
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def send_no_store(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                headers = MutableHeaders(scope=message)
+                headers["Cache-Control"] = "no-store"
+            await send(message)
+
+        await self.app(scope, receive, send_no_store)
 
 
 async def _validation_error(_: Request, exc: Exception) -> JSONResponse:
@@ -38,6 +65,7 @@ def create_app(
     )
     app.add_exception_handler(RequestValidationError, _validation_error)
 
+    app.add_middleware(NoStoreMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,

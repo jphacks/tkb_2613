@@ -147,3 +147,23 @@ def test_mock_diagnose_rejects_demo_posts_in_the_wrong_format(tmp_path: Path) ->
 
     assert res.status_code == 503
     assert "example.com" not in res.text
+
+
+def test_diagnose_sends_keep_alive_comments_while_waiting_between_events() -> None:
+    # 投稿の間を空け、それより短い間隔で keep-alive を送らせる
+    # （Vercel や Cloudflare に切られないように）
+    settings = Settings(
+        mock_mode=True,
+        demo_fixture_path=FIXTURE,
+        mock_event_interval_seconds=0.05,
+        sse_keepalive_seconds=0.01,
+    )
+    with _client(settings) as client:
+        _login(client)
+
+        res = client.post("/api/diagnose")
+
+    blocks = [b for b in res.text.split("\n\n") if b]
+    assert ": keep-alive" in blocks
+    events = [b for b in blocks if not b.startswith(":")]
+    assert _events("\n\n".join(events) + "\n\n")[-1] == ("done", {"posts_seen": 10})

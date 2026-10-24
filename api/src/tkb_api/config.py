@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     demo_fixture_path: Path = Path("eval/fixtures/demo_observations.json")
     # MOCK_MODE の診断で、投稿を 1 件流すごとに待つ秒数（画面で 1 件ずつ増える様子を見せるため）
     mock_event_interval_seconds: float = 0.3
+    # 診断の SSE で、イベントの間がこの秒数より空いたら keep-alive のコメントを送る
+    # （Vercel は 120 秒、Cloudflare は 100 秒、何も届かないと接続を切るため）
+    sse_keepalive_seconds: float = Field(default=15, gt=0)
 
 
 @lru_cache

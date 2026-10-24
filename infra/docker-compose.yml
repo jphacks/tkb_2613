@@ -30,7 +30,8 @@ services:
     build:
       context: ../web
       args:
-        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8001}
+        # 画面の /api を、同じネットワークの api コンテナに中継する
+        API_ORIGIN: http://api:8001
     ports:
       - "127.0.0.1:3000:3000"
     read_only: true

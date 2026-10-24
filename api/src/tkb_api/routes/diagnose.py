@@ -47,6 +47,29 @@ async def _stream(posts: list[Post], interval: float) -> AsyncIterator[str]:
     yield _sse("done", {"posts_seen": len(posts)})
 
 
+async def _with_keep_alive(source: AsyncIterator[str], interval: float) -> AsyncIterator[str]:
+    """source の間が interval 秒より空いたら、SSE のコメント（: keep-alive）を送る。
+
+    途中の中継（Vercel、Tailscale、Cloudflare）に、止まった接続だと思われて切られないようにする。
+    画面はコメント行を読み飛ばす。
+    """
+    pending = asyncio.ensure_future(anext(source))
+    try:
+        while True:
+            done, _ = await asyncio.wait({pending}, timeout=interval)
+            if not done:
+                yield ": keep-alive\n\n"
+                continue
+            try:
+                chunk = pending.result()
+            except StopAsyncIteration:
+                return
+            yield chunk
+            pending = asyncio.ensure_future(anext(source))
+    finally:
+        pending.cancel()
+
+
 def get_fetch_posts() -> PostsFetcher:
     return bluesky.fetch_own_posts
 
@@ -78,7 +101,7 @@ async def diagnose(
         posts = await _fetch_own_posts(session, settings, fetch_posts)
         interval = 0
     return StreamingResponse(
-        _stream(posts, interval),
+        _with_keep_alive(_stream(posts, interval), settings.sse_keepalive_seconds),
         media_type="text/event-stream",
         # 途中の中継（プロキシ）にためこまれず、1 件ずつ届くようにする
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},

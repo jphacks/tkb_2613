@@ -13,7 +13,11 @@ export const ACCEPTED_IMAGE_TYPES = [
   "image/heif",
 ] as const;
 
-const DEFAULT_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8001";
+/**
+ * 既定は同じオリジン（相対パス）。/api は next.config.ts の rewrites で api に中継するので、
+ * 画面と api が同じオリジンになり、セッションの Cookie（SameSite=Lax）が送られる。
+ */
+const DEFAULT_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
 
 export type ApiErrorKind =
   | "unsupported_type"

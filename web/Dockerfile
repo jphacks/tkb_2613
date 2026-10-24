@@ -10,9 +10,9 @@ RUN pnpm install --frozen-lockfile
 
 FROM deps AS build
 COPY . .
-# NEXT_PUBLIC_ で始まる値はビルド時に埋め込まれる
-ARG NEXT_PUBLIC_API_BASE_URL=http://localhost:8001
-ENV NEXT_PUBLIC_API_BASE_URL=$NEXT_PUBLIC_API_BASE_URL NEXT_TELEMETRY_DISABLED=1
+# /api の中継先（next.config.ts の rewrites）はビルド時に読まれる
+ARG API_ORIGIN=http://localhost:8001
+ENV API_ORIGIN=$API_ORIGIN NEXT_TELEMETRY_DISABLED=1
 RUN pnpm build
 
 
