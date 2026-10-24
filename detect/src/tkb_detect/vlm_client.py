@@ -3,6 +3,7 @@
 応答の文字列をそのまま返す。手がかりの形式への変換はここでは行わない。
 """
 
+import asyncio
 import base64
 from dataclasses import dataclass
 from typing import Any
@@ -17,6 +18,9 @@ MOCK_VLM_JSON = '{"clues": []}'
 DEFAULT_TIMEOUT_S = 60.0
 # Qwen3 系は既定で思考モードが入り遅くなるため、毎回切る
 CHAT_TEMPLATE_KWARGS = {"enable_thinking": False}
+# 接続の段階の失敗（名前解決の失敗など）は、リクエストがサーバーに届いていないので送り直しても安全。
+# WSL では同時に名前を引くと失敗することがあるため、少し待って送り直す
+CONNECT_RETRY_DELAYS_S = (0.5, 1.5)
 
 
 @dataclass(frozen=True)
@@ -114,9 +118,16 @@ class VlmClient:
             headers["Authorization"] = f"Bearer {self._config.api_key}"
         try:
             async with httpx.AsyncClient(timeout=self._config.timeout_s) as client:
-                res = await client.post(
-                    f"{self._base_url}/chat/completions", json=payload, headers=headers
-                )
+                for delay in (*CONNECT_RETRY_DELAYS_S, None):
+                    try:
+                        res = await client.post(
+                            f"{self._base_url}/chat/completions", json=payload, headers=headers
+                        )
+                        break
+                    except (httpx.ConnectError, httpx.ConnectTimeout):
+                        if delay is None:
+                            raise
+                        await asyncio.sleep(delay)
                 res.raise_for_status()
                 return res.json()
         except httpx.HTTPStatusError as e:

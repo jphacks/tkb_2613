@@ -1,5 +1,6 @@
 import base64
 import json
+from collections.abc import Iterator
 
 import httpx
 import pytest
@@ -178,13 +179,56 @@ async def test_raises_detect_error_on_http_error() -> None:
             await VlmClient(_config()).complete(IMAGE, "image/jpeg", "p")
 
 
+@pytest.fixture
+def no_retry_wait(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("tkb_detect.vlm_client.CONNECT_RETRY_DELAYS_S", (0.0, 0.0))
+
+
 @pytest.mark.anyio
-async def test_raises_detect_error_on_connection_failure() -> None:
+@pytest.mark.usefixtures("no_retry_wait")
+async def test_raises_detect_error_when_connection_keeps_failing() -> None:
     with respx.mock as router:
-        router.post(f"{BASE}/chat/completions").mock(side_effect=httpx.ConnectError("down"))
+        route = router.post(f"{BASE}/chat/completions").mock(side_effect=httpx.ConnectError("down"))
 
         with pytest.raises(DetectError):
             await VlmClient(_config()).complete(IMAGE, "image/jpeg", "p")
+
+    assert route.call_count == 3
+
+
+@pytest.mark.anyio
+@pytest.mark.usefixtures("no_retry_wait")
+async def test_retries_connection_failures_such_as_name_resolution() -> None:
+    replies: Iterator[httpx.Response | Exception] = iter(
+        [
+            httpx.ConnectError("Temporary failure in name resolution"),
+            httpx.ConnectTimeout("slow"),
+            httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]}),
+        ]
+    )
+
+    def respond(_request: httpx.Request) -> httpx.Response:
+        reply = next(replies)
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
+
+    with respx.mock as router:
+        router.post(f"{BASE}/chat/completions").mock(side_effect=respond)
+
+        assert await VlmClient(_config()).complete_text("p") == "ok"
+
+
+@pytest.mark.anyio
+async def test_does_not_retry_read_timeouts() -> None:
+    # 読み取りの待ち時間切れは、サーバーで処理が進んでいるかもしれないので送り直さない
+    with respx.mock as router:
+        route = router.post(f"{BASE}/chat/completions").mock(side_effect=httpx.ReadTimeout("slow"))
+
+        with pytest.raises(DetectError):
+            await VlmClient(_config()).complete_text("p")
+
+    assert route.call_count == 1
 
 
 @pytest.mark.anyio
