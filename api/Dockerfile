@@ -11,14 +11,15 @@ COPY pyproject.toml uv.lock ./
 COPY common/pyproject.toml common/
 COPY api/pyproject.toml api/
 COPY detect/pyproject.toml detect/
-# ワークスペースの解決に必要なだけで、api のイメージには入れない
 COPY engine/pyproject.toml engine/
+# ワークスペースの解決に必要なだけで、api のイメージには入れない
 COPY data-prep/pyproject.toml data-prep/
 RUN uv sync --frozen --no-dev --package tkb-api --no-install-workspace
 
 COPY common common
 COPY api api
 COPY detect detect
+COPY engine engine
 RUN uv sync --frozen --no-dev --package tkb-api --no-editable
 
 
@@ -27,6 +28,8 @@ RUN useradd --system --no-create-home app
 COPY --from=build /app/.venv /app/.venv
 # MOCK_MODE の診断で流す架空のデモ用アカウントの投稿（写真本体は含まない）
 COPY eval/fixtures/demo_observations.json /app/eval/fixtures/
+# 推理の表（data/processed）はコミットしないのでイメージに入れない。
+# docker compose で読み取り専用でつなぐ（infra/docker-compose.yml）。なければ最寄り駅のルールを飛ばす
 WORKDIR /app
 ENV PATH=/app/.venv/bin:$PATH PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 USER app

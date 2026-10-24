@@ -731,9 +731,12 @@ source = { editable = "api" }
 dependencies = [
     { name = "atproto" },
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "tkb-common" },
+    { name = "tkb-detect" },
+    { name = "tkb-engine" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -741,9 +744,12 @@ dependencies = [
 requires-dist = [
     { name = "atproto", specifier = ">=0.0.73" },
     { name = "fastapi", specifier = ">=0.115" },
+    { name = "httpx", specifier = ">=0.28" },
     { name = "pydantic", specifier = ">=2.10" },
     { name = "pydantic-settings", specifier = ">=2.6" },
     { name = "tkb-common", editable = "common" },
+    { name = "tkb-detect", editable = "detect" },
+    { name = "tkb-engine", editable = "engine" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32" },
 ]
 

@@ -16,6 +16,9 @@ services:
       CORS_ORIGINS: '["http://localhost:3000"]'
     ports:
       - "127.0.0.1:8001:8001"
+    # 推理の表（make data で作る）。読み取り専用でつなぐ。なければ最寄り駅のルールだけを飛ばす
+    volumes:
+      - ../data/processed:/app/data/processed:ro
     # 写真をディスクに残さないよう、ファイルシステムを読み取り専用にする
     read_only: true
     tmpfs:
