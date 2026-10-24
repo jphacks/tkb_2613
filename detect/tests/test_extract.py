@@ -246,12 +246,20 @@ async def test_merges_ocr_when_configured() -> None:
 
 
 def test_build_extractor_skips_ocr_when_url_is_empty_or_mock() -> None:
-    real = {"vlm_base_url": VLM, "vlm_api_key": "", "vlm_model": "qwen"}
+    def uses_ocr(*, mock_mode: bool, ocr_base_url: str) -> bool:
+        extractor = build_extractor(
+            mock_mode=mock_mode,
+            vlm_base_url=VLM,
+            vlm_api_key="",
+            vlm_model="qwen",
+            ocr_base_url=ocr_base_url,
+        )
+        return extractor.uses_ocr
 
-    assert build_extractor(mock_mode=False, ocr_base_url="", **real)._ocr is None
-    assert build_extractor(mock_mode=False, ocr_base_url="  ", **real)._ocr is None
-    assert build_extractor(mock_mode=True, ocr_base_url=OCR, **real)._ocr is None
-    assert build_extractor(mock_mode=False, ocr_base_url=OCR, **real)._ocr is not None
+    assert uses_ocr(mock_mode=False, ocr_base_url="") is False
+    assert uses_ocr(mock_mode=False, ocr_base_url="  ") is False
+    assert uses_ocr(mock_mode=True, ocr_base_url=OCR) is False
+    assert uses_ocr(mock_mode=False, ocr_base_url=OCR) is True
 
 
 @pytest.mark.anyio

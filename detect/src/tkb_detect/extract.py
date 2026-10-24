@@ -43,6 +43,10 @@ class Extractor:
         self._ocr = ocr
         self._coordinate_space = coordinate_space
 
+    @property
+    def uses_ocr(self) -> bool:
+        return self._ocr is not None
+
     async def extract_post(self, post: Post, images: list[bytes]) -> list[Clue]:
         """投稿1件の手がかり。images は post.images と同じ順の画像のバイト列。"""
         if len(images) != len(post.images):
@@ -123,6 +127,7 @@ def build_extractor(
     vlm_api_key: str,
     vlm_model: str,
     ocr_base_url: str,
+    coordinate_space: CoordinateSpace | None = COORDINATE_SPACE,
 ) -> Extractor:
     """設定から作る。OCR は OCR_BASE_URL が空なら使わない。"""
     vlm = VlmClient(
@@ -130,7 +135,7 @@ def build_extractor(
     )
     use_ocr = bool(ocr_base_url.strip()) and not mock_mode
     ocr = OcrClient(OcrConfig(base_url=ocr_base_url, mock_mode=False)) if use_ocr else None
-    return Extractor(vlm, ocr)
+    return Extractor(vlm, ocr, coordinate_space)
 
 
 def _parse_items(raw: str) -> list[dict[str, Any]]:
