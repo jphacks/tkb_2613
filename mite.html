@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+<body>
+<title>みーつけた</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Dela+Gothic+One&family=Zen+Antique&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap">
+<style>
+/* 方向性：深夜の学校のかくれんぼ ── 青い闇、蛍光灯の白、鬼の目の赤。製品UI(web/globals.css)に合わせた単一ダーク */
+:root{
+  color-scheme:dark;
+  --paper:oklch(17% 0.06 265); --paper-deep:oklch(23% 0.08 265);
+  --ink:oklch(88% 0.04 250); --ink-dim:oklch(88% 0.04 250 / .62); --ink-faint:oklch(88% 0.04 250 / .34);
+  --line:oklch(88% 0.04 250 / .18);
+  --seeker:oklch(62% 0.23 27); --seeker-weak:oklch(62% 0.23 27 / .14);
+  --safe:oklch(74% 0.13 168); --safe-weak:oklch(74% 0.13 168 / .15);
+  --font-ui:"Zen Kaku Gothic New",system-ui,sans-serif;
+  --font-display:"Dela Gothic One","Zen Kaku Gothic New",sans-serif;
+  --font-horror:"Zen Antique","Zen Kaku Gothic New",serif;
+}
+*{box-sizing:border-box}
+body{
+  background:radial-gradient(ellipse 80% 60% at 50% 0%, oklch(32% 0.12 265 / .6), transparent 70%), var(--paper);
+  color:var(--ink);font-family:var(--font-ui);line-height:1.7;-webkit-font-smoothing:antialiased;min-height:100%}
+html,body{min-height:100%}
+/* 四隅を暗く＋走査線。操作は邪魔しない */
+body::before,body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:50}
+body::before{background:radial-gradient(ellipse at center, transparent 55%, oklch(5% 0.03 265 / .85) 100%)}
+body::after{background:repeating-linear-gradient(to bottom, oklch(0% 0 0 / .12) 0 1px, transparent 1px 3px);animation:flicker 7s infinite steps(1)}
+@keyframes flicker{0%,100%{background-color:transparent}92%{background-color:oklch(0% 0 0 / .35)}93%{background-color:transparent}95%{background-color:oklch(0% 0 0 / .5)}96%{background-color:transparent}}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition-duration:.01ms!important}}
+
+.wrap{position:relative;z-index:1;max-width:1040px;margin:0 auto;padding-block:26px 48px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  display:flex;flex-direction:column;gap:20px}
+h1,h2,h3,p{margin:0;text-wrap:balance}
+.eyebrow{font-size:12px;letter-spacing:.3em;color:var(--ink-dim);font-weight:500}
+.horror{font-family:var(--font-horror);color:var(--seeker);
+  text-shadow:0 0 6px oklch(60% 0.23 27 / .9),0 0 24px oklch(50% 0.22 27 / .6),2px 3px 0 oklch(10% 0.05 265)}
+.head h1{font-size:clamp(40px,11vw,78px);line-height:1.1;margin-top:8px}
+.blink{animation:blink 2.4s infinite}
+@keyframes blink{0%,70%,100%{opacity:1}75%{opacity:.15}80%{opacity:1}84%{opacity:.3}}
+.head p{color:var(--ink-dim);font-size:15px;margin-top:16px;max-width:58ch}
+
+.grid{display:grid;grid-template-columns:1.1fr .9fr;gap:16px}
+@media (max-width:760px){.grid{grid-template-columns:1fr}}
+.panel{background:var(--paper-deep);border:1px solid var(--line);border-radius:4px;padding:18px;
+  box-shadow:6px 6px 0 oklch(10% 0.05 265 / .8)}
+
+.hero{display:flex;flex-direction:column;gap:4px;align-items:flex-start}
+.hero .lbl{font-size:12.5px;color:var(--ink-dim)}
+.hero .num{font-family:var(--font-display);font-size:clamp(34px,9vw,58px);line-height:1.05;color:var(--seeker);
+  font-variant-numeric:tabular-nums;text-shadow:0 0 18px oklch(60% 0.23 27 / .45);transition:color .4s}
+.hero .num.safe{color:var(--safe);text-shadow:0 0 18px oklch(72% 0.13 168 / .4)}
+.hero .sub{font-size:11.5px;color:var(--ink-faint)}
+
+.ladder{display:flex;flex-direction:column;gap:3px;margin-top:10px}
+.rung{display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:7px 11px;border-radius:3px;
+  border:1px solid transparent;font-size:14px;transition:all .35s}
+.rung .k{font-weight:500}.rung .n{font-size:12px;color:var(--ink-faint);font-variant-numeric:tabular-nums}
+.rung.done{color:var(--ink-faint)}
+.rung.now{background:var(--seeker-weak);border-color:var(--seeker);font-weight:700}
+.rung.now.safe{background:var(--safe-weak);border-color:var(--safe)}
+.rung.now .n{color:var(--ink-dim)}
+.rung.todo{opacity:.35}
+
+.stage{display:flex;flex-direction:column;gap:14px;min-height:280px}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{min-width:0;flex:1 1 170px;background:var(--paper);border:1px solid var(--line);border-radius:3px;padding:9px 12px}
+.chip .t{font-size:11px;color:var(--ink-dim);font-weight:700;letter-spacing:.06em;margin-bottom:2px}
+.chip .v{font-size:13.5px}
+.plus{align-self:center;color:var(--ink-faint);font-weight:700;flex:0 0 auto}
+.line{font-size:clamp(18px,3.4vw,23px);line-height:1.55;font-weight:700}
+.found{font-family:var(--font-horror);color:var(--seeker);font-size:clamp(28px,7vw,44px);line-height:1.1;
+  text-shadow:0 0 6px oklch(60% 0.23 27 / .9),0 0 24px oklch(50% 0.22 27 / .6),2px 3px 0 oklch(10% 0.05 265)}
+.know{display:inline-flex;align-items:center;gap:7px;align-self:flex-start;font-size:13px;font-weight:700;
+  background:var(--seeker-weak);color:var(--seeker);padding:6px 12px;border-radius:999px}
+.know.safe{background:var(--safe-weak);color:var(--safe)}
+.know .dot{width:7px;height:7px;border-radius:50%;background:currentColor;flex:0 0 auto}
+.dossier{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+@media(max-width:520px){.dossier{grid-template-columns:1fr}}
+.dossier .f{border:1px solid var(--line);border-left:3px solid var(--seeker);border-radius:0;padding:9px 12px;background:var(--paper);animation:pop .45s both}
+.dossier .f .k{font-size:11px;color:var(--ink-dim)}
+.dossier .f .v{font-weight:700;color:var(--seeker);font-size:15px}
+@keyframes pop{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+.ctl{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+button{font:inherit;cursor:pointer;border-radius:3px;border:2px solid var(--ink);background:transparent;color:var(--ink);
+  padding:9px 18px;font-weight:700;font-size:14px;transition:transform .12s}
+button:hover:not(:disabled){transform:translateY(-2px)}
+button:active:not(:disabled){transform:translateY(1px)}
+button:disabled{opacity:.4;cursor:not-allowed}
+button.primary,button.danger{font-family:var(--font-display);font-size:15px;color:var(--paper);border-color:transparent;
+  padding:11px 22px;box-shadow:4px 4px 0 var(--ink)}
+button.primary{background:var(--seeker)}
+button.danger{background:var(--safe)}
+button.primary:active:not(:disabled),button.danger:active:not(:disabled){transform:translateY(2px);box-shadow:none}
+button:focus-visible{outline:3px solid var(--seeker);outline-offset:2px}
+.count{font-size:13px;color:var(--ink-dim);font-variant-numeric:tabular-nums;margin-left:auto}
+.tick{height:3px;background:var(--line);border-radius:999px;overflow:hidden}
+.tick-bar{height:100%;width:0;background:var(--seeker);box-shadow:0 0 10px var(--seeker)}
+.tick-bar.run{transition:width var(--dwell,2800ms) linear;width:100%}
+
+.feed{display:flex;flex-direction:column;gap:0}
+.feed .ft{font-size:12px;letter-spacing:.3em;color:var(--ink-dim);font-weight:500;margin-bottom:10px}
+.post{display:flex;gap:11px;padding:12px 4px;border-bottom:1px dashed var(--line);transition:.3s}
+.post.hot{background:var(--seeker-weak);border-radius:3px;padding-inline:12px}
+.post.gone{opacity:.4;text-decoration:line-through;text-decoration-color:var(--seeker)}
+.post .av{width:34px;height:34px;border-radius:999px;flex:0 0 auto;background:var(--paper);border:1px solid var(--line);
+  display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;color:var(--ink-dim)}
+.post .bd{min-width:0}
+.post .meta{font-size:11px;letter-spacing:.08em;color:var(--ink-faint)}
+.post .txt{font-size:14px}
+.post .ph{display:inline-block;margin-top:5px;font-size:11.5px;color:var(--ink-dim);background:var(--paper);
+  border:1px solid var(--line);border-radius:3px;padding:3px 9px}
+.foot{font-size:12.5px;color:var(--ink-dim);border-top:1px dashed var(--line);padding-top:16px}
+.foot b{color:var(--ink)}
+</style>
+
+<div class="wrap">
+  <div class="head">
+    <div class="eyebrow">あなたの投稿、組み合わせると</div>
+    <h1 class="horror">みーつけた</h1>
+    <p>住所も名前も、自分では書いていない。それでも、1件ずつは無害な投稿を重ねるだけで、人は「ここまで」絞られます。これは架空の人物のデモ。自分のアカウントでも、確かめてみてください。</p>
+  </div>
+
+  <div class="grid">
+    <div class="panel stage" id="stage" aria-live="polite"></div>
+    <div class="panel">
+      <div class="hero">
+        <div class="lbl">この人が住んでいる可能性のある範囲</div>
+        <div class="num" id="num">約5,500万世帯</div>
+        <div class="sub">デモ用のおおよその世帯数（架空のデモ）</div>
+      </div>
+      <div class="ladder" id="ladder"></div>
+    </div>
+  </div>
+
+  <div class="tick"><div class="tick-bar" id="tick"></div></div>
+  <div class="ctl">
+    <button id="play" class="primary">⏸ 一時停止</button>
+    <button id="restart">↻ 最初から</button>
+    <button id="prev">←</button>
+    <button id="next">→</button>
+    <span class="count" id="count"></span>
+  </div>
+
+  <div class="panel feed">
+    <div class="ft">このアカウントの投稿（架空）</div>
+    <div id="feed"></div>
+  </div>
+
+  <div class="foot" id="foot">
+    これは架空の人物のデモです。実在の市・駅・大学名は使っていますが、<b>人物・丁目・住所は作り物</b>です。このアプリが見せるのは「どこまで絞れてしまうか」までで、<b>いつ家が留守になるかは出しません</b>。目的は、怖がらせることではなく、<b>自分の投稿を一度見直してもらう</b>ことです。
+  </div>
+</div>
+
+<script>
+const RM = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+const rungs = [
+  {k:'日本全国',      n:55000000},
+  {k:'多摩地域',      n:1800000},
+  {k:'八王子市',      n:290000},
+  {k:'収集地区',      n:40000},
+  {k:'八王子駅 徒歩圏',n:2800},
+  {k:'この区画',      n:300},
+];
+
+const posts = {
+  p1:{av:'？',meta:'火 19:40',txt:'ゴミ袋、10枚でこの値段か…地味に効くな',ph:'写真：青い指定ゴミ袋（大40L）'},
+  p2:{av:'？',meta:'水 8:12', txt:'ゴミ出し間に合わんかった、もう回収済みだった',ph:'写真：集積所の看板（収集曜日）'},
+  p3:{av:'？',meta:'月 8:05', txt:'今日は歩いて大学行くか'},
+  p4:{av:'？',meta:'月 10:41',txt:'2限ねむい'},
+  p5:{av:'？',meta:'土 14:20',txt:'バイト前に一杯。窓の外、今日もいい天気',ph:'写真：カフェの窓（ガラスに向かいの看板が反射）'},
+  p6:{av:'？',meta:'平日 よく同じ時間帯',txt:'ついた / ただいま（短い投稿が何度も）'},
+  p7:{av:'？',meta:'日 15:02',txt:'発送した！',ph:'写真：伝票（宛名に付箋、コードはそのまま）'},
+  p8:{av:'？',meta:'木 21:30',txt:'誕生日、やっと堂々と頼めた🍺',reply:'友達：あおいおめ〜！🎉'},
+  n1:{av:'？',meta:'金 23:10',txt:'レポート終わらん'},
+  n2:{av:'？',meta:'日 17:00',txt:'空きれい'},
+};
+const order = ['p1','p2','p3','p4','p5','n1','p6','p7','p8','n2'];
+
+const steps = [
+  {eye:'20件の投稿', line:'どれも、ひとつずつは何でもない投稿です。重ねてみましょう。', lvl:0, ev:[]},
+  {eye:'手がかり①　ゴミ袋',
+   chips:[{t:'指定ゴミ袋',v:'青・大(40L)・10枚750円'},{t:'投稿',v:'「10枚でこの値段か…」'}],
+   line:'この袋が有料なのは、多摩地域の市だけ。青い大(40L)が10枚で750円なのは、八王子市です。',
+   know:'東京都 → 八王子市', lvl:2, ev:['p1']},
+  {eye:'手がかり②　集積所の看板',
+   chips:[{t:'看板',v:'燃えるゴミの曜日'},{t:'知識',v:'曜日の組は地区ごと'}],
+   line:'ゴミの収集曜日の組み合わせは、地区ごとに違います。市内の、この地区です。',
+   know:'八王子市 → 収集地区', lvl:3, ev:['p2']},
+  {eye:'手がかり③　通学',
+   chips:[{t:'8:05',v:'「歩いて大学行くか」'},{t:'10:41',v:'「2限ねむい」'}],
+   line:'歩いて通える大学は限られます。時間割と合わせると、中央大学の一人。',
+   know:'家は中央大学から約4.5kmの円の中', lvl:3, ev:['p3','p4']},
+  {eye:'手がかり④　窓の外',
+   chips:[{t:'カフェの写真',v:'窓際の一杯'},{t:'ガラスの反射',v:'向かいの看板'}],
+   line:'窓ガラスに、向かいの看板が映っています。この店は、ある駅の目の前。',
+   know:'収集地区 ∩ 4.5km圏 → 最寄りは八王子駅', lvl:4, ev:['p5']},
+  {eye:'手がかり⑤　いつもの時間',
+   chips:[{t:'平日',v:'同じ時間帯の短い投稿'},{t:'回数',v:'2回以上'}],
+   line:'平日の同じ時間帯に、この駅から何度も。あなたの生活のリズムまで見えています。',
+   know:'八王子駅／平日のこの時間帯', lvl:4, ev:['p6']},
+  {eye:'手がかり⑥　フリマの発送',
+   chips:[{t:'伝票',v:'宛名に付箋'},{t:'でも',v:'コードはそのまま'}],
+   line:'宛名は手で隠した。……でも、このコードは隠していませんね。',
+   know:'駅の徒歩圏 → この区画', lvl:5, ev:['p7']},
+  {eye:'手がかり⑦　誕生日',
+   chips:[{t:'投稿',v:'「やっと堂々と頼めた🍺」'},{t:'友達の返信',v:'「あおいおめ〜！」'}],
+   line:'本人は、名前を一度も書いていません。書いたのは、お祝いしてくれた友達でした。',
+   know:'名前：アオイ／20歳', lvl:5, ev:['p8']},
+  {eye:'ここまでの結論', person:true, found:true,
+   line:'アオイさん・20歳・八王子市、八王子駅のそば。住所も名前も、自分では一文字も書いていません。',
+   lvl:5, ev:[]},
+  {eye:'次の一手', payoff:true,
+   line:'全部消す必要はありません。効いているのは、この2件です。',
+   lvl:5, ev:['p5','p7']},
+];
+
+let cur = 0, collapsed = false;
+const deleted = new Set();
+const $ = s => document.querySelector(s);
+
+function fmtHouseholds(n){
+  n = Math.round(n);
+  if (n >= 10000){
+    let man = n/10000;
+    man = man >= 100 ? Math.round(man) : Math.round(man*10)/10;
+    return '約' + man.toLocaleString('ja-JP') + '万世帯';
+  }
+  return '約' + n.toLocaleString('ja-JP') + '世帯';
+}
+
+let tween;
+function setNum(to, safe){
+  const el = $('#num');
+  el.classList.toggle('safe', !!safe);
+  const from = Number(el.dataset.v || rungs[0].n);
+  el.dataset.v = to;
+  if (RM){ el.textContent = fmtHouseholds(to); return; }
+  cancelAnimationFrame(tween);
+  const t0 = performance.now(), dur = 650;
+  (function frame(t){
+    const p = Math.min(1,(t-t0)/dur), e = 1-Math.pow(1-p,3);
+    el.textContent = fmtHouseholds(from + (to-from)*e);
+    if (p<1) tween = requestAnimationFrame(frame);
+    else el.textContent = fmtHouseholds(to);
+  })(performance.now());
+}
+
+function renderLadder(active, safe){
+  $('#ladder').innerHTML = rungs.map((r,i)=>{
+    let cls = i<active ? 'done' : i===active ? 'now'+(safe?' safe':'') : 'todo';
+    return `<div class="rung ${cls}"><span class="k">${r.k}</span><span class="n">${fmtHouseholds(r.n)}</span></div>`;
+  }).join('');
+}
+
+function renderFeed(){
+  const hot = new Set(collapsed ? [] : (steps[cur].ev||[]));
+  $('#feed').innerHTML = order.map(id=>{
+    const p = posts[id];
+    const cls = (deleted.has(id)?'gone ':'') + (hot.has(id)?'hot':'');
+    return `<div class="post ${cls}">
+      <div class="av">${p.av}</div>
+      <div class="bd">
+        <div class="meta">${p.meta}</div>
+        <div class="txt">${p.txt}</div>
+        ${p.ph?`<div class="ph">${p.ph}</div>`:''}
+        ${p.reply?`<div class="ph">${(id==='p8'&&cur<7)?p.reply.replace('あおい','○○'):p.reply}</div>`:''}
+      </div></div>`;
+  }).join('');
+}
+
+function stageHTML(s){
+  if (s.person){
+    const fields = [['名前','アオイ'],['年齢','20歳'],['大学','中央大学（八王子）'],['市','八王子市'],['最寄り','八王子駅・徒歩圏'],['エリア','この区画 約300世帯'],['生活リズム','平日のこの時間帯']];
+    return `<div class="eyebrow">${s.eye}</div><div class="found">みーつけた</div>`
+      + '<div class="dossier">' + fields.map(f=>`<div class="f"><div class="k">${f[0]}</div><div class="v">${f[1]}</div></div>`).join('') + '</div>'
+      + `<div class="line">${s.line}</div>`;
+  }
+  let h = `<div class="eyebrow">${s.eye}</div>`;
+  if (s.found) h += `<div class="found">みーつけた</div>`;
+  if (s.chips){
+    h += '<div class="chips">';
+    s.chips.forEach((c,i)=>{ if(i) h+='<span class="plus">＋</span>';
+      h += `<div class="chip"><div class="t">${c.t}</div><div class="v">${c.v}</div></div>`; });
+    h += '</div>';
+  }
+  h += `<div class="line">${s.line}</div>`;
+  if (s.know) h += `<div class="know"><span class="dot"></span>${s.know}</div>`;
+  if (s.payoff){
+    if (!collapsed){
+      h += `<div class="chips">
+        <div class="chip"><div class="t">消す①</div><div class="v">発送の伝票の写真</div></div>
+        <div class="chip"><div class="t">消す②</div><div class="v">カフェの窓の写真</div></div>
+      </div>
+      <button class="danger" id="del">この2件を消す</button>`;
+    } else {
+      h += `<div class="line" style="color:var(--safe)">約300世帯 → 約4万世帯。130倍の人混みに紛れ直せます。</div>
+      <div class="know safe"><span class="dot"></span>一番効いていたのは、何気ない窓の写真でした</div>`;
+    }
+  }
+  return h;
+}
+
+let playing = true, timer = null;
+function updatePlay(){ $('#play').textContent = playing ? '⏸ 一時停止' : '▶ 再生'; }
+function dwell(i){ const d = i===0?2200 : i===6?3600 : i===8?4200 : 2800; return RM ? d+1500 : d; }
+
+function schedule(){
+  clearTimeout(timer);
+  const tb = $('#tick'); tb.classList.remove('run'); tb.style.width='0';
+  if(cur >= steps.length-1){ playing=false; updatePlay(); return; }
+  if(!playing) return;
+  const d = dwell(cur);
+  if(!RM){ tb.style.setProperty('--dwell', d+'ms'); void tb.offsetWidth; tb.classList.add('run'); }
+  timer = setTimeout(()=>{ cur++; if(!steps[cur].payoff) collapsed=false; render(); }, d);
+}
+
+function render(){
+  const s = steps[cur];
+  $('#stage').innerHTML = stageHTML(s);
+  const active = collapsed ? 3 : s.lvl;
+  setNum(rungs[active].n, collapsed);
+  renderLadder(active, collapsed);
+  renderFeed();
+  $('#count').textContent = `${cur+1} / ${steps.length}`;
+  const del = $('#del');
+  if (del) del.onclick = ()=>{ deleted.add('p5'); deleted.add('p7'); collapsed=true; playing=false; updatePlay(); render(); };
+  schedule();
+}
+
+function pauseThen(fn){ playing=false; updatePlay(); clearTimeout(timer); fn(); render(); }
+$('#play').onclick = ()=>{
+  playing = !playing; updatePlay();
+  if(playing){ if(cur>=steps.length-1){ cur=0; collapsed=false; deleted.clear(); } render(); }
+  else { clearTimeout(timer); const tb=$('#tick'); tb.classList.remove('run'); tb.style.width='0'; }
+};
+$('#restart').onclick = ()=>{ cur=0; collapsed=false; deleted.clear(); playing=true; updatePlay(); render(); };
+$('#next').onclick = ()=> pauseThen(()=>{ if(cur<steps.length-1){ cur++; if(!steps[cur].payoff) collapsed=false; } });
+$('#prev').onclick = ()=> pauseThen(()=>{ if(cur>0){ cur--; collapsed=false; deleted.clear(); } });
+updatePlay();
+render();
+</script>
+</body>
+</html>
