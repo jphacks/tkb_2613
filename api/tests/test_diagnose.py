@@ -1,13 +1,18 @@
 import json
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
+from atproto import AsyncClient
 from fastapi.testclient import TestClient
 
+from tkb_api.bluesky import BlueskyUnavailableError, LoginResult, PostsFetcher
 from tkb_api.config import Settings, get_settings
 from tkb_api.main import create_app
+from tkb_api.routes.diagnose import get_fetch_posts
+from tkb_api.routes.session import get_login
+from tkb_common.schemas import Post
 
 PASSWORD = "correct horse battery staple"  # noqa: S105  テスト用の架空の値
 FIXTURE = Path(__file__).resolve().parents[2] / "eval" / "fixtures" / "demo_observations.json"
@@ -60,15 +65,62 @@ def test_mock_diagnose_streams_each_demo_post_then_done(client: TestClient) -> N
     ]
 
 
-def test_diagnose_without_mock_is_not_implemented_yet() -> None:
+REAL_DID = "did:plc:me00000000000000000000"
+REAL_CLIENT = cast(AsyncClient, object())  # 本物の通信はしない。fetch_posts に渡ることだけ確かめる
+
+
+def _real_client(fetch_posts: PostsFetcher) -> TestClient:
+    """MOCK_MODE=0 の api。ログインと投稿の取得だけを偽物に差し替える。"""
+
+    async def login(handle: str, _password: str) -> LoginResult:
+        return LoginResult(handle=handle, did=REAL_DID, client=REAL_CLIENT)
+
+    client = _client(Settings(mock_mode=False, max_posts=5))
+    client.app.dependency_overrides[get_login] = lambda: login  # type: ignore[attr-defined]
+    client.app.dependency_overrides[get_fetch_posts] = lambda: fetch_posts  # type: ignore[attr-defined]
+    return client
+
+
+def test_real_diagnose_streams_the_session_accounts_own_posts() -> None:
+    post = Post.model_validate(json.loads(FIXTURE.read_text(encoding="utf-8"))["posts"][0])
+    calls: list[tuple[AsyncClient, str, int]] = []
+
+    async def fetch_posts(client: AsyncClient, did: str, limit: int) -> list[Post]:
+        calls.append((client, did, limit))
+        return [post]
+
+    with _real_client(fetch_posts) as client:
+        _login(client)
+        res = client.post("/api/diagnose")
+
+    assert res.status_code == 200
+    assert calls == [(REAL_CLIENT, REAL_DID, 5)]
+    assert _events(res.text) == [
+        ("post", {"post": post.model_dump(mode="json")}),
+        ("done", {"posts_seen": 1}),
+    ]
+
+
+def test_real_diagnose_reports_bluesky_errors_as_bad_gateway() -> None:
+    async def fetch_posts(_client: AsyncClient, _did: str, _limit: int) -> list[Post]:
+        raise BlueskyUnavailableError
+
+    with _real_client(fetch_posts) as client:
+        _login(client)
+        res = client.post("/api/diagnose")
+
+    assert res.status_code == 502
+
+
+def test_real_diagnose_asks_to_log_in_again_after_a_mock_login() -> None:
     settings = Settings(mock_mode=False, demo_fixture_path=FIXTURE)
     with _client(settings) as client:
-        # 本物のログインを避けるため、モックでログインしてから設定だけ本番扱いにする
+        # モックでログインしてから設定だけ本番扱いにする（Bluesky のクライアントがないセッション）
         client.app.dependency_overrides[get_settings] = lambda: Settings(mock_mode=True)  # type: ignore[attr-defined]
         _login(client)
         client.app.dependency_overrides[get_settings] = lambda: settings  # type: ignore[attr-defined]
 
-        assert client.post("/api/diagnose").status_code == 501
+        assert client.post("/api/diagnose").status_code == 401
 
 
 def test_mock_diagnose_reports_missing_demo_data(tmp_path: Path) -> None:
