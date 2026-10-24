@@ -92,13 +92,13 @@ describe("LoginPanel", () => {
 
   it("keeps the handle but clears the password when login fails", async () => {
     vi.mocked(createSession).mockRejectedValue(
-      new ApiError("unauthorized", "ハンドル名かパスワードが違います", 401),
+      new ApiError("unauthorized", messages.errors.wrongCredentials, 401),
     );
     await renderLoggedOut();
 
     fill("alice.bsky.social", PASSWORD);
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("ハンドル名かパスワードが違います");
+    expect(await screen.findByRole("alert")).toHaveTextContent(messages.errors.wrongCredentials);
     expect(screen.getByLabelText(t.handle)).toHaveValue("alice.bsky.social");
     expect(screen.getByLabelText(t.password)).toHaveValue("");
   });

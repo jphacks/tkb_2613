@@ -7,9 +7,12 @@ import { PostCard, type PostClues } from "@/components/post-list/PostCard";
 import { SeekerEyes } from "@/components/seeker-eyes/SeekerEyes";
 import { useSession } from "@/components/session/SessionProvider";
 import { ApiError, diagnose } from "@/lib/api";
+import { messages } from "@/lib/messages";
 import type { Clue } from "@/types/clue";
 import type { Conclusion } from "@/types/diagnose";
 import type { Post } from "@/types/post";
+
+const t = messages.diagnose;
 
 /**
  * 診断の状態。connecting は押してから最初のイベントが届くまで、reading は投稿が届いている間、
@@ -31,13 +34,13 @@ interface Result {
 function statusText(phase: Phase, postCount: number, searchedCount: number): string | null {
   switch (phase.kind) {
     case "connecting":
-      return "特定班AIが投稿を取りに行っています…";
+      return t.connecting;
     case "reading":
-      return `投稿を読んでいます…（${postCount} 件）`;
+      return t.reading(postCount);
     case "searching":
-      return `手がかりを探しています…（${searchedCount} / ${postCount} 件）`;
+      return t.searching(searchedCount, postCount);
     case "done":
-      return `${phase.postsSeen} 件の投稿を読みました`;
+      return t.done(phase.postsSeen);
     default:
       return null;
   }
@@ -89,7 +92,7 @@ export function DiagnosePanel() {
       }
     } catch (e) {
       if (current.signal.aborted) return;
-      setPhase({ kind: "error", message: e instanceof ApiError ? e.message : "診断できませんでした" });
+      setPhase({ kind: "error", message: e instanceof ApiError ? e.message : t.failed });
     }
   }
 
@@ -101,7 +104,7 @@ export function DiagnosePanel() {
     <section aria-labelledby="diagnose-heading" aria-busy={busy} className="mt-12 space-y-8">
       <div>
         <h2 id="diagnose-heading" className="sr-only">
-          診断
+          {t.heading}
         </h2>
         <button
           type="button"
@@ -115,7 +118,7 @@ export function DiagnosePanel() {
               className="size-4 animate-spin rounded-full border-2 border-paper border-t-transparent motion-reduce:animate-none"
             />
           )}
-          診断する
+          {t.start}
         </button>
 
         {status && (
@@ -134,7 +137,7 @@ export function DiagnosePanel() {
       {result && <ConclusionBoard clues={result.clues} conclusions={result.conclusions} />}
 
       {posts.length > 0 && (
-        <ol aria-label="読んだ投稿" className="max-w-2xl space-y-5">
+        <ol aria-label={t.postsLabel} className="max-w-2xl space-y-5">
           {posts.map((post) => (
             <li key={post.post_id}>
               <PostCard post={post} found={found[post.post_id]} />

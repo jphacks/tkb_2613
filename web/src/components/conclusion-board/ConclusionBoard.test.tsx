@@ -1,7 +1,6 @@
 import { render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { CLUE_LABELS } from "@/lib/clueLabels";
 import { messages } from "@/lib/messages";
 import type { Clue } from "@/types/clue";
 import type { Conclusion } from "@/types/diagnose";
@@ -57,8 +56,8 @@ describe("ConclusionBoard", () => {
       "listitem",
     );
     expect(evidence.map((e) => e.textContent)).toEqual([
-      `${CLUE_LABELS.place_text}新宿`,
-      `${CLUE_LABELS.routine_text}毎朝 8 時の電車`,
+      `${messages.clues.typeLabels.place_text}新宿`,
+      `${messages.clues.typeLabels.routine_text}毎朝 8 時の電車`,
     ]);
     const strings = container.querySelector("svg.red-strings");
     expect(strings).toHaveAttribute("aria-hidden", "true");
@@ -70,7 +69,7 @@ describe("ConclusionBoard", () => {
 
     expect(screen.getByText(messages.board.found)).toBeInTheDocument();
     expect(container.querySelector(".found-flash")).toHaveAttribute("aria-hidden", "true");
-    expect(screen.getByText("最寄り駅")).toBeInTheDocument();
+    expect(screen.getByText(messages.board.attributeLabels.station)).toBeInTheDocument();
   });
 
   it("stays calm when nothing is inferred", () => {
@@ -78,6 +77,6 @@ describe("ConclusionBoard", () => {
 
     expect(screen.queryByText(messages.board.found)).not.toBeInTheDocument();
     expect(container.querySelector(".found-flash")).not.toBeInTheDocument();
-    expect(screen.getByText("投稿からは、あなたについて推定できることは見つかりませんでした")).toBeInTheDocument();
+    expect(screen.getByText(messages.board.empty)).toBeInTheDocument();
   });
 });

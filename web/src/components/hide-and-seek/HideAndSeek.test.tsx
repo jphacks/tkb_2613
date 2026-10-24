@@ -2,9 +2,12 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError, detectClues } from "@/lib/api";
+import { messages } from "@/lib/messages";
 import type { DetectResponse } from "@/types/clue";
 
 import { HideAndSeek } from "./HideAndSeek";
+
+const t = messages.hideAndSeek;
 
 vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
@@ -27,7 +30,7 @@ const RESPONSE: DetectResponse = {
 
 function choosePhoto() {
   const file = new File([new Uint8Array(4)], "photo.jpg", { type: "image/jpeg" });
-  fireEvent.change(screen.getByLabelText("写真を選ぶ"), { target: { files: [file] } });
+  fireEvent.change(screen.getByLabelText(t.pick), { target: { files: [file] } });
   return file;
 }
 
@@ -44,7 +47,7 @@ describe("HideAndSeek", () => {
   it("disables the search button until a photo is chosen", () => {
     render(<HideAndSeek />);
 
-    expect(screen.getByRole("button", { name: "みーつけた" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: t.search })).toBeDisabled();
   });
 
   it("shows found clues after searching the chosen photo", async () => {
@@ -52,21 +55,21 @@ describe("HideAndSeek", () => {
     render(<HideAndSeek />);
 
     const file = choosePhoto();
-    fireEvent.click(screen.getByRole("button", { name: "みーつけた" }));
+    fireEvent.click(screen.getByRole("button", { name: t.search }));
 
-    expect(await screen.findByRole("heading", { name: "みーつけた" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: t.found })).toBeInTheDocument();
     expect(screen.getByText("新宿")).toBeInTheDocument();
     expect(detectClues).toHaveBeenCalledWith(file);
   });
 
   it("shows a friendly message when the search fails", async () => {
-    vi.mocked(detectClues).mockRejectedValue(new ApiError("network", "サーバーに接続できませんでした"));
+    vi.mocked(detectClues).mockRejectedValue(new ApiError("network", messages.errors.network));
     render(<HideAndSeek />);
 
     choosePhoto();
-    fireEvent.click(screen.getByRole("button", { name: "みーつけた" }));
+    fireEvent.click(screen.getByRole("button", { name: t.search }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("サーバーに接続できませんでした");
+    expect(await screen.findByRole("alert")).toHaveTextContent(messages.errors.network);
   });
 
   it("releases the previous preview when another photo is chosen", () => {
