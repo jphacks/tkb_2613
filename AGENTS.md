@@ -5,7 +5,7 @@ JPHACKS 2026 東京B会場（チーム tkb_2613）の作品リポジトリ。Hac
 
 ## 作品の概要
 
-仮称「もういいかい？」（作品名は未決）。Bluesky の自分のアカウントにログインすると、「特定班AI」が過去の投稿（文章と写真）を横断して読み、名前・職業・勤務先・最寄り駅・生活時間帯などを根拠つきで推定する。そのうえで「この2件を消せば推定が崩れる」という最小限の削除を提案し、その場で削除して再診断する Web アプリ。
+仮称「もういいかい？」（作品名は未決）。Bluesky の自分のアカウントにログインすると、「特定班AI」が過去の投稿（文章と写真）を横断して読み、本名・現在地・最寄り駅・勤務先・家族情報などを根拠つきで推定する。そのうえで「この2件を消せば推定が崩れる」という最小限の削除を提案し、その場で削除して再診断する Web アプリ。
 
 ねらい：ある程度リテラシーのある人に「1件ずつは無害でも、組み合わせるとここまでわかる」と気づかせ、投稿を消すという行動につなげる。成果の指標は「消した件数」と「推定が崩れたか」。
 
@@ -84,25 +84,27 @@ Python は `common/` の Pydantic モデル（`tkb_common.schemas`）、TypeScri
 ### プロフィールの項目（捜査ボードの1行）
 
 ```json
-{"attribute": "station", "value": "〇〇駅", "confidence": 0.81, "status": "found",
+{"attribute": "commute_station_or_line", "value": "〇〇駅", "confidence": 0.81, "status": "found",
  "evidence": [{"post_id": "at://.../3kxxxx", "clue_index": 3, "required": true}]}
 ```
 
-- `attribute`：name / occupation / workplace / school / home_area / station / routine / relation
+- `attribute`：`facial_appearance` / `full_name` / `given_name_or_nickname` / `other_social_account` / `realtime_location` / `home_building_or_room` / `commute_station_or_line` / `residential_area` / `long_term_home_absence` / `workplace` / `workplace_area` / `school` / `frequent_shop` / `vehicle_model_or_partial_plate` / `partner_status_and_attributes` / `children_age_and_school`
+- 表示名、4つのカテゴリ、パーソナル度、推測しやすさは Python と TypeScript のプロフィール項目カタログで定義する。これらは診断ごとの推定確度ではない
+- `value`：具体値を示せない場合は null。`status` が unknown のときは null にする
 - `status`：found（推定できた）/ weak（弱い）/ unknown（不明）
 - `evidence`：根拠の手がかり。`required: true` は、その手がかりが消えるとこの項目が成り立たないもの
 
 ### 削除の提案
 
 ```json
-{"delete": ["at://.../3kxxxx", "at://.../3myyyy"], "broken": ["workplace", "station"], "before": [/* 項目 */], "after": [/* 項目 */]}
+{"delete": ["at://.../3kxxxx", "at://.../3myyyy"], "broken": ["workplace", "commute_station_or_line"], "before": [/* 項目 */], "after": [/* 項目 */]}
 ```
 
 ## 推定と最小削除の考え方（engine）
 
 - プロフィール推定：手がかりの一覧（文字だけ）を言語モデルに渡し、項目ごとの候補と根拠（手がかりの番号）を出させる。項目の確からしさは、根拠の手がかりの confidence を 1 − ∏(1 − c_i) で合成する。`required` の根拠が1つでも消えたら、その項目は不明にする
-- 生活時間帯は投稿時刻の偏りから engine が計算する（モデルは使わない）。駅名は `data-prep` の stations 表で実在を確認する
-- 最小削除：投稿を1件抜いたときの各項目の確からしさを、モデルを呼ばずに計算し直す。項目の重み（名前・勤務先・最寄り駅は3、職業・学校は2、生活時間帯・人間関係は1）を使い、重要な項目を最も多く崩す投稿から貪欲法で選ぶ。最大3件まで
+- 駅名は `data-prep` の stations 表で実在を確認する。生活時間帯は今回の16項目に含めない
+- 最小削除：投稿を1件抜いたときの各項目の確からしさを、モデルを呼ばずに計算し直す。16項目に対する重みは実装時に決める。重要な項目を最も多く崩す投稿から貪欲法で選ぶ。最大3件まで
 - 再診断：抜き出し済みの手がかりから、削除した投稿の分を除いてすぐに計算する
 
 ## モデルの呼び出し
