@@ -1,3 +1,7 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from typing import cast
+
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,10 +19,23 @@ async def _validation_error(_: Request, exc: Exception) -> JSONResponse:
     return JSONResponse({"detail": detail}, status_code=status.HTTP_422_UNPROCESSABLE_CONTENT)
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None,
+    sessions: SessionStore | None = None,
+) -> FastAPI:
     settings = settings or get_settings()
-    app = FastAPI(title="tkb_2613 API")
-    app.state.sessions = SessionStore(settings.session_ttl_minutes * 60)
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        yield
+        store = cast(SessionStore | None, getattr(app.state, "sessions", None))
+        if store is not None:
+            store.close()
+
+    app = FastAPI(title="tkb_2613 API", lifespan=lifespan)
+    app.state.sessions = (
+        sessions if sessions is not None else SessionStore(settings.session_ttl_minutes * 60)
+    )
     app.add_exception_handler(RequestValidationError, _validation_error)
 
     app.add_middleware(

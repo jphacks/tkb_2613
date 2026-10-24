@@ -47,6 +47,7 @@ async def create_session(
     settings: Annotated[Settings, Depends(get_settings)],
     store: Annotated[SessionStore, Depends(get_session_store)],
     login: Annotated[LoginFn, Depends(get_login)],
+    session_id: Annotated[str | None, Cookie(alias=SESSION_COOKIE)] = None,
 ) -> SessionResponse:
     if settings.mock_mode:
         result = LoginResult(handle=body.handle, did=MOCK_DID, client=None)
@@ -62,13 +63,18 @@ async def create_session(
                 status.HTTP_502_BAD_GATEWAY, "Bluesky に接続できませんでした"
             ) from None
 
+    if session_id:
+        store.delete(session_id)
+
+    new_session_id = store.create(result)
     response.set_cookie(
         SESSION_COOKIE,
-        store.create(result),
+        new_session_id,
         max_age=settings.session_ttl_minutes * 60,
         httponly=True,
         samesite="lax",
         secure=settings.cookie_secure,
+        path="/",
     )
     return SessionResponse(handle=result.handle, did=result.did)
 
@@ -82,9 +88,16 @@ def read_session(session: Annotated[BlueskySession, Depends(current_session)]) -
 @router.delete("/session", status_code=status.HTTP_204_NO_CONTENT)
 def delete_session(
     response: Response,
+    settings: Annotated[Settings, Depends(get_settings)],
     store: Annotated[SessionStore, Depends(get_session_store)],
     session_id: Annotated[str | None, Cookie(alias=SESSION_COOKIE)] = None,
 ) -> None:
     if session_id:
         store.delete(session_id)
-    response.delete_cookie(SESSION_COOKIE, httponly=True, samesite="lax")
+    response.delete_cookie(
+        SESSION_COOKIE,
+        path="/",
+        httponly=True,
+        samesite="lax",
+        secure=settings.cookie_secure,
+    )

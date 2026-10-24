@@ -141,6 +141,12 @@ class _Me:
     did = "did:plc:alice"
 
 
+class _CustomMe:
+    def __init__(self, handle: Any, did: Any) -> None:
+        self.handle = handle
+        self.did = did
+
+
 def test_bluesky_login_returns_handle_and_did(monkeypatch: pytest.MonkeyPatch) -> None:
     base_urls: list[str] = []
 
@@ -173,6 +179,27 @@ def test_bluesky_login_maps_errors(
         asyncio.run(bluesky.login("alice.bsky.social", PASSWORD))
 
 
+@pytest.mark.parametrize(
+    ("handle", "did"),
+    [
+        ("alice.bsky.social", "not-a-did"),
+        ("alice.bsky.social", 123),
+        ("", "did:plc:alice"),
+        ("   ", "did:plc:alice"),
+        (None, "did:plc:alice"),
+    ],
+)
+def test_bluesky_login_rejects_invalid_profile(
+    monkeypatch: pytest.MonkeyPatch, handle: Any, did: Any
+) -> None:
+    monkeypatch.setattr(
+        bluesky, "AsyncClient", lambda base_url: _FakeClient(_CustomMe(handle, did))
+    )
+
+    with pytest.raises(bluesky.BlueskyUnavailableError):
+        asyncio.run(bluesky.login("alice.bsky.social", PASSWORD))
+
+
 def test_get_login_uses_the_configured_service() -> None:
     login = get_login(Settings(bsky_service="https://pds.example"))
 
@@ -195,3 +222,43 @@ def test_store_expires_sessions() -> None:
     assert store.get(second) is None
     assert len(store) == 1
     assert store.get("unknown") is None
+
+
+def test_relogin_revokes_previous_session(client: TestClient) -> None:
+    res1 = client.post("/api/session", json={"handle": "alice.bsky.social", "password": PASSWORD})
+    assert res1.status_code == 200
+    token1 = res1.cookies[SESSION_COOKIE]
+    store = client.app.state.sessions  # type: ignore[attr-defined]
+    assert store.get(token1) is not None
+
+    res2 = client.post("/api/session", json={"handle": "bob.bsky.social", "password": PASSWORD})
+    assert res2.status_code == 200
+    token2 = res2.cookies[SESSION_COOKIE]
+    assert token1 != token2
+    assert store.get(token1) is None
+    assert store.get(token2) is not None
+
+
+def test_lifespan_closes_session_store() -> None:
+    app = create_app(Settings(mock_mode=True))
+    with TestClient(app) as client:
+        res = client.post(
+            "/api/session", json={"handle": "alice.bsky.social", "password": PASSWORD}
+        )
+        assert res.status_code == 200
+        store = app.state.sessions
+        assert len(store) == 1
+    assert len(store) == 0
+    assert store.get("any") is None
+
+
+def test_cookie_secure_option() -> None:
+    with _client(Settings(mock_mode=True, cookie_secure=False)) as c:
+        res = c.post("/api/session", json={"handle": "alice.bsky.social", "password": PASSWORD})
+        cookie = res.headers["set-cookie"].lower()
+        assert "secure" not in cookie
+
+    with _client(Settings(mock_mode=True, cookie_secure=True)) as c:
+        res = c.post("/api/session", json={"handle": "alice.bsky.social", "password": PASSWORD})
+        cookie = res.headers["set-cookie"].lower()
+        assert "secure" in cookie
