@@ -16,6 +16,9 @@ GAZ = Gazetteer(
         {"station_name": "根津", "mesh_1km": "m-bunkyo"},
         {"station_name": "根岸", "mesh_1km": "m-taito"},
         {"station_name": "新宿", "mesh_1km": "m-shinjuku"},
+        # 根津の隣の駅（駅名標に並ぶ）
+        {"station_name": "湯島", "mesh_1km": "m-bunkyo"},
+        {"station_name": "千駄木", "mesh_1km": "m-bunkyo"},
     ],
     postal=[
         {"postal_code": "1130031", "muni_code": "13105", "city": "文京区", "town": "根津"},
@@ -65,7 +68,7 @@ def test_station_names_treats_x_as_any_char_and_drops_suffix() -> None:
 
 
 def test_stations_in_returns_stations_in_municipality_meshes() -> None:
-    assert GAZ.stations_in({"13105"}) == {"根津"}
+    assert GAZ.stations_in({"13105"}) == {"根津", "湯島", "千駄木"}
     assert GAZ.stations_in({"99999"}) == set()
 
 
@@ -164,6 +167,91 @@ def test_r1_no_town_when_area_is_ambiguous() -> None:
     clues = [_clue("p1", ClueType.POSTAL_CODE, "113-00xx")]
 
     assert rule_r1(clues, GAZ) == []
+
+
+def _sign(post_id: str, value: str, region: tuple[int, int, int, int] | None) -> Clue:
+    """写真の駅名標の文字（同じ post_id・image_index なら同じ駅名標）。"""
+    return Clue(
+        post_id=post_id,
+        image_index=0,
+        type=ClueType.STATION_SIGN,
+        value=value,
+        region=region,
+        confidence=0.95,
+        source=ClueSource.VLM,
+    )
+
+
+def test_r1_reads_a_station_sign_with_neighbor_stations() -> None:
+    # テスト写真の nezu_sign と同じ形：大きい「根津」と、小さい隣の駅名・かな・駅番号
+    clues = [
+        _sign("p1", "根津", (549, 422, 1300, 705)),
+        _sign("p1", "ねづ", (600, 380, 700, 411)),
+        _sign("p1", "C 14", (1310, 430, 1360, 474)),
+        _sign("p1", "湯島", (100, 750, 200, 789)),
+        _sign("p1", "千駄木", (1200, 750, 1300, 794)),
+    ]
+
+    station = _by_attribute(rule_r1(clues, GAZ))["station"]
+
+    assert station.value == "根津駅"
+    # 隣の駅名も根拠に入る（表にない「ねづ」「C 14」は入らない）
+    assert station.clue_indices == [0, 3, 4]
+
+
+def test_r1_without_regions_takes_the_first_name_on_the_sign() -> None:
+    clues = [
+        _sign("p1", "根津", None),
+        _sign("p1", "湯島", None),
+        _sign("p1", "千駄木", None),
+    ]
+
+    assert _by_attribute(rule_r1(clues, GAZ))["station"].value == "根津駅"
+
+
+def test_r1_signs_in_different_photos_are_counted_separately() -> None:
+    clues = [
+        _sign("p1", "根津", (0, 0, 300, 100)),
+        _sign("p2", "根津", (0, 0, 300, 100)),
+        _sign("p3", "新宿", (0, 0, 300, 100)),
+    ]
+
+    station = _by_attribute(rule_r1(clues, GAZ))["station"]
+
+    assert (station.value, station.clue_indices) == ("根津駅", [0, 1])
+
+
+def test_r1_most_votes_wins_even_if_names_disagree() -> None:
+    clues = [
+        _clue("p1", ClueType.PLACE_TEXT, "新宿駅"),
+        _clue("p2", ClueType.PLACE_TEXT, "新宿"),
+        _sign("p3", "根津", (0, 0, 300, 100)),
+    ]
+
+    station = _by_attribute(rule_r1(clues, GAZ))["station"]
+
+    assert (station.value, station.clue_indices) == ("新宿駅", [0, 1])
+
+
+def test_r1_no_station_when_votes_tie() -> None:
+    clues = [
+        _clue("p1", ClueType.PLACE_TEXT, "新宿駅"),
+        _sign("p2", "根津", (0, 0, 300, 100)),
+        _sign("p3", "千駄木", (0, 0, 300, 100)),
+    ]
+
+    assert "station" not in _by_attribute(rule_r1(clues, GAZ))
+
+
+def test_r1_neighbor_names_do_not_vote_for_themselves() -> None:
+    # 駅名標の「湯島」は隣の駅。湯島を推すのは本文の1件だけなので、根津と並んで決まらない
+    clues = [
+        _sign("p1", "根津", (0, 0, 600, 200)),
+        _sign("p1", "湯島", (0, 300, 100, 330)),
+        _clue("p2", ClueType.PLACE_TEXT, "湯島駅"),
+    ]
+
+    assert "station" not in _by_attribute(rule_r1(clues, GAZ))
 
 
 # ---- R2 ----
