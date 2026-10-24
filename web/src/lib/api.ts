@@ -1,4 +1,5 @@
 import { type DetectResponse, isDetectResponse } from "@/types/clue";
+import { isSessionResponse, type SessionResponse } from "@/types/session";
 
 /** api/src/tkb_api/routes/detect.py の上限とそろえる */
 export const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
@@ -15,6 +16,7 @@ const DEFAULT_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localho
 export type ApiErrorKind =
   | "unsupported_type"
   | "too_large"
+  | "unauthorized"
   | "network"
   | "server"
   | "invalid_response";
@@ -68,4 +70,82 @@ export async function detectClues(
     throw new ApiError("invalid_response", "サーバーの応答を読み取れませんでした");
   }
   return data;
+}
+
+interface RequestOptions {
+  baseUrl?: string;
+  signal?: AbortSignal;
+}
+
+/**
+ * Bluesky にログインする。パスワードは api に送るだけで、ブラウザには残さない。
+ * セッションは api が Cookie（セッション番号だけ）で持つ。
+ */
+export async function createSession(
+  handle: string,
+  password: string,
+  { baseUrl = DEFAULT_BASE_URL, signal }: RequestOptions = {},
+): Promise<SessionResponse> {
+  let res: Response;
+  try {
+    res = await fetch(`${baseUrl}/api/session`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ handle, password }),
+      credentials: "include",
+      signal,
+    });
+  } catch {
+    throw new ApiError("network", "サーバーに接続できませんでした");
+  }
+
+  if (res.status === 401) {
+    throw new ApiError("unauthorized", "ハンドル名かパスワードが違います", 401);
+  }
+  if (!res.ok) {
+    throw new ApiError("server", `サーバーでエラーが起きました（${res.status}）`, res.status);
+  }
+
+  const data: unknown = await res.json().catch(() => undefined);
+  if (!isSessionResponse(data)) {
+    throw new ApiError("invalid_response", "サーバーの応答を読み取れませんでした");
+  }
+  return data;
+}
+
+/** 今ログインしているアカウントを返す。ログインしていなければ null。 */
+export async function getSession({
+  baseUrl = DEFAULT_BASE_URL,
+  signal,
+}: RequestOptions = {}): Promise<SessionResponse | null> {
+  let res: Response;
+  try {
+    res = await fetch(`${baseUrl}/api/session`, { credentials: "include", signal });
+  } catch {
+    throw new ApiError("network", "サーバーに接続できませんでした");
+  }
+
+  if (res.status === 401) return null;
+  if (!res.ok) {
+    throw new ApiError("server", `サーバーでエラーが起きました（${res.status}）`, res.status);
+  }
+
+  const data: unknown = await res.json().catch(() => undefined);
+  if (!isSessionResponse(data)) {
+    throw new ApiError("invalid_response", "サーバーの応答を読み取れませんでした");
+  }
+  return data;
+}
+
+/** ログアウトする。api 側のセッションを捨てる。 */
+export async function deleteSession({ baseUrl = DEFAULT_BASE_URL, signal }: RequestOptions = {}) {
+  let res: Response;
+  try {
+    res = await fetch(`${baseUrl}/api/session`, { method: "DELETE", credentials: "include", signal });
+  } catch {
+    throw new ApiError("network", "サーバーに接続できませんでした");
+  }
+  if (!res.ok) {
+    throw new ApiError("server", `サーバーでエラーが起きました（${res.status}）`, res.status);
+  }
 }

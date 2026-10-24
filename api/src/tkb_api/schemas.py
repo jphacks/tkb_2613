@@ -1,56 +1,69 @@
-"""手がかりの形式。Python 側の正。
+"""api の形式。
 
-web/src/types/clue.ts と同時に変更すること。
+共有の型（手がかりなど）の正は common/（tkb_common.schemas）で、ここは互換のために読み込み直すだけ。
+api の入出力（ログインなど）はこのファイルが Python 側の正。
+ログインは web/src/types/session.ts と同時に変更すること。
 """
 
-from enum import StrEnum
-from typing import Annotated, Self
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from tkb_common.schemas import (
+    PHOTO_ONLY_TYPES,
+    PHOTO_SOURCES,
+    TEXT_ONLY_TYPES,
+    Clue,
+    ClueSource,
+    ClueType,
+    DetectResponse,
+    NonNegativeInt,
+    Region,
+)
 
-NonNegativeInt = Annotated[int, Field(ge=0)]
+__all__ = [
+    # tkb_common から読み込み直している共有の型
+    "PHOTO_ONLY_TYPES",
+    "PHOTO_SOURCES",
+    "TEXT_ONLY_TYPES",
+    "Clue",
+    "ClueSource",
+    "ClueType",
+    "DetectResponse",
+    "NonNegativeInt",
+    "Region",
+    # api の入出力
+    "SessionRequest",
+    "SessionResponse",
+]
+
+API_ONLY_NAMES = frozenset({"SessionRequest", "SessionResponse"})
 
 
-class ClueType(StrEnum):
-    STATION_SIGN = "station_sign"
-    ADDRESS_TEXT = "address_text"
-    POSTAL_CODE = "postal_code"
-    PHONE = "phone"
-    SHOP = "shop"
-    PLATE = "plate"
-    LANDMARK = "landmark"
-    EXIF_GPS = "exif_gps"
-    FACE = "face"
-    IRIS = "iris"
-    KEY = "key"
-    CODE = "code"
-
-
-class ClueSource(StrEnum):
-    OCR = "ocr"
-    VLM = "vlm"
-    BROWSER = "browser"
-
-
-class Clue(BaseModel):
+class SessionRequest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    type: ClueType
-    value: str
-    # 画像上の矩形 [左上x, 左上y, 右下x, 右下y]（ピクセル）
-    region: tuple[NonNegativeInt, NonNegativeInt, NonNegativeInt, NonNegativeInt]
-    confidence: float = Field(ge=0.0, le=1.0)
-    source: ClueSource
+    handle: str = Field(min_length=1, max_length=253)
+    # アカウントのパスワードかアプリパスワード。ログインに使うだけで保存しない。
+    # SecretStr にして、repr やエラーの文言にパスワードが出ないようにする
+    password: SecretStr
 
-    @model_validator(mode="after")
-    def _check_region_order(self) -> Self:
-        x1, y1, x2, y2 = self.region
-        if x2 <= x1 or y2 <= y1:
-            raise ValueError("region は [左上x, 左上y, 右下x, 右下y] で、右下が左上より大きいこと")
-        return self
+    @field_validator("handle")
+    @classmethod
+    def _normalize_handle(cls, value: str) -> str:
+        handle = value.strip().removeprefix("@")
+        if not handle:
+            raise ValueError("ハンドル名を入れてください")
+        return handle
+
+    @field_validator("password")
+    @classmethod
+    def _check_password(cls, value: SecretStr) -> SecretStr:
+        if not value.get_secret_value():
+            raise ValueError("パスワードを入れてください")
+        return value
 
 
-class DetectResponse(BaseModel):
+class SessionResponse(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    clues: list[Clue]
+    handle: str
+    did: str

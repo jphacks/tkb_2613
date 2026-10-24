@@ -4,6 +4,7 @@ from typing import cast
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from tkb_api.bluesky_auth import BlueskyAuthenticator
 from tkb_api.config import Settings, get_settings

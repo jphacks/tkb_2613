@@ -8,8 +8,12 @@ dependencies = [
   "fastapi>=0.115",
   "pydantic>=2.10",
   "pydantic-settings>=2.6",
+  "tkb-common",
   "uvicorn[standard]>=0.32",
 ]
+
+[tool.uv.sources]
+tkb-common = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

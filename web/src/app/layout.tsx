@@ -5,15 +5,19 @@ import "@fontsource/zen-kaku-gothic-new/400.css";
 import "@fontsource/zen-kaku-gothic-new/700.css";
 import "./globals.css";
 
+import { SessionProvider } from "@/components/session/SessionProvider";
+
 export const metadata: Metadata = {
   title: "もういいかい？",
-  description: "SNS に上げる前の写真から、特定につながる手がかりを見つけて隠すかくれんぼ",
+  description: "Bluesky の自分の投稿の組み合わせから何がわかるかを見せ、最小限の削除で逃げ切るかくれんぼ",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="ja" className="h-full antialiased">
-      <body className="min-h-full">{children}</body>
+      <body className="min-h-full">
+        <SessionProvider>{children}</SessionProvider>
+      </body>
     </html>
   );
 }

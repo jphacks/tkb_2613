@@ -1,10 +1,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ApiError, detectClues, MAX_IMAGE_BYTES } from "./api";
+import { ApiError, createSession, deleteSession, detectClues, getSession, MAX_IMAGE_BYTES } from "./api";
 
 const RESPONSE = {
   clues: [
-    { type: "phone", value: "03-0000-0000", region: [1, 2, 3, 4], confidence: 0.8, source: "ocr" },
+    {
+      post_id: "at://did:plc:xxxx/app.bsky.feed.post/3kxxxx",
+      image_index: 0,
+      type: "phone",
+      value: "03-0000-0000",
+      region: [1, 2, 3, 4],
+      confidence: 0.8,
+      source: "ocr",
+    },
   ],
 };
 
@@ -81,5 +89,92 @@ describe("detectClues", () => {
     mockFetch(new Response("not json", { status: 200 }));
 
     await expect(detectClues(jpeg())).rejects.toMatchObject({ kind: "invalid_response" });
+  });
+});
+
+describe("createSession", () => {
+  const SESSION = { handle: "alice.bsky.social", did: "did:plc:abc" };
+
+  it("posts the handle and password as JSON with cookies", async () => {
+    const fetchFn = mockFetch(Response.json(SESSION));
+
+    const result = await createSession("alice.bsky.social", "pw", { baseUrl: "http://api.test" });
+
+    expect(result).toEqual(SESSION);
+    const [url, init] = fetchFn.mock.calls[0];
+    expect(url).toBe("http://api.test/api/session");
+    expect(init?.method).toBe("POST");
+    expect(init?.credentials).toBe("include");
+    expect(JSON.parse(init?.body as string)).toEqual({
+      handle: "alice.bsky.social",
+      password: "pw",
+    });
+  });
+
+  it("maps 401 to unauthorized", async () => {
+    mockFetch(new Response(null, { status: 401 }));
+    await expect(createSession("a", "b")).rejects.toMatchObject({ kind: "unauthorized", status: 401 });
+  });
+
+  it("maps other errors to server", async () => {
+    mockFetch(new Response(null, { status: 502 }));
+    await expect(createSession("a", "b")).rejects.toMatchObject({ kind: "server", status: 502 });
+  });
+
+  it("maps fetch failures to network", async () => {
+    mockFetch(new TypeError("offline"));
+    await expect(createSession("a", "b")).rejects.toMatchObject({ kind: "network" });
+  });
+
+  it("rejects responses of the wrong shape", async () => {
+    mockFetch(Response.json({ handle: "a" }));
+    await expect(createSession("a", "b")).rejects.toMatchObject({ kind: "invalid_response" });
+  });
+});
+
+describe("deleteSession", () => {
+  it("sends DELETE with cookies", async () => {
+    const fetchFn = mockFetch(new Response(null, { status: 204 }));
+
+    await deleteSession({ baseUrl: "http://api.test" });
+
+    const [url, init] = fetchFn.mock.calls[0];
+    expect(url).toBe("http://api.test/api/session");
+    expect(init?.method).toBe("DELETE");
+    expect(init?.credentials).toBe("include");
+  });
+
+  it("maps errors", async () => {
+    mockFetch(new Response(null, { status: 500 }));
+    await expect(deleteSession()).rejects.toBeInstanceOf(ApiError);
+    mockFetch(new TypeError("offline"));
+    await expect(deleteSession()).rejects.toMatchObject({ kind: "network" });
+  });
+});
+
+describe("getSession", () => {
+  const SESSION = { handle: "alice.bsky.social", did: "did:plc:abc" };
+
+  it("returns the logged-in account with cookies", async () => {
+    const fetchFn = mockFetch(Response.json(SESSION));
+
+    expect(await getSession({ baseUrl: "http://api.test" })).toEqual(SESSION);
+    const [url, init] = fetchFn.mock.calls[0];
+    expect(url).toBe("http://api.test/api/session");
+    expect(init?.credentials).toBe("include");
+  });
+
+  it("returns null when not logged in", async () => {
+    mockFetch(new Response(null, { status: 401 }));
+    expect(await getSession()).toBeNull();
+  });
+
+  it("maps errors", async () => {
+    mockFetch(new Response(null, { status: 500 }));
+    await expect(getSession()).rejects.toMatchObject({ kind: "server" });
+    mockFetch(Response.json({ handle: "a" }));
+    await expect(getSession()).rejects.toMatchObject({ kind: "invalid_response" });
+    mockFetch(new TypeError("offline"));
+    await expect(getSession()).rejects.toMatchObject({ kind: "network" });
   });
 });
