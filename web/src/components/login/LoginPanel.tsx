@@ -2,6 +2,7 @@
 
 import { useActionState } from "react";
 
+import { BlueskyLogo } from "@/components/brand/BlueskyLogo";
 import { useSession } from "@/components/session/SessionProvider";
 import { ApiError } from "@/lib/api";
 import { normalizeHandle } from "@/types/session";
@@ -22,13 +23,17 @@ export function LoginPanel() {
   const { state: session, login, logout } = useSession();
 
   const [form, formAction, isPending] = useActionState(
-    async (_prev: LoginFormState, formData: FormData): Promise<LoginFormState> => {
+    async (
+      _prev: LoginFormState,
+      formData: FormData,
+    ): Promise<LoginFormState> => {
       const handle = normalizeHandle(String(formData.get("handle") ?? ""));
       try {
         await login(handle, String(formData.get("password") ?? ""));
         return INITIAL_STATE;
       } catch (err) {
-        const error = err instanceof ApiError ? err.message : "ログインできませんでした";
+        const error =
+          err instanceof ApiError ? err.message : "ログインできませんでした";
         return { error, handle };
       }
     },
@@ -45,9 +50,13 @@ export function LoginPanel() {
 
   if (session.status === "authenticated") {
     return (
-      <section aria-label="ログイン中" className="flex flex-wrap items-center gap-4">
-        <p>
-          <span className="text-sm text-ink/60">ログイン中</span>{" "}
+      <section
+        aria-label="ログイン中"
+        className="flex flex-wrap items-center gap-4"
+      >
+        <p className="flex items-center gap-2">
+          <BlueskyLogo className="size-5" />
+          <span className="text-sm text-ink/60">ログイン中</span>
           <span className="font-bold">@{session.session.handle}</span>
         </p>
         <button
@@ -62,8 +71,20 @@ export function LoginPanel() {
   }
 
   return (
-    <form action={formAction} aria-label="Bluesky にログイン" className="max-w-md">
-      <fieldset disabled={isPending} aria-busy={isPending} className="space-y-5 disabled:opacity-60">
+    <form
+      action={formAction}
+      aria-label="Bluesky にログイン"
+      className="max-w-md"
+    >
+      <p className="mb-5 flex items-center gap-2.5 font-bold">
+        <BlueskyLogo className="size-7" />
+        Bluesky のアカウントでログイン
+      </p>
+      <fieldset
+        disabled={isPending}
+        aria-busy={isPending}
+        className="space-y-5 disabled:opacity-60"
+      >
         <label className="block space-y-1.5">
           <span className="block font-bold">ハンドル名</span>
           <input
@@ -93,7 +114,10 @@ export function LoginPanel() {
             className="w-full rounded-sm border-2 border-ink bg-paper px-3 py-2 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-seeker"
           />
           <p id="password-hint" className="text-sm text-ink/70">
-            Bluesky のパスワードでログインできます。パスワードは保存しません。アプリパスワード（「設定 → プライバシーとセキュリティ → アプリパスワード」で作れます）を使うと、あとで取り消せるので、より安心です。
+            Bluesky
+            のパスワードでログインできます。パスワードは保存しません。アプリパスワード（「設定
+            → プライバシーとセキュリティ →
+            アプリパスワード」で作れます）を使うと、あとで取り消せるので、より安心です。
           </p>
         </div>
 
@@ -107,7 +131,7 @@ export function LoginPanel() {
               className="size-4 animate-spin rounded-full border-2 border-paper border-t-transparent motion-reduce:animate-none"
             />
           )}
-          もういいかい？
+          ログイン
         </button>
       </fieldset>
 
@@ -117,7 +141,10 @@ export function LoginPanel() {
         </p>
       )}
       {!isPending && form.error && (
-        <p role="alert" className="mt-4 border-l-4 border-seeker bg-seeker/10 px-4 py-3">
+        <p
+          role="alert"
+          className="mt-4 border-l-4 border-seeker bg-seeker/10 px-4 py-3"
+        >
           {form.error}
         </p>
       )}

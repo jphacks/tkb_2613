@@ -26,7 +26,7 @@ async function renderLoggedOut() {
 function fill(handle: string, password: string) {
   fireEvent.change(screen.getByLabelText("ハンドル名"), { target: { value: handle } });
   fireEvent.change(screen.getByLabelText("パスワード"), { target: { value: password } });
-  fireEvent.click(screen.getByRole("button", { name: "もういいかい？" }));
+  fireEvent.click(screen.getByRole("button", { name: "ログイン" }));
 }
 
 beforeEach(() => {
@@ -72,7 +72,7 @@ describe("LoginPanel", () => {
 
     expect(await screen.findByRole("status")).toHaveTextContent("Bluesky にログインしています");
     expect(screen.getByLabelText("ハンドル名")).toBeDisabled();
-    expect(screen.getByRole("button", { name: "もういいかい？" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "ログイン" })).toBeDisabled();
 
     resolve(ALICE);
     expect(await screen.findByText("@alice.bsky.social")).toBeInTheDocument();
