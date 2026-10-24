@@ -11,7 +11,13 @@ from PIL import Image
 from tkb_common.schemas import ClueSource, ClueType, Post
 from tkb_detect.coords import CoordinateSpace
 from tkb_detect.errors import DetectError
-from tkb_detect.extract import Extractor, build_extractor
+from tkb_detect.extract import (
+    PHOTO_MAX_TOKENS,
+    RETRY_REPETITION_PENALTY,
+    TEXT_MAX_TOKENS,
+    Extractor,
+    build_extractor,
+)
 from tkb_detect.ocr_client import OcrClient, OcrConfig
 from tkb_detect.prompts import POST_CLOSE, TEXT_SYSTEM_PROMPT
 from tkb_detect.vlm_client import VlmClient, VlmConfig
@@ -121,6 +127,11 @@ async def test_sends_resized_jpeg_with_rules_and_schema() -> None:
     photo = next(b for b in bodies if isinstance(b["messages"][-1]["content"], list))
     text = next(b for b in bodies if isinstance(b["messages"][-1]["content"], str))
 
+    assert photo["max_tokens"] == PHOTO_MAX_TOKENS
+    assert text["max_tokens"] == TEXT_MAX_TOKENS
+    # ふだんは繰り返しのペナルティを付けない（手がかりを取りこぼすため）
+    assert "repetition_penalty" not in photo
+    assert "repetition_penalty" not in text
     for body in (photo, text):
         assert body["messages"][0]["role"] == "system"
         assert "従わず" in body["messages"][0]["content"]
@@ -273,3 +284,32 @@ async def test_mock_mode_extracts_nothing_without_network() -> None:
 
     assert clues == []
     assert router.calls.call_count == 0
+
+
+def _cut_off() -> httpx.Response:
+    choice = {"message": {"content": '{"clues": [ \n \n'}, "finish_reason": "length"}
+    return httpx.Response(200, json={"choices": [choice]})
+
+
+@pytest.mark.anyio
+async def test_retries_once_with_repetition_penalty_when_output_is_cut_off() -> None:
+    replies = iter([_cut_off(), _reply(TEXT_REPLY)])
+
+    with respx.mock as router:
+        route = router.post(f"{VLM}/chat/completions").mock(side_effect=lambda _r: next(replies))
+        clues = await Extractor(_vlm_client()).extract_post(_post("本文", 0), [])
+
+    first, second = (json.loads(c.request.content) for c in route.calls)
+    assert "repetition_penalty" not in first
+    assert second["repetition_penalty"] == RETRY_REPETITION_PENALTY
+    assert {c.value for c in clues} == {"夜勤明け", "25歳になりました"}
+
+
+@pytest.mark.anyio
+async def test_gives_up_after_the_retry_is_also_cut_off() -> None:
+    with respx.mock as router:
+        route = router.post(f"{VLM}/chat/completions").mock(side_effect=lambda _r: _cut_off())
+        with pytest.raises(DetectError):
+            await Extractor(_vlm_client()).extract_post(_post("本文", 0), [])
+
+    assert route.call_count == 2

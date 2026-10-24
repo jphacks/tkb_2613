@@ -7,14 +7,14 @@
 
 import asyncio
 import json
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from pydantic import ValidationError
 
 from tkb_common.schemas import Clue, ClueSource, ClueType, Post, Region
 from tkb_detect.coords import COORDINATE_SPACE, CoordinateSpace, to_original_region
-from tkb_detect.errors import DetectError
+from tkb_detect.errors import DetectError, OutputCutOffError
 from tkb_detect.image import PreparedImage, prepare_image
 from tkb_detect.ocr_client import OcrClient, OcrConfig
 from tkb_detect.ocr_merge import merge_ocr
@@ -30,6 +30,15 @@ from tkb_detect.vlm_client import VlmClient, VlmConfig
 
 # 送った画像は JPEG に書き出し直している
 SENT_MIME_TYPE = "image/jpeg"
+# 出力の上限。qwen3.6-27b（RunPod）は約30トークン/秒なので、1回の呼び出しが
+# 待ち時間の60秒（中継が切れる100秒）に収まるようにする。ふだんの出力は写真で約350、本文で約100
+PHOTO_MAX_TOKENS = 1024
+TEXT_MAX_TOKENS = 512
+# json_schema で縛っても JSON の中の空白は何個でも許されるため、qwen3.6-27b が空白と改行を
+# 出し続けて止まらないことがある（vLLM 0.32 では whitespace_pattern などの指定が効かなかった）。
+# 繰り返しのペナルティで止まるが、JSON のキーの繰り返しにも効いて手がかりを取りこぼすので、
+# 出力が上限で切れたときのやり直しにだけ使う
+RETRY_REPETITION_PENALTY = 1.05
 
 
 class Extractor:
@@ -61,12 +70,16 @@ class Extractor:
 
     async def _extract_image(self, post_id: str, index: int, data: bytes) -> list[Clue]:
         prepared = prepare_image(data)
-        vlm_task = self._vlm.complete(
-            prepared.jpeg,
-            SENT_MIME_TYPE,
-            PHOTO_USER_PROMPT,
-            system=PHOTO_SYSTEM_PROMPT,
-            json_schema=PHOTO_SCHEMA,
+        vlm_task = _retry_if_cut_off(
+            lambda penalty: self._vlm.complete(
+                prepared.jpeg,
+                SENT_MIME_TYPE,
+                PHOTO_USER_PROMPT,
+                system=PHOTO_SYSTEM_PROMPT,
+                json_schema=PHOTO_SCHEMA,
+                max_tokens=PHOTO_MAX_TOKENS,
+                repetition_penalty=penalty,
+            )
         )
         if self._ocr is None:
             raw = await vlm_task
@@ -97,8 +110,14 @@ class Extractor:
         return clues
 
     async def _extract_text(self, post_id: str, text: str) -> list[Clue]:
-        raw = await self._vlm.complete_text(
-            text_user_prompt(text), system=TEXT_SYSTEM_PROMPT, json_schema=TEXT_SCHEMA
+        raw = await _retry_if_cut_off(
+            lambda penalty: self._vlm.complete_text(
+                text_user_prompt(text),
+                system=TEXT_SYSTEM_PROMPT,
+                json_schema=TEXT_SCHEMA,
+                max_tokens=TEXT_MAX_TOKENS,
+                repetition_penalty=penalty,
+            )
         )
         clues = []
         for item in _parse_items(raw):
@@ -136,6 +155,14 @@ def build_extractor(
     use_ocr = bool(ocr_base_url.strip()) and not mock_mode
     ocr = OcrClient(OcrConfig(base_url=ocr_base_url, mock_mode=False)) if use_ocr else None
     return Extractor(vlm, ocr, coordinate_space)
+
+
+async def _retry_if_cut_off(call: Callable[[float | None], Awaitable[str]]) -> str:
+    """出力が上限で切れたら（空白が止まらなかったら）、繰り返しのペナルティを付けて1回だけやり直す。"""
+    try:
+        return await call(None)
+    except OutputCutOffError:
+        return await call(RETRY_REPETITION_PENALTY)
 
 
 def _parse_items(raw: str) -> list[dict[str, Any]]:

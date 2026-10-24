@@ -5,8 +5,13 @@ import httpx
 import pytest
 import respx
 
-from tkb_detect.errors import DetectError, ForbiddenEndpointError
-from tkb_detect.vlm_client import MOCK_VLM_JSON, MOCK_VLM_TEXT, VlmClient, VlmConfig
+from tkb_detect.errors import DetectError, ForbiddenEndpointError, OutputCutOffError
+from tkb_detect.vlm_client import (
+    MOCK_VLM_JSON,
+    MOCK_VLM_TEXT,
+    VlmClient,
+    VlmConfig,
+)
 
 BASE = "http://vlm.local/v1"
 IMAGE = b"\xff\xd8\xff\xe0fake"
@@ -120,6 +125,36 @@ async def test_mock_mode_returns_json_when_schema_requested_without_network() ->
     assert image_text == body_text == MOCK_VLM_JSON
     assert plain == MOCK_VLM_TEXT
     assert router.calls.call_count == 0
+
+
+@pytest.mark.anyio
+async def test_sends_max_tokens_and_repetition_penalty_only_when_given() -> None:
+    with respx.mock as router:
+        route = router.post(f"{BASE}/chat/completions").respond(
+            json={"choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}]}
+        )
+
+        await VlmClient(_config()).complete(
+            IMAGE, "image/jpeg", "p", max_tokens=1024, repetition_penalty=1.05
+        )
+        await VlmClient(_config()).complete_text("p")
+
+    first, second = (json.loads(c.request.content) for c in route.calls)
+    assert first["max_tokens"] == 1024
+    assert first["repetition_penalty"] == 1.05
+    assert "max_tokens" not in second
+    assert "repetition_penalty" not in second
+
+
+@pytest.mark.anyio
+async def test_raises_detect_error_when_output_is_cut_off() -> None:
+    with respx.mock as router:
+        router.post(f"{BASE}/chat/completions").respond(
+            json={"choices": [{"message": {"content": '{"clues": [ '}, "finish_reason": "length"}]}
+        )
+
+        with pytest.raises(OutputCutOffError):
+            await VlmClient(_config()).complete_text("p", max_tokens=10)
 
 
 @pytest.mark.anyio

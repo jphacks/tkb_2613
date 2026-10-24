@@ -9,7 +9,7 @@ from typing import Any
 
 import httpx
 
-from tkb_detect.errors import DetectError
+from tkb_detect.errors import DetectError, OutputCutOffError
 from tkb_detect.guard import ensure_team_endpoint
 
 MOCK_VLM_TEXT = "（モック）駅名標「新宿」が写っています。"
@@ -42,8 +42,13 @@ class VlmClient:
         *,
         system: str | None = None,
         json_schema: dict[str, Any] | None = None,
+        max_tokens: int | None = None,
+        repetition_penalty: float | None = None,
     ) -> str:
-        """画像と指示を送る。json_schema を渡すと、その形の JSON だけを返させる。"""
+        """画像と指示を送る。json_schema を渡すと、その形の JSON だけを返させる。
+
+        max_tokens に達して出力が途中で切れたときは OutputCutOffError にする。
+        """
         if self._config.mock_mode:
             return MOCK_VLM_TEXT if json_schema is None else MOCK_VLM_JSON
 
@@ -52,7 +57,8 @@ class VlmClient:
             {"type": "text", "text": prompt},
             {"type": "image_url", "image_url": {"url": data_url}},
         ]
-        data = await self._post(self._build_payload(content, system, json_schema))
+        payload = self._build_payload(content, system, json_schema, max_tokens, repetition_penalty)
+        data = await self._post(payload)
         return _extract_content(data)
 
     async def complete_text(
@@ -61,12 +67,15 @@ class VlmClient:
         *,
         system: str | None = None,
         json_schema: dict[str, Any] | None = None,
+        max_tokens: int | None = None,
+        repetition_penalty: float | None = None,
     ) -> str:
         """画像なしで文字だけを送る（投稿の本文の読み取り用）。"""
         if self._config.mock_mode:
             return MOCK_VLM_TEXT if json_schema is None else MOCK_VLM_JSON
 
-        data = await self._post(self._build_payload(prompt, system, json_schema))
+        payload = self._build_payload(prompt, system, json_schema, max_tokens, repetition_penalty)
+        data = await self._post(payload)
         return _extract_content(data)
 
     def _build_payload(
@@ -74,6 +83,8 @@ class VlmClient:
         user_content: str | list[dict[str, Any]],
         system: str | None,
         json_schema: dict[str, Any] | None,
+        max_tokens: int | None = None,
+        repetition_penalty: float | None = None,
     ) -> dict[str, Any]:
         messages: list[dict[str, Any]] = []
         if system is not None:
@@ -86,6 +97,10 @@ class VlmClient:
             "messages": messages,
             "chat_template_kwargs": dict(CHAT_TEMPLATE_KWARGS),
         }
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
+        if repetition_penalty is not None:
+            payload["repetition_penalty"] = repetition_penalty
         if json_schema is not None:
             payload["response_format"] = {
                 "type": "json_schema",
@@ -113,9 +128,12 @@ class VlmClient:
 
 def _extract_content(data: Any) -> str:
     try:
-        content = data["choices"][0]["message"]["content"]
+        choice = data["choices"][0]
+        content = choice["message"]["content"]
     except (KeyError, IndexError, TypeError) as e:
         raise DetectError("VLM の応答が想定外の形式です") from e
+    if choice.get("finish_reason") == "length":
+        raise OutputCutOffError("VLM の出力が長すぎて途中で切れました")
     if not isinstance(content, str):
         raise DetectError("VLM の応答に本文がありません")
     return content

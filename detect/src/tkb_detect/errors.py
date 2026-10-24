@@ -4,3 +4,7 @@ class DetectError(Exception):
 
 class ForbiddenEndpointError(DetectError):
     """チームのサーバー以外（第三者の AI サービスなど）に送ろうとした。"""
+
+
+class OutputCutOffError(DetectError):
+    """VLM の出力が max_tokens に達して途中で切れた。"""
