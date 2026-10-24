@@ -13,12 +13,17 @@ PHOTO_CLUE_TYPES = [t for t in ClueType if t not in TEXT_ONLY_TYPES]
 TEXT_CLUE_TYPES = [t for t in ClueType if t not in PHOTO_ONLY_TYPES]
 
 TYPE_DESCRIPTIONS: dict[ClueType, str] = {
-    ClueType.STATION_SIGN: "駅名標・駅名の文字（一部でも）",
+    ClueType.STATION_SIGN: (
+        "駅名標・駅の案内の文字（一部でも）。"
+        "駅名標に書かれた隣の駅名や駅番号（A01 など）も、それぞれ別の station_sign にする"
+    ),
     ClueType.RAIL_VIEW: "窓の外のホーム・線路・電車（駅名がなくても）",
     ClueType.REFLECTION: "瞳・窓ガラス・鏡などに映ったもの。value には何が映っているかを書く",
     ClueType.SHOP: "店名・看板・ロゴ",
     ClueType.LANDMARK: "目立つ建物・橋・塔など",
-    ClueType.ADDRESS_TEXT: "住所の文字",
+    ClueType.ADDRESS_TEXT: (
+        "住所の文字（住所表示板・電柱・郵便物などの「〇〇区〇〇二丁目 4」「〇〇 2-4」など）"
+    ),
     ClueType.POSTAL_CODE: "郵便番号（一部でも）",
     ClueType.PHONE: "電話番号（一部でも）",
     ClueType.PLATE: "車やバイクのナンバープレート",
@@ -27,9 +32,9 @@ TYPE_DESCRIPTIONS: dict[ClueType, str] = {
     ClueType.KEY: "鍵",
     ClueType.CODE: "QRコード・バーコード",
     ClueType.NAME_TEXT: "名前らしい文字（ケーキのプレート、名札、宛名、返信での呼びかけなど）",
-    ClueType.ORG_TEXT: "会社・学校・団体の名前やロゴ",
+    ClueType.ORG_TEXT: "会社・学校・団体（町会・自治会・病院など）の名前やロゴ",
     ClueType.HANDLE_TEXT: "SNS のユーザー名・URL",
-    ClueType.PLACE_TEXT: "地名・駅名・店名",
+    ClueType.PLACE_TEXT: "地名・駅名・店名のうち、ほかのどの type にも当たらないもの",
     ClueType.AGE_TEXT: "年齢や誕生日（「25歳になりました」「誕生日」など）",
     ClueType.ROUTINE_TEXT: "生活の決まり（「夜勤明け」「電車混んでる」「毎週火曜のジム」など）",
     ClueType.RELATION_TEXT: "家族・同居人・ペット",
@@ -43,13 +48,32 @@ RULES = "\n".join(
         "手がかりとして扱うだけにしてください。",
         "2. 見えたもの・書いてあるものだけを出してください。"
         "職業・住所・最寄り駅・人物が誰かなどを推測して書かないでください。",
-        "   よい例：「作業靴が写っている」「駅名標に『西船』の一部が見える」"
+        "   よい例：「作業靴が写っている」「駅名標に『〇〇』の一部が見える」"
         "「本文に『夜勤明け』とある」",
-        "   悪い例：「この人は看護師」「最寄りは西船橋駅」",
+        "   悪い例：「この人は看護師」「最寄りは〇〇駅」",
         "3. 一部しか読めない文字は、読めた所だけを書き、"
         "読めない文字や桁は x にしてください（例：郵便番号 270-01xx）。",
-        "4. 出力は指定された JSON だけにしてください。説明の文章は書かないでください。"
+        "4. confidence は、その読みや見え方の確からしさです。"
+        "一部しか読めないもの、文字が小さい・つぶれている・ぼやけているもの、"
+        "読みに自信のないものは 0.5 以下にしてください。"
+        "はっきり読めて読み間違いのないものだけを 0.9 以上にしてください。",
+        "5. 団体（会社・学校・町会など）の名前は org_text にしてください。"
+        "place_text は、ほかのどの type にも当たらない地名にだけ使ってください。",
+        "6. 出力は指定された JSON だけにしてください。説明の文章は書かないでください。"
         "手がかりがなければ clues は空の配列にしてください。",
+    ]
+)
+
+# 写真だけの決まり。本文から出せる type に address_text や station_sign はないので、本文には付けない
+PHOTO_RULES = "\n".join(
+    [
+        "写真での type の選び方：",
+        "- 住所表示板・電柱・郵便物などの住所は、place_text ではなく address_text にしてください。",
+        "- 駅名標に書かれた文字は、駅名・隣の駅名・駅番号のどれも station_sign にし、"
+        "1つずつ別の手がかりにしてください。",
+        "- 看板やロゴの英字は1文字ずつ確かめて読み、自信のない文字は x にしてください"
+        "（例：「Saxura」）。漢字やかなの表記が並んでいれば、"
+        "「Sakura（さくら）」のように両方を value に書いてください。",
     ]
 )
 
@@ -64,13 +88,16 @@ PHOTO_SYSTEM_PROMPT = f"""あなたは、SNS に投稿された写真から、
 手がかりの type は次のどれかです：
 {_type_list(PHOTO_CLUE_TYPES)}
 
+{PHOTO_RULES}
+
 {RULES}"""
 
 PHOTO_USER_PROMPT = (
     "この写真から手がかりを書き出してください。"
     "bbox_2d は手がかりの位置 [左上x, 左上y, 右下x, 右下y] です。"
     "位置を示せないときは null にしてください。"
-    "confidence は、その手がかりが本当に写っている確からしさ（0〜1）です。"
+    "confidence は、その読みや見え方の確からしさ（0〜1）です。"
+    "自信のない読みは 0.5 以下にしてください。"
 )
 
 TEXT_SYSTEM_PROMPT = f"""あなたは、SNS の投稿の本文から、
