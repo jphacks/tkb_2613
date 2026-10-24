@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     vlm_model: str = ""
     ocr_base_url: str = ""
     cors_origins: list[str] = ["http://localhost:3000"]
+    session_cookie_secure: bool = False
 
 
 @lru_cache
