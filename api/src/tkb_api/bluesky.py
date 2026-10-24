@@ -32,8 +32,8 @@ class LoginResult:
 LoginFn = Callable[[str, str], Awaitable[LoginResult]]
 
 
-async def login(handle: str, password: str) -> LoginResult:
-    client = AsyncClient()
+async def login(handle: str, password: str, service: str = "https://bsky.social") -> LoginResult:
+    client = AsyncClient(base_url=f"{service.rstrip('/')}/xrpc")
     try:
         me = await client.login(handle, password)
     except (UnauthorizedError, BadRequestError) as e:

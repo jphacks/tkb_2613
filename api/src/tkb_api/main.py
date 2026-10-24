@@ -18,7 +18,7 @@ async def _validation_error(_: Request, exc: Exception) -> JSONResponse:
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     app = FastAPI(title="tkb_2613 API")
-    app.state.sessions = SessionStore(settings.session_ttl_seconds)
+    app.state.sessions = SessionStore(settings.session_ttl_minutes * 60)
     app.add_exception_handler(RequestValidationError, _validation_error)
 
     app.add_middleware(

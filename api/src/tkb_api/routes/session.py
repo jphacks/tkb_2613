@@ -5,6 +5,7 @@ current_session で得たセッションの DID の投稿だけを扱う。
 リクエスト本文（アプリパスワードを含む）はログに出さない。
 """
 
+from functools import partial
 from typing import Annotated
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
@@ -25,8 +26,8 @@ def get_session_store(request: Request) -> SessionStore:
     return store
 
 
-def get_login() -> LoginFn:
-    return bluesky.login
+def get_login(settings: Annotated[Settings, Depends(get_settings)]) -> LoginFn:
+    return partial(bluesky.login, service=settings.bsky_service)
 
 
 def current_session(
@@ -64,7 +65,7 @@ async def create_session(
     response.set_cookie(
         SESSION_COOKIE,
         store.create(result),
-        max_age=settings.session_ttl_seconds,
+        max_age=settings.session_ttl_minutes * 60,
         httponly=True,
         samesite="lax",
         secure=settings.cookie_secure,

@@ -142,11 +142,18 @@ class _Me:
 
 
 def test_bluesky_login_returns_handle_and_did(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(bluesky, "AsyncClient", lambda: _FakeClient(_Me()))
+    base_urls: list[str] = []
 
-    result = asyncio.run(bluesky.login("alice.bsky.social", PASSWORD))
+    def fake_client(base_url: str) -> _FakeClient:
+        base_urls.append(base_url)
+        return _FakeClient(_Me())
+
+    monkeypatch.setattr(bluesky, "AsyncClient", fake_client)
+
+    result = asyncio.run(bluesky.login("alice.bsky.social", PASSWORD, "https://pds.example/"))
 
     assert (result.handle, result.did) == ("alice.bsky.social", "did:plc:alice")
+    assert base_urls == ["https://pds.example/xrpc"]
 
 
 @pytest.mark.parametrize(
@@ -160,10 +167,16 @@ def test_bluesky_login_returns_handle_and_did(monkeypatch: pytest.MonkeyPatch) -
 def test_bluesky_login_maps_errors(
     monkeypatch: pytest.MonkeyPatch, outcome: Any, expected: type[Exception]
 ) -> None:
-    monkeypatch.setattr(bluesky, "AsyncClient", lambda: _FakeClient(outcome))
+    monkeypatch.setattr(bluesky, "AsyncClient", lambda base_url: _FakeClient(outcome))
 
     with pytest.raises(expected):
         asyncio.run(bluesky.login("alice.bsky.social", PASSWORD))
+
+
+def test_get_login_uses_the_configured_service() -> None:
+    login = get_login(Settings(bsky_service="https://pds.example"))
+
+    assert login.keywords == {"service": "https://pds.example"}  # type: ignore[attr-defined]
 
 
 def test_store_expires_sessions() -> None:
