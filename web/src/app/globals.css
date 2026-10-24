@@ -18,9 +18,14 @@
   --font-horror: "Zen Antique", "Zen Kaku Gothic New", serif;
 }
 
+/* html にも色を付ける。付けないと body の背景が画面全体に移り、グラデーションが1画面ごとにくり返されて境目が出る */
+html {
+  background: var(--paper);
+}
+
 body {
   background:
-    radial-gradient(ellipse 80% 60% at 50% 0%, oklch(32% 0.12 265 / 0.6), transparent 70%),
+    radial-gradient(ellipse 80% 60vh at 50% 0%, oklch(32% 0.12 265 / 0.6), transparent 70%) no-repeat,
     var(--paper);
   color: var(--ink);
   font-family: var(--font-sans);
