@@ -1,0 +1,274 @@
+from datetime import datetime
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+import pyarrow as pa
+import pyarrow.parquet as pq
+
+from tkb_common.schemas import TEXT_ONLY_TYPES, Clue, ClueSource, ClueType, Post
+from tkb_engine import Conclusion, Gazetteer, infer, rule_r1, rule_r2, rule_r3
+
+JST = ZoneInfo("Asia/Tokyo")
+
+# 根津と根岸は「根x」に合う。根津だけが文京区のメッシュにある
+GAZ = Gazetteer(
+    stations=[
+        {"station_name": "根津", "mesh_1km": "m-bunkyo"},
+        {"station_name": "根岸", "mesh_1km": "m-taito"},
+        {"station_name": "新宿", "mesh_1km": "m-shinjuku"},
+    ],
+    postal=[
+        {"postal_code": "1130031", "muni_code": "13105", "city": "文京区", "town": "根津"},
+        {
+            "postal_code": "1130032",
+            "muni_code": "13105",
+            "city": "文京区",
+            "town": "弥生（次のビルを除く）",
+        },
+        {"postal_code": "1600022", "muni_code": "13104", "city": "新宿区", "town": "新宿"},
+    ],
+    muni_meshes={"13105": {"m-bunkyo"}, "13104": {"m-shinjuku"}},
+)
+
+
+def _post(post_id: str, when: str) -> Post:
+    """when は JST の "2026-10-20 08:10" の形。2026-10-20 は火曜。"""
+    created = datetime.strptime(when, "%Y-%m-%d %H:%M").replace(tzinfo=JST)
+    return Post(post_id=post_id, text="", created_at=created, images=[])
+
+
+def _clue(post_id: str, type_: ClueType, value: str) -> Clue:
+    """本文の手がかり（routine_text・place_text など）は source=text、それ以外は写真から。"""
+    from_text = type_ in TEXT_ONLY_TYPES or type_ is ClueType.PLACE_TEXT
+    return Clue(
+        post_id=post_id,
+        image_index=None if from_text else 0,
+        type=type_,
+        value=value,
+        region=None,
+        confidence=0.9,
+        source=ClueSource.TEXT if from_text else ClueSource.VLM,
+    )
+
+
+def _by_attribute(conclusions: list[Conclusion]) -> dict[str, Conclusion]:
+    return {c.attribute: c for c in conclusions}
+
+
+# ---- Gazetteer ----
+
+
+def test_station_names_treats_x_as_any_char_and_drops_suffix() -> None:
+    assert GAZ.station_names("根x") == {"根津", "根岸"}
+    assert GAZ.station_names(" 新宿駅 ") == {"新宿"}
+    assert GAZ.station_names("渋谷") == set()
+
+
+def test_stations_in_returns_stations_in_municipality_meshes() -> None:
+    assert GAZ.stations_in({"13105"}) == {"根津"}
+    assert GAZ.stations_in({"99999"}) == set()
+
+
+def test_area_from_partial_postal_code() -> None:
+    munis, towns = GAZ.area(_clue("p", ClueType.POSTAL_CODE, "113-00xx"))
+    assert munis == {"13105"}
+    assert towns == {"根津", "弥生"}
+
+
+def test_area_from_address_matches_city_then_town() -> None:
+    munis, towns = GAZ.area(_clue("p", ClueType.ADDRESS_TEXT, "文京区 弥生二丁目xx"))
+    assert munis == {"13105"}
+    assert towns == {"弥生"}
+
+
+def test_area_returns_empty_when_nothing_matches() -> None:
+    assert GAZ.area(_clue("p", ClueType.ADDRESS_TEXT, "台東区上野")) == (set(), set())
+
+
+def test_load_reads_parquet_tables(tmp_path: Path) -> None:
+    pq.write_table(
+        pa.Table.from_pylist([{"station_name": "根津", "mesh_1km": "m1"}]),
+        tmp_path / "stations.parquet",
+    )
+    pq.write_table(
+        pa.Table.from_pylist(
+            [{"postal_code": "1130031", "muni_code": "13105", "city": "文京区", "town": "根津"}]
+        ),
+        tmp_path / "postal.parquet",
+    )
+    pq.write_table(
+        pa.Table.from_pylist(
+            [{"muni_code": "13105", "mesh_1km": "m1"}, {"muni_code": "13105", "mesh_1km": "m2"}]
+        ),
+        tmp_path / "muni_mesh.parquet",
+    )
+
+    gaz = Gazetteer.load(tmp_path)
+
+    assert gaz.station_names("根津") == {"根津"}
+    assert gaz.muni_meshes == {"13105": {"m1", "m2"}}
+    assert len(gaz.postal) == 1
+
+
+# ---- R1 ----
+
+
+def test_r1_narrows_station_by_area_and_finds_town() -> None:
+    clues = [
+        _clue("p1", ClueType.STATION_SIGN, "根x"),
+        _clue("p2", ClueType.ROUTINE_TEXT, "電車混んでる"),
+        _clue("p3", ClueType.POSTAL_CODE, "113-00xx"),
+        _clue("p4", ClueType.ADDRESS_TEXT, "文京区弥生二丁目xx"),
+    ]
+
+    got = _by_attribute(rule_r1(clues, GAZ))
+
+    assert got["home_area"].value == "弥生"
+    assert got["home_area"].clue_indices == [2, 3]
+    assert got["station"].value == "根津駅"
+    assert got["station"].clue_indices == [0, 2, 3]
+
+
+def test_r1_needs_min_evidence_for_station() -> None:
+    one = [_clue("p1", ClueType.STATION_SIGN, "新宿")]
+    two = [*one, _clue("p2", ClueType.PLACE_TEXT, "新宿駅")]
+
+    assert rule_r1(one, GAZ) == []
+    station = _by_attribute(rule_r1(two, GAZ))["station"]
+    assert (station.value, station.clue_indices) == ("新宿駅", [0, 1])
+
+
+def test_r1_no_station_when_candidates_stay_ambiguous() -> None:
+    clues = [
+        _clue("p1", ClueType.STATION_SIGN, "根x"),
+        _clue("p2", ClueType.STATION_SIGN, "根x"),
+    ]
+
+    assert rule_r1(clues, GAZ) == []
+
+
+def test_r1_ignores_area_outside_station_candidates() -> None:
+    # 新宿区の住所では「根x」の候補が絞れないので、住所は駅の根拠に入れない
+    clues = [
+        _clue("p1", ClueType.STATION_SIGN, "根x"),
+        _clue("p2", ClueType.ADDRESS_TEXT, "新宿区新宿3丁目"),
+    ]
+
+    got = _by_attribute(rule_r1(clues, GAZ))
+
+    assert "station" not in got
+    assert got["home_area"].value == "新宿"
+
+
+def test_r1_no_town_when_area_is_ambiguous() -> None:
+    clues = [_clue("p1", ClueType.POSTAL_CODE, "113-00xx")]
+
+    assert rule_r1(clues, GAZ) == []
+
+
+# ---- R2 ----
+
+
+def _station(value: str = "根津駅") -> list[Conclusion]:
+    return [Conclusion("R1", "station", value, [0])]
+
+
+def test_r2_finds_weekday_time_of_location_posts() -> None:
+    posts = [
+        _post("p1", "2026-10-19 08:10"),  # 月
+        _post("p2", "2026-10-21 08:40"),  # 水
+        _post("p3", "2026-10-24 08:20"),  # 土：平日ではない
+        _post("p4", "2026-10-22 08:30"),  # 場所の手がかりがない
+    ]
+    clues = [
+        _clue("p1", ClueType.STATION_SIGN, "根x"),
+        _clue("p2", ClueType.SHOP, "赤札堂"),
+        _clue("p3", ClueType.SHOP, "赤札堂"),
+        _clue("p4", ClueType.ROUTINE_TEXT, "眠い"),
+    ]
+
+    [got] = rule_r2(clues, posts, _station())
+
+    assert got.attribute == "active_time"
+    assert got.value == "平日 8時ごろに根津駅のまわりにいる"
+    assert got.clue_indices == [0, 1]
+
+
+def test_r2_needs_station_from_r1() -> None:
+    posts = [_post("p1", "2026-10-19 08:10"), _post("p2", "2026-10-21 08:40")]
+    clues = [_clue("p1", ClueType.SHOP, "赤札堂"), _clue("p2", ClueType.SHOP, "赤札堂")]
+
+    assert rule_r2(clues, posts, []) == []
+
+
+def test_r2_needs_min_posts_in_same_window() -> None:
+    posts = [_post("p1", "2026-10-19 08:10"), _post("p2", "2026-10-21 18:00")]
+    clues = [_clue("p1", ClueType.SHOP, "赤札堂"), _clue("p2", ClueType.SHOP, "赤札堂")]
+
+    assert rule_r2(clues, posts, _station()) == []
+
+
+# ---- R3 ----
+
+
+def test_r3_finds_same_weekday_and_time() -> None:
+    posts = [
+        _post("p1", "2026-10-06 20:10"),
+        _post("p2", "2026-10-13 20:30"),
+        _post("p3", "2026-10-20 19:50"),
+    ]
+    clues = [
+        _clue("p1", ClueType.ROUTINE_TEXT, "毎週火曜のジム"),
+        _clue("p2", ClueType.ROUTINE_TEXT, "ジム"),
+        _clue("p3", ClueType.ROUTINE_TEXT, "ジム"),
+    ]
+
+    # 曜日を含む routine_text（0）は時刻のまとまりの結論に入っているので、別の結論にしない
+    [got] = rule_r3(clues, posts)
+
+    assert got.value == "毎週火曜 20時ごろに出かけている（ジム・毎週火曜のジム）"
+    assert got.clue_indices == [0, 1, 2]
+
+
+def test_r3_uses_weekday_in_text_alone() -> None:
+    posts = [_post("p1", "2026-10-20 12:00")]
+    clues = [_clue("p1", ClueType.ROUTINE_TEXT, "毎週金曜はヨガ")]
+
+    [got] = rule_r3(clues, posts)
+
+    assert (got.value, got.clue_indices, got.note) == (
+        "毎週金曜（毎週金曜はヨガ）",
+        [0],
+        "本文の曜日",
+    )
+
+
+def test_r3_needs_min_posts() -> None:
+    posts = [_post("p1", "2026-10-06 20:10"), _post("p2", "2026-10-13 20:30")]
+    clues = [_clue("p1", ClueType.ROUTINE_TEXT, "ジム")]
+
+    assert rule_r3(clues, posts) == []
+
+
+# ---- infer ----
+
+
+def test_infer_chains_r1_into_r2() -> None:
+    posts = [
+        _post("p1", "2026-10-19 08:10"),
+        _post("p2", "2026-10-21 08:40"),
+        _post("p3", "2026-10-24 15:00"),
+    ]
+    clues = [
+        _clue("p1", ClueType.STATION_SIGN, "根x"),
+        _clue("p2", ClueType.POSTAL_CODE, "113-00xx"),
+        _clue("p3", ClueType.ADDRESS_TEXT, "文京区弥生二丁目"),
+    ]
+
+    got = infer(clues, posts, GAZ)
+
+    assert [(c.rule, c.attribute) for c in got] == [
+        ("R1", "home_area"),
+        ("R1", "station"),
+        ("R2", "active_time"),
+    ]
