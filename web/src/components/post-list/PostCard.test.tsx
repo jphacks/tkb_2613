@@ -81,4 +81,38 @@ describe("PostCard", () => {
     rerender(<PostCard post={POST} found={{ clues: [clue], error: null }} />);
     expect(card).toHaveClass("clue-hit");
   });
+
+  it("frames a photo clue on its own photo once the photo has loaded", () => {
+    const clue: Clue = {
+      ...TEXT_CLUE,
+      image_index: 0,
+      type: "station_sign",
+      source: "vlm",
+      region: [600, 225, 1200, 450],
+    };
+    const { container } = render(<PostCard post={POST} found={{ clues: [clue], error: null }} />);
+    expect(container.querySelector(".photo-mark")).not.toBeInTheDocument();
+
+    const img = screen.getByRole("img", { name: "写真 1" });
+    Object.defineProperty(img, "naturalWidth", { value: 2400 });
+    Object.defineProperty(img, "naturalHeight", { value: 1800 });
+    fireEvent.load(img);
+
+    expect(container.querySelector(".photo-mark")).toHaveStyle({
+      left: "25%",
+      top: "12.5%",
+      width: "25%",
+      height: "12.5%",
+    });
+  });
 });
+
+const TEXT_CLUE: Clue = {
+  post_id: POST.post_id,
+  image_index: null,
+  type: "place_text",
+  value: "新宿",
+  region: null,
+  confidence: 0.8,
+  source: "text",
+};
