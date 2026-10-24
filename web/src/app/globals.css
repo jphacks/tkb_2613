@@ -100,6 +100,46 @@ body::after {
   }
 }
 
+/* 診断の間に覗く鬼の目：ときどきまばたきし、左右を見回す */
+.seeker-eyes {
+  overflow: visible;
+  filter: drop-shadow(0 0 4px oklch(60% 0.23 27 / 0.9));
+}
+
+.seeker-eyes-blink {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: eyes-blink 3.2s infinite;
+}
+
+.seeker-eyes-look {
+  animation: eyes-look 4.8s ease-in-out infinite;
+}
+
+@keyframes eyes-blink {
+  0%,
+  88%,
+  100% {
+    transform: scaleY(1);
+  }
+  92% {
+    transform: scaleY(0.1);
+  }
+}
+
+@keyframes eyes-look {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  25% {
+    transform: translateX(-4px);
+  }
+  60% {
+    transform: translateX(4px);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

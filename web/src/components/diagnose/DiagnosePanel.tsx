@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { ConclusionBoard } from "@/components/conclusion-board/ConclusionBoard";
 import { PostCard, type PostClues } from "@/components/post-list/PostCard";
+import { SeekerEyes } from "@/components/seeker-eyes/SeekerEyes";
 import { useSession } from "@/components/session/SessionProvider";
 import { ApiError, diagnose } from "@/lib/api";
 import type { Clue } from "@/types/clue";
@@ -118,7 +119,8 @@ export function DiagnosePanel() {
         </button>
 
         {status && (
-          <p role="status" className="mt-4 text-ink/70">
+          <p role="status" className="mt-4 flex items-center gap-3 text-ink/70">
+            {busy && <SeekerEyes className="h-5 w-16 shrink-0" />}
             {status}
           </p>
         )}
