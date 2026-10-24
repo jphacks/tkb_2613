@@ -2,28 +2,39 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import { PostCard } from "@/components/post-list/PostCard";
+import { ConclusionBoard } from "@/components/conclusion-board/ConclusionBoard";
+import { PostCard, type PostClues } from "@/components/post-list/PostCard";
 import { useSession } from "@/components/session/SessionProvider";
 import { ApiError, diagnose } from "@/lib/api";
+import type { Clue } from "@/types/clue";
+import type { Conclusion } from "@/types/diagnose";
 import type { Post } from "@/types/post";
 
 /**
- * 診断の状態。connecting は押してから最初のイベントが届くまで、reading は投稿が届いている間。
- * 手がかりやプロフィールのイベントを足すときは、ここに状態を足す。
+ * 診断の状態。connecting は押してから最初のイベントが届くまで、reading は投稿が届いている間、
+ * searching は手がかりを取り出している間。
  */
 type Phase =
   | { kind: "idle" }
   | { kind: "connecting" }
   | { kind: "reading" }
+  | { kind: "searching" }
   | { kind: "done"; postsSeen: number }
   | { kind: "error"; message: string };
 
-function statusText(phase: Phase, postCount: number): string | null {
+interface Result {
+  clues: readonly Clue[];
+  conclusions: readonly Conclusion[];
+}
+
+function statusText(phase: Phase, postCount: number, searchedCount: number): string | null {
   switch (phase.kind) {
     case "connecting":
       return "特定班AIが投稿を取りに行っています…";
     case "reading":
       return `投稿を読んでいます…（${postCount} 件）`;
+    case "searching":
+      return `手がかりを探しています…（${searchedCount} / ${postCount} 件）`;
     case "done":
       return `${phase.postsSeen} 件の投稿を読みました`;
     default:
@@ -38,6 +49,8 @@ function statusText(phase: Phase, postCount: number): string | null {
 export function DiagnosePanel() {
   const { state: session } = useSession();
   const [posts, setPosts] = useState<readonly Post[]>([]);
+  const [found, setFound] = useState<Readonly<Record<string, PostClues>>>({});
+  const [result, setResult] = useState<Result | null>(null);
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   const controller = useRef<AbortController | null>(null);
 
@@ -51,14 +64,26 @@ export function DiagnosePanel() {
     const current = new AbortController();
     controller.current = current;
     setPosts([]);
+    setFound({});
+    setResult(null);
     setPhase({ kind: "connecting" });
     try {
       for await (const event of diagnose({ signal: current.signal })) {
-        if (event.event === "post") {
-          setPosts((prev) => [...prev, event.post]);
-          setPhase({ kind: "reading" });
-        } else {
-          setPhase({ kind: "done", postsSeen: event.posts_seen });
+        switch (event.event) {
+          case "post":
+            setPosts((prev) => [...prev, event.post]);
+            setPhase({ kind: "reading" });
+            break;
+          case "clues":
+            setFound((prev) => ({ ...prev, [event.post_id]: { clues: event.clues, error: event.error } }));
+            setPhase({ kind: "searching" });
+            break;
+          case "conclusions":
+            setResult({ clues: event.clues, conclusions: event.conclusions });
+            break;
+          case "done":
+            setPhase({ kind: "done", postsSeen: event.posts_seen });
+            break;
         }
       }
     } catch (e) {
@@ -67,8 +92,8 @@ export function DiagnosePanel() {
     }
   }
 
-  const busy = phase.kind === "connecting" || phase.kind === "reading";
-  const status = statusText(phase, posts.length);
+  const busy = phase.kind === "connecting" || phase.kind === "reading" || phase.kind === "searching";
+  const status = statusText(phase, posts.length, Object.keys(found).length);
 
   // ログイン画面と同じ形：ボタンの文言は変えず、処理中は回る印を出し、状態とエラーはボタンの下に出す
   return (
@@ -104,11 +129,13 @@ export function DiagnosePanel() {
         )}
       </div>
 
+      {result && <ConclusionBoard clues={result.clues} conclusions={result.conclusions} />}
+
       {posts.length > 0 && (
         <ol aria-label="読んだ投稿" className="max-w-2xl space-y-5">
           {posts.map((post) => (
             <li key={post.post_id}>
-              <PostCard post={post} />
+              <PostCard post={post} found={found[post.post_id]} />
             </li>
           ))}
         </ol>
