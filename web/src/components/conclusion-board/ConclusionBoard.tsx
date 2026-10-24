@@ -17,8 +17,16 @@ interface ConclusionBoardProps {
 
 /** 捜査ボード。推理の結論を「推定」として並べ、根拠の手がかりを添える。 */
 export function ConclusionBoard({ clues, conclusions }: ConclusionBoardProps) {
+  const found = conclusions.length > 0;
   return (
     <section aria-labelledby="board-heading" className="max-w-2xl space-y-4">
+      {/* 表示された瞬間に 1 回だけ演出が走る。何も推定できなかったときは出さない */}
+      {found && (
+        <>
+          <div aria-hidden="true" className="found-flash" />
+          <p className="horror-title found-title text-5xl sm:text-6xl">みーつけた</p>
+        </>
+      )}
       <h3 id="board-heading" className="font-display text-2xl">
         捜査ボード
       </h3>
