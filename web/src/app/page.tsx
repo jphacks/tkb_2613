@@ -7,7 +7,7 @@ export default function Home() {
       <header className="mb-14">
         <p className="mb-3 text-sm tracking-[0.3em] text-ink/60">あなたの投稿、組み合わせると</p>
         <h1 className="horror-title text-5xl leading-tight sm:text-7xl">
-          もういいかい<span className="horror-blink">？</span>
+          みーつけ<span className="horror-blink">た</span>
         </h1>
         <p className="mt-5 max-w-xl text-ink/80">
           Bluesky の自分の投稿を特定班AIが読み、1件ずつは無害な投稿の組み合わせから、何がわかるかを見せます。調べられるのはログインした本人のアカウントだけです。

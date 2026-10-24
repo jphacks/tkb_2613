@@ -44,7 +44,7 @@ describe("HideAndSeek", () => {
   it("disables the search button until a photo is chosen", () => {
     render(<HideAndSeek />);
 
-    expect(screen.getByRole("button", { name: "もういいかい？" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "みーつけた" })).toBeDisabled();
   });
 
   it("shows found clues after searching the chosen photo", async () => {
@@ -52,7 +52,7 @@ describe("HideAndSeek", () => {
     render(<HideAndSeek />);
 
     const file = choosePhoto();
-    fireEvent.click(screen.getByRole("button", { name: "もういいかい？" }));
+    fireEvent.click(screen.getByRole("button", { name: "みーつけた" }));
 
     expect(await screen.findByRole("heading", { name: "みーつけた" })).toBeInTheDocument();
     expect(screen.getByText("新宿")).toBeInTheDocument();
@@ -64,7 +64,7 @@ describe("HideAndSeek", () => {
     render(<HideAndSeek />);
 
     choosePhoto();
-    fireEvent.click(screen.getByRole("button", { name: "もういいかい？" }));
+    fireEvent.click(screen.getByRole("button", { name: "みーつけた" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("サーバーに接続できませんでした");
   });

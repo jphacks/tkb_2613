@@ -9,7 +9,7 @@ import "./globals.css";
 import { SessionProvider } from "@/components/session/SessionProvider";
 
 export const metadata: Metadata = {
-  title: "もういいかい？",
+  title: "みーつけた",
   description: "Bluesky の自分の投稿の組み合わせから何がわかるかを見せ、最小限の削除で逃げ切るかくれんぼ",
 };
 
