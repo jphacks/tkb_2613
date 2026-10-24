@@ -39,6 +39,11 @@ TEXT_MAX_TOKENS = 512
 # 繰り返しのペナルティで止まるが、JSON のキーの繰り返しにも効いて手がかりを取りこぼすので、
 # 出力が上限で切れたときのやり直しにだけ使う
 RETRY_REPETITION_PENALTY = 1.05
+# 小さく写ったものは読み間違えやすいのに、モデルは confidence を下げない
+# （テスト写真で、24×97 ピクセルの看板を読み間違えたまま 0.9 を付けた）。
+# 枠の短い辺が元の画像でこれより小さければ、confidence を SMALL_REGION_MAX_CONFIDENCE までにする
+SMALL_REGION_MIN_SIDE_PX = 32
+SMALL_REGION_MAX_CONFIDENCE = 0.5
 
 
 class Extractor:
@@ -106,7 +111,7 @@ class Extractor:
                 ),
             )
             if clue is not None:
-                clues.append(clue)
+                clues.append(_cap_small_region(clue))
         return clues
 
     async def _extract_text(self, post_id: str, text: str) -> list[Clue]:
@@ -213,6 +218,16 @@ def _build_clue(
         )
     except (ValueError, ValidationError):
         return None
+
+
+def _cap_small_region(clue: Clue) -> Clue:
+    if clue.region is None:
+        return clue
+    x1, y1, x2, y2 = clue.region
+    if min(x2 - x1, y2 - y1) >= SMALL_REGION_MIN_SIDE_PX:
+        return clue
+    capped = min(clue.confidence, SMALL_REGION_MAX_CONFIDENCE)
+    return clue.model_copy(update={"confidence": capped})
 
 
 def _dedupe(clues: list[Clue]) -> list[Clue]:
