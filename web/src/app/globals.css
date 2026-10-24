@@ -1,11 +1,11 @@
 @import "tailwindcss";
 
-/* 方向性：かくれんぼ ── 生成りの紙、墨、鬼の朱 */
+/* 方向性：深夜の学校のかくれんぼ ── 青い闇、蛍光灯の白、鬼の目の赤 */
 :root {
-  --paper: oklch(96% 0.02 85);
-  --paper-deep: oklch(91% 0.03 80);
-  --ink: oklch(22% 0.02 260);
-  --seeker: oklch(58% 0.19 32);
+  --paper: oklch(17% 0.06 265);
+  --paper-deep: oklch(23% 0.08 265);
+  --ink: oklch(88% 0.04 250);
+  --seeker: oklch(60% 0.23 27);
 }
 
 @theme inline {
@@ -15,12 +15,84 @@
   --color-seeker: var(--seeker);
   --font-sans: "Zen Kaku Gothic New", system-ui, sans-serif;
   --font-display: "Dela Gothic One", "Zen Kaku Gothic New", sans-serif;
+  --font-horror: "Zen Antique", "Zen Kaku Gothic New", serif;
 }
 
 body {
-  background: var(--paper);
+  background:
+    radial-gradient(ellipse 80% 60% at 50% 0%, oklch(32% 0.12 265 / 0.6), transparent 70%),
+    var(--paper);
   color: var(--ink);
   font-family: var(--font-sans);
+}
+
+/* 画面の四隅を暗くし、走査線を重ねる。操作の邪魔をしないよう pointer-events は切る */
+body::before,
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 50;
+}
+
+body::before {
+  background: radial-gradient(ellipse at center, transparent 55%, oklch(5% 0.03 265 / 0.85) 100%);
+}
+
+body::after {
+  background: repeating-linear-gradient(to bottom, oklch(0% 0 0 / 0.12) 0 1px, transparent 1px 3px);
+  animation: flicker 7s infinite steps(1);
+}
+
+/* 切れかけの蛍光灯 */
+@keyframes flicker {
+  0%,
+  100% {
+    background-color: transparent;
+  }
+  92% {
+    background-color: oklch(0% 0 0 / 0.35);
+  }
+  93% {
+    background-color: transparent;
+  }
+  95% {
+    background-color: oklch(0% 0 0 / 0.5);
+  }
+  96% {
+    background-color: transparent;
+  }
+}
+
+.horror-title {
+  font-family: var(--font-horror);
+  color: var(--seeker);
+  text-shadow:
+    0 0 6px oklch(60% 0.23 27 / 0.9),
+    0 0 24px oklch(50% 0.22 27 / 0.6),
+    2px 3px 0 oklch(10% 0.05 265);
+}
+
+.horror-blink {
+  animation: blink 2.4s infinite;
+}
+
+@keyframes blink {
+  0%,
+  70%,
+  100% {
+    opacity: 1;
+  }
+  75% {
+    opacity: 0.15;
+  }
+  80% {
+    opacity: 1;
+  }
+  84% {
+    opacity: 0.3;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -28,5 +100,6 @@ body {
   *::before,
   *::after {
     transition-duration: 0.01ms !important;
+    animation: none !important;
   }
 }
