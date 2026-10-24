@@ -3,21 +3,12 @@
 import { useState } from "react";
 
 import { CLUE_LABELS } from "@/lib/clueLabels";
-import type { Clue, Region } from "@/types/clue";
+import { type Size, toPercentBox } from "@/lib/region";
+import type { Clue } from "@/types/clue";
 
 interface ResultFrameProps {
   imageUrl: string;
   clues: readonly Clue[];
-}
-
-interface Size {
-  width: number;
-  height: number;
-}
-
-function toPercentBox([x1, y1, x2, y2]: Region, { width, height }: Size) {
-  const pct = (n: number, total: number) => `${(n / total) * 100}%`;
-  return { left: pct(x1, width), top: pct(y1, height), width: pct(x2 - x1, width), height: pct(y2 - y1, height) };
 }
 
 /** 結果表示の枠。写真の上に手がかりの位置を重ね、一覧を並べる。 */
