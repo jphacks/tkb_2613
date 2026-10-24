@@ -13,7 +13,8 @@ station → commute_station_or_line、home_area → residential_area はその�
 
 ルールの中身：
 - R1 生活圏：station_sign / place_text（駅名）と address_text / postal_code（区と町名）から、
-  最寄り駅と町名
+  最寄り駅と町名。駅名は手がかりごとに候補へ票を入れ、票のいちばん多い駅にする。
+  同じ写真の駅名標は、枠がいちばん大きい駅名をその駅、ほかを隣の駅とみなす
 - R2 行動時間：R1 で駅が決まったとき、場所の手がかりがある平日の投稿が、同じ時間帯に
   R2_MIN_POSTS 件以上
 - R3 留守の時間：同じ曜日・同じ時間帯の投稿が R3_MIN_POSTS 件以上、または曜日を含む routine_text
@@ -99,27 +100,17 @@ def rule_r1(clues: Sequence[Clue], gaz: Gazetteer) -> list[Conclusion]:
                 )
             )
 
-    # 最寄り駅：駅名の候補を、区のメッシュで絞る
-    if not name_hits:
-        return conclusions
-    candidates = set.intersection(*name_hits.values())
-    evidence = set(name_hits)
-    if munis:
-        in_area = gaz.stations_in(munis)
-        if candidates & in_area:
-            candidates &= in_area
+    # 最寄り駅：駅名の手がかりごとに候補へ票を入れ、区のメッシュで絞って、票のいちばん多い駅
+    station = _vote_station(clues, name_hits, munis, gaz)
+    if station is not None:
+        name, evidence, used_area = station
+        if used_area:
             evidence |= set(area_hits)
-    if len(candidates) == 1 and len(evidence) >= R1_MIN_EVIDENCE:
-        station = next(iter(candidates))
-        conclusions.append(
-            Conclusion(
-                "R1",
-                "station",
-                f"{station}駅",
-                sorted(evidence),
-                "駅名の候補を区のメッシュで絞った",
-            )
-        )
+        if len(evidence) >= R1_MIN_EVIDENCE:
+            note = "駅名の手がかりの票がいちばん多い駅"
+            if used_area:
+                note += "。住所・郵便番号の区で絞った"
+            conclusions.append(Conclusion("R1", "station", f"{name}駅", sorted(evidence), note))
     return conclusions
 
 
@@ -183,6 +174,67 @@ def infer(clues: Sequence[Clue], posts: Sequence[Post], gaz: Gazetteer) -> list[
     """すべてのルールを順に当てはめる。R2 は R1 の結論を使う。"""
     r1 = rule_r1(clues, gaz)
     return [*r1, *rule_r2(clues, posts, r1), *rule_r3(clues, posts)]
+
+
+def _region_area(clue: Clue) -> int:
+    if clue.region is None:
+        return 0
+    x1, y1, x2, y2 = clue.region
+    return (x2 - x1) * (y2 - y1)
+
+
+def _sign_groups(clues: Sequence[Clue], name_hits: dict[int, set[str]]) -> dict[int, list[int]]:
+    """同じ写真の駅名標の手がかりをまとめ、{その駅の番号: 隣の駅の番号の一覧} を返す。
+
+    駅名標には、その駅の名前と隣の駅の名前が並ぶ。枠がいちばん大きいものをその駅とみなす。
+    写真の駅名標でない駅名の手がかり（本文の place_text など）は、隣の駅なしで1つずつ。
+    """
+    groups: dict[tuple[str, int], list[int]] = {}
+    singles: dict[int, list[int]] = {}
+    for i in name_hits:
+        clue = clues[i]
+        if clue.type is ClueType.STATION_SIGN and clue.image_index is not None:
+            groups.setdefault((clue.post_id, clue.image_index), []).append(i)
+        else:
+            singles[i] = []
+    for members in groups.values():
+        # 枠の大きさが同じなら、先に出たもの（モデルはふつう大きく書かれた駅名から挙げる）
+        main = max(members, key=lambda i: (_region_area(clues[i]), -i))
+        singles[main] = [i for i in members if i != main]
+    return singles
+
+
+def _vote_station(
+    clues: Sequence[Clue],
+    name_hits: dict[int, set[str]],
+    munis: set[str],
+    gaz: Gazetteer,
+) -> tuple[str, set[int], bool] | None:
+    """(駅名, 根拠の手がかりの番号, 区で絞ったか)。決められなければ None。"""
+    votes: dict[str, set[int]] = {}
+    for main, neighbors in _sign_groups(clues, name_hits).items():
+        for name in name_hits[main]:
+            votes.setdefault(name, set()).add(main)
+            # 隣の駅名は、その駅の根拠に入れる（自分自身の票にはしない）
+            votes[name].update(neighbors)
+    if not votes:
+        return None
+
+    used_area = False
+    if munis:
+        in_area = {name: ids for name, ids in votes.items() if name in gaz.stations_in(munis)}
+        if in_area:
+            votes, used_area = in_area, True
+
+    def score(name: str) -> int:
+        # 票は「その駅」として挙がった手がかりの数（隣の駅としての根拠は数えない）
+        return sum(1 for i in votes[name] if name in name_hits[i])
+
+    best = max(score(name) for name in votes)
+    winners = [name for name in votes if score(name) == best]
+    if len(winners) != 1:
+        return None
+    return winners[0], set(votes[winners[0]]), used_area
 
 
 def _local(post: Post) -> datetime:
