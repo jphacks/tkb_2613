@@ -8,12 +8,14 @@ WORKDIR /app
 
 # 依存関係だけを先に入れて、ソース変更時のキャッシュを効かせる
 COPY pyproject.toml uv.lock ./
+COPY common/pyproject.toml common/
 COPY api/pyproject.toml api/
 COPY detect/pyproject.toml detect/
 # ワークスペースの解決に必要なだけで、api のイメージには入れない
 COPY data-prep/pyproject.toml data-prep/
 RUN uv sync --frozen --no-dev --package tkb-api --no-install-workspace
 
+COPY common common
 COPY api api
 COPY detect detect
 RUN uv sync --frozen --no-dev --package tkb-api --no-editable

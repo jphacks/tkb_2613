@@ -2,6 +2,7 @@
 **
 !pyproject.toml
 !uv.lock
+!common/
 !api/
 !detect/
 # ワークスペースの解決に pyproject だけ使う

@@ -40,6 +40,7 @@ Hack Day に作るもの（作品の中心。ここが採点対象）：
 
 ```
 web/        Next.js（App Router）+ TypeScript + Tailwind CSS。ログイン、投稿一覧、捜査ボード、削除の画面
+common/     api・detect・engine で共有する型（手がかり・投稿などの Pydantic モデル）
 api/        FastAPI + Pydantic。uv で管理。セッション、Bluesky との連携、Server-Sent Events での逐次配信
 detect/     投稿ごとの手がかりの抜き出し（OCR、画像を読む言語モデル、本文の読み取り）
 engine/     プロフィール推定、最小削除プランナー、再診断
@@ -53,7 +54,7 @@ Bluesky との通信は `api/` に置き、Python の `atproto` パッケージ�
 
 ## データの形式
 
-Python は `api/` の Pydantic モデル、TypeScript は `web/` の型を正とし、両方を同時に変更する。API の細かい形は Hack Day 1日目の最初に決めて、ここを更新する。
+Python は `common/` の Pydantic モデル（`tkb_common.schemas`）、TypeScript は `web/` の型を正とし、両方を同時に変更する。detect と engine から api を import すると循環依存になるので、共有の型は `common/` に置く。API の細かい形は Hack Day 1日目の最初に決めて、ここを更新する。
 
 ### 投稿（Bluesky から取得したもの）
 
