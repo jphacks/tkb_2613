@@ -1,5 +1,5 @@
 {
-  "note": "JPHACKS 2026 デモ用の架空アカウント。実在の人物・場所の写真ではない。役割C（推理ルール）と役割A（画面のモック）用",
+  "note": "JPHACKS 2026 デモ用の架空アカウント（架空の男性「はるき」）。根津駅のまわり（文京区弥生二丁目）に住む設定で、メンバーの最寄りではない。実在の人物の写真ではない。役割C（推理ルール）と役割A（画面のモック）用",
   "account": {
     "did": "did:plc:demo00000000000000000000",
     "display_name": "デモ用の架空アカウント"
@@ -35,7 +35,7 @@
     },
     {
       "post_id": "at://did:plc:demo00000000000000000000/app.bsky.feed.post/3demo0000003",
-      "text": "夜勤明けのラーメン",
+      "text": "夜勤明けの買い出し",
       "created_at": "2026-10-08T08:05:00+09:00",
       "images": [
         {
@@ -141,7 +141,7 @@
       "post_id": "at://did:plc:demo00000000000000000000/app.bsky.feed.post/3demo0000001",
       "image_index": 0,
       "type": "station_sign",
-      "value": "西船x",
+      "value": "根x",
       "region": [
         820,
         180,
@@ -196,7 +196,7 @@
       "post_id": "at://did:plc:demo00000000000000000000/app.bsky.feed.post/3demo0000003",
       "image_index": 0,
       "type": "shop",
-      "value": "麺屋そらまめ",
+      "value": "赤札堂",
       "region": [
         310,
         40,
@@ -242,7 +242,7 @@
       "post_id": "at://did:plc:demo00000000000000000000/app.bsky.feed.post/3demo0000006",
       "image_index": 0,
       "type": "name_text",
-      "value": "ゆうか",
+      "value": "はるき",
       "region": [
         450,
         380,
@@ -292,7 +292,7 @@
       "post_id": "at://did:plc:demo00000000000000000000/app.bsky.feed.post/3demo0000009",
       "image_index": 0,
       "type": "postal_code",
-      "value": "273-0xxx",
+      "value": "113-00xx",
       "region": [
         140,
         220,
@@ -305,13 +305,27 @@
     {
       "post_id": "at://did:plc:demo00000000000000000000/app.bsky.feed.post/3demo0000009",
       "image_index": 0,
-      "type": "name_text",
-      "value": "xx ゆうか 様",
+      "type": "address_text",
+      "value": "文京区弥生二丁目xx",
       "region": [
         140,
-        300,
+        280,
+        620,
+        330
+      ],
+      "confidence": 0.55,
+      "source": "ocr"
+    },
+    {
+      "post_id": "at://did:plc:demo00000000000000000000/app.bsky.feed.post/3demo0000009",
+      "image_index": 0,
+      "type": "name_text",
+      "value": "xx はるき 様",
+      "region": [
+        140,
+        340,
         520,
-        360
+        400
       ],
       "confidence": 0.45,
       "source": "ocr"
@@ -343,13 +357,15 @@
   "expected": [
     {
       "attribute": "station",
-      "value": "西船橋駅",
-      "note": "駅名標の一部＋平日朝の「電車混んでる」＋郵便番号の一部（船橋市）",
+      "value": "根津駅",
+      "note": "駅名標の一部＋平日朝の「電車混んでる」＋郵便番号と住所の一部（文京区弥生二丁目）＋駅の近くの赤札堂",
       "clue_indices": [
         1,
         3,
         13,
-        15
+        15,
+        16,
+        6
       ]
     },
     {
@@ -364,12 +380,12 @@
     },
     {
       "attribute": "name",
-      "value": "ゆうか（25歳、誕生日は10月17日ごろ）",
+      "value": "はるき（25歳、誕生日は10月17日ごろ）",
       "note": "ケーキのプレート＋「25歳になりました」の投稿日。宛名の一部が裏づけ",
       "clue_indices": [
         10,
         11,
-        16
+        17
       ]
     },
     {
