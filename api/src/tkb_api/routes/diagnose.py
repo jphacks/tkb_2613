@@ -4,7 +4,8 @@
   event: post  data: {"post": 投稿}
   event: done  data: {"posts_seen": 件数}
 
-今はモックだけ。MOCK_MODE=1 のとき、架空のデモ用アカウントの投稿を Post の形で確かめてから流す。
+MOCK_MODE=1 のときは、架空のデモ用アカウントの投稿を Post の形で確かめてから流す。
+MOCK_MODE=0 のときは、セッションの DID 本人の投稿を Bluesky から直近 MAX_POSTS 件取って流す。
 """
 
 import asyncio
@@ -15,7 +16,8 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 
-from tkb_api.bluesky import BlueskySession
+from tkb_api import bluesky
+from tkb_api.bluesky import BlueskySession, PostsFetcher
 from tkb_api.config import Settings, get_settings
 from tkb_api.routes.session import current_session
 from tkb_common.schemas import Post
@@ -45,17 +47,38 @@ async def _stream(posts: list[Post], interval: float) -> AsyncIterator[str]:
     yield _sse("done", {"posts_seen": len(posts)})
 
 
+def get_fetch_posts() -> PostsFetcher:
+    return bluesky.fetch_own_posts
+
+
+async def _fetch_own_posts(
+    session: BlueskySession, settings: Settings, fetch_posts: PostsFetcher
+) -> list[Post]:
+    if session.client is None:
+        # モックでログインしたあとに MOCK_MODE=0 で起動し直した場合など
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "ログインし直してください")
+    try:
+        return await fetch_posts(session.client, session.did, settings.max_posts)
+    except bluesky.BlueskyUnavailableError:
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY, "Bluesky から投稿を取得できませんでした"
+        ) from None
+
+
 @router.post("/diagnose")
 async def diagnose(
-    _session: Annotated[BlueskySession, Depends(current_session)],
+    session: Annotated[BlueskySession, Depends(current_session)],
     settings: Annotated[Settings, Depends(get_settings)],
+    fetch_posts: Annotated[PostsFetcher, Depends(get_fetch_posts)],
 ) -> StreamingResponse:
-    if not settings.mock_mode:
-        raise HTTPException(status.HTTP_501_NOT_IMPLEMENTED, "まだモックでしか診断できません")
-
-    posts = _load_demo_posts(settings)
+    if settings.mock_mode:
+        posts = _load_demo_posts(settings)
+        interval = settings.mock_event_interval_seconds
+    else:
+        posts = await _fetch_own_posts(session, settings, fetch_posts)
+        interval = 0
     return StreamingResponse(
-        _stream(posts, settings.mock_event_interval_seconds),
+        _stream(posts, interval),
         media_type="text/event-stream",
         # 途中の中継（プロキシ）にためこまれず、1 件ずつ届くようにする
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
