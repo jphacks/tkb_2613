@@ -5,6 +5,18 @@
 - 写真本体はコミットしない（`photos/` に置く。`.gitignore` 済み）
 - 正解表は写真のファイル名と、手がかりの形式（`type` / `value` / `region`）で書く
 
+## try_detect.py
+
+手元の画像と本文から手がかりを取り出して表示する（試し用）。接続先はルートの `.env` から読む。
+
+```bash
+uv run python eval/try_detect.py eval/photos/a.jpg --text "夜勤明けのラーメン"
+uv run python eval/try_detect.py --text "25歳になりました"
+```
+
+- `MOCK_MODE=1` のときは接続せず、空の一覧を表示する
+- `--space relative_1000` / `--space sent_pixels` で座標の単位を一時的に指定できる（確認用）
+
 ## fixtures/demo_observations.json
 
 架空のデモ用アカウントの投稿10件と、そこから取り出した手がかり（手で作ったもの）。役割C の推理ルールの開発と、役割A の画面のモックに使う。
