@@ -29,4 +29,4 @@ make down
 - 既定は `MOCK_MODE=1`（外部に一切接続しない）。実際のモデルにつなぐときは `.env` で `MOCK_MODE=0` にする
 - コンテナのファイルシステムは読み取り専用（写真をディスクに残さないため）。書き込めるのはメモリ上の `/tmp` だけ
 - ポートは `127.0.0.1` にだけ公開する
-- `NEXT_PUBLIC_API_BASE_URL` はビルド時に埋め込まれるので、変えたら `make up` でビルドし直す
+- 画面は `/api` を api に中継する（`web/next.config.ts` の rewrites）。中継先の `API_ORIGIN` はビルド時に読まれるので、変えたら `make up` でビルドし直す

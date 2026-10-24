@@ -134,7 +134,9 @@ Python は `common/` の Pydantic モデル（`tkb_common.schemas`）、TypeScri
 - `SESSION_TTL_MINUTES`（既定30）
 - `MAX_POSTS`（既定30）
 
-既存：`MOCK_MODE`、`VLM_BASE_URL`、`VLM_API_KEY`、`VLM_MODEL`、`OCR_BASE_URL`、`NEXT_PUBLIC_API_BASE_URL`。鍵を `NEXT_PUBLIC_` で始まる変数に入れない。
+既存：`MOCK_MODE`、`VLM_BASE_URL`、`VLM_API_KEY`、`VLM_MODEL`、`OCR_BASE_URL`。鍵を `NEXT_PUBLIC_` で始まる変数に入れない。
+
+画面は `/api` を api に中継する（`web/next.config.ts` の rewrites）ので、画面と api は同じオリジンになる。中継先は `API_ORIGIN`（ビルド時に読まれる。既定 `http://localhost:8001`）。Vercel に画面を置くときは、公開した api の URL を Vercel の環境変数 `API_ORIGIN` に入れる。api の応答には `Cache-Control: no-store` を付け、診断の SSE はイベントの間が `SSE_KEEPALIVE_SECONDS`（既定15）秒空いたら keep-alive のコメントを送る。
 
 ## コマンド（実際の内容に合わせて更新する）
 

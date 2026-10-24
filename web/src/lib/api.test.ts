@@ -160,6 +160,16 @@ describe("deleteSession", () => {
   });
 });
 
+describe("default base URL", () => {
+  it("calls the api through the same origin, so the session cookie works behind the /api rewrite", async () => {
+    const fetchFn = mockFetch(new Response(null, { status: 401 }));
+
+    await getSession();
+
+    expect(fetchFn.mock.calls[0][0]).toBe("/api/session");
+  });
+});
+
 describe("getSession", () => {
   const SESSION = { handle: "alice.bsky.social", did: "did:plc:abc" };
 
