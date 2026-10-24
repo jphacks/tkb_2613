@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from tkb_api.schemas import Clue
+from tkb_common.schemas import Clue, Post
 
 FIXTURE = Path(__file__).resolve().parents[2] / "eval" / "fixtures" / "demo_observations.json"
 
@@ -24,6 +24,12 @@ def test_every_clue_matches_the_clue_format(doc: dict[str, Any]) -> None:
     clues = [Clue.model_validate(c) for c in doc["clues"]]
 
     assert len(clues) > 0
+
+
+def test_every_post_matches_the_post_format(doc: dict[str, Any]) -> None:
+    posts = [Post.model_validate(p) for p in doc["posts"]]
+
+    assert len(posts) == 10
 
 
 def test_clues_point_to_existing_posts_images_and_regions(doc: dict[str, Any]) -> None:
