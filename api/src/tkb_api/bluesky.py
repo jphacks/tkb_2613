@@ -1,0 +1,93 @@
+"""Bluesky へのログインと、ログイン中のセッション。
+
+パスワードはログインに使うだけで、保存もログ出力もしない。
+セッションはメモリ上だけに置き、ブラウザにはランダムなセッション番号だけを渡す。
+"""
+
+import secrets
+import time
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
+
+from atproto import AsyncClient
+from atproto_client.exceptions import AtProtocolError, BadRequestError, UnauthorizedError
+
+
+class LoginFailedError(Exception):
+    """ハンドル名かパスワードが違う。"""
+
+
+class BlueskyUnavailableError(Exception):
+    """Bluesky に接続できない、または想定外の応答。"""
+
+
+@dataclass(frozen=True)
+class LoginResult:
+    handle: str
+    did: str
+    # モックのときは None（外部に一切接続しない）
+    client: AsyncClient | None
+
+
+LoginFn = Callable[[str, str], Awaitable[LoginResult]]
+
+
+async def login(handle: str, password: str) -> LoginResult:
+    client = AsyncClient()
+    try:
+        me = await client.login(handle, password)
+    except (UnauthorizedError, BadRequestError) as e:
+        raise LoginFailedError from e
+    except AtProtocolError as e:
+        raise BlueskyUnavailableError from e
+    if me is None:
+        raise BlueskyUnavailableError
+    return LoginResult(handle=me.handle, did=me.did, client=client)
+
+
+@dataclass(frozen=True)
+class BlueskySession:
+    handle: str
+    did: str
+    client: AsyncClient | None
+    expires_at: float
+
+
+class SessionStore:
+    """セッション番号 → ログイン中のセッション。メモリ上だけに置き、期限が来たら捨てる。"""
+
+    def __init__(self, ttl_seconds: float, clock: Callable[[], float] = time.monotonic) -> None:
+        self._ttl = ttl_seconds
+        self._clock = clock
+        self._sessions: dict[str, BlueskySession] = {}
+
+    def create(self, result: LoginResult) -> str:
+        self._purge_expired()
+        session_id = secrets.token_urlsafe(32)
+        self._sessions[session_id] = BlueskySession(
+            handle=result.handle,
+            did=result.did,
+            client=result.client,
+            expires_at=self._clock() + self._ttl,
+        )
+        return session_id
+
+    def get(self, session_id: str) -> BlueskySession | None:
+        session = self._sessions.get(session_id)
+        if session is None:
+            return None
+        if session.expires_at <= self._clock():
+            del self._sessions[session_id]
+            return None
+        return session
+
+    def delete(self, session_id: str) -> None:
+        self._sessions.pop(session_id, None)
+
+    def __len__(self) -> int:
+        return len(self._sessions)
+
+    def _purge_expired(self) -> None:
+        now = self._clock()
+        for session_id in [k for k, v in self._sessions.items() if v.expires_at <= now]:
+            del self._sessions[session_id]

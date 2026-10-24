@@ -4,6 +4,7 @@ version = "0.0.0"
 description = "受付 API（FastAPI）"
 requires-python = ">=3.13,<3.14"
 dependencies = [
+  "atproto>=0.0.73",
   "fastapi>=0.115",
   "pydantic>=2.10",
   "pydantic-settings>=2.6",

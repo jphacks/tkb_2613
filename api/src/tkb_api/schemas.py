@@ -1,12 +1,12 @@
-"""手がかりの形式。Python 側の正。
+"""api の入出力の形式。Python 側の正。
 
-web/src/types/clue.ts と同時に変更すること。
+手がかりは web/src/types/clue.ts、ログインは web/src/types/session.ts と同時に変更すること。
 """
 
 from enum import StrEnum
 from typing import Annotated, Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
 NonNegativeInt = Annotated[int, Field(ge=0)]
 Region = tuple[NonNegativeInt, NonNegativeInt, NonNegativeInt, NonNegativeInt]
@@ -106,3 +106,34 @@ class DetectResponse(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     clues: list[Clue]
+
+
+class SessionRequest(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    handle: str = Field(min_length=1, max_length=253)
+    # アカウントのパスワードかアプリパスワード。ログインに使うだけで保存しない。
+    # SecretStr にして、repr やエラーの文言にパスワードが出ないようにする
+    password: SecretStr
+
+    @field_validator("handle")
+    @classmethod
+    def _normalize_handle(cls, value: str) -> str:
+        handle = value.strip().removeprefix("@")
+        if not handle:
+            raise ValueError("ハンドル名を入れてください")
+        return handle
+
+    @field_validator("password")
+    @classmethod
+    def _check_password(cls, value: SecretStr) -> SecretStr:
+        if not value.get_secret_value():
+            raise ValueError("パスワードを入れてください")
+        return value
+
+
+class SessionResponse(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    handle: str
+    did: str

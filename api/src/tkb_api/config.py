@@ -14,6 +14,10 @@ class Settings(BaseSettings):
     vlm_model: str = ""
     ocr_base_url: str = ""
     cors_origins: list[str] = ["http://localhost:3000"]
+    # ログインのセッションをメモリに置く時間（秒）
+    session_ttl_seconds: int = 30 * 60
+    # HTTPS で公開するときは 1 にする（Cookie を HTTPS だけで送る）
+    cookie_secure: bool = False
 
 
 @lru_cache
