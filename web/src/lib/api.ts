@@ -1,4 +1,6 @@
+import { readSse } from "@/lib/sse";
 import { type DetectResponse, isDetectResponse } from "@/types/clue";
+import { type DiagnoseEvent, toDiagnoseEvent } from "@/types/diagnose";
 import { isSessionResponse, type SessionResponse } from "@/types/session";
 
 /** api/src/tkb_api/routes/detect.py の上限とそろえる */
@@ -148,4 +150,45 @@ export async function deleteSession({ baseUrl = DEFAULT_BASE_URL, signal }: Requ
   if (!res.ok) {
     throw new ApiError("server", `サーバーでエラーが起きました（${res.status}）`, res.status);
   }
+}
+
+/**
+ * 診断を始め、届いたイベントを順に返す。対象はセッション（Cookie）の本人のアカウントだけで、
+ * どのアカウントを調べるかは送らない。done が届く前に切れたら ApiError（network）を投げる。
+ */
+export async function* diagnose({
+  baseUrl = DEFAULT_BASE_URL,
+  signal,
+}: RequestOptions = {}): AsyncGenerator<DiagnoseEvent> {
+  let res: Response;
+  try {
+    res = await fetch(`${baseUrl}/api/diagnose`, { method: "POST", credentials: "include", signal });
+  } catch {
+    throw new ApiError("network", "サーバーに接続できませんでした");
+  }
+
+  if (res.status === 401) {
+    throw new ApiError("unauthorized", "ログインし直してください", 401);
+  }
+  if (!res.ok || !res.body) {
+    throw new ApiError("server", `サーバーでエラーが起きました（${res.status}）`, res.status);
+  }
+
+  try {
+    for await (const message of readSse(res.body)) {
+      let event: DiagnoseEvent | null;
+      try {
+        event = toDiagnoseEvent(message.event, message.data);
+      } catch {
+        throw new ApiError("invalid_response", "サーバーの応答を読み取れませんでした");
+      }
+      if (!event) continue;
+      yield event;
+      if (event.event === "done") return;
+    }
+  } catch (e) {
+    if (e instanceof ApiError) throw e;
+    throw new ApiError("network", "診断の途中で接続が切れました");
+  }
+  throw new ApiError("network", "診断の途中で接続が切れました");
 }
