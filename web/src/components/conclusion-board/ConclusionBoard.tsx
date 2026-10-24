@@ -1,4 +1,5 @@
 import { CLUE_LABELS } from "@/lib/clueLabels";
+import { messages } from "@/lib/messages";
 import type { Clue } from "@/types/clue";
 import type { Conclusion } from "@/types/diagnose";
 
@@ -24,7 +25,7 @@ export function ConclusionBoard({ clues, conclusions }: ConclusionBoardProps) {
       {found && (
         <>
           <div aria-hidden="true" className="found-flash" />
-          <p className="horror-title found-title text-5xl sm:text-6xl">みーつけた</p>
+          <p className="horror-title found-title text-5xl sm:text-6xl">{messages.board.found}</p>
         </>
       )}
       <h3 id="board-heading" className="font-display text-2xl">

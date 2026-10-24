@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
+import { messages } from "@/lib/messages";
 import type { Clue } from "@/types/clue";
 import type { Conclusion } from "@/types/diagnose";
 
@@ -28,7 +29,7 @@ describe("ConclusionBoard", () => {
   it("announces みーつけた and flashes once when something is inferred", () => {
     const { container } = render(<ConclusionBoard clues={[CLUE]} conclusions={[CONCLUSION]} />);
 
-    expect(screen.getByText("みーつけた")).toBeInTheDocument();
+    expect(screen.getByText(messages.board.found)).toBeInTheDocument();
     expect(container.querySelector(".found-flash")).toHaveAttribute("aria-hidden", "true");
     expect(screen.getByText("最寄り駅")).toBeInTheDocument();
   });
@@ -36,7 +37,7 @@ describe("ConclusionBoard", () => {
   it("stays calm when nothing is inferred", () => {
     const { container } = render(<ConclusionBoard clues={[]} conclusions={[]} />);
 
-    expect(screen.queryByText("みーつけた")).not.toBeInTheDocument();
+    expect(screen.queryByText(messages.board.found)).not.toBeInTheDocument();
     expect(container.querySelector(".found-flash")).not.toBeInTheDocument();
     expect(screen.getByText("投稿からは、あなたについて推定できることは見つかりませんでした")).toBeInTheDocument();
   });
