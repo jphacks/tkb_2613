@@ -165,6 +165,45 @@ body::after {
   }
 }
 
+/* 捜査ボードの赤い糸：みーつけたの後に、証拠から推定へ 1 本ずつ張られていく */
+.red-string {
+  fill: none;
+  stroke: var(--seeker);
+  stroke-width: 2;
+  stroke-linecap: round;
+  filter: drop-shadow(0 1px 1px oklch(0% 0 0 / 0.6));
+  stroke-dasharray: 1;
+  /* 動きを止めた人には、張り終わった糸をそのまま見せる */
+  stroke-dashoffset: 0;
+  animation: draw-line 0.5s ease-out backwards;
+}
+
+@keyframes draw-line {
+  from {
+    stroke-dashoffset: 1;
+  }
+}
+
+/* 証拠のカードを留める画鋲 */
+.evidence-pin {
+  position: relative;
+}
+
+.evidence-pin::before {
+  content: "";
+  position: absolute;
+  top: -5px;
+  left: 50%;
+  width: 10px;
+  height: 10px;
+  margin-left: -5px;
+  border-radius: 50%;
+  background: var(--seeker);
+  box-shadow:
+    0 1px 2px oklch(0% 0 0 / 0.6),
+    inset -2px -2px 0 oklch(40% 0.2 27);
+}
+
 /* 推理の結論が出た瞬間：画面が 1 回だけ薄く赤く光る。光に敏感な人のため、1 回だけ・薄くする */
 .found-flash {
   position: fixed;

@@ -1,6 +1,7 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { render, screen, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { CLUE_LABELS } from "@/lib/clueLabels";
 import { messages } from "@/lib/messages";
 import type { Clue } from "@/types/clue";
 import type { Conclusion } from "@/types/diagnose";
@@ -25,7 +26,45 @@ const CONCLUSION: Conclusion = {
   note: "",
 };
 
+/** jsdom には ResizeObserver がないので、observe した瞬間に 1 回知らせる代わりを置く */
+class ImmediateResizeObserver {
+  constructor(private readonly callback: ResizeObserverCallback) {}
+  observe() {
+    this.callback([], this as unknown as ResizeObserver);
+  }
+  unobserve() {}
+  disconnect() {}
+}
+
+beforeEach(() => {
+  vi.stubGlobal("ResizeObserver", ImmediateResizeObserver);
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
 describe("ConclusionBoard", () => {
+  it("pins each clue used as evidence once and ties a red string to every conclusion it supports", () => {
+    const clues: Clue[] = [CLUE, { ...CLUE, type: "routine_text", value: "毎朝 8 時の電車" }];
+    const conclusions: Conclusion[] = [
+      { ...CONCLUSION, clue_indices: [0, 1] },
+      { ...CONCLUSION, attribute: "active_time", value: "平日の朝", clue_indices: [1] },
+    ];
+    const { container } = render(<ConclusionBoard clues={clues} conclusions={conclusions} />);
+
+    const evidence = within(screen.getByRole("list", { name: messages.board.evidence })).getAllByRole(
+      "listitem",
+    );
+    expect(evidence.map((e) => e.textContent)).toEqual([
+      `${CLUE_LABELS.place_text}新宿`,
+      `${CLUE_LABELS.routine_text}毎朝 8 時の電車`,
+    ]);
+    const strings = container.querySelector("svg.red-strings");
+    expect(strings).toHaveAttribute("aria-hidden", "true");
+    expect(strings?.querySelectorAll("path")).toHaveLength(3);
+  });
+
   it("announces みーつけた and flashes once when something is inferred", () => {
     const { container } = render(<ConclusionBoard clues={[CLUE]} conclusions={[CONCLUSION]} />);
 
