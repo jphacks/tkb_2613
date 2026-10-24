@@ -7,10 +7,11 @@ import "@fontsource/zen-kaku-gothic-new/700.css";
 import "./globals.css";
 
 import { SessionProvider } from "@/components/session/SessionProvider";
+import { messages } from "@/lib/messages";
 
 export const metadata: Metadata = {
-  title: "もういいかい？",
-  description: "Bluesky の自分の投稿の組み合わせから何がわかるかを見せ、最小限の削除で逃げ切るかくれんぼ",
+  title: messages.app.name,
+  description: messages.app.description,
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

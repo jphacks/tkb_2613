@@ -2,9 +2,13 @@
 
 import { useActionState } from "react";
 
+import { BlueskyLogo } from "@/components/brand/BlueskyLogo";
 import { useSession } from "@/components/session/SessionProvider";
 import { ApiError } from "@/lib/api";
+import { messages } from "@/lib/messages";
 import { normalizeHandle } from "@/types/session";
+
+const t = messages.login;
 
 interface LoginFormState {
   error: string | null;
@@ -28,7 +32,7 @@ export function LoginPanel() {
         await login(handle, String(formData.get("password") ?? ""));
         return INITIAL_STATE;
       } catch (err) {
-        const error = err instanceof ApiError ? err.message : "ログインできませんでした";
+        const error = err instanceof ApiError ? err.message : t.failed;
         return { error, handle };
       }
     },
@@ -38,16 +42,17 @@ export function LoginPanel() {
   if (session.status === "checking") {
     return (
       <p role="status" className="text-ink/70">
-        ログイン状態を確認しています…
+        {t.checking}
       </p>
     );
   }
 
   if (session.status === "authenticated") {
     return (
-      <section aria-label="ログイン中" className="flex flex-wrap items-center gap-4">
-        <p>
-          <span className="text-sm text-ink/60">ログイン中</span>{" "}
+      <section aria-label={t.loggedIn} className="flex flex-wrap items-center gap-4">
+        <p className="flex items-center gap-2">
+          <BlueskyLogo className="size-5" />
+          <span className="text-sm text-ink/60">{t.loggedIn}</span>
           <span className="font-bold">@{session.session.handle}</span>
         </p>
         <button
@@ -55,24 +60,28 @@ export function LoginPanel() {
           onClick={logout}
           className="rounded-sm border-2 border-ink px-4 py-2 text-sm font-bold transition-transform hover:-translate-y-0.5 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-seeker"
         >
-          ログアウト
+          {t.logout}
         </button>
       </section>
     );
   }
 
   return (
-    <form action={formAction} aria-label="Bluesky にログイン" className="max-w-md">
+    <form action={formAction} aria-label={t.formLabel} className="max-w-md">
+      <p className="mb-5 flex items-center gap-2.5 font-bold">
+        <BlueskyLogo className="size-7" />
+        {t.heading}
+      </p>
       <fieldset disabled={isPending} aria-busy={isPending} className="space-y-5 disabled:opacity-60">
         <label className="block space-y-1.5">
-          <span className="block font-bold">ハンドル名</span>
+          <span className="block font-bold">{t.handle}</span>
           <input
             name="handle"
             required
             autoComplete="username"
             autoCapitalize="none"
             spellCheck={false}
-            placeholder="alice.bsky.social"
+            placeholder={t.handlePlaceholder}
             defaultValue={form.handle}
             className="w-full rounded-sm border-2 border-ink bg-paper px-3 py-2 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-seeker"
           />
@@ -80,7 +89,7 @@ export function LoginPanel() {
 
         <div className="space-y-1.5">
           <label htmlFor="password" className="block font-bold">
-            パスワード
+            {t.password}
           </label>
           <input
             id="password"
@@ -93,7 +102,7 @@ export function LoginPanel() {
             className="w-full rounded-sm border-2 border-ink bg-paper px-3 py-2 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-seeker"
           />
           <p id="password-hint" className="text-sm text-ink/70">
-            Bluesky のパスワードでログインできます。パスワードは保存しません。アプリパスワード（「設定 → プライバシーとセキュリティ → アプリパスワード」で作れます）を使うと、あとで取り消せるので、より安心です。
+            {t.passwordHint}
           </p>
         </div>
 
@@ -107,13 +116,14 @@ export function LoginPanel() {
               className="size-4 animate-spin rounded-full border-2 border-paper border-t-transparent motion-reduce:animate-none"
             />
           )}
-          もういいかい？
+          {t.submit}
         </button>
       </fieldset>
 
+      {/* 画面ではボタンのくるくるで伝わるので、文字は読み上げだけにする */}
       {isPending && (
-        <p role="status" className="mt-4 text-ink/70">
-          Bluesky にログインしています…
+        <p role="status" className="sr-only">
+          {t.pending}
         </p>
       )}
       {!isPending && form.error && (

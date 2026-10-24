@@ -39,14 +39,18 @@ export function HideAndSeek() {
       const { clues } = await detectClues(photo.file);
       setPhase({ kind: "found", clues });
     } catch (e) {
-      const message = e instanceof ApiError ? e.message : "うまく探せませんでした";
+      const message =
+        e instanceof ApiError ? e.message : "うまく探せませんでした";
       setPhase({ kind: "error", message });
     }
   }
 
   return (
     <div className="space-y-10">
-      <section aria-label="写真の選択" className="flex flex-wrap items-end gap-4">
+      <section
+        aria-label="写真の選択"
+        className="flex flex-wrap items-end gap-4"
+      >
         <label className="cursor-pointer rounded-sm border-2 border-ink bg-paper px-5 py-3 font-bold transition-transform hover:-translate-y-0.5 focus-within:outline-3 focus-within:outline-offset-2 focus-within:outline-seeker active:translate-y-0">
           写真を選ぶ
           <input
@@ -62,7 +66,7 @@ export function HideAndSeek() {
           disabled={!photo || phase.kind === "searching"}
           className="rounded-sm bg-seeker px-6 py-3 font-display text-lg text-paper shadow-[4px_4px_0_var(--color-ink)] transition-transform hover:-translate-y-0.5 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-ink active:translate-y-0.5 active:shadow-none disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
         >
-          もういいかい？
+          みーつけた
         </button>
         {phase.kind === "searching" && (
           <p role="status" className="text-ink/70">
@@ -72,7 +76,10 @@ export function HideAndSeek() {
       </section>
 
       {phase.kind === "error" && (
-        <p role="alert" className="border-l-4 border-seeker bg-seeker/10 px-4 py-3">
+        <p
+          role="alert"
+          className="border-l-4 border-seeker bg-seeker/10 px-4 py-3"
+        >
           {phase.message}
         </p>
       )}
@@ -88,7 +95,11 @@ export function HideAndSeek() {
 
       {photo && phase.kind !== "found" && (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={photo.url} alt="選んだ写真のプレビュー" className="max-h-[60vh] w-auto rounded-sm border border-ink/15" />
+        <img
+          src={photo.url}
+          alt="選んだ写真のプレビュー"
+          className="max-h-[60vh] w-auto rounded-sm border border-ink/15"
+        />
       )}
     </div>
   );
