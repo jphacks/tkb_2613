@@ -5,7 +5,7 @@ from fastapi.responses import JSONResponse
 
 from tkb_api.bluesky import SessionStore
 from tkb_api.config import Settings, get_settings
-from tkb_api.routes import detect, session
+from tkb_api.routes import detect, diagnose, session
 
 
 async def _validation_error(_: Request, exc: Exception) -> JSONResponse:
@@ -30,6 +30,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.include_router(detect.router)
     app.include_router(session.router)
+    app.include_router(diagnose.router)
 
     @app.get("/health")
     def health() -> dict[str, str | bool]:

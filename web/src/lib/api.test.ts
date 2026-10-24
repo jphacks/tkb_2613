@@ -1,6 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ApiError, createSession, deleteSession, detectClues, getSession, MAX_IMAGE_BYTES } from "./api";
+import {
+  ApiError,
+  createSession,
+  deleteSession,
+  detectClues,
+  diagnose,
+  getSession,
+  MAX_IMAGE_BYTES,
+} from "./api";
 
 const RESPONSE = {
   clues: [
@@ -176,5 +184,65 @@ describe("getSession", () => {
     await expect(getSession()).rejects.toMatchObject({ kind: "invalid_response" });
     mockFetch(new TypeError("offline"));
     await expect(getSession()).rejects.toMatchObject({ kind: "network" });
+  });
+});
+
+describe("diagnose", () => {
+  const POST = {
+    post_id: "at://did:plc:xxxx/app.bsky.feed.post/3kxxxx",
+    text: "夜勤明けのラーメン",
+    created_at: "2026-10-20T08:31:00+09:00",
+    images: [],
+  };
+
+  function sse(body: string, status = 200): Response {
+    return new Response(body, { status, headers: { "Content-Type": "text/event-stream" } });
+  }
+
+  async function collect(): Promise<unknown[]> {
+    const events: unknown[] = [];
+    for await (const event of diagnose({ baseUrl: "http://api.test" })) events.push(event);
+    return events;
+  }
+
+  it("posts with cookies and yields events in the order they arrive", async () => {
+    const fetchFn = mockFetch(
+      sse(`event: post\ndata: ${JSON.stringify({ post: POST })}\n\nevent: done\ndata: {"posts_seen":1}\n\n`),
+    );
+
+    expect(await collect()).toEqual([
+      { event: "post", post: POST },
+      { event: "done", posts_seen: 1 },
+    ]);
+    const [url, init] = fetchFn.mock.calls[0];
+    expect(url).toBe("http://api.test/api/diagnose");
+    expect(init?.method).toBe("POST");
+    expect(init?.credentials).toBe("include");
+  });
+
+  it("skips events the screen does not know yet", async () => {
+    mockFetch(sse('event: clues\ndata: {"clues":[]}\n\nevent: done\ndata: {"posts_seen":0}\n\n'));
+    expect(await collect()).toEqual([{ event: "done", posts_seen: 0 }]);
+  });
+
+  it("asks to log in again when the session has expired", async () => {
+    mockFetch(sse("", 401));
+    await expect(collect()).rejects.toMatchObject({ kind: "unauthorized" });
+  });
+
+  it("maps errors", async () => {
+    mockFetch(sse("", 500));
+    await expect(collect()).rejects.toMatchObject({ kind: "server" });
+    mockFetch(new TypeError("offline"));
+    await expect(collect()).rejects.toMatchObject({ kind: "network" });
+    mockFetch(sse('event: post\ndata: {"post":{}}\n\n'));
+    await expect(collect()).rejects.toMatchObject({ kind: "invalid_response" });
+  });
+
+  it("fails when the stream ends before done", async () => {
+    mockFetch(sse(`event: post\ndata: ${JSON.stringify({ post: POST })}\n\n`));
+    const error = await collect().catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error).toMatchObject({ kind: "network" });
   });
 });

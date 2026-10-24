@@ -24,6 +24,9 @@ RUN uv sync --frozen --no-dev --package tkb-api --no-editable
 FROM python:3.13-slim
 RUN useradd --system --no-create-home app
 COPY --from=build /app/.venv /app/.venv
+# MOCK_MODE の診断で流す架空のデモ用アカウントの投稿（写真本体は含まない）
+COPY eval/fixtures/demo_observations.json /app/eval/fixtures/
+WORKDIR /app
 ENV PATH=/app/.venv/bin:$PATH PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 USER app
 EXPOSE 8001

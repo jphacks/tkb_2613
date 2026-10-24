@@ -7,6 +7,8 @@
 !detect/
 # ワークスペースの解決に pyproject だけ使う
 !data-prep/pyproject.toml
+# MOCK_MODE の診断で流すデモ用の投稿
+!eval/fixtures/demo_observations.json
 **/__pycache__
 **/.pytest_cache
 **/tests

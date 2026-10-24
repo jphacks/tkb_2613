@@ -1,4 +1,5 @@
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -20,6 +21,10 @@ class Settings(BaseSettings):
     session_ttl_minutes: int = 30
     # HTTPS で公開するときは 1 にする（Cookie を HTTPS だけで送る）
     cookie_secure: bool = False
+    # MOCK_MODE の診断で流す、架空のデモ用アカウントの投稿（起動した場所からの相対パス）
+    demo_fixture_path: Path = Path("eval/fixtures/demo_observations.json")
+    # MOCK_MODE の診断で、投稿を 1 件流すごとに待つ秒数（画面で 1 件ずつ増える様子を見せるため）
+    mock_event_interval_seconds: float = 0.3
 
 
 @lru_cache

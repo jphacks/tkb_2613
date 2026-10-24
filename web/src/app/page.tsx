@@ -1,3 +1,4 @@
+import { DiagnosePanel } from "@/components/diagnose/DiagnosePanel";
 import { LoginPanel } from "@/components/login/LoginPanel";
 
 export default function Home() {
@@ -13,6 +14,7 @@ export default function Home() {
         </p>
       </header>
       <LoginPanel />
+      <DiagnosePanel />
     </main>
   );
 }
