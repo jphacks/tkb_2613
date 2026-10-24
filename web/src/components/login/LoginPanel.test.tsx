@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SessionProvider } from "@/components/session/SessionProvider";
 import { ApiError, createSession, deleteSession, getSession } from "@/lib/api";
+import { messages } from "@/lib/messages";
 
 import { LoginPanel } from "./LoginPanel";
 
@@ -11,6 +12,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
   return { ...actual, createSession: vi.fn(), deleteSession: vi.fn(), getSession: vi.fn() };
 });
 
+const t = messages.login;
 const PASSWORD = "correct horse battery staple";
 const ALICE = { handle: "alice.bsky.social", did: "did:plc:abc" };
 
@@ -20,13 +22,13 @@ async function renderLoggedOut() {
       <LoginPanel />
     </SessionProvider>,
   );
-  await screen.findByLabelText("ハンドル名");
+  await screen.findByLabelText(t.handle);
 }
 
 function fill(handle: string, password: string) {
-  fireEvent.change(screen.getByLabelText("ハンドル名"), { target: { value: handle } });
-  fireEvent.change(screen.getByLabelText("パスワード"), { target: { value: password } });
-  fireEvent.click(screen.getByRole("button", { name: "ログイン" }));
+  fireEvent.change(screen.getByLabelText(t.handle), { target: { value: handle } });
+  fireEvent.change(screen.getByLabelText(t.password), { target: { value: password } });
+  fireEvent.click(screen.getByRole("button", { name: t.submit }));
 }
 
 beforeEach(() => {
@@ -48,7 +50,7 @@ describe("LoginPanel", () => {
       </SessionProvider>,
     );
 
-    expect(screen.getByRole("status")).toHaveTextContent("ログイン状態を確認しています");
+    expect(screen.getByRole("status")).toHaveTextContent(t.checking);
   });
 
   it("restores the logged-in account when the cookie is still valid", async () => {
@@ -70,9 +72,9 @@ describe("LoginPanel", () => {
 
     fill("alice.bsky.social", PASSWORD);
 
-    expect(await screen.findByRole("status")).toHaveTextContent("Bluesky にログインしています");
-    expect(screen.getByLabelText("ハンドル名")).toBeDisabled();
-    expect(screen.getByRole("button", { name: "ログイン" })).toBeDisabled();
+    expect(await screen.findByRole("status")).toHaveTextContent(t.pending);
+    expect(screen.getByLabelText(t.handle)).toBeDisabled();
+    expect(screen.getByRole("button", { name: t.submit })).toBeDisabled();
 
     resolve(ALICE);
     expect(await screen.findByText("@alice.bsky.social")).toBeInTheDocument();
@@ -97,8 +99,8 @@ describe("LoginPanel", () => {
     fill("alice.bsky.social", PASSWORD);
 
     expect(await screen.findByRole("alert")).toHaveTextContent("ハンドル名かパスワードが違います");
-    expect(screen.getByLabelText("ハンドル名")).toHaveValue("alice.bsky.social");
-    expect(screen.getByLabelText("パスワード")).toHaveValue("");
+    expect(screen.getByLabelText(t.handle)).toHaveValue("alice.bsky.social");
+    expect(screen.getByLabelText(t.password)).toHaveValue("");
   });
 
   it("shows a generic message for unexpected errors", async () => {
@@ -107,7 +109,7 @@ describe("LoginPanel", () => {
 
     fill("alice.bsky.social", PASSWORD);
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("ログインできませんでした");
+    expect(await screen.findByRole("alert")).toHaveTextContent(t.failed);
   });
 
   it("returns to the form after logging out, even if the api fails", async () => {
@@ -116,9 +118,9 @@ describe("LoginPanel", () => {
     await renderLoggedOut();
     fill("alice.bsky.social", PASSWORD);
 
-    fireEvent.click(await screen.findByRole("button", { name: "ログアウト" }));
+    fireEvent.click(await screen.findByRole("button", { name: t.logout }));
 
-    expect(await screen.findByLabelText("ハンドル名")).toBeInTheDocument();
+    expect(await screen.findByLabelText(t.handle)).toBeInTheDocument();
     expect(deleteSession).toHaveBeenCalled();
   });
 });
