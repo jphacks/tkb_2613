@@ -154,3 +154,12 @@ def _clues_schema(types: list[ClueType], with_bbox: bool) -> dict[str, Any]:
 
 PHOTO_SCHEMA = _clues_schema(PHOTO_CLUE_TYPES, with_bbox=True)
 TEXT_SCHEMA = _clues_schema(TEXT_CLUE_TYPES, with_bbox=False)
+
+
+ZOOM_USER_PROMPT = (
+    "この画像は、写真の一部を拡大したものです。"
+    "写っている文字や、瞳・窓・鏡に映り込んでいるものを、もう一度よく見て書き出してください。"
+    "読めない文字は x にし、自信のない読みは confidence を 0.5 以下にしてください。"
+)
+
+ZOOM_SCHEMA = _clues_schema(PHOTO_CLUE_TYPES, with_bbox=False)

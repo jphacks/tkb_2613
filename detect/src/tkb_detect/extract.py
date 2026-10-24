@@ -15,7 +15,7 @@ from pydantic import ValidationError
 from tkb_common.schemas import Clue, ClueSource, ClueType, Post, Region
 from tkb_detect.coords import COORDINATE_SPACE, CoordinateSpace, to_original_region
 from tkb_detect.errors import DetectError, OutputCutOffError
-from tkb_detect.image import PreparedImage, prepare_image
+from tkb_detect.image import PreparedImage, crop_and_enlarge, prepare_image
 from tkb_detect.ocr_client import OcrClient, OcrConfig
 from tkb_detect.ocr_merge import merge_ocr
 from tkb_detect.prompts import (
@@ -24,9 +24,31 @@ from tkb_detect.prompts import (
     PHOTO_USER_PROMPT,
     TEXT_SCHEMA,
     TEXT_SYSTEM_PROMPT,
+    ZOOM_SCHEMA,
+    ZOOM_USER_PROMPT,
     text_user_prompt,
 )
 from tkb_detect.vlm_client import VlmClient, VlmConfig
+
+# 小さく写ったものは読み間違えやすいのに、モデルは confidence を下げない
+# （テスト写真で、24×97 ピクセルの看板を読み間違えたまま 0.9 を付けた）。
+# 枠の短い辺が元の画像で SMALL_REGION_MIN_SIDE_PX より小さければ、confidence を
+# SMALL_REGION_MAX_CONFIDENCE までにする。拡大して読み直し、2回とも同じに読めたものは除く
+from tkb_detect.zoom import (
+    SMALL_REGION_MAX_CONFIDENCE,
+    SMALL_REGION_MIN_SIDE_PX,
+    cap_small_region,
+    clean_value,
+    resolve_zoom,
+    select_zoom_targets,
+)
+
+__all__ = [
+    "SMALL_REGION_MAX_CONFIDENCE",
+    "SMALL_REGION_MIN_SIDE_PX",
+    "Extractor",
+    "build_extractor",
+]
 
 # 送った画像は JPEG に書き出し直している
 SENT_MIME_TYPE = "image/jpeg"
@@ -39,11 +61,8 @@ TEXT_MAX_TOKENS = 512
 # 繰り返しのペナルティで止まるが、JSON のキーの繰り返しにも効いて手がかりを取りこぼすので、
 # 出力が上限で切れたときのやり直しにだけ使う
 RETRY_REPETITION_PENALTY = 1.05
-# 小さく写ったものは読み間違えやすいのに、モデルは confidence を下げない
-# （テスト写真で、24×97 ピクセルの看板を読み間違えたまま 0.9 を付けた）。
-# 枠の短い辺が元の画像でこれより小さければ、confidence を SMALL_REGION_MAX_CONFIDENCE までにする
-SMALL_REGION_MIN_SIDE_PX = 32
-SMALL_REGION_MAX_CONFIDENCE = 0.5
+# 拡大して読み直すときの出力の上限（ふだんは数件だけ）
+ZOOM_MAX_TOKENS = 256
 
 
 class Extractor:
@@ -52,10 +71,12 @@ class Extractor:
         vlm: VlmClient,
         ocr: OcrClient | None = None,
         coordinate_space: CoordinateSpace | None = COORDINATE_SPACE,
+        zoom: bool = True,
     ) -> None:
         self._vlm = vlm
         self._ocr = ocr
         self._coordinate_space = coordinate_space
+        self._zoom = zoom
 
     @property
     def uses_ocr(self) -> bool:
@@ -88,11 +109,47 @@ class Extractor:
         )
         if self._ocr is None:
             raw = await vlm_task
-            return self._photo_clues(post_id, index, raw, prepared)
+            return await self._reread_small(data, self._photo_clues(post_id, index, raw, prepared))
 
         # OCR は元の画像を読み、元の画像のピクセルで箱を返す
         raw, lines = await asyncio.gather(vlm_task, self._ocr.recognize(data))
-        return merge_ocr(post_id, index, self._photo_clues(post_id, index, raw, prepared), lines)
+        clues = await self._reread_small(data, self._photo_clues(post_id, index, raw, prepared))
+        return merge_ocr(post_id, index, clues, lines)
+
+    async def _reread_small(self, data: bytes, clues: list[Clue]) -> list[Clue]:
+        """小さい文字や映り込みを拡大して読み直し、小ささによる confidence の上限をかける。"""
+        targets = select_zoom_targets(clues) if self._zoom else []
+        if not targets:
+            return [cap_small_region(c) for c in clues]
+
+        resolved = await asyncio.gather(*(self._zoom_into(data, t) for t in targets))
+        replacements = {id(t): r for t, r in zip(targets, resolved, strict=True)}
+        final: list[Clue] = []
+        for clue in clues:
+            final.extend(replacements.get(id(clue), [cap_small_region(clue)]))
+        return final
+
+    async def _zoom_into(self, data: bytes, target: Clue) -> list[Clue]:
+        region = target.region
+        if region is None:  # select_zoom_targets は region のあるものだけを選ぶ
+            return [target]
+        try:
+            raw = await _retry_if_cut_off(
+                lambda penalty: self._vlm.complete(
+                    crop_and_enlarge(data, region),
+                    SENT_MIME_TYPE,
+                    ZOOM_USER_PROMPT,
+                    system=PHOTO_SYSTEM_PROMPT,
+                    json_schema=ZOOM_SCHEMA,
+                    max_tokens=ZOOM_MAX_TOKENS,
+                    repetition_penalty=penalty,
+                )
+            )
+            items = _parse_items(raw)
+        except DetectError:
+            # 読み直しに失敗しても、1回目の読みは残す（強くは信じない）
+            return [cap_small_region(target)]
+        return resolve_zoom(target, items)
 
     def _photo_clues(
         self, post_id: str, index: int, raw: str, prepared: PreparedImage
@@ -111,7 +168,7 @@ class Extractor:
                 ),
             )
             if clue is not None:
-                clues.append(_cap_small_region(clue))
+                clues.append(clue)
         return clues
 
     async def _extract_text(self, post_id: str, text: str) -> list[Clue]:
@@ -152,6 +209,7 @@ def build_extractor(
     vlm_model: str,
     ocr_base_url: str,
     coordinate_space: CoordinateSpace | None = COORDINATE_SPACE,
+    zoom: bool = True,
 ) -> Extractor:
     """設定から作る。OCR は OCR_BASE_URL が空なら使わない。"""
     vlm = VlmClient(
@@ -159,7 +217,7 @@ def build_extractor(
     )
     use_ocr = bool(ocr_base_url.strip()) and not mock_mode
     ocr = OcrClient(OcrConfig(base_url=ocr_base_url, mock_mode=False)) if use_ocr else None
-    return Extractor(vlm, ocr, coordinate_space)
+    return Extractor(vlm, ocr, coordinate_space, zoom)
 
 
 async def _retry_if_cut_off(call: Callable[[float | None], Awaitable[str]]) -> str:
@@ -211,23 +269,13 @@ def _build_clue(
             post_id=post_id,
             image_index=image_index,
             type=ClueType(clue_type),
-            value=value.strip(),
+            value=clean_value(value),
             region=region,
             confidence=min(max(float(confidence), 0.0), 1.0),
             source=source,
         )
     except (ValueError, ValidationError):
         return None
-
-
-def _cap_small_region(clue: Clue) -> Clue:
-    if clue.region is None:
-        return clue
-    x1, y1, x2, y2 = clue.region
-    if min(x2 - x1, y2 - y1) >= SMALL_REGION_MIN_SIDE_PX:
-        return clue
-    capped = min(clue.confidence, SMALL_REGION_MAX_CONFIDENCE)
-    return clue.model_copy(update={"confidence": capped})
 
 
 def _dedupe(clues: list[Clue]) -> list[Clue]:

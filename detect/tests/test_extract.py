@@ -20,7 +20,7 @@ from tkb_detect.extract import (
     build_extractor,
 )
 from tkb_detect.ocr_client import OcrClient, OcrConfig
-from tkb_detect.prompts import POST_CLOSE, TEXT_SYSTEM_PROMPT
+from tkb_detect.prompts import POST_CLOSE, TEXT_SYSTEM_PROMPT, ZOOM_USER_PROMPT
 from tkb_detect.vlm_client import VlmClient, VlmConfig
 
 VLM = "http://vlm.local/v1"
@@ -83,6 +83,7 @@ PHOTO_REPLY = {
             "confidence": 0.6,
         },
         {"type": "uniform", "value": "作業靴", "bbox_2d": None, "confidence": 0.8},
+        {"type": "plate", "value": " xx 302\nxx・160 ", "bbox_2d": None, "confidence": 0.5},
     ]
 }
 TEXT_REPLY = {
@@ -108,6 +109,7 @@ async def test_extracts_photo_and_text_clues_in_the_clue_format() -> None:
     # 0〜1000 の相対値を、元の画像（2560×1440）のピクセルに直す
     assert sign.region == (256, 288, 768, 374)
     assert by_value["作業靴"].region is None
+    assert "xx 302 xx・160" in by_value
     night = by_value["夜勤明け"]
     assert (night.image_index, night.region, night.source) == (None, None, ClueSource.TEXT)
     # 範囲外の confidence は 0〜1 に収める
@@ -343,7 +345,7 @@ async def test_caps_confidence_of_small_regions() -> None:
             {"type": "shop", "value": "低い", "bbox_2d": [600, 100, 610, 300], "confidence": 0.3},
         ]
     }
-    extractor = Extractor(_vlm_client(), coordinate_space=CoordinateSpace.RELATIVE_1000)
+    extractor = Extractor(_vlm_client(), coordinate_space=CoordinateSpace.RELATIVE_1000, zoom=False)
 
     with respx.mock as router:
         router.post(f"{VLM}/chat/completions").mock(side_effect=_router(reply, {"clues": []}))
@@ -357,3 +359,77 @@ async def test_caps_confidence_of_small_regions() -> None:
         "作業靴": 0.8,
         "低い": 0.3,
     }
+
+
+def _zoom_aware_router(first: object, zoom: object) -> Callable[[httpx.Request], httpx.Response]:
+    """1回目の読み取りには first、拡大した読み直しには zoom を返す。"""
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        user = json.loads(request.content)["messages"][-1]["content"]
+        if not isinstance(user, list):
+            return _reply({"clues": []})
+        return _reply(zoom if user[0]["text"] == ZOOM_USER_PROMPT else first)
+
+    return handle
+
+
+@pytest.mark.anyio
+async def test_rereads_small_text_by_zooming_in() -> None:
+    # 元の画像 2560×1440。看板は横 25px の縦書き
+    first = {
+        "clues": [
+            {
+                "type": "org_text",
+                "value": "厚生",
+                "bbox_2d": [500, 100, 510, 300],
+                "confidence": 0.9,
+            },
+            {
+                "type": "station_sign",
+                "value": "根津",
+                "bbox_2d": [100, 100, 400, 300],
+                "confidence": 0.95,
+            },
+        ]
+    }
+    zoom = {"clues": [{"type": "org_text", "value": "弥生", "confidence": 0.9}]}
+    extractor = Extractor(_vlm_client(), coordinate_space=CoordinateSpace.RELATIVE_1000)
+
+    with respx.mock as router:
+        route = router.post(f"{VLM}/chat/completions").mock(
+            side_effect=_zoom_aware_router(first, zoom)
+        )
+        clues = await extractor.extract_post(_post("", 1), [_png(2560, 1440)])
+
+    # 1回目と、小さい看板1件の読み直しだけ（大きい駅名標は読み直さない）
+    assert route.call_count == 2
+    assert {(c.value, c.confidence) for c in clues} == {
+        ("弥生", SMALL_REGION_MAX_CONFIDENCE),
+        ("根津", 0.95),
+    }
+
+
+@pytest.mark.anyio
+async def test_keeps_first_reading_when_zoom_request_fails() -> None:
+    first = {
+        "clues": [
+            {
+                "type": "org_text",
+                "value": "厚生",
+                "bbox_2d": [500, 100, 510, 300],
+                "confidence": 0.9,
+            }
+        ]
+    }
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        user = json.loads(request.content)["messages"][-1]["content"]
+        if user[0]["text"] == ZOOM_USER_PROMPT:
+            return httpx.Response(500)
+        return _reply(first)
+
+    with respx.mock as router:
+        router.post(f"{VLM}/chat/completions").mock(side_effect=handle)
+        clues = await Extractor(_vlm_client()).extract_post(_post("", 1), [_png(2560, 1440)])
+
+    assert [(c.value, c.confidence) for c in clues] == [("厚生", SMALL_REGION_MAX_CONFIDENCE)]
