@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from tkb_api.bluesky import BlueskyUnavailableError, LoginResult, PostsFetcher
 from tkb_api.config import Settings, get_settings
 from tkb_api.main import create_app
-from tkb_api.routes.diagnose import get_extractor, get_fetch_posts, get_gazetteer
+from tkb_api.routes.diagnose import get_extractor_factory, get_fetch_posts, get_gazetteer
 from tkb_api.routes.session import get_login
 from tkb_common.schemas import Clue, ClueSource, ClueType, Post
 from tkb_detect.extract import Extractor
@@ -132,7 +132,8 @@ def _real_client(fetch_posts: PostsFetcher, extractor: Extractor | None = None) 
     overrides = client.app.dependency_overrides  # type: ignore[attr-defined]
     overrides[get_login] = lambda: login
     overrides[get_fetch_posts] = lambda: fetch_posts
-    overrides[get_extractor] = lambda: extractor or FakeExtractor()
+    fake = extractor or FakeExtractor()
+    overrides[get_extractor_factory] = lambda: lambda: fake
     return client
 
 
@@ -160,6 +161,27 @@ def test_real_diagnose_extracts_clues_from_the_session_accounts_own_posts() -> N
     assert events[1][1]["clues"][0]["value"] == post.text
     assert events[2][1]["clues"] == events[1][1]["clues"]
     assert events[-1] == ("done", {"posts_seen": 1})
+
+
+@pytest.mark.parametrize("vlm_base_url", ["", "https://api.openai.com/v1"])
+def test_real_diagnose_reports_a_missing_or_forbidden_model_endpoint(vlm_base_url: str) -> None:
+    post = Post.model_validate({**json.loads(FIXTURE.read_text(encoding="utf-8"))["posts"][3]})
+
+    async def fetch_posts(_client: AsyncClient, _did: str, _limit: int) -> list[Post]:
+        return [post]
+
+    async def login(handle: str, _password: str) -> LoginResult:
+        return LoginResult(handle=handle, did=REAL_DID, client=REAL_CLIENT)
+
+    settings = Settings(mock_mode=False, vlm_base_url=vlm_base_url, max_posts=5)
+    with _client(settings) as client:
+        client.app.dependency_overrides[get_login] = lambda: login  # type: ignore[attr-defined]
+        client.app.dependency_overrides[get_fetch_posts] = lambda: fetch_posts  # type: ignore[attr-defined]
+        _login(client)
+        res = client.post("/api/diagnose")
+
+    assert res.status_code == 503
+    assert "openai" not in res.text
 
 
 def test_real_diagnose_reports_bluesky_errors_as_bad_gateway() -> None:
