@@ -4,8 +4,7 @@
   event: post  data: {"post": 投稿}
   event: done  data: {"posts_seen": 件数}
 
-今はモックだけ。MOCK_MODE=1 のとき、架空のデモ用アカウントの投稿をそのまま流す。
-投稿の Pydantic モデル（tkb_common に追加予定）ができたら、それを通してから流す。
+今はモックだけ。MOCK_MODE=1 のとき、架空のデモ用アカウントの投稿を Post の形で確かめてから流す。
 """
 
 import asyncio
@@ -19,6 +18,7 @@ from fastapi.responses import StreamingResponse
 from tkb_api.bluesky import BlueskySession
 from tkb_api.config import Settings, get_settings
 from tkb_api.routes.session import current_session
+from tkb_common.schemas import Post
 
 router = APIRouter(prefix="/api")
 
@@ -27,21 +27,20 @@ def _sse(event: str, data: dict[str, Any]) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-def _load_demo_posts(settings: Settings) -> list[dict[str, Any]]:
+def _load_demo_posts(settings: Settings) -> list[Post]:
     try:
         doc = json.loads(settings.demo_fixture_path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        # パスはエラーの文言に入れない
+        return [Post.model_validate(p) for p in doc["posts"]]
+    except (OSError, ValueError, KeyError, TypeError):
+        # pydantic の ValidationError は ValueError の仲間。パスや中身はエラーの文言に入れない
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE, "モック用のデータを読み込めませんでした"
         ) from None
-    posts: list[dict[str, Any]] = doc["posts"]
-    return posts
 
 
-async def _stream(posts: list[dict[str, Any]], interval: float) -> AsyncIterator[str]:
+async def _stream(posts: list[Post], interval: float) -> AsyncIterator[str]:
     for post in posts:
-        yield _sse("post", {"post": post})
+        yield _sse("post", {"post": post.model_dump(mode="json")})
         await asyncio.sleep(interval)
     yield _sse("done", {"posts_seen": len(posts)})
 

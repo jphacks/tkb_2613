@@ -80,3 +80,18 @@ def test_mock_diagnose_reports_missing_demo_data(tmp_path: Path) -> None:
 
     assert res.status_code == 503
     assert "missing.json" not in res.text
+
+
+def test_mock_diagnose_rejects_demo_posts_in_the_wrong_format(tmp_path: Path) -> None:
+    doc = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    doc["posts"][0]["images"][0]["url"] = "https://example.com/a.jpg"
+    broken = tmp_path / "broken.json"
+    broken.write_text(json.dumps(doc), encoding="utf-8")
+    settings = Settings(mock_mode=True, demo_fixture_path=broken, mock_event_interval_seconds=0)
+    with _client(settings) as client:
+        _login(client)
+
+        res = client.post("/api/diagnose")
+
+    assert res.status_code == 503
+    assert "example.com" not in res.text
