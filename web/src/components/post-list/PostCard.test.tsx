@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
+import { messages } from "@/lib/messages";
 import type { Clue } from "@/types/clue";
 import type { Post } from "@/types/post";
 
@@ -34,7 +35,7 @@ describe("PostCard", () => {
   it("shows each photo, naming it by its number when it has no alt text", () => {
     render(<PostCard post={POST} />);
 
-    const img = screen.getByRole("img", { name: "写真 1" });
+    const img = screen.getByRole("img", { name: messages.post.photoName(0) });
     expect(img).toHaveAttribute("src", POST.images[0].url);
     expect(img).toHaveAttribute("referrerpolicy", "no-referrer");
   });
@@ -48,10 +49,10 @@ describe("PostCard", () => {
   it("keeps the photo's shape and shows a placeholder when the photo cannot be loaded", () => {
     render(<PostCard post={POST} />);
 
-    fireEvent.error(screen.getByRole("img", { name: "写真 1" }));
+    fireEvent.error(screen.getByRole("img", { name: messages.post.photoName(0) }));
 
-    expect(screen.queryByRole("img", { name: "写真 1" })).not.toBeInTheDocument();
-    const placeholder = screen.getByText("写真 1（表示できません）");
+    expect(screen.queryByRole("img", { name: messages.post.photoName(0) })).not.toBeInTheDocument();
+    const placeholder = screen.getByText(messages.post.photoUnavailable(messages.post.photoName(0)));
     expect(placeholder.closest("[style]")).toHaveStyle({ aspectRatio: "1200 / 900" });
   });
 
@@ -93,7 +94,7 @@ describe("PostCard", () => {
     const { container } = render(<PostCard post={POST} found={{ clues: [clue], error: null }} />);
     expect(container.querySelector(".photo-mark")).not.toBeInTheDocument();
 
-    const img = screen.getByRole("img", { name: "写真 1" });
+    const img = screen.getByRole("img", { name: messages.post.photoName(0) });
     Object.defineProperty(img, "naturalWidth", { value: 2400 });
     Object.defineProperty(img, "naturalHeight", { value: 1800 });
     fireEvent.load(img);

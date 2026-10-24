@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import { CLUE_LABELS } from "@/lib/clueLabels";
+import { messages } from "@/lib/messages";
 import { type Size, toPercentBox } from "@/lib/region";
 import type { Clue } from "@/types/clue";
 
@@ -22,7 +22,7 @@ export function ResultFrame({ imageUrl, clues }: ResultFrameProps) {
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={imageUrl}
-          alt="選んだ写真"
+          alt={messages.hideAndSeek.photoAlt}
           className="block h-auto w-full"
           onLoad={(e) =>
             setSize({ width: e.currentTarget.naturalWidth, height: e.currentTarget.naturalHeight })
@@ -47,9 +47,9 @@ export function ResultFrame({ imageUrl, clues }: ResultFrameProps) {
       </figure>
 
       {clues.length === 0 ? (
-        <p className="text-ink/70">手がかりは見つかりませんでした</p>
+        <p className="text-ink/70">{messages.clues.none}</p>
       ) : (
-        <ol aria-label="見つかった手がかり" className="space-y-3">
+        <ol aria-label={messages.hideAndSeek.cluesLabel} className="space-y-3">
           {clues.map((clue, i) => (
             <li
               key={i}
@@ -58,7 +58,7 @@ export function ResultFrame({ imageUrl, clues }: ResultFrameProps) {
               <span className="font-display text-xl text-seeker">{i + 1}</span>
               <span>
                 <span className="block text-xs tracking-widest text-ink/60">
-                  {CLUE_LABELS[clue.type]}
+                  {messages.clues.typeLabels[clue.type]}
                 </span>
                 <span className="text-lg font-bold">{clue.value}</span>
               </span>

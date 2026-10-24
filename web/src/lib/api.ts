@@ -1,3 +1,4 @@
+import { messages } from "@/lib/messages";
 import { readSse } from "@/lib/sse";
 import { type DetectResponse, isDetectResponse } from "@/types/clue";
 import { type DiagnoseEvent, toDiagnoseEvent } from "@/types/diagnose";
@@ -49,10 +50,10 @@ export async function detectClues(
   { baseUrl = DEFAULT_BASE_URL, signal }: DetectOptions = {},
 ): Promise<DetectResponse> {
   if (!(ACCEPTED_IMAGE_TYPES as readonly string[]).includes(file.type)) {
-    throw new ApiError("unsupported_type", "JPEG・PNG・WebP・HEIC の写真を選んでください");
+    throw new ApiError("unsupported_type", messages.errors.unsupportedType);
   }
   if (file.size > MAX_IMAGE_BYTES) {
-    throw new ApiError("too_large", "写真が大きすぎます（20MB まで）");
+    throw new ApiError("too_large", messages.errors.tooLarge(MAX_IMAGE_BYTES / 1024 / 1024));
   }
 
   let res: Response;
@@ -64,16 +65,16 @@ export async function detectClues(
       signal,
     });
   } catch {
-    throw new ApiError("network", "サーバーに接続できませんでした");
+    throw new ApiError("network", messages.errors.network);
   }
 
   if (!res.ok) {
-    throw new ApiError("server", `サーバーでエラーが起きました（${res.status}）`, res.status);
+    throw new ApiError("server", messages.errors.server(res.status), res.status);
   }
 
   const data: unknown = await res.json().catch(() => undefined);
   if (!isDetectResponse(data)) {
-    throw new ApiError("invalid_response", "サーバーの応答を読み取れませんでした");
+    throw new ApiError("invalid_response", messages.errors.invalidResponse);
   }
   return data;
 }
@@ -102,19 +103,19 @@ export async function createSession(
       signal,
     });
   } catch {
-    throw new ApiError("network", "サーバーに接続できませんでした");
+    throw new ApiError("network", messages.errors.network);
   }
 
   if (res.status === 401) {
-    throw new ApiError("unauthorized", "ハンドル名かパスワードが違います", 401);
+    throw new ApiError("unauthorized", messages.errors.wrongCredentials, 401);
   }
   if (!res.ok) {
-    throw new ApiError("server", `サーバーでエラーが起きました（${res.status}）`, res.status);
+    throw new ApiError("server", messages.errors.server(res.status), res.status);
   }
 
   const data: unknown = await res.json().catch(() => undefined);
   if (!isSessionResponse(data)) {
-    throw new ApiError("invalid_response", "サーバーの応答を読み取れませんでした");
+    throw new ApiError("invalid_response", messages.errors.invalidResponse);
   }
   return data;
 }
@@ -128,17 +129,17 @@ export async function getSession({
   try {
     res = await fetch(`${baseUrl}/api/session`, { credentials: "include", signal });
   } catch {
-    throw new ApiError("network", "サーバーに接続できませんでした");
+    throw new ApiError("network", messages.errors.network);
   }
 
   if (res.status === 401) return null;
   if (!res.ok) {
-    throw new ApiError("server", `サーバーでエラーが起きました（${res.status}）`, res.status);
+    throw new ApiError("server", messages.errors.server(res.status), res.status);
   }
 
   const data: unknown = await res.json().catch(() => undefined);
   if (!isSessionResponse(data)) {
-    throw new ApiError("invalid_response", "サーバーの応答を読み取れませんでした");
+    throw new ApiError("invalid_response", messages.errors.invalidResponse);
   }
   return data;
 }
@@ -149,10 +150,10 @@ export async function deleteSession({ baseUrl = DEFAULT_BASE_URL, signal }: Requ
   try {
     res = await fetch(`${baseUrl}/api/session`, { method: "DELETE", credentials: "include", signal });
   } catch {
-    throw new ApiError("network", "サーバーに接続できませんでした");
+    throw new ApiError("network", messages.errors.network);
   }
   if (!res.ok) {
-    throw new ApiError("server", `サーバーでエラーが起きました（${res.status}）`, res.status);
+    throw new ApiError("server", messages.errors.server(res.status), res.status);
   }
 }
 
@@ -168,14 +169,14 @@ export async function* diagnose({
   try {
     res = await fetch(`${baseUrl}/api/diagnose`, { method: "POST", credentials: "include", signal });
   } catch {
-    throw new ApiError("network", "サーバーに接続できませんでした");
+    throw new ApiError("network", messages.errors.network);
   }
 
   if (res.status === 401) {
-    throw new ApiError("unauthorized", "ログインし直してください", 401);
+    throw new ApiError("unauthorized", messages.errors.sessionExpired, 401);
   }
   if (!res.ok || !res.body) {
-    throw new ApiError("server", `サーバーでエラーが起きました（${res.status}）`, res.status);
+    throw new ApiError("server", messages.errors.server(res.status), res.status);
   }
 
   try {
@@ -184,7 +185,7 @@ export async function* diagnose({
       try {
         event = toDiagnoseEvent(message.event, message.data);
       } catch {
-        throw new ApiError("invalid_response", "サーバーの応答を読み取れませんでした");
+        throw new ApiError("invalid_response", messages.errors.invalidResponse);
       }
       if (!event) continue;
       yield event;
@@ -192,7 +193,7 @@ export async function* diagnose({
     }
   } catch (e) {
     if (e instanceof ApiError) throw e;
-    throw new ApiError("network", "診断の途中で接続が切れました");
+    throw new ApiError("network", messages.errors.diagnoseInterrupted);
   }
-  throw new ApiError("network", "診断の途中で接続が切れました");
+  throw new ApiError("network", messages.errors.diagnoseInterrupted);
 }

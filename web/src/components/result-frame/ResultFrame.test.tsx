@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
+import { messages } from "@/lib/messages";
 import type { Clue } from "@/types/clue";
 
 import { ResultFrame } from "./ResultFrame";
@@ -38,7 +39,7 @@ const CLUES: Clue[] = [
 ];
 
 function loadImage(width: number, height: number) {
-  const img = screen.getByRole("img", { name: "選んだ写真" });
+  const img = screen.getByRole("img", { name: messages.hideAndSeek.photoAlt });
   Object.defineProperty(img, "naturalWidth", { value: width });
   Object.defineProperty(img, "naturalHeight", { value: height });
   fireEvent.load(img);
@@ -48,7 +49,7 @@ describe("ResultFrame", () => {
   it("lists every clue with its label, value and confidence", () => {
     render(<ResultFrame imageUrl="blob:photo" clues={CLUES} />);
 
-    const items = within(screen.getByRole("list", { name: "見つかった手がかり" })).getAllByRole(
+    const items = within(screen.getByRole("list", { name: messages.hideAndSeek.cluesLabel })).getAllByRole(
       "listitem",
     );
     expect(items).toHaveLength(3);
@@ -79,6 +80,6 @@ describe("ResultFrame", () => {
   it("shows a message when no clues were found", () => {
     render(<ResultFrame imageUrl="blob:photo" clues={[]} />);
 
-    expect(screen.getByText("手がかりは見つかりませんでした")).toBeInTheDocument();
+    expect(screen.getByText(messages.clues.none)).toBeInTheDocument();
   });
 });

@@ -4,7 +4,10 @@ import { useEffect, useState } from "react";
 
 import { ResultFrame } from "@/components/result-frame/ResultFrame";
 import { ACCEPTED_IMAGE_TYPES, ApiError, detectClues } from "@/lib/api";
+import { messages } from "@/lib/messages";
 import type { Clue } from "@/types/clue";
+
+const t = messages.hideAndSeek;
 
 type Phase =
   | { kind: "idle" }
@@ -40,7 +43,7 @@ export function HideAndSeek() {
       setPhase({ kind: "found", clues });
     } catch (e) {
       const message =
-        e instanceof ApiError ? e.message : "うまく探せませんでした";
+        e instanceof ApiError ? e.message : t.failed;
       setPhase({ kind: "error", message });
     }
   }
@@ -48,11 +51,11 @@ export function HideAndSeek() {
   return (
     <div className="space-y-10">
       <section
-        aria-label="写真の選択"
+        aria-label={t.pickerLabel}
         className="flex flex-wrap items-end gap-4"
       >
         <label className="cursor-pointer rounded-sm border-2 border-ink bg-paper px-5 py-3 font-bold transition-transform hover:-translate-y-0.5 focus-within:outline-3 focus-within:outline-offset-2 focus-within:outline-seeker active:translate-y-0">
-          写真を選ぶ
+          {t.pick}
           <input
             type="file"
             accept={ACCEPTED_IMAGE_TYPES.join(",")}
@@ -66,11 +69,11 @@ export function HideAndSeek() {
           disabled={!photo || phase.kind === "searching"}
           className="rounded-sm bg-seeker px-6 py-3 font-display text-lg text-paper shadow-[4px_4px_0_var(--color-ink)] transition-transform hover:-translate-y-0.5 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-ink active:translate-y-0.5 active:shadow-none disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
         >
-          みーつけた
+          {t.search}
         </button>
         {phase.kind === "searching" && (
           <p role="status" className="text-ink/70">
-            さがしています…
+            {t.searching}
           </p>
         )}
       </section>
@@ -87,7 +90,7 @@ export function HideAndSeek() {
       {photo && phase.kind === "found" && (
         <section aria-labelledby="found-heading" className="space-y-6">
           <h2 id="found-heading" className="font-display text-4xl text-seeker">
-            みーつけた
+            {t.found}
           </h2>
           <ResultFrame imageUrl={photo.url} clues={phase.clues} />
         </section>
@@ -97,7 +100,7 @@ export function HideAndSeek() {
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={photo.url}
-          alt="選んだ写真のプレビュー"
+          alt={t.previewAlt}
           className="max-h-[60vh] w-auto rounded-sm border border-ink/15"
         />
       )}

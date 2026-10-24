@@ -2,18 +2,11 @@
 
 import { useLayoutEffect, useRef, useState } from "react";
 
-import { CLUE_LABELS } from "@/lib/clueLabels";
 import { messages } from "@/lib/messages";
 import type { Clue } from "@/types/clue";
 import type { Conclusion } from "@/types/diagnose";
 
-/** engine の試作の項目名（attribute）の表示名。16項目への対応づけまでのつなぎ */
-const ATTRIBUTE_LABELS: Readonly<Record<string, string>> = {
-  station: "最寄り駅",
-  home_area: "住んでいる町",
-  active_time: "よくいる時間",
-  routine: "決まった外出",
-};
+const t = messages.board;
 
 /** 糸のたるみ（px） */
 const SAG = 28;
@@ -87,14 +80,14 @@ export function ConclusionBoard({ clues, conclusions }: ConclusionBoardProps) {
       {found && (
         <>
           <div aria-hidden="true" className="found-flash" />
-          <p className="horror-title found-title text-5xl sm:text-6xl">{messages.board.found}</p>
+          <p className="horror-title found-title text-5xl sm:text-6xl">{t.found}</p>
         </>
       )}
       <h3 id="board-heading" className="font-display text-2xl">
-        捜査ボード
+        {t.heading}
       </h3>
       {conclusions.length === 0 ? (
-        <p className="text-ink/70">投稿からは、あなたについて推定できることは見つかりませんでした</p>
+        <p className="text-ink/70">{t.empty}</p>
       ) : (
         <div ref={boardRef} className="relative">
           <svg aria-hidden="true" className="red-strings absolute inset-0 h-full w-full overflow-visible">
@@ -109,7 +102,7 @@ export function ConclusionBoard({ clues, conclusions }: ConclusionBoardProps) {
             ))}
           </svg>
 
-          <ul aria-label={messages.board.evidence} className="relative flex flex-wrap gap-x-3 gap-y-5 pt-2">
+          <ul aria-label={t.evidence} className="relative flex flex-wrap gap-x-3 gap-y-5 pt-2">
             {evidence.map((index) => {
               const clue = clues[index];
               return (
@@ -121,14 +114,14 @@ export function ConclusionBoard({ clues, conclusions }: ConclusionBoardProps) {
                   }}
                   className="evidence-pin rounded-sm border border-ink/20 bg-paper-deep px-2.5 py-1.5 text-sm shadow-[2px_2px_0_oklch(0%_0_0/0.4)]"
                 >
-                  <span className="block text-xs text-ink/60">{CLUE_LABELS[clue.type]}</span>
+                  <span className="block text-xs text-ink/60">{messages.clues.typeLabels[clue.type]}</span>
                   <span className="font-bold">{clue.value}</span>
                 </li>
               );
             })}
           </ul>
 
-          <ol aria-label="推定できたこと" className="relative mt-16 space-y-6">
+          <ol aria-label={t.conclusionsLabel} className="relative mt-16 space-y-6">
             {conclusions.map((conclusion, i) => (
               <li
                 key={i}
@@ -139,20 +132,20 @@ export function ConclusionBoard({ clues, conclusions }: ConclusionBoardProps) {
                 className="border-l-4 border-seeker bg-paper-deep px-4 py-3"
               >
                 <p className="text-xs tracking-widest text-ink/60">
-                  {ATTRIBUTE_LABELS[conclusion.attribute] ?? conclusion.attribute}
-                  <span className="ml-2 rounded-sm bg-ink/10 px-1.5 py-0.5">推定</span>
+                  {t.attributeLabels[conclusion.attribute] ?? conclusion.attribute}
+                  <span className="ml-2 rounded-sm bg-ink/10 px-1.5 py-0.5">{t.inferred}</span>
                 </p>
                 <p className="mt-1 text-xl font-bold">{conclusion.value}</p>
                 {conclusion.note && <p className="mt-1 text-sm text-ink/70">{conclusion.note}</p>}
                 <p className="mt-3 text-xs tracking-widest text-ink/60">
-                  根拠（{conclusion.clue_indices.length} 件）
+                  {t.reasons(conclusion.clue_indices.length)}
                 </p>
-                <ul aria-label="根拠の手がかり" className="mt-1 flex flex-wrap gap-2">
+                <ul aria-label={t.reasonsLabel} className="mt-1 flex flex-wrap gap-2">
                   {conclusion.clue_indices.map((index) => {
                     const clue = clues[index];
                     return (
                       <li key={index} className="rounded-sm border border-ink/20 px-2 py-0.5 text-sm">
-                        <span className="text-xs text-ink/60">{CLUE_LABELS[clue.type]}</span>{" "}
+                        <span className="text-xs text-ink/60">{messages.clues.typeLabels[clue.type]}</span>{" "}
                         {clue.value}
                       </li>
                     );

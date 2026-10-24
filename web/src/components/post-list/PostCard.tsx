@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 
+import { messages } from "@/lib/messages";
 import { type Size, toPercentBox } from "@/lib/region";
 import type { Clue } from "@/types/clue";
 import type { Post, PostImage } from "@/types/post";
@@ -21,7 +22,7 @@ function PostPhoto({ image, clues }: { image: PostImage; clues: readonly Clue[] 
   const [failed, setFailed] = useState(false);
   // 手がかりの位置は、api が解析した元の写真のピクセル座標。読み込んだ写真の実寸で割って重ねる
   const [size, setSize] = useState<Size | null>(null);
-  const name = image.alt || `写真 ${image.index + 1}`;
+  const name = image.alt || messages.post.photoName(image.index);
   const boxes =
     size && !failed ? clues.flatMap((c) => (c.region ? [toPercentBox(c.region, size)] : [])) : [];
 
@@ -32,7 +33,7 @@ function PostPhoto({ image, clues }: { image: PostImage; clues: readonly Clue[] 
     >
       {failed ? (
         <p className="flex h-full items-center justify-center p-3 text-center text-sm text-ink/60">
-          {name}（表示できません）
+          {messages.post.photoUnavailable(name)}
         </p>
       ) : (
         // Bluesky の CDN の画像をそのまま表示するので next/image は使わない
@@ -86,7 +87,7 @@ export function PostCard({ post, found }: { post: Post; found?: PostClues }) {
           ))}
         </div>
       )}
-      {found && <ClueList clues={found.clues} error={found.error} label="この投稿の手がかり" />}
+      {found && <ClueList clues={found.clues} error={found.error} label={messages.post.cluesLabel} />}
     </article>
   );
 }

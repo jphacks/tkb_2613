@@ -3,11 +3,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { SessionProvider } from "@/components/session/SessionProvider";
 import { ApiError, diagnose, getSession } from "@/lib/api";
+import { messages } from "@/lib/messages";
 import type { Clue } from "@/types/clue";
 import type { DiagnoseEvent } from "@/types/diagnose";
 import type { Post } from "@/types/post";
 
 import { DiagnosePanel } from "./DiagnosePanel";
+
+const d = messages.diagnose;
+const b = messages.board;
 
 vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
@@ -57,7 +61,7 @@ async function renderLoggedIn() {
       <DiagnosePanel />
     </SessionProvider>,
   );
-  return screen.findByRole("button", { name: "診断する" });
+  return screen.findByRole("button", { name: d.start });
 }
 
 afterEach(() => {
@@ -88,18 +92,18 @@ describe("DiagnosePanel", () => {
 
     fireEvent.click(await renderLoggedIn());
 
-    expect(await screen.findByRole("status")).toHaveTextContent("特定班AIが投稿を取りに行っています…");
-    const button = screen.getByRole("button", { name: "診断する" });
+    expect(await screen.findByRole("status")).toHaveTextContent(d.connecting);
+    const button = screen.getByRole("button", { name: d.start });
     expect(button).toBeDisabled();
     expect(button.querySelector(".animate-spin")).not.toBeNull();
-    expect(screen.getByRole("region", { name: "診断" })).toHaveAttribute("aria-busy", "true");
+    expect(screen.getByRole("region", { name: d.heading })).toHaveAttribute("aria-busy", "true");
 
     release();
 
-    expect(await screen.findByRole("status")).toHaveTextContent("0 件の投稿を読みました");
+    expect(await screen.findByRole("status")).toHaveTextContent(d.done(0));
     expect(button).toBeEnabled();
     expect(button.querySelector(".animate-spin")).toBeNull();
-    expect(screen.getByRole("region", { name: "診断" })).toHaveAttribute("aria-busy", "false");
+    expect(screen.getByRole("region", { name: d.heading })).toHaveAttribute("aria-busy", "false");
   });
 
   it("adds posts one by one as they arrive, then says how many were read", async () => {
@@ -114,14 +118,14 @@ describe("DiagnosePanel", () => {
 
     expect(await screen.findByText("夜勤明け。電車混んでる")).toBeInTheDocument();
     expect(screen.queryByText("ジムおわり")).not.toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("投稿を読んでいます…（1 件）");
-    expect(screen.getByRole("button", { name: "診断する" })).toBeDisabled();
+    expect(screen.getByRole("status")).toHaveTextContent(d.reading(1));
+    expect(screen.getByRole("button", { name: d.start })).toBeDisabled();
 
     stream.release();
 
     expect(await screen.findByText("ジムおわり")).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("2 件の投稿を読みました");
-    expect(screen.getByRole("button", { name: "診断する" })).toBeEnabled();
+    expect(screen.getByRole("status")).toHaveTextContent(d.done(2));
+    expect(screen.getByRole("button", { name: d.start })).toBeEnabled();
     const items = screen.getAllByRole("listitem");
     expect(items.map((li) => li.textContent)).toEqual([
       expect.stringContaining("夜勤明け。電車混んでる"),
@@ -137,9 +141,9 @@ describe("DiagnosePanel", () => {
     const button = await renderLoggedIn();
 
     fireEvent.click(button);
-    await screen.findByText("1 件の投稿を読みました");
+    await screen.findByText(d.done(1));
     fireEvent.click(button);
-    await screen.findByText("1 件の投稿を読みました");
+    await screen.findByText(d.done(1));
 
     expect(screen.getAllByText("夜勤明け。電車混んでる")).toHaveLength(1);
   });
@@ -147,14 +151,14 @@ describe("DiagnosePanel", () => {
   it("shows the error and keeps the posts read so far", async () => {
     vi.mocked(diagnose).mockImplementation(async function* () {
       yield { event: "post", post: post(1, "夜勤明け。電車混んでる") };
-      throw new ApiError("network", "診断の途中で接続が切れました");
+      throw new ApiError("network", messages.errors.diagnoseInterrupted);
     });
 
     fireEvent.click(await renderLoggedIn());
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("診断の途中で接続が切れました");
+    expect(await screen.findByRole("alert")).toHaveTextContent(messages.errors.diagnoseInterrupted);
     expect(screen.getByText("夜勤明け。電車混んでる")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "診断する" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: d.start })).toBeEnabled();
   });
 
   it("does not show details of unexpected errors", async () => {
@@ -166,7 +170,7 @@ describe("DiagnosePanel", () => {
     fireEvent.click(await renderLoggedIn());
 
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("診断できませんでした");
+    expect(alert).toHaveTextContent(d.failed);
     expect(alert).not.toHaveTextContent("secret");
   });
 
@@ -198,23 +202,23 @@ describe("DiagnosePanel", () => {
 
     fireEvent.click(await renderLoggedIn());
     await screen.findByText("夜勤明け。電車混んでる");
-    expect(screen.queryByRole("region", { name: "捜査ボード" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: b.heading })).not.toBeInTheDocument();
 
     stream.release();
 
-    const board = await screen.findByRole("region", { name: "捜査ボード" });
-    const [item] = within(within(board).getByRole("list", { name: "推定できたこと" })).getAllByRole(
+    const board = await screen.findByRole("region", { name: b.heading });
+    const [item] = within(within(board).getByRole("list", { name: b.conclusionsLabel })).getAllByRole(
       "listitem",
     );
-    expect(item).toHaveTextContent("決まった外出");
-    expect(item).toHaveTextContent("推定");
+    expect(item).toHaveTextContent(b.attributeLabels.routine);
+    expect(item).toHaveTextContent(b.inferred);
     expect(item).toHaveTextContent("毎週火曜 20時ごろに出かけている");
-    expect(within(item).getByRole("list", { name: "根拠の手がかり" })).toHaveTextContent(
+    expect(within(item).getByRole("list", { name: b.reasonsLabel })).toHaveTextContent(
       "生活の決まり 毎週火曜はジム",
     );
-    expect(screen.getByRole("list", { name: "この投稿の手がかり" })).toHaveTextContent("毎週火曜はジム");
-    expect(screen.getByText("手がかりを探せませんでした（写真を取得できませんでした）")).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("2 件の投稿を読みました");
+    expect(screen.getByRole("list", { name: messages.post.cluesLabel })).toHaveTextContent("毎週火曜はジム");
+    expect(screen.getByText(messages.clues.failed("写真を取得できませんでした"))).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(d.done(2));
   });
 
   it("says when nothing could be inferred", async () => {
@@ -226,7 +230,7 @@ describe("DiagnosePanel", () => {
     fireEvent.click(await renderLoggedIn());
 
     expect(
-      await screen.findByText("投稿からは、あなたについて推定できることは見つかりませんでした"),
+      await screen.findByText(b.empty),
     ).toBeInTheDocument();
   });
 });
