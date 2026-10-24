@@ -1,16 +1,55 @@
-"""手がかりの形式。Python 側の正。
+"""api・detect・engine で共有する形式（投稿と手がかり）。Python 側の正。
 
-web/src/types/clue.ts と同時に変更すること。
-api・detect・engine はここを参照する。
+投稿は web/src/types/post.ts、手がかりは web/src/types/clue.ts と同時に変更すること。
 """
 
 from enum import StrEnum
 from typing import Annotated, Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 NonNegativeInt = Annotated[int, Field(ge=0)]
+PositiveInt = Annotated[int, Field(gt=0)]
 Region = tuple[NonNegativeInt, NonNegativeInt, NonNegativeInt, NonNegativeInt]
+
+# 画像を取りに行ってよいのは Bluesky の CDN だけ
+BSKY_CDN_PREFIX = "https://cdn.bsky.app/"
+# Bluesky の投稿に付けられる写真は4枚まで
+MAX_IMAGES_PER_POST = 4
+
+
+class PostImage(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    index: NonNegativeInt
+    url: str
+    alt: str
+    width: PositiveInt
+    height: PositiveInt
+
+    @field_validator("url")
+    @classmethod
+    def _check_cdn(cls, value: str) -> str:
+        if not value.startswith(BSKY_CDN_PREFIX):
+            raise ValueError(f"画像の URL は {BSKY_CDN_PREFIX} で始まること")
+        return value
+
+
+class Post(BaseModel):
+    """Bluesky から取得した投稿。"""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    post_id: str = Field(min_length=1)
+    text: str
+    created_at: AwareDatetime
+    images: list[PostImage] = Field(max_length=MAX_IMAGES_PER_POST)
+
+    @model_validator(mode="after")
+    def _check_image_order(self) -> Self:
+        if [image.index for image in self.images] != list(range(len(self.images))):
+            raise ValueError("images の index は 0 から順に並べること")
+        return self
 
 
 class ClueType(StrEnum):
