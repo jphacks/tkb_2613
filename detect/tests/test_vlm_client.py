@@ -6,7 +6,7 @@ import pytest
 import respx
 
 from tkb_detect.errors import DetectError, ForbiddenEndpointError
-from tkb_detect.vlm_client import MOCK_VLM_TEXT, VlmClient, VlmConfig
+from tkb_detect.vlm_client import MOCK_VLM_JSON, MOCK_VLM_TEXT, VlmClient, VlmConfig
 
 BASE = "http://vlm.local/v1"
 IMAGE = b"\xff\xd8\xff\xe0fake"
@@ -51,6 +51,75 @@ async def test_sends_openai_compatible_request_with_image() -> None:
     assert content[0] == {"type": "text", "text": "手がかりは？"}
     expected_url = "data:image/jpeg;base64," + base64.b64encode(IMAGE).decode()
     assert content[1] == {"type": "image_url", "image_url": {"url": expected_url}}
+
+
+@pytest.mark.anyio
+async def test_always_disables_thinking_and_uses_zero_temperature() -> None:
+    with respx.mock as router:
+        route = router.post(f"{BASE}/chat/completions").respond(
+            json={"choices": [{"message": {"content": "ok"}}]}
+        )
+
+        await VlmClient(_config()).complete(IMAGE, "image/jpeg", "p")
+        await VlmClient(_config()).complete_text("p")
+
+    for call in route.calls:
+        body = json.loads(call.request.content)
+        assert body["chat_template_kwargs"] == {"enable_thinking": False}
+        assert body["temperature"] == 0
+        assert "response_format" not in body
+
+
+@pytest.mark.anyio
+async def test_requests_json_schema_output_with_system_prompt() -> None:
+    schema = {"type": "object", "properties": {"clues": {"type": "array"}}}
+    with respx.mock as router:
+        route = router.post(f"{BASE}/chat/completions").respond(
+            json={"choices": [{"message": {"content": '{"clues": []}'}}]}
+        )
+
+        text = await VlmClient(_config()).complete(
+            IMAGE, "image/jpeg", "p", system="守ること", json_schema=schema
+        )
+
+    assert text == '{"clues": []}'
+    body = json.loads(route.calls.last.request.content)
+    assert body["response_format"] == {
+        "type": "json_schema",
+        "json_schema": {"name": "clues", "schema": schema},
+    }
+    assert body["messages"][0] == {"role": "system", "content": "守ること"}
+    assert body["messages"][1]["role"] == "user"
+
+
+@pytest.mark.anyio
+async def test_complete_text_sends_text_only() -> None:
+    with respx.mock as router:
+        route = router.post(f"{BASE}/chat/completions").respond(
+            json={"choices": [{"message": {"content": "ok"}}]}
+        )
+
+        text = await VlmClient(_config()).complete_text("本文", json_schema={"type": "object"})
+
+    assert text == "ok"
+    body = json.loads(route.calls.last.request.content)
+    assert body["messages"] == [{"role": "user", "content": "本文"}]
+    assert body["chat_template_kwargs"] == {"enable_thinking": False}
+    assert body["response_format"]["type"] == "json_schema"
+
+
+@pytest.mark.anyio
+async def test_mock_mode_returns_json_when_schema_requested_without_network() -> None:
+    client = VlmClient(VlmConfig(base_url="", api_key="", model="", mock_mode=True))
+
+    with respx.mock(assert_all_called=False) as router:
+        image_text = await client.complete(IMAGE, "image/jpeg", "p", json_schema={})
+        body_text = await client.complete_text("p", json_schema={})
+        plain = await client.complete_text("p")
+
+    assert image_text == body_text == MOCK_VLM_JSON
+    assert plain == MOCK_VLM_TEXT
+    assert router.calls.call_count == 0
 
 
 @pytest.mark.anyio

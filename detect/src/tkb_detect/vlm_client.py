@@ -13,7 +13,10 @@ from tkb_detect.errors import DetectError
 from tkb_detect.guard import ensure_team_endpoint
 
 MOCK_VLM_TEXT = "（モック）駅名標「新宿」が写っています。"
+MOCK_VLM_JSON = '{"clues": []}'
 DEFAULT_TIMEOUT_S = 60.0
+# Qwen3 系は既定で思考モードが入り遅くなるため、毎回切る
+CHAT_TEMPLATE_KWARGS = {"enable_thinking": False}
 
 
 @dataclass(frozen=True)
@@ -31,28 +34,64 @@ class VlmClient:
         # モックでは接続しないので、接続先の確認もしない
         self._base_url = "" if config.mock_mode else ensure_team_endpoint(config.base_url)
 
-    async def complete(self, image: bytes, mime_type: str, prompt: str) -> str:
+    async def complete(
+        self,
+        image: bytes,
+        mime_type: str,
+        prompt: str,
+        *,
+        system: str | None = None,
+        json_schema: dict[str, Any] | None = None,
+    ) -> str:
+        """画像と指示を送る。json_schema を渡すと、その形の JSON だけを返させる。"""
         if self._config.mock_mode:
-            return MOCK_VLM_TEXT
+            return MOCK_VLM_TEXT if json_schema is None else MOCK_VLM_JSON
 
-        data = await self._post(self._build_payload(image, mime_type, prompt))
+        data_url = f"data:{mime_type};base64,{base64.b64encode(image).decode()}"
+        content: list[dict[str, Any]] = [
+            {"type": "text", "text": prompt},
+            {"type": "image_url", "image_url": {"url": data_url}},
+        ]
+        data = await self._post(self._build_payload(content, system, json_schema))
         return _extract_content(data)
 
-    def _build_payload(self, image: bytes, mime_type: str, prompt: str) -> dict[str, Any]:
-        data_url = f"data:{mime_type};base64,{base64.b64encode(image).decode()}"
-        return {
+    async def complete_text(
+        self,
+        prompt: str,
+        *,
+        system: str | None = None,
+        json_schema: dict[str, Any] | None = None,
+    ) -> str:
+        """画像なしで文字だけを送る（投稿の本文の読み取り用）。"""
+        if self._config.mock_mode:
+            return MOCK_VLM_TEXT if json_schema is None else MOCK_VLM_JSON
+
+        data = await self._post(self._build_payload(prompt, system, json_schema))
+        return _extract_content(data)
+
+    def _build_payload(
+        self,
+        user_content: str | list[dict[str, Any]],
+        system: str | None,
+        json_schema: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        messages: list[dict[str, Any]] = []
+        if system is not None:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": user_content})
+
+        payload: dict[str, Any] = {
             "model": self._config.model,
             "temperature": 0,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt},
-                        {"type": "image_url", "image_url": {"url": data_url}},
-                    ],
-                }
-            ],
+            "messages": messages,
+            "chat_template_kwargs": dict(CHAT_TEMPLATE_KWARGS),
         }
+        if json_schema is not None:
+            payload["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {"name": "clues", "schema": json_schema},
+            }
+        return payload
 
     async def _post(self, payload: dict[str, Any]) -> Any:
         headers = {}
