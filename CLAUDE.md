@@ -41,6 +41,43 @@ infra/      Docker Compose、起動手順
 docs/       設計メモ、pre-hackday.md
 ```
 
+## アーキテクチャのルール
+
+### 依存の向き
+
+```
+web ──HTTP──> api ──> detect ──> VLM / OCR（チームのサーバー）
+                 └──> engine ──> data/processed/*.parquet（data-prep が作る）
+```
+
+- web が呼ぶのは api だけ。web から VLM・OCR・外部のサービスに直接つながない
+- api だけが FastAPI と環境変数を知っている。detect と engine は FastAPI も `tkb_api` も import しない、ただのライブラリにする
+- detect と engine は互いを import しない。間は手がかりの形式でつなぎ、組み合わせるのは api の役目
+- data-prep は事前に一度だけ動かすもの。api・detect・engine は data-prep のコードを import せず、出力の Parquet だけを読む
+
+### 各パッケージの役目
+
+- `api/routes/`：HTTP の受け付けだけ（形式・サイズの確認、エラーを HTTP に直す、SSE での配信）。判定や計算は書かず、detect・engine の関数を呼ぶ
+- `api/config.py`：環境変数を読むのはここ（`Settings`）だけ。detect・engine には設定をデータクラス（例：`VlmConfig`）で渡す
+- `detect/`：モデルを呼び、結果を手がかりの形式に変換する。外に出る HTTP はここだけで書き、接続先は必ず `ensure_team_endpoint` を通す
+- `engine/`：手がかりと表から残り世帯数などを計算する。**写真の画素を受け取らない**（手がかりの値と `region` だけで計算する）。ネットワークにつながない
+- `web/src/lib/api.ts`：api を呼ぶのはここだけ。コンポーネントから `fetch` しない
+- `web/src/types/`：api の応答の型と、型を確かめる関数（`isDetectResponse` など）。api から受け取ったものは必ずこれで確かめてから使う
+- `web/src/components/<機能>/`：画面の部品。テストは同じフォルダに置く
+
+### 写真の通り道
+
+- 写真は web → api の 1 回だけ送る。api は本文（画像そのもの）で受け取る。multipart や `UploadFile` は一時ファイルに書き出すので使わない
+- 写真を受け取る関数は `bytes` で受け取り、ファイルのパスを受け取らない。途中でディスクに書かない
+- 例外やエラーの文言に、写真・本文・モデルの応答の中身を入れない（型名や HTTP の状態コードだけにする）
+
+### 新しく作るときの決まり
+
+- API を増やすときは、Pydantic の応答モデル（`api/`）、TypeScript の型と型を確かめる関数（`web/src/types/`）、両方のテストを同じ PR で足す
+- api と web で同じ値を持つもの（画像の上限 `MAX_IMAGE_BYTES`、対応する形式など）は、片方を変えたらもう片方も変える
+- 外につながる部分（VLM、OCR、表の読み込み）は `MOCK_MODE=1` で、外部にも公開データにもつながずに動くようにする。テストと CI は公開データなしで通ること
+- engine のテストは、data-prep と同じく小さな自作の表で書く
+
 ## 手がかりの形式
 
 検出結果はすべてこの形にそろえる。モデルを入れ替えても後段が壊れないようにするため。ローカル担当にもこの形で依頼済み。
