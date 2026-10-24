@@ -14,6 +14,7 @@ from tkb_detect.errors import DetectError
 from tkb_detect.extract import (
     PHOTO_MAX_TOKENS,
     RETRY_REPETITION_PENALTY,
+    SMALL_REGION_MAX_CONFIDENCE,
     TEXT_MAX_TOKENS,
     Extractor,
     build_extractor,
@@ -313,3 +314,46 @@ async def test_gives_up_after_the_retry_is_also_cut_off() -> None:
             await Extractor(_vlm_client()).extract_post(_post("本文", 0), [])
 
     assert route.call_count == 2
+
+
+@pytest.mark.anyio
+async def test_caps_confidence_of_small_regions() -> None:
+    # 元の画像 2560×1440。0〜1000 の相対値で 10 は 横 25.6px・縦 14.4px
+    reply = {
+        "clues": [
+            # 縦書きの細い看板（横 25px）
+            {
+                "type": "shop",
+                "value": "細い看板",
+                "bbox_2d": [500, 100, 510, 300],
+                "confidence": 0.9,
+            },
+            # 小さいナンバープレート（縦 14px）
+            {"type": "plate", "value": "160", "bbox_2d": [300, 600, 340, 610], "confidence": 0.95},
+            # 大きくはっきり写った駅名標
+            {
+                "type": "station_sign",
+                "value": "大きい",
+                "bbox_2d": [100, 100, 400, 300],
+                "confidence": 0.95,
+            },
+            # 位置がないものは変えない
+            {"type": "uniform", "value": "作業靴", "bbox_2d": None, "confidence": 0.8},
+            # もともと低いものは上げない
+            {"type": "shop", "value": "低い", "bbox_2d": [600, 100, 610, 300], "confidence": 0.3},
+        ]
+    }
+    extractor = Extractor(_vlm_client(), coordinate_space=CoordinateSpace.RELATIVE_1000)
+
+    with respx.mock as router:
+        router.post(f"{VLM}/chat/completions").mock(side_effect=_router(reply, {"clues": []}))
+        clues = await extractor.extract_post(_post("", 1), [_png(2560, 1440)])
+
+    confidence = {c.value: c.confidence for c in clues}
+    assert confidence == {
+        "細い看板": SMALL_REGION_MAX_CONFIDENCE,
+        "160": SMALL_REGION_MAX_CONFIDENCE,
+        "大きい": 0.95,
+        "作業靴": 0.8,
+        "低い": 0.3,
+    }
