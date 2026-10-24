@@ -120,8 +120,9 @@ export function LoginPanel() {
         </button>
       </fieldset>
 
+      {/* 画面ではボタンのくるくるで伝わるので、文字は読み上げだけにする */}
       {isPending && (
-        <p role="status" className="mt-4 text-ink/70">
+        <p role="status" className="sr-only">
           {t.pending}
         </p>
       )}
