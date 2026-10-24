@@ -27,7 +27,7 @@ describe("toDiagnoseEvent", () => {
 
   it.each([
     ["data not JSON", "post", "{"],
-    ["post in the wrong format", "post", JSON.stringify({ post: { ...POST, post_id: "x" } })],
+    ["post in the wrong format", "post", JSON.stringify({ post: { ...POST, post_id: "" } })],
     ["post missing", "post", JSON.stringify({})],
     ["posts_seen negative", "done", JSON.stringify({ posts_seen: -1 })],
     ["posts_seen not an integer", "done", JSON.stringify({ posts_seen: "10" })],

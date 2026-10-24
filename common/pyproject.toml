@@ -1,0 +1,15 @@
+[project]
+name = "tkb-common"
+version = "0.0.0"
+description = "api・detect・engine で共有する型（手がかりの形式など）"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+  "pydantic>=2.10",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tkb_common"]
