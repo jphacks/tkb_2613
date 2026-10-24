@@ -14,7 +14,12 @@ class Settings(BaseSettings):
     vlm_model: str = ""
     ocr_base_url: str = ""
     cors_origins: list[str] = ["http://localhost:3000"]
-    session_cookie_secure: bool = False
+    # Bluesky のログイン先
+    bsky_service: str = "https://bsky.social"
+    # ログインのセッションをメモリに置く時間（分）
+    session_ttl_minutes: int = 30
+    # HTTPS で公開するときは 1 にする（Cookie を HTTPS だけで送る）
+    cookie_secure: bool = False
 
 
 @lru_cache

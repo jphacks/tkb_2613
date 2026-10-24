@@ -52,7 +52,7 @@ plugins = ["pydantic.mypy"]
 
 # 型情報を持たないライブラリ
 [[tool.mypy.overrides]]
-module = ["atproto", "atproto.*", "jismesh.*", "pyarrow.*"]
+module = ["atproto", "atproto.*", "atproto_client.*", "jismesh.*", "pyarrow.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

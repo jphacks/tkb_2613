@@ -2,34 +2,41 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import cast
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from tkb_api.bluesky_auth import BlueskyAuthenticator
+from tkb_api.bluesky import SessionStore
 from tkb_api.config import Settings, get_settings
 from tkb_api.routes import detect, session
-from tkb_api.sessions import SessionStore
+
+
+async def _validation_error(_: Request, exc: Exception) -> JSONResponse:
+    # 既定の応答は送られてきた値（パスワードなど）をそのまま返すので、場所と理由だけにする
+    errors = exc.errors() if isinstance(exc, RequestValidationError) else []
+    detail = [{"loc": e["loc"], "msg": e["msg"], "type": e["type"]} for e in errors]
+    return JSONResponse({"detail": detail}, status_code=status.HTTP_422_UNPROCESSABLE_CONTENT)
 
 
 def create_app(
     settings: Settings | None = None,
-    session_store: SessionStore | None = None,
-    authenticator: BlueskyAuthenticator | None = None,
+    sessions: SessionStore | None = None,
 ) -> FastAPI:
     settings = settings or get_settings()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
-        store = cast(SessionStore | None, getattr(app.state, "session_store", None))
+        store = cast(SessionStore | None, getattr(app.state, "sessions", None))
         if store is not None:
             store.close()
 
     app = FastAPI(title="tkb_2613 API", lifespan=lifespan)
-    app.state.settings = settings
-    app.state.session_store = session_store if session_store is not None else SessionStore()
-    app.state.authenticator = authenticator if authenticator is not None else BlueskyAuthenticator()
+    app.state.sessions = (
+        sessions if sessions is not None else SessionStore(settings.session_ttl_minutes * 60)
+    )
+    app.add_exception_handler(RequestValidationError, _validation_error)
 
     app.add_middleware(
         CORSMiddleware,

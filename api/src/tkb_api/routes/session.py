@@ -1,204 +1,103 @@
-"""Bluesky アカウントによるセッション管理エンドポイント。
+"""Bluesky へのログインとログアウト。
 
-Cookie に署名なしの推測不能トークンを保存し、サーバー側のメモリ内セッションストアで
-SDK クライアントと本人 DID を保持する。パスワードや DID をレスポンス本文に含めない。
+診断できるのはログインした本人のアカウントだけにするため、以降の API は
+current_session で得たセッションの DID の投稿だけを扱う。
+リクエスト本文（アプリパスワードを含む）はログに出さない。
 """
 
-from typing import Annotated, cast
+from functools import partial
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from pydantic import BaseModel, ConfigDict, SecretStr, field_validator
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
 
-from tkb_api.bluesky_auth import (
-    AuthenticatedAccount,
-    AuthenticationError,
-    BlueskyAuthenticator,
-    LoginClient,
-    LoginProfile,
-)
+from tkb_api import bluesky
+from tkb_api.bluesky import BlueskySession, LoginFn, LoginResult, SessionStore
 from tkb_api.config import Settings, get_settings
-from tkb_api.sessions import SESSION_TTL_SECONDS, SessionStore
-
-SESSION_COOKIE_NAME = "tkb_session"
+from tkb_api.schemas import SessionRequest, SessionResponse
 
 router = APIRouter(prefix="/api")
 
-
-class SessionLoginRequest(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    handle: str
-    app_password: SecretStr
-
-    @field_validator("handle")
-    @classmethod
-    def _strip_handle(cls, value: str) -> str:
-        return value.strip()
+SESSION_COOKIE = "tkb_session"
+MOCK_DID = "did:plc:mockdemoaccount"
 
 
-class SessionStatusResponse(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    authenticated: bool
-    handle: str | None = None
+def get_session_store(request: Request) -> SessionStore:
+    store: SessionStore = request.app.state.sessions
+    return store
 
 
-class _MockLoginProfile:
-    def __init__(self, did: str, handle: str) -> None:
-        self._did = did
-        self._handle = handle
-
-    @property
-    def did(self) -> str:
-        return self._did
-
-    @property
-    def handle(self) -> str:
-        return self._handle
+def get_login(settings: Annotated[Settings, Depends(get_settings)]) -> LoginFn:
+    return partial(bluesky.login, service=settings.bsky_service)
 
 
-class _MockLoginClient:
-    """モックモード用の軽量クライアント。外部通信は一切行わない。"""
-
-    def __init__(self, did: str, handle: str) -> None:
-        self._did = did
-        self._handle = handle
-
-    @property
-    def did(self) -> str:
-        return self._did
-
-    @property
-    def handle(self) -> str:
-        return self._handle
-
-    async def login(self, identifier: str, password: str) -> LoginProfile:
-        return _MockLoginProfile(did=self._did, handle=self._handle)
-
-
-def _normalize_handle(handle: str) -> str:
-    cleaned = handle.strip().lstrip("@")
-    if "." not in cleaned:
-        return f"{cleaned}.bsky.social"
-    return cleaned
-
-
-def _resolve_settings(request: Request, fallback: Settings) -> Settings:
-    state_settings = getattr(request.app.state, "settings", None)
-    if isinstance(state_settings, Settings):
-        return state_settings
-    return fallback
-
-
-def get_current_account(request: Request) -> AuthenticatedAccount:
-    """現在のリクエストから本人認証済みアカウントを取り出す依存ヘルパー。"""
-    session_id = request.cookies.get(SESSION_COOKIE_NAME)
-    if not session_id:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="ログインが必要です",
-        )
-
-    session_store = cast(SessionStore, request.app.state.session_store)
-    account = session_store.get(session_id)
-    if account is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="ログインが必要です",
-        )
-    return account
+def current_session(
+    store: Annotated[SessionStore, Depends(get_session_store)],
+    session_id: Annotated[str | None, Cookie(alias=SESSION_COOKIE)] = None,
+) -> BlueskySession:
+    session = store.get(session_id) if session_id else None
+    if session is None:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "ログインしてください")
+    return session
 
 
 @router.post("/session")
-async def login(
-    body: SessionLoginRequest,
-    request: Request,
+async def create_session(
+    body: SessionRequest,
     response: Response,
     settings: Annotated[Settings, Depends(get_settings)],
-) -> SessionStatusResponse:
-    """Bluesky アカウントでログインし、HttpOnly Cookie を発行する。"""
-    active_settings = _resolve_settings(request, settings)
-    handle = body.handle.strip()
-    app_password_raw = body.app_password.get_secret_value()
-
-    if not handle or not app_password_raw.strip():
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Bluesky の認証情報を入力してください",
-        )
-
-    if active_settings.mock_mode:
-        normalized_handle = _normalize_handle(handle)
-        mock_client = cast(
-            LoginClient,
-            _MockLoginClient(did="did:plc:mock-user", handle=normalized_handle),
-        )
-        account = AuthenticatedAccount(
-            did="did:plc:mock-user",
-            handle=normalized_handle,
-            client=mock_client,
-        )
+    store: Annotated[SessionStore, Depends(get_session_store)],
+    login: Annotated[LoginFn, Depends(get_login)],
+    session_id: Annotated[str | None, Cookie(alias=SESSION_COOKIE)] = None,
+) -> SessionResponse:
+    if settings.mock_mode:
+        result = LoginResult(handle=body.handle, did=MOCK_DID, client=None)
     else:
-        authenticator = cast(BlueskyAuthenticator, request.app.state.authenticator)
         try:
-            account = await authenticator.authenticate(handle, app_password_raw)
-        except AuthenticationError as exc:
+            result = await login(body.handle, body.password.get_secret_value())
+        except bluesky.LoginFailedError:
             raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=str(exc),
-            ) from exc
+                status.HTTP_401_UNAUTHORIZED, "ハンドル名かパスワードが違います"
+            ) from None
+        except bluesky.BlueskyUnavailableError:
+            raise HTTPException(
+                status.HTTP_502_BAD_GATEWAY, "Bluesky に接続できませんでした"
+            ) from None
 
-    session_store = cast(SessionStore, request.app.state.session_store)
-    existing_session_id = request.cookies.get(SESSION_COOKIE_NAME)
-    if existing_session_id:
-        session_store.revoke(existing_session_id)
+    if session_id:
+        store.delete(session_id)
 
-    session_id = session_store.create(account)
+    new_session_id = store.create(result)
     response.set_cookie(
-        key=SESSION_COOKIE_NAME,
-        value=session_id,
-        max_age=SESSION_TTL_SECONDS,
+        SESSION_COOKIE,
+        new_session_id,
+        max_age=settings.session_ttl_minutes * 60,
         httponly=True,
         samesite="lax",
-        secure=active_settings.session_cookie_secure,
+        secure=settings.cookie_secure,
         path="/",
     )
-    return SessionStatusResponse(authenticated=True, handle=account.handle)
+    return SessionResponse(handle=result.handle, did=result.did)
 
 
 @router.get("/session")
-def get_session(request: Request) -> SessionStatusResponse:
-    """セッションの有効状態とハンドル名を返す。未認証でも 200 で返す。"""
-    session_id = request.cookies.get(SESSION_COOKIE_NAME)
-    if not session_id:
-        return SessionStatusResponse(authenticated=False, handle=None)
-
-    session_store = cast(SessionStore, request.app.state.session_store)
-    account = session_store.get(session_id)
-    if account is None:
-        return SessionStatusResponse(authenticated=False, handle=None)
-
-    return SessionStatusResponse(authenticated=True, handle=account.handle)
+def read_session(session: Annotated[BlueskySession, Depends(current_session)]) -> SessionResponse:
+    """今ログインしているのは誰か。画面を開き直したときに、ログイン状態を戻すのに使う。"""
+    return SessionResponse(handle=session.handle, did=session.did)
 
 
-@router.delete("/session")
+@router.delete("/session", status_code=status.HTTP_204_NO_CONTENT)
 def delete_session(
-    request: Request,
     response: Response,
     settings: Annotated[Settings, Depends(get_settings)],
-) -> SessionStatusResponse:
-    """ログアウトし、サーバー側セッションの破棄と Cookie の削除を行う。"""
-    active_settings = _resolve_settings(request, settings)
-    session_id = request.cookies.get(SESSION_COOKIE_NAME)
+    store: Annotated[SessionStore, Depends(get_session_store)],
+    session_id: Annotated[str | None, Cookie(alias=SESSION_COOKIE)] = None,
+) -> None:
     if session_id:
-        session_store = cast(SessionStore, request.app.state.session_store)
-        session_store.revoke(session_id)
-
+        store.delete(session_id)
     response.delete_cookie(
-        key=SESSION_COOKIE_NAME,
+        SESSION_COOKIE,
         path="/",
         httponly=True,
         samesite="lax",
-        secure=active_settings.session_cookie_secure,
+        secure=settings.cookie_secure,
     )
-    return SessionStatusResponse(authenticated=False, handle=None)
