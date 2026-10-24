@@ -1,6 +1,6 @@
 /**
  * 手がかりの形式。TypeScript 側の正。
- * api/src/tkb_api/schemas.py と同時に変更すること。
+ * common/src/tkb_common/schemas.py と同時に変更すること。
  */
 
 /** 写真からだけ出る type */

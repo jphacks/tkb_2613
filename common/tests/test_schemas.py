@@ -3,7 +3,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from tkb_api.schemas import Clue, ClueSource, ClueType, DetectResponse
+from tkb_common.schemas import Clue, ClueSource, ClueType, DetectResponse
 
 POST_ID = "at://did:plc:xxxx/app.bsky.feed.post/3kxxxx"
 

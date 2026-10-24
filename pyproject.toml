@@ -8,7 +8,7 @@ dependencies = []
 package = false
 
 [tool.uv.workspace]
-members = ["api", "detect", "data-prep"]
+members = ["common", "api", "detect", "data-prep"]
 
 [dependency-groups]
 dev = [
@@ -30,7 +30,7 @@ select = ["E", "F", "W", "I", "B", "UP", "S", "SIM", "RUF"]
 ignore = ["RUF001", "RUF002", "RUF003"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["tkb_api", "tkb_detect", "tkb_data_prep"]
+known-first-party = ["tkb_common", "tkb_api", "tkb_detect", "tkb_data_prep"]
 
 [tool.ruff.lint.per-file-ignores]
 "**/tests/**" = ["S101"]
@@ -39,6 +39,8 @@ known-first-party = ["tkb_api", "tkb_detect", "tkb_data_prep"]
 python_version = "3.13"
 strict = true
 files = [
+  "common/src",
+  "common/tests",
   "api/src",
   "api/tests",
   "detect/src",
@@ -54,5 +56,5 @@ module = ["jismesh.*", "pyarrow.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
-testpaths = ["api/tests", "detect/tests", "data-prep/tests"]
-addopts = "--import-mode=importlib --cov=tkb_api --cov=tkb_detect --cov=tkb_data_prep --cov-report=term-missing --cov-fail-under=80"
+testpaths = ["common/tests", "api/tests", "detect/tests", "data-prep/tests"]
+addopts = "--import-mode=importlib --cov=tkb_common --cov=tkb_api --cov=tkb_detect --cov=tkb_data_prep --cov-report=term-missing --cov-fail-under=80"

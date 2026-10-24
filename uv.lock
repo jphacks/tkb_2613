@@ -6,6 +6,7 @@ requires-python = "==3.13.*"
 members = [
     "tkb-2613",
     "tkb-api",
+    "tkb-common",
     "tkb-data-prep",
     "tkb-detect",
 ]
@@ -575,6 +576,7 @@ dependencies = [
     { name = "fastapi" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
+    { name = "tkb-common" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -583,8 +585,20 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.115" },
     { name = "pydantic", specifier = ">=2.10" },
     { name = "pydantic-settings", specifier = ">=2.6" },
+    { name = "tkb-common", editable = "common" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32" },
 ]
+
+[[package]]
+name = "tkb-common"
+version = "0.0.0"
+source = { editable = "common" }
+dependencies = [
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "pydantic", specifier = ">=2.10" }]
 
 [[package]]
 name = "tkb-data-prep"
