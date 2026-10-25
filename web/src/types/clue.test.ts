@@ -75,7 +75,7 @@ describe("clue enums", () => {
     expect([...CLUE_TYPES].sort()).toEqual(
       [
         "station_sign", "rail_view", "reflection", "shop", "landmark", "address_text",
-        "postal_code", "phone", "plate", "uniform", "face", "key", "code",
+        "postal_code", "phone", "plate", "uniform", "face", "key", "code", "local_item", "notice",
         "name_text", "org_text", "handle_text", "place_text",
         "age_text", "routine_text", "relation_text",
       ].sort(),

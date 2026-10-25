@@ -18,6 +18,8 @@ export const PHOTO_ONLY_CLUE_TYPES = [
   "face",
   "key",
   "code",
+  "local_item",
+  "notice",
 ] as const;
 
 /** 写真と本文の両方から出る type */
