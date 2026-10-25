@@ -45,7 +45,7 @@ SSEブロックは `event: <name>\ndata: <JSON>\n\n`。JSONはUTF-8で送られ�
 | 1 | `post` | `{"post": Post}` | 診断対象投稿をすべて取得した後、投稿一覧の順に全件送信。各投稿を送るたび手がかり抽出を待つわけではない。 |
 | 2 | `clues` | `{"post_id":"…","clues":[Clue,…],"error":string|null}` | 抽出処理が完了した投稿ごと。抽出処理の完了順。成功時は `error:null`。投稿単位の抽出失敗時は空の `clues` とエラー文字列を送る。 |
 | 3 | `conclusions` | `{"clues":[全Clue,…],"conclusions":[Conclusion,…]}` | 全投稿の抽出処理の後に1回。cluesは `clues` イベントで得た配列を集めたもの。 |
-| 4 | `plan` | Simulation ＋ `"posts":[{"post_id","broken"},…]` | 推理の後に1回。`delete` は名前・生年月日の推定を優先し、住所・最寄り駅・行動時間・留守の時間も崩す危ない投稿を最大3件、推薦順に並べる（`tkb_engine.planner.plan`）。`posts` は各投稿だけを消したときに崩れる項目。候補がなければ `delete` は空。 |
+| 4 | `plan` | Simulation ＋ `"posts":[{"post_id","broken"},…]` | 推理の後に1回。`delete` は捜査ボードの結論末尾3項目を崩す投稿を最大3件、推薦順に並べる（`tkb_engine.planner.plan`）。`posts` は各投稿だけを消したときに崩れる項目。候補がなければ `delete` は空。 |
 | 5 | `done` | `{"posts_seen":number}` | 正常完了時に1回。 |
 
 ### 失敗・切断の現状

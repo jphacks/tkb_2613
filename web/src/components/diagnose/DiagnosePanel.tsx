@@ -157,7 +157,13 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
       )}
 
       {!busy && result && risky && (
-        <RiskyPosts posts={posts} risky={risky} clueCount={result.clues.length} onSimulated={setSimulation} />
+        <RiskyPosts
+          posts={posts}
+          risky={risky}
+          targetAttributes={[...new Set(result.conclusions.slice(-3).map((c) => c.attribute))]}
+          clueCount={result.clues.length}
+          onSimulated={setSimulation}
+        />
       )}
 
       {posts.length > 0 && (

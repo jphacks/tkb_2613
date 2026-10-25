@@ -67,23 +67,17 @@ def test_diagnose_streams_the_plan_before_done(client: TestClient) -> None:
 
     proposal = events["plan"]
     assert proposal["delete"][0] == NAME_POST
-    assert set(proposal["delete"]) == {NAME_POST, ADDRESS_POST, GYM_POST}
     assert {"given_name_or_nickname", "birthday"} <= set(proposal["broken"])
-    assert {"station", "active_time", "routine"} <= set(proposal["broken"])
-    # 推薦対象の重要な項目は消したあとに残らない。年齢などは対象外なので残る
-    assert not {c["attribute"] for c in proposal["after"]} & {
-        "full_name",
-        "given_name_or_nickname",
-        "birthday",
-        "home_area",
-        "home_block",
-        "station",
-        "active_time",
-        "routine",
-    }
+    conclusions = events["conclusions"]["conclusions"]
+    target_conclusions = conclusions[-3:]
+    target_attributes = {c["attribute"] for c in target_conclusions}
+    assert set(proposal["broken"]) & target_attributes
+    assert not {c["attribute"] for c in proposal["after"]} & target_attributes
+    target_clue_indices = {i for c in target_conclusions for i in c["clue_indices"]}
+    target_post_ids = {events["conclusions"]["clues"][i]["post_id"] for i in target_clue_indices}
+    assert set(proposal["delete"]) <= target_post_ids
     by_post = {p["post_id"]: p["broken"] for p in proposal["posts"]}
-    assert "station" in by_post[ADDRESS_POST]
-    assert "routine" in by_post[GYM_POST]
+    assert set(proposal["delete"]) <= by_post.keys()
 
 
 def test_simulate_requires_login(client: TestClient) -> None:

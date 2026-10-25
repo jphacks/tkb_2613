@@ -11,9 +11,16 @@ import { DeleteConfirm } from "./DeleteConfirm";
 
 const t = messages.risky;
 
-/** engine の IMPORTANT_ATTRIBUTES（tkb_engine/planner.py）とそろえる。全部崩れたら逃げ切り */
-const IMPORTANT_ATTRIBUTES = [
-  "full_name", "given_name_or_nickname", "birthday", "home_area", "home_block", "station", "active_time", "routine",
+/** 呼び出し元からボード項目が渡されない場合の互換用判定 */
+const FALLBACK_ATTRIBUTES = [
+  "full_name",
+  "given_name_or_nickname",
+  "birthday",
+  "home_area",
+  "home_block",
+  "station",
+  "active_time",
+  "routine",
 ] as const;
 
 /** 投稿の本文はこの文字数で切って見せる */
@@ -22,6 +29,8 @@ const EXCERPT_LENGTH = 60;
 interface RiskyPostsProps {
   posts: readonly Post[];
   risky: readonly RiskyPost[];
+  /** 捜査ボードの末尾3項目（engine の推薦対象と同じ） */
+  targetAttributes?: readonly string[];
   /** 診断の手がかりの数（simulate の結果の根拠の番号を確かめる） */
   clueCount: number;
   /** 消したらどうなるか・実際に消した結果。元に戻したり選び直したりしたら null */
@@ -42,7 +51,7 @@ function excerpt(text: string): string {
  * 結果は捜査ボードに渡して、崩れた項目を「不明」にする。
  * 試したあと、確認ダイアログで OK したときだけ Bluesky から実際に消す（もういいよ）。消したあとは選び直せない。
  */
-export function RiskyPosts({ posts, risky, clueCount, onSimulated }: RiskyPostsProps) {
+export function RiskyPosts({ posts, risky, targetAttributes, clueCount, onSimulated }: RiskyPostsProps) {
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set(risky.map((r) => r.post_id)));
   const [result, setResult] = useState<Simulation | null>(null);
   const [pending, setPending] = useState(false);
@@ -127,7 +136,11 @@ export function RiskyPosts({ posts, risky, clueCount, onSimulated }: RiskyPostsP
   }
 
   const shown = deletion ?? result;
-  const escaped = shown !== null && IMPORTANT_ATTRIBUTES.every((a) => !shown.after.some((c) => c.attribute === a));
+  const escapeTargets = targetAttributes ?? FALLBACK_ATTRIBUTES;
+  const escaped =
+    shown !== null &&
+    escapeTargets.length > 0 &&
+    escapeTargets.every((a) => !shown.after.some((c) => c.attribute === a));
 
   return (
     <section aria-labelledby="risky-heading" aria-busy={pending} className="max-w-2xl space-y-4">
