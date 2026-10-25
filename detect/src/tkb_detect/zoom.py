@@ -1,7 +1,7 @@
 """2段階の読み取り。1回目で見つけた小さい文字や映り込みを、拡大してもう一度読ませる。
 
 - 対象：文字の手がかりで枠の短い辺が ZOOM_MAX_SIDE_PX 未満のものと、reflection。
-  小さい順に、写真1枚あたり MAX_ZOOMS_PER_IMAGE 件まで
+  プロフィール推定に使う種類を優先し、写真1枚あたり MAX_ZOOMS_PER_IMAGE 件まで
 - 読みが一致した：小さくても confidence の上限（SMALL_REGION_MAX_CONFIDENCE）を外す
 - 読みが食い違った：拡大したほうの読みを使い、confidence は上限まで
 - 映り込み：中に読める看板などがあれば、その type の手がかりを足す（confidence は上限まで）
@@ -15,7 +15,9 @@ from tkb_common.schemas import Clue, ClueType
 
 # 拡大して読み直す対象の、枠の短い辺（元の画像のピクセル）
 ZOOM_MAX_SIDE_PX = 64
-MAX_ZOOMS_PER_IMAGE = 3
+# 実アカウントの23投稿・22写真では拡大VLMを約40回呼び、診断に143〜164秒かかった。
+# 拡大を1写真1回に抑える。選ばれなかった小さい手がかりには confidence の上限をかける。
+MAX_ZOOMS_PER_IMAGE = 1
 SMALL_REGION_MIN_SIDE_PX = 32
 SMALL_REGION_MAX_CONFIDENCE = 0.5
 
@@ -34,6 +36,21 @@ READING_TYPES = frozenset(
     }
 )
 
+# 推理ルールの入力になる文字を優先する。同じ種類なら小さい領域を先に読む。
+ZOOM_PRIORITY = (
+    ClueType.NAME_TEXT,
+    ClueType.ADDRESS_TEXT,
+    ClueType.POSTAL_CODE,
+    ClueType.STATION_SIGN,
+    ClueType.ORG_TEXT,
+    ClueType.PLACE_TEXT,
+    ClueType.SHOP,
+    ClueType.REFLECTION,
+    ClueType.HANDLE_TEXT,
+    ClueType.PHONE,
+    ClueType.PLATE,
+)
+
 
 def _short_side(clue: Clue) -> int | None:
     if clue.region is None:
@@ -43,7 +60,7 @@ def _short_side(clue: Clue) -> int | None:
 
 
 def select_zoom_targets(clues: list[Clue]) -> list[Clue]:
-    """拡大して読み直す手がかりを、小さい順に選ぶ。"""
+    """推理に効く小さい文字を優先して、拡大する手がかりを選ぶ。"""
     targets = []
     for clue in clues:
         side = _short_side(clue)
@@ -52,9 +69,10 @@ def select_zoom_targets(clues: list[Clue]) -> list[Clue]:
         if clue.type is ClueType.REFLECTION or (
             clue.type in READING_TYPES and side < ZOOM_MAX_SIDE_PX
         ):
-            targets.append((side, clue))
-    targets.sort(key=lambda t: t[0])
-    return [clue for _, clue in targets[:MAX_ZOOMS_PER_IMAGE]]
+            priority = ZOOM_PRIORITY.index(clue.type)
+            targets.append((priority, side, clue))
+    targets.sort(key=lambda t: (t[0], t[1]))
+    return [clue for _, _, clue in targets[:MAX_ZOOMS_PER_IMAGE]]
 
 
 def cap_small_region(clue: Clue) -> Clue:
