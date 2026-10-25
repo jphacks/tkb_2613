@@ -107,3 +107,15 @@ export function cropStyle(
     mark: { left: pct((x1 - left) / w), top: pct((y1 - top) / h), width: pct((x2 - x1) / w), height: pct((y2 - y1) / h) },
   };
 }
+
+/**
+ * 身元カードに出す名前。写真や本文に写っていた文字（name_text）をそのまま使い、推測で補わない。
+ * 読めない文字（x）の少ないもの、確からしいものを選ぶ。なければ null。
+ */
+export function pickName(clues: readonly Clue[]): string | null {
+  const unreadable = (value: string) => (value.match(/x/gi) ?? []).length;
+  const names = clues
+    .filter((c) => c.type === "name_text" && c.value.trim())
+    .sort((a, b) => unreadable(a.value) - unreadable(b.value) || b.confidence - a.confidence);
+  return names[0]?.value.trim() ?? null;
+}
