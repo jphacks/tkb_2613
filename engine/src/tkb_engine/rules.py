@@ -457,9 +457,9 @@ def rule_r7(
             f"{city}の大学で時間割が合うのはここだけ" if periods else f"{city}にある大学はここだけ"
         )
     else:
-        value = f"{city}にある大学（{len(candidates)}校のどれか）"
+        value = f"{city}内の大学（{len(candidates)}校のどれか）"
         note = "「大学」と時限の投稿。候補：" + "・".join(candidates[:5])
-    value += "（歩いて通える所に住んでいる）" if walk else ""
+    value += "・歩いて通学" if walk else ""
     evidence = sorted({*college, *(i for i, _, _ in periods), *r4[0].clue_indices})
     return [Conclusion("R7", "school", value, evidence, note)]
 

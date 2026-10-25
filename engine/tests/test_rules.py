@@ -487,14 +487,14 @@ def test_r7_school_needs_the_timetable_to_fit() -> None:
     ]
     r4 = rule_r4(clues, KNOW_GAZ)
     school = rule_r7(clues, posts, KNOW_GAZ, r4)
-    assert [c.value for c in school] == ["X大学 本校（歩いて通える所に住んでいる）"]
+    assert [c.value for c in school] == ["X大学 本校・歩いて通学"]
     late = [_post("p1", "2026-10-19 08:05"), _post("p2", "2026-10-19 13:30"), *OTHER_DAYS]
     assert rule_r7(clues, late, KNOW_GAZ, r4) == []
     # 同じ日にまとめて投稿したなら時刻は使わず、市区町村の大学だけで決める
     same_day = [_post("p1", "2026-10-19 08:05"), _post("p2", "2026-10-19 13:30")]
     school = rule_r7(clues, same_day, KNOW_GAZ, r4)
     assert [(c.value, c.note) for c in school] == [
-        ("X大学 本校（歩いて通える所に住んでいる）", "八王子市にある大学はここだけ")
+        ("X大学 本校・歩いて通学", "八王子市にある大学はここだけ")
     ]
 
 
@@ -529,7 +529,7 @@ def test_r7_lists_candidates_when_the_timetable_cannot_decide() -> None:
     r4 = [Conclusion("R4", "home_city", "八王子市", [])]
     # Y大学は時間割が分からないので候補に残る
     got = rule_r7(clues, posts, gaz, r4)
-    assert [c.value for c in got] == ["八王子市にある大学（2校のどれか）"]
+    assert [c.value for c in got] == ["八王子市内の大学（2校のどれか）"]
 
 
 def test_r8_name_combines_readings_and_drops_honorifics() -> None:
