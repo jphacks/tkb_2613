@@ -33,6 +33,11 @@ GAZ = Gazetteer(
     ],
     muni_meshes={"13105": {"m-bunkyo"}, "13201": {"m-hachioji"}, "13117": {"m-kita"}},
     knowledge=Knowledge.load(),
+    schools=[
+        {"name": "中央大学", "kind": "大学", "city": "八王子市"},
+        {"name": "東京都立大学", "kind": "大学", "city": "八王子市"},
+        {"name": "東京都立竹早高等学校", "kind": "高等学校", "city": "文京区"},
+    ],
 )
 
 

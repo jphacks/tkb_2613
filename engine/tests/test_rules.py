@@ -488,6 +488,40 @@ def test_r7_school_needs_the_timetable_to_fit() -> None:
     assert rule_r7(clues, late, KNOW_GAZ, r4) == []
 
 
+def test_r7_school_from_a_name_in_a_photo() -> None:
+    gaz = Gazetteer(
+        schools=[
+            {"name": "東京都立立川高等学校", "kind": "高等学校", "city": "立川市"},
+            {"name": "東京都立立川国際中等教育学校", "kind": "中等教育学校", "city": "立川市"},
+            {"name": "中央大学", "kind": "大学", "city": "八王子市"},
+        ]
+    )
+    badge = [_clue("p1", ClueType.UNIFORM, "制服の校章と「立川高校」の文字")]
+    assert [c.value for c in rule_r7(badge, [], gaz, [])] == ["東京都立立川高等学校（立川市）"]
+    # 「立川高島屋」は学校ではない
+    shop = [_clue("p1", ClueType.LANDMARK, "立川高島屋")]
+    assert rule_r7(shop, [], gaz, []) == []
+
+
+def test_r7_lists_candidates_when_the_timetable_cannot_decide() -> None:
+    gaz = Gazetteer(
+        knowledge=KNOW_GAZ.knowledge,
+        schools=[
+            {"name": "X大学", "kind": "大学", "city": "八王子市"},
+            {"name": "Y大学", "kind": "大学", "city": "八王子市"},
+        ],
+    )
+    posts = [_post("p1", "2026-10-19 08:05"), _post("p2", "2026-10-19 10:41")]
+    clues = [
+        _clue("p1", ClueType.ROUTINE_TEXT, "大学行く"),
+        _clue("p2", ClueType.ROUTINE_TEXT, "2限ねむい"),
+    ]
+    r4 = [Conclusion("R4", "home_city", "八王子市", [])]
+    # Y大学は時間割が分からないので候補に残る
+    got = rule_r7(clues, posts, gaz, r4)
+    assert [c.value for c in got] == ["八王子市にある大学（2校のどれか）"]
+
+
 def test_r8_name_combines_readings_and_drops_honorifics() -> None:
     weak = _clue("p2", ClueType.NAME_TEXT, "xx ハルキ 様").model_copy(update={"confidence": 0.45})
     clues = [_clue("p1", ClueType.NAME_TEXT, "Happy Birthday"), weak]

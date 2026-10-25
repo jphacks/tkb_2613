@@ -77,7 +77,15 @@
       "post_id": "at://did:plc:demoaoi0000000000000000/app.bsky.feed.post/3aoi00000007",
       "text": "2限ねむい",
       "created_at": "2026-10-12T10:41:00+09:00",
-      "images": []
+      "images": [
+        {
+          "index": 0,
+          "url": "https://cdn.bsky.app/img/feed_fullsize/plain/did:plc:demoaoi0000000000000000/aoi07@jpeg",
+          "alt": "",
+          "width": 1200,
+          "height": 900
+        }
+      ]
     },
     {
       "post_id": "at://did:plc:demoaoi0000000000000000/app.bsky.feed.post/3aoi00000008",
@@ -214,6 +222,20 @@
       "source": "text"
     },
     {
+      "post_id": "at://did:plc:demoaoi0000000000000000/app.bsky.feed.post/3aoi00000007",
+      "image_index": 0,
+      "type": "org_text",
+      "value": "教室のスライドの隅の大学のロゴ「中央大学」",
+      "region": [
+        980,
+        800,
+        1180,
+        880
+      ],
+      "confidence": 0.78,
+      "source": "vlm"
+    },
+    {
       "post_id": "at://did:plc:demoaoi0000000000000000/app.bsky.feed.post/3aoi00000008",
       "image_index": 0,
       "type": "rail_view",
@@ -281,18 +303,15 @@
       "clue_indices": [
         1,
         2,
-        8
+        9
       ]
     },
     {
       "attribute": "school",
-      "value": "中央大学 多摩キャンパス（歩いて通える所に住んでいる）",
-      "note": "「歩いて大学」＋「2限」の時刻と時間割",
+      "value": "中央大学（八王子市）",
+      "note": "2限の教室の写真に写った大学のロゴ",
       "clue_indices": [
-        1,
-        2,
-        5,
-        6
+        7
       ]
     },
     {
@@ -311,8 +330,8 @@
       "note": "平日18時台の「ついた」3件",
       "clue_indices": [
         0,
-        7,
-        9
+        8,
+        10
       ]
     },
     {
@@ -320,7 +339,7 @@
       "value": "八王子市旭町 9-3 付近",
       "note": "届いた郵便物のカスタマバーコード（郵便番号と住所表示番号）",
       "clue_indices": [
-        8
+        9
       ]
     },
     {
@@ -328,7 +347,7 @@
       "value": "あおい",
       "note": "友達の返信での呼びかけ",
       "clue_indices": [
-        11
+        12
       ]
     },
     {
@@ -336,7 +355,7 @@
       "value": "20歳（誕生日は10月22日ごろ）",
       "note": "誕生日にお酒を頼めるようになった",
       "clue_indices": [
-        10
+        11
       ]
     }
   ],

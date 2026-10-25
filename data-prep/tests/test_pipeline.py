@@ -18,6 +18,14 @@ ESTAT = (
 )
 
 
+SCHOOLS_CSV = (
+    '学校コード,学校種,都道府県番号,"設置\n区分",本分校,学校名,学校所在地,郵便番号,'
+    '"属性情報\n設定年月日","属性情報\n廃止年月日","旧学校\n調査番号",移行後の学校コード\n'
+    "D113210000010,D1(高等学校),13(東京),2(公),1(本),東京都立新宿高等学校,"
+    "東京都新宿区内藤町１１－４,1600022,2021-01-20,,,\n"
+)
+
+
 def build_inputs(root: Path) -> Paths:
     paths = Paths(raw_dir=root / "raw", manual_dir=root / "manual", out_dir=root / "out")
     meshes = {
@@ -52,6 +60,9 @@ def build_inputs(root: Path) -> Paths:
     with zipfile.ZipFile(paths.stations_zip, "w") as archive:
         archive.writestr(stations.GEOJSON_SUFFIX, json.dumps({"features": [shinjuku]}))
 
+    paths.mext_dir.mkdir(parents=True)
+    (paths.mext_dir / "schools.csv").write_text("\ufeff" + SCHOOLS_CSV, encoding="utf-8")
+
     paths.manual_dir.mkdir()
     paths.area_codes_csv.write_text(
         "area_code,section_code,target_text\n03,219,東京都新宿区、所沢市\n", encoding="utf-8"
@@ -70,6 +81,7 @@ def test_run_writes_every_table_and_reports_counts(tmp_path: Path) -> None:
         "households_500m.parquet",
         "muni_mesh.parquet",
         "postal.parquet",
+        "schools.parquet",
         "stations.parquet",
     ]
     text = "\n".join(lines)

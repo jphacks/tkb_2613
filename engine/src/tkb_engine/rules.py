@@ -27,7 +27,8 @@ age・occupation・active_time・routine は16項目にない。
 - R5 収集地区：R4 の市区町村で、集積所の掲示（notice）の燃やすごみの曜日が合う収集地区。
   郵便物・住所表示の町名でさらに絞る
 - R6 区画：郵便物のカスタマバーコードの中身（code）や住所表示（address_text）の郵便番号・町名と番地
-- R7 通学先：「大学」と「〇限」の本文を、R4 の市区町村にある大学の時間割と照らす
+- R7 通学先：学校の名前（学校コードの表）が出てくればその学校。なければ「大学」と「〇限」の
+  本文を、R4 の市区町村にある大学の時間割と照らす
 - R8 名前：name_text（ケーキのプレート、宛名、返信での呼びかけなど）を、敬称や読めない字を
   落としてまとめる
 - R9 年齢：age_text の「〇歳」。誕生日にお酒（「堂々と頼めた🍺」など）なら 20歳。誕生日は投稿日
@@ -327,7 +328,15 @@ def rule_r6(clues: Sequence[Clue], gaz: Gazetteer) -> list[Conclusion]:
 def rule_r7(
     clues: Sequence[Clue], posts: Sequence[Post], gaz: Gazetteer, r4: list[Conclusion]
 ) -> list[Conclusion]:
-    """R7 通学先（school）：「大学」と「〇限」の投稿を、市区町村の大学の時間割と照らす。"""
+    """R7 通学先（school）。
+
+    1. 学校の名前（学校コードの表にある大学・高校など）が写真や本文に出てくれば、その学校
+    2. なければ「大学」と「〇限」の投稿を、R4 の市区町村にある大学の時間割と照らす。
+       時間割の分からない大学は候補に残し、1校に決まらなければ「〇〇市にある大学」までにする
+    """
+    named = _named_school(clues, gaz)
+    if named:
+        return named
     if not r4:
         return []
     city = r4[0].value
@@ -341,22 +350,59 @@ def rule_r7(
     ]
     if not college or not periods:
         return []
-    candidates = [
-        u
-        for u in gaz.knowledge.universities
-        if u.city == city
-        and all(
-            n in u.periods and u.periods[n][0] - R7_EARLY_HOURS <= t <= u.periods[n][1]
-            for _, n, t in periods
+    timetables = {u.name: u.periods for u in gaz.knowledge.universities}
+    names = {s["name"] for s in gaz.schools if s["kind"] == "大学" and s["city"] == city}
+    names |= {u.name for u in gaz.knowledge.universities if u.city == city}
+    candidates = sorted(
+        n
+        for n in names
+        if n not in timetables
+        or all(
+            k in timetables[n] and timetables[n][k][0] - R7_EARLY_HOURS <= t <= timetables[n][k][1]
+            for _, k, t in periods
         )
-    ]
-    if len(candidates) != 1:
+    )
+    if not candidates:
         return []
-    u = candidates[0]
     walk = any("歩いて" in texts[i].value or "徒歩" in texts[i].value for i in college)
-    value = f"{u.name} {u.campus}" + ("（歩いて通える所に住んでいる）" if walk else "")
+    if len(candidates) == 1:
+        campus = next((u.campus for u in gaz.knowledge.universities if u.name == candidates[0]), "")
+        value = f"{candidates[0]} {campus}".strip()
+        note = f"{city}の大学で時間割が合うのはここだけ"
+    else:
+        value = f"{city}にある大学（{len(candidates)}校のどれか）"
+        note = "「大学」と時限の投稿。候補：" + "・".join(candidates[:5])
+    value += "（歩いて通える所に住んでいる）" if walk else ""
     evidence = sorted({*college, *(i for i, _, _ in periods), *r4[0].clue_indices})
-    return [Conclusion("R7", "school", value, evidence, f"{city}の大学で時間割が合うのはここだけ")]
+    return [Conclusion("R7", "school", value, evidence, note)]
+
+
+# 学校の名前を探す手がかり
+SCHOOL_NAME_TYPES = {
+    ClueType.ORG_TEXT,
+    ClueType.UNIFORM,
+    ClueType.NOTICE,
+    ClueType.PLACE_TEXT,
+    ClueType.LANDMARK,
+    ClueType.ROUTINE_TEXT,
+    ClueType.REFLECTION,
+}
+
+
+def _named_school(clues: Sequence[Clue], gaz: Gazetteer) -> list[Conclusion]:
+    votes: dict[str, list[int]] = {}
+    kinds: dict[str, str] = {}
+    for i, c in enumerate(clues):
+        if c.type not in SCHOOL_NAME_TYPES:
+            continue
+        found = gaz.schools_named_in(c.value)
+        if len(found) == 1:
+            votes.setdefault(found[0]["name"], []).append(i)
+            kinds[found[0]["name"]] = found[0]["city"]
+    if len(votes) != 1:
+        return []
+    name, indices = next(iter(votes.items()))
+    return [Conclusion("R7", "school", f"{name}（{kinds[name]}）", indices, "学校の名前")]
 
 
 def rule_r8(clues: Sequence[Clue]) -> list[Conclusion]:

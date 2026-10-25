@@ -103,6 +103,8 @@ class Gazetteer:
     postal: list[dict[str, str]] = field(default_factory=list)
     muni_meshes: dict[str, set[str]] = field(default_factory=dict)
     knowledge: Knowledge = field(default_factory=Knowledge)
+    # 学校ごとに {"name", "kind"（大学・高等学校など）, "city", ...}。表がなければ空
+    schools: list[dict[str, str]] = field(default_factory=list)
 
     @classmethod
     def load(cls, data_dir: Path = DATA_DIR, knowledge: Knowledge | None = None) -> "Gazetteer":
@@ -114,6 +116,11 @@ class Gazetteer:
             postal=pq.read_table(data_dir / "postal.parquet").to_pylist(),
             muni_meshes=meshes,
             knowledge=Knowledge.load() if knowledge is None else knowledge,
+            schools=(
+                pq.read_table(data_dir / "schools.parquet").to_pylist()
+                if (data_dir / "schools.parquet").is_file()
+                else []
+            ),
         )
 
     def city_munis(self, city: str) -> set[str]:
@@ -126,6 +133,19 @@ class Gazetteer:
         found = {name for name in names if name and name in text}
         # 「八王子市」と「王子市」のように、ほかの名前に含まれるものは落とす
         return {n for n in found if not any(n != m and n in m for m in found)}
+
+    def schools_named_in(self, text: str) -> list[dict[str, str]]:
+        """文字の中に名前（「〇〇高等学校」「〇〇高校」「都立〇〇高校」なども）が出てくる学校。
+        ほかの名前の一部になっている短い名前は落とす。"""
+        hits = [
+            (variant, s)
+            for s in self.schools
+            for variant in school_name_variants(s["name"])
+            if variant in text
+        ]
+        longest = max((len(v) for v, _ in hits), default=0)
+        found = {s["name"]: s for v, s in hits if len(v) == longest}
+        return list(found.values())
 
     def postal_rows(self, code: str) -> list[dict[str, str]]:
         """ハイフンなし7桁の郵便番号の行。"""
@@ -156,6 +176,21 @@ class Gazetteer:
                 and value.split(r["city"], 1)[1].startswith(_town(r["town"]))
             ]
         return {r["muni_code"] for r in rows}, {_town(r["town"]) for r in rows}
+
+
+def school_name_variants(name: str) -> set[str]:
+    """学校の正式名から、写真や本文に出てきそうな書き方。短すぎるもの（2文字以下）は入れない。"""
+    base = re.sub(
+        r"^(東京都立|都立|神奈川県立|県立|千葉県立|埼玉県立|市立|区立|国立|私立)", "", name
+    )
+    variants = {name, base}
+    for long, short in (("高等学校", "高校"), ("中等教育学校", "中等")):
+        if base.endswith(long):
+            stem = base.removesuffix(long)
+            variants.add(stem + short)
+            if name.startswith(("東京都立", "都立")):
+                variants.add("都立" + stem + short)
+    return {v for v in variants if len(v) > 2}
 
 
 def _pattern(value: str) -> re.Pattern[str]:
