@@ -1,8 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="520" height="900" viewBox="0 0 520 900" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="520" height="940" viewBox="0 0 520 940" role="img" aria-labelledby="title desc">
   <title id="title">みーつけたの技術構成</title>
-  <desc id="desc">Next.jsの画面とFastAPIがSSEで連携し、実モードでは本人のBluesky投稿とチーム管理のOCR・VLMを使う。試作engineはR1からR7の推理とplan、simulateを行い、削除は確認後の別APIで扱う。モックは固定fixtureを再生する。</desc>
+  <desc id="desc">Next.jsの画面とFastAPIが連携し、APIが本人のBluesky投稿を取得する。写真と本文はチーム管理のVLM、写真は接続設定時にOCRも使う。engineはR1からR7の試作推理とplan、simulateを行い、APIが結果をSSEで画面へ配信する。削除は画面での確認後に別リクエストで行う。</desc>
   <defs>
-    <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#f15b55"/></marker>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#f15b55" /></marker>
+    <marker id="arrowStart" markerWidth="8" markerHeight="8" refX="2" refY="4" orient="auto"><path d="M8,0 L0,4 L8,8 Z" fill="#f15b55" /></marker>
     <style>
       text { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
       .title { fill:#f4f6fb; font-size:24px; font-weight:750; }
@@ -12,42 +13,44 @@
       .small { fill:#c7d1e3; font-size:12.5px; }
       .card { fill:#1d2944; stroke:#465472; stroke-width:1.5; }
       .team { fill:#22283f; stroke:#f15b55; stroke-width:1.5; }
-      .mock { fill:#172238; stroke:#76b7ff; stroke-width:1.5; }
-      .line { fill:none; stroke:#f15b55; stroke-width:2.3; marker-end:url(#arrow); }
-      .dash { fill:none; stroke:#76b7ff; stroke-width:2.3; stroke-dasharray:7 6; marker-end:url(#arrow); }
+      .line { fill:none; stroke:#f15b55; stroke-width:2.2; marker-end:url(#arrow); }
+      .both { fill:none; stroke:#f15b55; stroke-width:2.2; marker-start:url(#arrowStart); marker-end:url(#arrow); }
     </style>
   </defs>
-  <rect width="520" height="900" rx="18" fill="#11182b"/>
+  <rect width="520" height="940" rx="18" fill="#11182b" />
   <text class="title" x="24" y="40">技術構成とデータの流れ</text>
-  <text class="sub" x="24" y="65">赤い実線: 実モード / 青い破線: モック経路</text>
-  <rect class="card" x="24" y="88" width="210" height="86" rx="12"/>
-  <text class="head" x="42" y="119">Web</text><text class="body" x="42" y="143">Next.js / TypeScript</text><text class="small" x="42" y="162">画面・操作・SSE表示</text>
-  <rect class="card" x="286" y="88" width="210" height="86" rx="12"/>
-  <text class="head" x="304" y="119">API</text><text class="body" x="304" y="143">FastAPI / Python</text><text class="small" x="304" y="162">本人セッション・処理の仲介</text>
-  <path class="line" d="M236 128 H278"/><text class="small" x="255" y="116" text-anchor="middle">/api</text>
-  <path class="line" d="M278 151 H236"/><text class="small" x="255" y="169" text-anchor="middle">SSE</text>
-  <rect class="team" x="24" y="218" width="210" height="104" rx="12"/>
-  <text class="head" x="42" y="249">Bluesky</text><text class="body" x="42" y="273">本人の投稿・画像</text><text class="small" x="42" y="295">セッションのDIDで取得</text><text class="small" x="42" y="313">画像URLはcdn.bsky.appに限定</text>
-  <path class="line" d="M286 150 L262 195 H130 V210"/>
-  <rect class="team" x="286" y="218" width="210" height="104" rx="12"/>
-  <text class="head" x="304" y="249">detect / チームサーバー</text><text class="body" x="304" y="273">OCR: PP-OCRv5</text><text class="body" x="304" y="295">VLM: vLLM互換API</text><text class="small" x="304" y="313">投稿ごとの観測Clueを抽出</text>
-  <path class="line" d="M391 174 V210"/>
-  <rect class="mock" x="24" y="355" width="210" height="92" rx="12"/>
-  <text x="42" y="385" fill="#9bcaff" font-size="17" font-weight="700">MOCK_MODE=1</text><text class="body" x="42" y="410">固定fixtureの投稿・Clue</text><text class="small" x="42" y="432">APIはBluesky/モデルへ接続しない</text>
-  <path class="dash" d="M234 401 H278"/><text class="small" x="255" y="389">fixture再生</text>
-  <rect class="card" x="286" y="355" width="210" height="120" rx="12"/>
-  <text class="head" x="304" y="386">engine（試作）</text><text class="body" x="304" y="410">R1–R7 → Conclusion</text><text class="body" x="304" y="433">plan / simulate</text><text class="small" x="304" y="456">モデルを呼ばず仮除外を再推理</text>
-  <path class="line" d="M391 322 V347"/>
-  <rect class="card" x="24" y="510" width="472" height="126" rx="12"/>
-  <text class="head" x="44" y="542">診断SSEの順序</text><text class="body" x="44" y="572">post → clues → conclusions → plan → done</text>
-  <text class="small" x="44" y="600">Clueは観測、Conclusionは推理。Conclusionはclue_indicesで根拠へ戻る。</text><text class="small" x="44" y="622">16項目プロフィールは目標。現行engineは試作Conclusion型。</text>
-  <path class="line" d="M391 476 V500 H260"/>
-  <rect class="team" x="24" y="680" width="210" height="100" rx="12"/>
-  <text class="head" x="42" y="711">POST /api/delete</text><text class="body" x="42" y="735">確認後に別リクエスト</text><text class="small" x="42" y="757">実モードは本人投稿を削除</text><text class="small" x="42" y="775">取り消せない操作</text>
-  <rect class="mock" x="286" y="680" width="210" height="100" rx="12"/>
-  <text x="304" y="711" fill="#9bcaff" font-size="17" font-weight="700">MOCK delete</text><text class="body" x="304" y="735">成功応答を模擬</text><text class="small" x="304" y="757">Bluesky投稿は変更しない</text>
-  <rect class="card" x="24" y="644" width="472" height="30" rx="8"/>
-  <text class="small" x="260" y="664" text-anchor="middle">Webで選択・確認後、別の POST /api/delete を呼び出す</text>
-  <rect class="card" x="24" y="818" width="472" height="58" rx="12"/>
-  <text class="small" x="42" y="843">モックでもブラウザがfixture内の画像URLを読み込む場合がある。</text><text class="small" x="42" y="864">これはAPIのBluesky/モデル接続とは別の画像表示リクエスト。</text>
+  <text class="sub" x="24" y="65">実モードの本人投稿から推理・操作まで</text>
+
+  <rect class="card" x="24" y="88" width="210" height="92" rx="12" />
+  <text class="head" x="42" y="119">Web</text><text class="body" x="42" y="143">Next.js / TypeScript</text><text class="small" x="42" y="165">本人操作・結果表示</text>
+  <rect class="card" x="286" y="88" width="210" height="92" rx="12" />
+  <text class="head" x="304" y="119">API</text><text class="body" x="304" y="143">FastAPI / Python</text><text class="small" x="304" y="165">セッション・処理の仲介</text>
+  <path class="both" d="M242 126 H278" /><text class="small" x="260" y="111" text-anchor="middle">HTTP / SSE</text>
+
+  <rect class="team" x="24" y="230" width="210" height="106" rx="12" />
+  <text class="head" x="42" y="261">Bluesky</text><text class="body" x="42" y="285">セッション本人の投稿</text><text class="small" x="42" y="307">本人DIDにひもづけて取得</text><text class="small" x="42" y="326">写真: cdn.bsky.app</text>
+  <rect class="team" x="286" y="230" width="210" height="106" rx="12" />
+  <text class="head" x="304" y="261">detect / チームサーバー</text><text class="body" x="304" y="285">VLM: vLLM互換API</text><text class="body" x="304" y="308">OCR: PP-OCRv5（任意接続）</text><text class="small" x="304" y="328">観測Clueを抽出</text>
+  <path class="both" d="M286 157 C264 174 248 199 222 225" />
+  <path class="both" d="M391 182 V225" />
+
+  <rect class="card" x="24" y="390" width="472" height="132" rx="12" />
+  <text class="head" x="44" y="422">engine（試作）</text><text class="body" x="44" y="449">R1–R7 → 根拠付きConclusion</text><text class="body" x="44" y="472">plan / simulate → 最大3件の候補・仮除外比較</text>
+  <text class="small" x="44" y="499">対象は station / active_time / routine。16項目プロフィールは目標段階。</text>
+  <path class="line" d="M391 337 V382" />
+
+  <rect class="card" x="24" y="566" width="472" height="106" rx="12" />
+  <text class="head" x="44" y="598">診断結果をSSEで配信</text><text class="body" x="44" y="627">post → clues → conclusions → plan → done</text>
+  <text class="small" x="44" y="653">Clueは観測、Conclusionは推理。clue_indicesで根拠へ戻る。</text>
+  <path class="line" d="M260 523 V558" />
+
+  <rect class="team" x="24" y="706" width="472" height="132" rx="12" />
+  <text class="head" x="44" y="739">本人の確認後に削除</text>
+  <text class="body" x="44" y="768">選択・確認後、別の POST /api/delete を実行</text>
+  <text class="body" x="44" y="792">本人投稿だけを削除。元に戻せない。</text>
+  <text class="small" x="44" y="818">仮比較は POST /api/simulate。SSE受信で削除されない。</text>
+
+  <rect class="card" x="24" y="860" width="472" height="68" rx="12" />
+  <text class="small" x="42" y="887">画面表示の画像読込みは、APIが画像をモデルへ送る処理とは別。</text>
+  <text class="small" x="42" y="909">どちらもBluesky CDNを利用し、本人投稿画像を扱う。</text>
 </svg>
