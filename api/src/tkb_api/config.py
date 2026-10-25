@@ -25,8 +25,9 @@ class Settings(BaseSettings):
     max_posts: int = Field(default=30, ge=1, le=100)
     # MOCK_MODE の診断で流す、架空のデモ用アカウントの投稿（起動した場所からの相対パス）
     demo_fixture_path: Path = Path("eval/fixtures/demo_observations.json")
-    # MOCK_MODE の診断で、投稿を 1 件流すごとに待つ秒数（画面で 1 件ずつ増える様子を見せるため）
-    mock_event_interval_seconds: float = 0.3
+    # MOCK_MODE の診断で、投稿・手がかりを 1 件流すごとに待つ秒数（診断中の画面の演出を見せるため。
+    # デモの 10 件で約 16 秒。本番は待たない）
+    mock_event_interval_seconds: float = 0.8
     # 推理ルールが引く data-prep の表（stations・postal・muni_mesh）。make data で作る。
     # 読めないときは、表を使うルール（R1 の最寄り駅など）だけを飛ばす
     gazetteer_dir: Path = Path("data/processed")
