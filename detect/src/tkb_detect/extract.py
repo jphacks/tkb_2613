@@ -13,6 +13,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from tkb_common.schemas import Clue, ClueSource, ClueType, Post, Region
+from tkb_detect.barcode import read_codes
 from tkb_detect.coords import COORDINATE_SPACE, CoordinateSpace, to_original_region
 from tkb_detect.errors import DetectError, OutputCutOffError
 from tkb_detect.image import PreparedImage, crop_and_enlarge, prepare_image
@@ -95,6 +96,18 @@ class Extractor:
         return _dedupe([clue for clues in results for clue in clues])
 
     async def _extract_image(self, post_id: str, index: int, data: bytes) -> list[Clue]:
+        # バーコードは言語モデルでは読めないので、画像処理で読む（VLM の呼び出しと並べて走らせる）
+        codes_task = asyncio.create_task(
+            asyncio.to_thread(_read_codes_safely, data, post_id, index)
+        )
+        clues = await self._extract_image_with_models(post_id, index, data)
+        codes = await codes_task
+        if not codes:
+            return clues
+        # 中身を読めたら、言語モデルの code（中身を推測した読み）は捨てる
+        return [*codes, *(c for c in clues if c.type is not ClueType.CODE)]
+
+    async def _extract_image_with_models(self, post_id: str, index: int, data: bytes) -> list[Clue]:
         prepared = prepare_image(data)
         vlm_task = _retry_if_cut_off(
             lambda penalty: self._vlm.complete(
@@ -218,6 +231,14 @@ def build_extractor(
     use_ocr = bool(ocr_base_url.strip()) and not mock_mode
     ocr = OcrClient(OcrConfig(base_url=ocr_base_url, mock_mode=False)) if use_ocr else None
     return Extractor(vlm, ocr, coordinate_space, zoom)
+
+
+def _read_codes_safely(data: bytes, post_id: str, index: int) -> list[Clue]:
+    """バーコードの読み取りに失敗しても、言語モデルの手がかりは残す。"""
+    try:
+        return read_codes(data, post_id, index)
+    except (OSError, ValueError):
+        return []
 
 
 async def _retry_if_cut_off(call: Callable[[float | None], Awaitable[str]]) -> str:

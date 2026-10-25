@@ -30,7 +30,18 @@ TYPE_DESCRIPTIONS: dict[ClueType, str] = {
     ClueType.UNIFORM: "制服・作業着・作業靴・社員証・名札",
     ClueType.FACE: "人の顔。value には写っている人数などだけを書き、誰かは書かない",
     ClueType.KEY: "鍵",
-    ClueType.CODE: "QRコード・バーコード",
+    ClueType.CODE: (
+        "QRコード・バーコード。読み取れた中身や、そばに印字された数字（郵便番号など）があれば"
+        " value に書く"
+    ),
+    ClueType.LOCAL_ITEM: (
+        "地域が限られる品物（自治体の指定ゴミ袋、地域の広報誌・回覧板など）。"
+        "value には色・大きさ・容量・枚数・値段・自治体名など、見えた・書いてある特徴をそのまま書く"
+    ),
+    ClueType.NOTICE: (
+        "掲示・案内板の文字（ゴミ集積所の収集曜日、町会・自治会の掲示など）。"
+        "value には書かれた文字をそのまま書く"
+    ),
     ClueType.NAME_TEXT: "名前らしい文字（ケーキのプレート、名札、宛名、返信での呼びかけなど）",
     ClueType.ORG_TEXT: "会社・学校・団体（町会・自治会・病院など）の名前やロゴ",
     ClueType.HANDLE_TEXT: "SNS のユーザー名・URL",

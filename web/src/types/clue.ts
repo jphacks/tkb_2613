@@ -18,10 +18,17 @@ export const PHOTO_ONLY_CLUE_TYPES = [
   "face",
   "key",
   "code",
+  "notice",
 ] as const;
 
 /** 写真と本文の両方から出る type */
-export const PHOTO_OR_TEXT_CLUE_TYPES = ["name_text", "org_text", "handle_text", "place_text"] as const;
+export const PHOTO_OR_TEXT_CLUE_TYPES = [
+  "name_text",
+  "org_text",
+  "handle_text",
+  "place_text",
+  "local_item",
+] as const;
 
 /** 本文からだけ出る type */
 export const TEXT_ONLY_CLUE_TYPES = ["age_text", "routine_text", "relation_text"] as const;

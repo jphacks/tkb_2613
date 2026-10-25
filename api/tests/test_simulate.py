@@ -76,6 +76,7 @@ def test_diagnose_streams_the_plan_before_done(client: TestClient) -> None:
         "given_name_or_nickname",
         "birthday",
         "home_area",
+        "home_block",
         "station",
         "active_time",
         "routine",

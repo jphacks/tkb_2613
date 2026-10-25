@@ -82,8 +82,12 @@ async def test_reports_download_failures_without_the_url(reply: Any) -> None:
     assert "cdn.bsky.app" not in str(excinfo.value)
 
 
-def test_missing_tables_give_an_empty_gazetteer(tmp_path: Path) -> None:
-    assert load_gazetteer(tmp_path) == Gazetteer()
+def test_missing_tables_give_an_empty_gazetteer_with_the_knowledge(tmp_path: Path) -> None:
+    gazetteer = load_gazetteer(tmp_path)
+
+    assert gazetteer.stations == [] and gazetteer.postal == []
+    # 知識表はリポジトリにあるので、data-prep の表がなくても読む
+    assert gazetteer.knowledge.trash_bags
 
 
 def test_demo_extractions_group_fixture_clues_by_post() -> None:

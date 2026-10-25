@@ -68,6 +68,9 @@ class ClueType(StrEnum):
     FACE = "face"
     KEY = "key"
     CODE = "code"
+    NOTICE = "notice"
+    # 写真と本文の両方から
+    LOCAL_ITEM = "local_item"
     # 写真と本文の両方から
     NAME_TEXT = "name_text"
     ORG_TEXT = "org_text"
@@ -94,6 +97,7 @@ PHOTO_ONLY_TYPES = frozenset(
         ClueType.FACE,
         ClueType.KEY,
         ClueType.CODE,
+        ClueType.NOTICE,
     }
 )
 TEXT_ONLY_TYPES = frozenset({ClueType.AGE_TEXT, ClueType.ROUTINE_TEXT, ClueType.RELATION_TEXT})

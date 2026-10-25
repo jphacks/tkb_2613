@@ -5,7 +5,7 @@ uv run python -m tkb_data_prep
 
 import sys
 
-from tkb_data_prep import area_codes, households, muni_mesh, postal, stations
+from tkb_data_prep import area_codes, households, muni_mesh, postal, schools, stations
 from tkb_data_prep.config import Paths
 from tkb_data_prep.errors import DataPrepError
 from tkb_data_prep.summary import Tables, report
@@ -18,6 +18,7 @@ def run(paths: Paths) -> Tables:
     loaded = households.load(paths, allowed)
     station_rows = stations.load(paths, allowed)
     converted = area_codes.load(paths, area_codes.NameIndex.build(munis, postals))
+    school_rows = schools.load(paths, postals)
 
     out = paths.out_dir
     muni_mesh.write(munis, out / "muni_mesh.parquet")
@@ -25,6 +26,7 @@ def run(paths: Paths) -> Tables:
     postal.write(postals, out / "postal.parquet")
     stations.write(station_rows, out / "stations.parquet")
     area_codes.write(converted.rows, out / "area_codes.parquet")
+    schools.write(school_rows, out / "schools.parquet")
 
     return Tables(
         muni_mesh=munis,
@@ -34,6 +36,7 @@ def run(paths: Paths) -> Tables:
         stations=station_rows,
         area_codes=converted.rows,
         area_code_problems=converted.problems,
+        schools=school_rows,
     )
 
 

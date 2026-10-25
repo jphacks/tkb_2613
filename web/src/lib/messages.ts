@@ -26,6 +26,8 @@ const CLUE_TYPE_LABELS: Readonly<Record<ClueType, string>> = {
   face: "顔",
   key: "鍵",
   code: "バーコード・QR コード",
+  local_item: "地域の品物",
+  notice: "掲示・案内板",
   name_text: "名前",
   org_text: "会社・学校・団体",
   handle_text: "SNS のユーザー名",
@@ -38,13 +40,18 @@ const CLUE_TYPE_LABELS: Readonly<Record<ClueType, string>> = {
 /** engine の試作の項目名（attribute）の表示名。16項目への対応づけまでのつなぎ。ないものは attribute をそのまま出す */
 const ATTRIBUTE_LABELS: Readonly<Record<string, string>> = {
   station: "最寄り駅",
+  home_city: "住んでいる市区町村",
+  home_district: "ゴミの収集地区",
   home_area: "住んでいる町",
+  home_block: "住所の区画",
   active_time: "よくいる時間",
   routine: "決まった外出",
+  name: "名前",
+  age: "年齢",
+  occupation: "仕事",
   line: "使っている路線",
   full_name: "名前",
   given_name_or_nickname: "呼び名",
-  age: "年齢",
   school: "学校",
   birthday: "生年月日",
 };

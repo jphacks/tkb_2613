@@ -51,7 +51,7 @@ def test_clues_point_to_existing_posts_images_and_regions(doc: dict[str, Any]) -
 def test_expected_inferences_refer_to_existing_clues(doc: dict[str, Any]) -> None:
     attributes = {e["attribute"] for e in doc["expected"]}
 
-    assert attributes == {"station", "occupation", "name", "routine"}
+    assert attributes == {"station", "occupation", "given_name_or_nickname", "age", "routine"}
     for e in doc["expected"]:
         assert all(0 <= i < len(doc["clues"]) for i in e["clue_indices"])
 

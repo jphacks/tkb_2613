@@ -21,7 +21,6 @@
 | `POST /api/detect` | 画像バイナリをリクエスト本文に直接送信。許可Content-Type: JPEG/PNG/WebP/HEIC/HEIF | モック時200 `{"clues":[…]}` | 空本文400、未対応形式415、20MiB超413。`MOCK_MODE=0` は現状501「検出はまだ実装されていません」。このルートはログイン必須ではない。 |
 | `POST /api/diagnose` | `tkb_session` Cookie。JSON bodyなし | `text/event-stream` | Cookieなし・無効は401。成功時は以下のSSE順序。投稿/手がかり/結論の結果はディスクやログに保存しない。推理まで終わると、投稿と手がかりをそのセッションのメモリにだけ置く（simulate 用。ログアウト・期限切れで消え、次の診断を始めると消える）。 |
 | `POST /api/simulate` | `tkb_session` Cookie。JSON `{"delete":["at://…",…]}`（最大100件） | 200 Simulation（下記） | 実際には消さない（Bluesky の削除APIを呼ばない）。モデルも呼ばない。Cookieなし・無効は401、そのセッションで診断が終わっていなければ409、最後の診断にない投稿IDや余計なキーは422（送られたIDは応答に入れない）。 |
-| `POST /api/delete` | `tkb_session` Cookie。JSON `{"delete":["at://…",…]}`（1〜10件） | 200 Deletion（下記） | **Bluesky から実際に消す**（元に戻せない）。画面で選び、確認ダイアログで OK したときだけ呼ぶ。消すのはセッションの DID 本人の投稿（`at://<did>/app.bsky.feed.post/…`）だけ。1件ずつ消し、失敗した投稿は飛ばして続ける。`MOCK_MODE=1` では Bluesky に接続せず、全部消せたことにする。Cookieなし・無効は401、診断が終わっていなければ409、最後の診断にない投稿IDや余計なキー、JSON 以外の本文は422。セッションの診断はそのまま残す（手がかりの番号がずれないように）。ログには件数だけを出す。 |
 
 バリデーションエラーは422で `{"detail":[{"loc":[…],"msg":"…","type":"…"}]}` を返す。送信値そのものは詳細に含めない。その他のエラー形式は FastAPI のHTTPエラー応答に従う。
 
@@ -31,10 +30,11 @@ Pythonの正は `common/src/tkb_common/schemas.py`、画面側の対応型は `w
 
 - **Post**: `post_id`（AT URI）、`text`、時差付き `created_at`、`images`。画像は `index, url, alt, width, height`。URLは `https://cdn.bsky.app/` のみ、画像は最大4枚。
 - **Clue**: `post_id, image_index, type, value, region, confidence, source`。`region` は元画像ピクセルの `[x1,y1,x2,y2]` またはnull。本文由来は通常 `image_index/region=null`、`source=text`。確信度は0〜1。許容type/sourceの列挙と写真/本文の整合条件は共通スキーマを参照。
+- `Clue.type` に `local_item`（写真・本文）と `notice`（写真のみ）を追加。写真の `code` は画像処理で解読し、`source=ocr` として返す。モデルのバーコード解読の推測は住所の区画の根拠にしない。
 - **DetectResponse**: `{"clues":[Clue,…]}`。
 - **Simulation**: `{"delete":[投稿ID],"broken":[attribute],"after":[Conclusion]}`。`delete` の投稿を消したとして推理し直した結果。`broken` は、消す前に結論があり、消したあと1つもなくなる項目（値が別の値に変わっただけなら入れない）。`after` の `clue_indices` は、診断の `conclusions` イベントの `clues` での番号。Python は `tkb_api.pipeline.simulation_json`、TypeScript は `web/src/types/diagnose.ts` の `Simulation`。
 - **Deletion**: Simulation ＋ `"failed":[投稿ID]`。`delete` は実際に消せた投稿だけで、`broken`・`after` はそれを除いて推理し直した結果（`clue_indices` は Simulation と同じく診断の `clues` での番号）。`failed` は消せなかった投稿。TypeScript は `web/src/types/diagnose.ts` の `Deletion`。
-- **現在の診断Conclusion**: `rule, attribute, value, clue_indices, note`。`clue_indices` は同じ `conclusions` イベントの `clues` 配列に対する0始まり番号。これは目標の16項目プロフィール型（status/confidence/evidence）とは別の試作型。
+- **現在の診断Conclusion**: `rule, attribute, value, clue_indices, note`。`attribute` は試作の名前で、現在は `home_city`・`home_district`・`station`・`home_area`・`home_block`・`active_time`・`routine`・`school`・`full_name`・`given_name_or_nickname`・`birthday`・`line`・`age`・`occupation`（ルール R1〜R12。同じ attribute が複数出ることがある）。`clue_indices` は同じ `conclusions` イベントの `clues` 配列に対する0始まり番号。これは目標の16項目プロフィール型（status/confidence/evidence）とは別の試作型。
 
 ## 診断 SSE のイベント
 

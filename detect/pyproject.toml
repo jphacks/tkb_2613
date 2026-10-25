@@ -5,8 +5,11 @@ description = "OCR と画像を読む言語モデルの呼び出し"
 requires-python = ">=3.13,<3.14"
 dependencies = [
   "httpx>=0.28",
+  "numpy>=2.0",
   "pillow>=13.0.0",
+  "scipy>=1.14",
   "tkb-common",
+  "zxing-cpp>=2.3",
 ]
 
 [build-system]

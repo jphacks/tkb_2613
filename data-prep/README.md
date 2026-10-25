@@ -63,6 +63,7 @@ area_codes             276 行（うち一部だけが対象 47）
 | `postal.parquet` | postal_code, muni_code, pref, city, town | 郵便番号（7 桁）と市区町村。町域名は「以下に掲載がない場合」なども含めてそのまま |
 | `stations.parquet` | station_name, line_name, operator, lat, lon, mesh_1km | 駅 × 路線ごとに 1 行。lat, lon はホームの線の中心。1都3県の 1km メッシュにある駅だけ |
 | `area_codes.parquet` | area_code, section_code, muni_code, partial, note | 市外局番（先頭の 0 付き）と番号区画コード、市区町村。一部だけが対象なら partial が true で、note に但し書き |
+| `schools.parquet` | school_code, kind, name, address, postal_code, muni_code, city | 1都3県の大学・短期大学・高等専門学校・高等学校・中等教育学校（文部科学省「学校コード」、廃止を除く）。大学は本部の所在地だけ |
 
 ### 知っておくこと
 

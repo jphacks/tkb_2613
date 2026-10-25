@@ -47,8 +47,13 @@ def _clue(post_id: str, type_: ClueType, value: str) -> Clue:
 
 
 def _station_case() -> tuple[list[Clue], list[Post]]:
-    """駅名標（a）と郵便番号・住所（b）で根津駅。どちらも平日 8 時台なので R2 も出る。"""
-    posts = [_post("a", "2026-10-20 08:10"), _post("b", "2026-10-21 08:30")]
+    """駅名標（a）と郵便番号・住所（b）で根津駅。どちらも平日 8 時台なので R2 も出る。
+    z は手がかりのない投稿（投稿の日付が3日に散らばり、時刻を推理に使える）。"""
+    posts = [
+        _post("a", "2026-10-20 08:10"),
+        _post("b", "2026-10-21 08:30"),
+        _post("z", "2026-10-23 12:00"),
+    ]
     clues = [
         _clue("a", ClueType.STATION_SIGN, "根x"),
         _clue("b", ClueType.POSTAL_CODE, "113-00xx"),
@@ -70,9 +75,14 @@ def test_simulate_breaks_station_and_the_rules_that_depend_on_it() -> None:
 
     sim = simulate(clues, posts, GAZ, ["b"])
 
-    assert {c.attribute for c in sim.before} == {"home_area", "station", "active_time"}
+    assert {c.attribute for c in sim.before} == {
+        "home_area",
+        "station",
+        "home_block",
+        "active_time",
+    }
     assert sim.after == []
-    assert sim.broken == ["home_area", "station", "active_time"]
+    assert sim.broken == ["home_area", "station", "home_block", "active_time"]
     assert sim.delete == ["b"]
 
 

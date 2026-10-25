@@ -20,7 +20,14 @@ from tkb_engine.rules import Conclusion, infer
 
 # 名前・生年月日は身元に直結するので、場所や行動の推定より先に崩す。
 IDENTITY_ATTRIBUTES = ("full_name", "given_name_or_nickname", "birthday")
-IMPORTANT_ATTRIBUTES = (*IDENTITY_ATTRIBUTES, "home_area", "station", "active_time", "routine")
+IMPORTANT_ATTRIBUTES = (
+    *IDENTITY_ATTRIBUTES,
+    "home_area",
+    "home_block",
+    "station",
+    "active_time",
+    "routine",
+)
 PLAN_MAX_POSTS = 3
 
 

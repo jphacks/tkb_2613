@@ -66,7 +66,7 @@ def test_serializes_back_to_documented_json_shape(data: dict[str, Any]) -> None:
 def test_covers_all_documented_types_and_sources() -> None:
     assert {t.value for t in ClueType} == {
         "station_sign", "rail_view", "reflection", "shop", "landmark", "address_text",
-        "postal_code", "phone", "plate", "uniform", "face", "key", "code",
+        "postal_code", "phone", "plate", "uniform", "face", "key", "code", "local_item", "notice",
         "name_text", "org_text", "handle_text", "place_text",
         "age_text", "routine_text", "relation_text",
     }  # fmt: skip

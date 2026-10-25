@@ -224,3 +224,15 @@ describe("RiskyPosts", () => {
     expect(screen.queryByRole("button", { name: t.simulate })).not.toBeInTheDocument();
   });
 });
+
+
+it("does not report escape while the home block can still be inferred", async () => {
+  vi.mocked(simulate).mockResolvedValue({
+    ...ALL_BROKEN,
+    after: [{ rule: "R6", attribute: "home_block", value: "架空町 1-2 付近", clue_indices: [0], note: "" }],
+  });
+  renderRisky();
+  fireEvent.click(screen.getByRole("button", { name: t.simulate }));
+  expect(await screen.findByText(t.result(2, 3))).toBeInTheDocument();
+  expect(screen.queryByText(t.safe)).not.toBeInTheDocument();
+});

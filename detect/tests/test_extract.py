@@ -433,3 +433,25 @@ async def test_keeps_first_reading_when_zoom_request_fails() -> None:
         clues = await Extractor(_vlm_client()).extract_post(_post("", 1), [_png(2560, 1440)])
 
     assert [(c.value, c.confidence) for c in clues] == [("厚生", SMALL_REGION_MAX_CONFIDENCE)]
+
+
+@pytest.mark.anyio
+async def test_decoded_barcodes_replace_the_models_guess() -> None:
+    """バーコードは画像処理で読み、言語モデルの code（中身の推測）は捨てる。"""
+    import zxingcpp
+
+    qr = zxingcpp.create_barcode("https://example.com/demo", zxingcpp.BarcodeFormat.QRCode)
+    img = Image.new("L", (600, 400), 255)
+    img.paste(Image.fromarray(qr.to_image(scale=6)), (40, 40))
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    guess = {"clues": [{"type": "code", "value": "QR 1234", "bbox_2d": None, "confidence": 0.5}]}
+    extractor = Extractor(_vlm_client(), coordinate_space=CoordinateSpace.RELATIVE_1000)
+
+    with respx.mock as router:
+        router.post(f"{VLM}/chat/completions").mock(side_effect=_router(guess, TEXT_REPLY))
+        clues = await extractor.extract_post(_post("", 1), [buf.getvalue()])
+
+    assert [(c.type, c.value, c.source) for c in clues] == [
+        (ClueType.CODE, "QRCode: https://example.com/demo", ClueSource.OCR)
+    ]

@@ -6,18 +6,18 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from tkb_common.schemas import TEXT_ONLY_TYPES, Clue, ClueSource, ClueType, Post
-from tkb_engine import (
-    Conclusion,
-    Gazetteer,
-    infer,
-    rule_r1,
-    rule_r2,
-    rule_r3,
+from tkb_engine import Conclusion, Gazetteer, infer, rule_r1, rule_r2, rule_r3
+from tkb_engine.gazetteer import CollectionArea, Knowledge, TrashBag, University
+from tkb_engine.rules import (
+    rule_birthday,
     rule_r4,
     rule_r5,
     rule_r6,
     rule_r7,
     rule_r8,
+    rule_r9,
+    rule_r10,
+    rule_r11,
 )
 
 JST = ZoneInfo("Asia/Tokyo")
@@ -62,7 +62,13 @@ def _clue(post_id: str, type_: ClueType, value: str) -> Clue:
         value=value,
         region=None,
         confidence=0.9,
-        source=ClueSource.TEXT if from_text else ClueSource.VLM,
+        source=(
+            ClueSource.TEXT
+            if from_text
+            else ClueSource.OCR
+            if type_ is ClueType.CODE
+            else ClueSource.VLM
+        ),
     )
 
 
@@ -326,7 +332,6 @@ def test_r3_finds_same_weekday_and_time() -> None:
     # 曜日を含む routine_text（0）は時刻のまとまりの結論に入っているので、別の結論にしない
     [got] = rule_r3(clues, posts)
 
-    # 「毎週火曜のジム」は「ジム」を含むので、多く出てきた「ジム」だけを括弧に入れる
     assert got.value == "毎週火曜 20時ごろに出かけている（ジム）"
     assert got.clue_indices == [0, 1, 2]
 
@@ -371,8 +376,251 @@ def test_infer_chains_r1_into_r2() -> None:
     assert [(c.rule, c.attribute) for c in got] == [
         ("R1", "home_area"),
         ("R1", "station"),
+        ("R6", "home_block"),
         ("R2", "active_time"),
     ]
+
+
+# ---- R4〜R10 ----
+
+KNOW_GAZ = Gazetteer(
+    stations=[
+        {"station_name": "八王子", "mesh_1km": "m-hachioji"},
+        {"station_name": "王子", "mesh_1km": "m-kita"},
+    ],
+    postal=[
+        {"postal_code": "1920083", "muni_code": "13201", "city": "八王子市", "town": "旭町"},
+        {"postal_code": "1140002", "muni_code": "13117", "city": "北区", "town": "王子"},
+        {"postal_code": "1900012", "muni_code": "13202", "city": "立川市", "town": "曙町"},
+    ],
+    muni_meshes={"13201": {"m-hachioji"}, "13117": {"m-kita"}},
+    knowledge=Knowledge(
+        trash_bags=[
+            TrashBag(city="八王子市", liters=40, price=75),
+            TrashBag(city="三鷹市", liters=40, price=75, color="黄"),
+            TrashBag(city="立川市", liters=40, price=80),
+        ],
+        collection_areas=[
+            CollectionArea(city="八王子市", area="A地区", burnable_days="水土"),
+            CollectionArea(city="八王子市", area="B地区", burnable_days="月木"),
+        ],
+        universities=[
+            University(
+                name="X大学",
+                campus="本校",
+                city="八王子市",
+                periods={1: (9.0, 10 + 40 / 60), 2: (10 + 50 / 60, 12.5)},
+            ),
+        ],
+    ),
+)
+
+
+def test_r4_city_from_trash_bag_compares_the_price_per_bag() -> None:
+    # 1枚 75円は八王子市と三鷹市。三鷹市の袋は黄色なので、青い袋なら八王子市
+    blue = [_clue("p1", ClueType.LOCAL_ITEM, "指定ゴミ袋 青 40L 10枚 750円")]
+    assert [c.value for c in rule_r4(blue, KNOW_GAZ)] == ["八王子市"]
+    # 色が分からなければ2つに合うので決めない
+    plain = [_clue("p1", ClueType.LOCAL_ITEM, "指定ゴミ袋 40L 10枚 750円")]
+    assert rule_r4(plain, KNOW_GAZ) == []
+    # 袋に市の名前が書いてあれば、それで決まる
+    named = [_clue("p1", ClueType.LOCAL_ITEM, "八王子市指定収集袋 40L 10枚 750円")]
+    assert [c.value for c in rule_r4(named, KNOW_GAZ)] == ["八王子市"]
+    # 1枚 80円は立川市だけ
+    single = [_clue("p1", ClueType.LOCAL_ITEM, "指定収集袋 40L 5枚入 400円")]
+    assert [c.value for c in rule_r4(single, KNOW_GAZ)] == ["立川市"]
+
+
+def test_r4_drops_conflicting_cities() -> None:
+    clues = [
+        _clue("p1", ClueType.LOCAL_ITEM, "八王子市指定収集袋 40L"),
+        _clue("p2", ClueType.NOTICE, "立川市 資源ごみ"),
+    ]
+    assert rule_r4(clues, KNOW_GAZ) == []
+
+
+def test_r5_reads_only_the_burnable_days() -> None:
+    clues = [_clue("p1", ClueType.NOTICE, "八王子市 燃やさないごみ 月・木 / 燃やすごみ 水・土")]
+    r4 = rule_r4(clues, KNOW_GAZ)
+    assert [c.value for c in rule_r5(clues, KNOW_GAZ, r4)] == ["八王子市 A地区"]
+    assert rule_r5(clues, KNOW_GAZ, []) == []
+
+
+def test_r5_keeps_districts_with_unknown_days_and_narrows_by_town() -> None:
+    gaz = Gazetteer(
+        postal=KNOW_GAZ.postal,
+        knowledge=Knowledge(
+            collection_areas=[
+                CollectionArea("八王子市", "地区8", "月木", ["旭町", "南大沢1丁目"]),
+                CollectionArea("八王子市", "地区9", "", ["新町", "南大沢2丁目"]),
+                CollectionArea("八王子市", "地区10", "火金", ["天神町"]),
+            ],
+        ),
+    )
+    notice = _clue("p1", ClueType.NOTICE, "八王子市 燃やすごみ 月・木")
+    r4 = [Conclusion("R4", "home_city", "八王子市", [9])]
+    # 地区9は曜日が分からないので、まだ候補に残る
+    assert [c.value for c in rule_r5([notice], gaz, r4)] == ["八王子市 燃やすごみが月・木の地区"]
+    mail = _clue("p2", ClueType.CODE, "カスタマバーコード: 〒192-0083 住所表示番号 9-3")
+    district = rule_r5([notice, mail], gaz, r4)[0]
+    assert (district.value, district.clue_indices) == ("八王子市 地区8", [0, 1, 9])
+
+
+def test_r1_votes_for_a_station_written_in_a_shop_name() -> None:
+    clues = [
+        _clue("p1", ClueType.NOTICE, "八王子市 燃やすごみ 水・土"),
+        _clue("p2", ClueType.REFLECTION, "向かいの看板「カフェ八王子駅前店」"),
+    ]
+    r4 = rule_r4(clues, KNOW_GAZ)
+    station = _by_attribute(rule_r1(clues, KNOW_GAZ, r4))["station"]
+    # 「王子」ではなく、いちばん長く合う「八王子」
+    assert station.value == "八王子駅"
+    assert station.clue_indices == [0, 1]
+    # 市区町村で絞らなければ、根拠が1つで足りない
+    assert rule_r1(clues[1:], KNOW_GAZ) == []
+
+
+def test_r6_block_from_a_barcode_needs_a_known_postal_code() -> None:
+    clues = [_clue("p1", ClueType.CODE, "カスタマバーコード: 〒192-0083 住所表示番号 9-3")]
+    assert [c.value for c in rule_r6(clues, KNOW_GAZ)] == ["八王子市旭町 9-3 付近"]
+    unknown = [_clue("p1", ClueType.CODE, "カスタマバーコード: 〒999-9999 住所表示番号 9-3")]
+    assert rule_r6(unknown, KNOW_GAZ) == []
+    # 宅配伝票の追跡番号は、郵便番号のように見えても使わない
+    tracking = [_clue("p1", ClueType.CODE, "Codabar: A1920083000193A")]
+    assert rule_r6(tracking, KNOW_GAZ) == []
+
+
+# 手がかりのない投稿。投稿の日付を3日に散らばらせ、時刻を推理に使えるようにする
+OTHER_DAYS = [_post("d1", "2026-10-21 12:00"), _post("d2", "2026-10-23 12:00")]
+
+
+def test_r7_school_needs_the_timetable_to_fit() -> None:
+    posts = [_post("p1", "2026-10-19 08:05"), _post("p2", "2026-10-19 10:41"), *OTHER_DAYS]
+    clues = [
+        _clue("p0", ClueType.NOTICE, "八王子市 燃やすごみ 水・土"),
+        _clue("p1", ClueType.ROUTINE_TEXT, "歩いて大学行く"),
+        _clue("p2", ClueType.ROUTINE_TEXT, "2限ねむい"),
+    ]
+    r4 = rule_r4(clues, KNOW_GAZ)
+    school = rule_r7(clues, posts, KNOW_GAZ, r4)
+    assert [c.value for c in school] == ["X大学 本校・歩いて通学"]
+    late = [_post("p1", "2026-10-19 08:05"), _post("p2", "2026-10-19 13:30"), *OTHER_DAYS]
+    assert rule_r7(clues, late, KNOW_GAZ, r4) == []
+    # 同じ日にまとめて投稿したなら時刻は使わず、市区町村の大学だけで決める
+    same_day = [_post("p1", "2026-10-19 08:05"), _post("p2", "2026-10-19 13:30")]
+    school = rule_r7(clues, same_day, KNOW_GAZ, r4)
+    assert [(c.value, c.note) for c in school] == [
+        ("X大学 本校・歩いて通学", "八王子市にある大学はここだけ")
+    ]
+
+
+def test_r7_school_from_a_name_in_a_photo() -> None:
+    gaz = Gazetteer(
+        schools=[
+            {"name": "東京都立立川高等学校", "kind": "高等学校", "city": "立川市"},
+            {"name": "東京都立立川国際中等教育学校", "kind": "中等教育学校", "city": "立川市"},
+            {"name": "中央大学", "kind": "大学", "city": "八王子市"},
+        ]
+    )
+    badge = [_clue("p1", ClueType.UNIFORM, "制服の校章と「立川高校」の文字")]
+    assert [c.value for c in rule_r7(badge, [], gaz, [])] == ["東京都立立川高等学校（立川市）"]
+    # 「立川高島屋」は学校ではない
+    shop = [_clue("p1", ClueType.LANDMARK, "立川高島屋")]
+    assert rule_r7(shop, [], gaz, []) == []
+
+
+def test_r7_lists_candidates_when_the_timetable_cannot_decide() -> None:
+    gaz = Gazetteer(
+        knowledge=KNOW_GAZ.knowledge,
+        schools=[
+            {"name": "X大学", "kind": "大学", "city": "八王子市"},
+            {"name": "Y大学", "kind": "大学", "city": "八王子市"},
+        ],
+    )
+    posts = [_post("p1", "2026-10-19 08:05"), _post("p2", "2026-10-19 10:41")]
+    clues = [
+        _clue("p1", ClueType.ROUTINE_TEXT, "大学行く"),
+        _clue("p2", ClueType.ROUTINE_TEXT, "2限ねむい"),
+    ]
+    r4 = [Conclusion("R4", "home_city", "八王子市", [])]
+    # Y大学は時間割が分からないので候補に残る
+    got = rule_r7(clues, posts, gaz, r4)
+    assert [c.value for c in got] == ["八王子市内の大学（2校のどれか）"]
+
+
+def test_r8_name_combines_readings_and_drops_honorifics() -> None:
+    weak = _clue("p2", ClueType.NAME_TEXT, "xx ハルキ 様").model_copy(update={"confidence": 0.45})
+    clues = [_clue("p1", ClueType.NAME_TEXT, "Happy Birthday"), weak]
+    assert rule_r8(clues) == []
+    clues.append(_clue("p3", ClueType.NAME_TEXT, "はるきへ"))
+    name = rule_r8(clues)[0]
+    assert (name.value, name.clue_indices) == ("はるき", [2])
+
+
+def test_r9_age_from_a_number_or_a_first_legal_drink() -> None:
+    posts = [_post("p1", "2026-10-22 21:30"), *OTHER_DAYS]
+    drink = [_clue("p1", ClueType.AGE_TEXT, "誕生日、やっと堂々と頼めた🍺")]
+    assert [c.value for c in rule_r9(drink, posts)] == ["20歳（誕生日は10月22日ごろ）"]
+    # 同じ日にまとめて投稿したなら、投稿日を誕生日にしない
+    assert [c.value for c in rule_r9(drink, posts[:1])] == ["20歳"]
+    seijin = [_clue("p1", ClueType.AGE_TEXT, "成人式の前撮り")]
+    assert [c.value for c in rule_r9(seijin, posts)] == ["19〜20歳"]
+    plain = [_clue("p1", ClueType.AGE_TEXT, "30歳の抱負")]
+    assert [c.value for c in rule_r9(plain, posts)] == ["30歳"]
+    assert rule_r9([_clue("p1", ClueType.AGE_TEXT, "誕生日")], posts) == []
+
+
+def test_r10_occupation_needs_a_shift_or_two_outfits() -> None:
+    boots = _clue("p1", ClueType.UNIFORM, "安全靴")
+    assert rule_r10([boots]) == []
+    night = _clue("p2", ClueType.ROUTINE_TEXT, "夜勤明け")
+    assert [c.value for c in rule_r10([boots, night])] == ["夜勤のある現場仕事"]
+
+
+DIST_GAZ = Gazetteer(
+    stations=[
+        {"station_name": "八王子", "mesh_1km": "m-h", "lat": 35.6558, "lon": 139.3389},
+        {"station_name": "三鷹", "mesh_1km": "m-m", "lat": 35.7027, "lon": 139.5607},
+        {"station_name": "中野", "mesh_1km": "m-n", "lat": 35.7056, "lon": 139.6659},
+        {"station_name": "東中野", "mesh_1km": "m-n", "lat": 35.7067, "lon": 139.6826},
+    ],
+    postal=[
+        {"postal_code": "1920083", "muni_code": "13201", "city": "八王子市", "town": "旭町"},
+        {"postal_code": "1810013", "muni_code": "13204", "city": "三鷹市", "town": "下連雀"},
+    ],
+    muni_meshes={"13201": {"m-h"}, "13204": {"m-m"}},
+    knowledge=Knowledge(
+        trash_bags=[
+            TrashBag(city="八王子市", liters=40, price=75),
+            TrashBag(city="三鷹市", liters=40, price=75),
+        ]
+    ),
+)
+
+
+def _with_text(post_id: str, text: str) -> Post:
+    return _post(post_id, "2026-10-20 22:05").model_copy(update={"text": text})
+
+
+def test_r4_far_and_near_hints_pick_one_of_the_bag_cities() -> None:
+    bag = _clue("p1", ClueType.LOCAL_ITEM, "指定収集袋 40L 10枚 750円")
+    nakano = _clue("p2", ClueType.PLACE_TEXT, "中野")
+    assert rule_r4([bag], DIST_GAZ) == []
+
+    far = rule_r4([bag, nakano], DIST_GAZ, [_with_text("p2", "中野とか遠くてだるい")])
+    assert [(c.value, c.clue_indices) for c in far] == [("八王子市", [0, 1])]
+    assert "三鷹市から約10km" in far[0].note
+
+    near = rule_r4([bag, nakano], DIST_GAZ, [_with_text("p2", "中野ならすぐ行ける")])
+    assert [c.value for c in near] == ["三鷹市"]
+    # 遠い・近いの言葉がなければ使わない
+    plain = rule_r4([bag, nakano], DIST_GAZ, [_with_text("p2", "中野で飲み")])
+    assert plain == []
+
+
+def test_stations_named_in_prefers_the_longer_name() -> None:
+    assert DIST_GAZ.stations_named_in("東中野まで遠い") == {"東中野"}
+    assert DIST_GAZ.stations_named_in("中野まで遠い") == {"中野"}
 
 
 # ---- R4 路線 ----
@@ -406,9 +654,9 @@ def test_r4_finds_the_line_of_the_station_from_one_mention() -> None:
         _clue("p3", ClueType.PLACE_TEXT, "山手線"),
     ]
 
-    got = rule_r4(clues, [_station_conclusion("根津")], LINE_GAZ)
+    got = rule_r11(clues, [_station_conclusion("根津")], LINE_GAZ)
 
-    assert got == [Conclusion("R4", "line", "千代田線", [1], got[0].note)]
+    assert got == [Conclusion("R11", "line", "千代田線", [1], got[0].note)]
     assert "根津駅" in got[0].note
 
 
@@ -417,9 +665,11 @@ def test_r4_without_station_needs_the_line_in_several_posts() -> None:
     twice = [*once, _clue("p2", ClueType.ROUTINE_TEXT, "中央線止まってる")]
     same_post = [*once, _clue("p1", ClueType.ROUTINE_TEXT, "中央線止まってる")]
 
-    assert rule_r4(once, [], LINE_GAZ) == []
-    assert rule_r4(same_post, [], LINE_GAZ) == []
-    assert [(c.value, c.clue_indices) for c in rule_r4(twice, [], LINE_GAZ)] == [("中央線", [0, 1])]
+    assert rule_r11(once, [], LINE_GAZ) == []
+    assert rule_r11(same_post, [], LINE_GAZ) == []
+    assert [(c.value, c.clue_indices) for c in rule_r11(twice, [], LINE_GAZ)] == [
+        ("中央線", [0, 1])
+    ]
 
 
 def test_r4_ignores_lines_in_clue_types_that_are_not_text_or_signs() -> None:
@@ -428,7 +678,7 @@ def test_r4_ignores_lines_in_clue_types_that_are_not_text_or_signs() -> None:
         _clue("p2", ClueType.SHOP, "千代田線ラーメン"),
     ]
 
-    assert rule_r4(clues, [_station_conclusion("根津")], LINE_GAZ) == []
+    assert rule_r11(clues, [_station_conclusion("根津")], LINE_GAZ) == []
 
 
 def test_infer_adds_the_line_after_the_station() -> None:
@@ -452,6 +702,39 @@ def test_infer_adds_the_line_after_the_station() -> None:
     assert got["line"].value == "千代田線"
 
 
+def test_r8_joins_a_family_name_and_a_given_name_from_different_posts() -> None:
+    board = _clue("p1", ClueType.NAME_TEXT, "在室表の名札「内藤」").model_copy(
+        update={"confidence": 0.85}
+    )
+    cake = _clue("p2", ClueType.NAME_TEXT, "ケーキのプレート「大貴くん おめでとう」")
+    got = rule_r8([board, cake])
+    assert [(c.value, c.clue_indices) for c in got] == [("内藤大貴", [0, 1])]
+    assert [c.value for c in rule_r8([cake])] == ["大貴"]
+
+
+def test_r7_campus_from_a_lab_post_and_its_nearest_station() -> None:
+    gaz = Gazetteer(
+        stations=[{"station_name": "運河", "mesh_1km": "m-n", "lat": 35.91, "lon": 139.91}],
+        knowledge=Knowledge(
+            universities=[University("東京理科大学", "野田キャンパス", "野田市", {}, ["運河"])]
+        ),
+    )
+    lab = _clue("p1", ClueType.ROUTINE_TEXT, "研究室に泊まり")
+    platform = _clue("p2", ClueType.PLACE_TEXT, "運河")
+    got = rule_r7([lab, platform], [], gaz, [])
+    assert [(c.value, c.clue_indices) for c in got] == [("東京理科大学 野田キャンパス", [0, 1])]
+    # どちらか片方だけでは決まらない
+    assert rule_r7([lab], [], gaz, []) == []
+    assert rule_r7([platform], [], gaz, []) == []
+
+
+def test_r9_reads_the_age_from_a_birthday_post() -> None:
+    posts = [_post("p1", "2026-10-25 13:00").model_copy(update={"text": "誕生日。今日で22"})]
+    assert [c.value for c in rule_r9([_clue("p1", ClueType.AGE_TEXT, "今日で22")], posts)] == [
+        "22歳"
+    ]
+
+
 # ---- R5 名前・R6 年齢・R7 学校 ----
 
 
@@ -462,7 +745,7 @@ def test_r5_reads_a_full_name_from_an_address_label() -> None:
         _clue("p3", ClueType.NAME_TEXT, "だいき"),
     ]
 
-    got = _by_attribute(rule_r5(clues))
+    got = _by_attribute(rule_r8(clues))
 
     assert got["full_name"].value == "内藤大貴"
     assert got["full_name"].clue_indices == [0, 1]
@@ -471,16 +754,16 @@ def test_r5_reads_a_full_name_from_an_address_label() -> None:
 
 def test_r5_treats_three_or_more_kanji_without_a_space_as_a_full_name() -> None:
     assert (
-        _by_attribute(rule_r5([_clue("p1", ClueType.NAME_TEXT, "内藤大貴")]))["full_name"].value
+        _by_attribute(rule_r8([_clue("p1", ClueType.NAME_TEXT, "内藤大貴")]))["full_name"].value
         == "内藤大貴"
     )
-    assert set(_by_attribute(rule_r5([_clue("p1", ClueType.NAME_TEXT, "大貴")]))) == {
+    assert set(_by_attribute(rule_r8([_clue("p1", ClueType.NAME_TEXT, "大貴")]))) == {
         "given_name_or_nickname"
     }
 
 
 def test_r5_skips_names_with_unreadable_characters() -> None:
-    assert rule_r5([_clue("p1", ClueType.NAME_TEXT, "xx はるき 様")]) == []
+    assert rule_r8([_clue("p1", ClueType.NAME_TEXT, "xx はるき 様")]) == []
 
 
 def test_r5_does_not_decide_between_names_that_tie() -> None:
@@ -489,7 +772,7 @@ def test_r5_does_not_decide_between_names_that_tie() -> None:
         _clue("p2", ClueType.NAME_TEXT, "山田 花子"),
     ]
 
-    assert rule_r5(clues) == []
+    assert rule_r8(clues) == []
 
 
 def test_r6_takes_the_age_from_the_latest_post() -> None:
@@ -499,15 +782,13 @@ def test_r6_takes_the_age_from_the_latest_post() -> None:
         _clue("p2", ClueType.AGE_TEXT, "25歳になりました"),
     ]
 
-    assert rule_r6(clues, posts) == [
-        Conclusion("R6", "age", "25歳（2026年10月の投稿）", [1], "本文の年齢と投稿の日付")
-    ]
+    assert rule_r9(clues, posts) == [Conclusion("R9", "age", "25歳", [1], "本文の年齢")]
 
 
 def test_r6_needs_a_number_of_years() -> None:
     posts = [_post("p1", "2026-10-17 21:00")]
 
-    assert rule_r6([_clue("p1", ClueType.AGE_TEXT, "誕生日")], posts) == []
+    assert rule_r9([_clue("p1", ClueType.AGE_TEXT, "誕生日")], posts) == []
 
 
 def test_r7_reads_school_names_only() -> None:
@@ -518,7 +799,7 @@ def test_r7_reads_school_names_only() -> None:
         _clue("p4", ClueType.ORG_TEXT, "赤札堂"),
     ]
 
-    assert rule_r7(clues) == [
+    assert rule_r7(clues, [], GAZ, []) == [
         Conclusion("R7", "school", "筑波大学", [1, 2], "学校の名前の手がかり")
     ]
 
@@ -551,12 +832,12 @@ def test_r3_leaves_out_empty_parentheses() -> None:
 
 
 def test_r8_takes_the_birthday_and_year_from_an_age_post() -> None:
-    posts = [_post("p1", "2026-10-17 21:00")]
+    posts = [_post("p1", "2026-10-17 21:00"), *OTHER_DAYS]
 
-    got = rule_r8([_clue("p1", ClueType.AGE_TEXT, "25歳になりました")], posts)
+    got = rule_birthday([_clue("p1", ClueType.AGE_TEXT, "25歳になりました")], posts)
 
     assert got == [
-        Conclusion("R8", "birthday", "2001年10月17日ごろ", [0], "本文の年齢と、誕生日の投稿の日付")
+        Conclusion("R12", "birthday", "2001年10月17日ごろ", [0], "本文の年齢と、誕生日の投稿の日付")
     ]
 
 
@@ -567,7 +848,7 @@ def test_r8_prefers_a_written_date_and_counts_a_birthday_not_yet_reached() -> No
         _clue("p2", ClueType.AGE_TEXT, "4/12生まれ、いま24歳"),
     ]
 
-    (got,) = rule_r8(clues, posts)
+    (got,) = rule_birthday(clues, posts)
 
     # 3/1 の投稿の時点で 4/12 はまだ来ていないので、いま 24 歳なら 2001 年生まれ
     assert got.value == "2001年4月12日ごろ"
@@ -575,9 +856,9 @@ def test_r8_prefers_a_written_date_and_counts_a_birthday_not_yet_reached() -> No
 
 
 def test_r8_without_age_gives_only_month_and_day() -> None:
-    posts = [_post("p1", "2026-10-17 21:00")]
+    posts = [_post("p1", "2026-10-17 21:00"), *OTHER_DAYS]
 
-    (got,) = rule_r8([_clue("p1", ClueType.AGE_TEXT, "誕生日ケーキ")], posts)
+    (got,) = rule_birthday([_clue("p1", ClueType.AGE_TEXT, "誕生日ケーキ")], posts)
 
     assert got.value == "10月17日ごろ"
 
@@ -586,4 +867,45 @@ def test_r8_ignores_ages_without_a_birthday_and_impossible_dates() -> None:
     posts = [_post("p1", "2026-10-17 21:00")]
     clues = [_clue("p1", ClueType.AGE_TEXT, "25歳"), _clue("p1", ClueType.AGE_TEXT, "13/45")]
 
-    assert rule_r8(clues, posts) == []
+    assert rule_birthday(clues, posts) == []
+
+
+def test_city_does_not_ignore_a_distance_that_refutes_every_candidate() -> None:
+    bag = _clue("p1", ClueType.LOCAL_ITEM, "指定ゴミ袋 40L 10枚 750円")
+    hint = _clue("p2", ClueType.PLACE_TEXT, "中野まで遠い")
+    # 2候補とも閾値以内になるデータでは「遠い」に合う市はない
+    gaz = Gazetteer(
+        stations=[
+            {"station_name": "中野", "mesh_1km": "near", "lat": 35.7, "lon": 139.6},
+        ],
+        postal=DIST_GAZ.postal,
+        muni_meshes={"13201": {"near"}, "13204": {"near"}},
+        knowledge=DIST_GAZ.knowledge,
+    )
+    assert rule_r4([bag, hint], gaz) == []
+
+
+def test_zero_bag_count_is_ignored_without_crashing_diagnosis() -> None:
+    assert rule_r4([_clue("p", ClueType.LOCAL_ITEM, "指定ゴミ袋40L 0枚750円")], KNOW_GAZ) == []
+
+
+def test_model_guesses_of_customer_barcodes_are_not_address_evidence() -> None:
+    guess = _clue("p", ClueType.CODE, "カスタマバーコード: 〒192-0083 住所表示番号 9-3")
+    guess = guess.model_copy(update={"source": ClueSource.VLM})
+    assert rule_r6([guess], KNOW_GAZ) == []
+
+
+def test_same_day_birthday_does_not_become_the_date_of_posting() -> None:
+    posts = [_post("p", "2026-10-25 12:00")]
+    assert rule_birthday([_clue("p", ClueType.AGE_TEXT, "22歳の誕生日")], posts) == []
+
+
+def test_explicit_birthday_is_kept_even_in_a_same_day_account() -> None:
+    posts = [_post("p", "2026-10-25 12:00")]
+    [birthday] = rule_birthday([_clue("p", ClueType.AGE_TEXT, "4/12生まれ、いま22歳")], posts)
+    assert birthday.value == "2004年4月12日ごろ"
+
+
+def test_birthday_rejects_nonexistent_calendar_dates() -> None:
+    posts = [_post("p", "2026-10-25 12:00")]
+    assert rule_birthday([_clue("p", ClueType.AGE_TEXT, "2月30日")], posts) == []

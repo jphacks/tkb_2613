@@ -6,6 +6,7 @@ from tkb_data_prep.area_codes import AreaCode, Problem
 from tkb_data_prep.households import Household
 from tkb_data_prep.muni_mesh import MuniMesh
 from tkb_data_prep.postal import Postal
+from tkb_data_prep.schools import School
 from tkb_data_prep.stations import Station
 
 
@@ -18,6 +19,7 @@ class Tables:
     stations: list[Station]
     area_codes: list[AreaCode]
     area_code_problems: list[Problem]
+    schools: list[School]
 
 
 def report(t: Tables) -> list[str]:
@@ -36,6 +38,8 @@ def report(t: Tables) -> list[str]:
         f"（駅名 {len({s.station_name for s in t.stations}):,}）",
         f"area_codes       {len(t.area_codes):>9,} 行"
         f"（うち一部だけが対象 {sum(a.partial for a in t.area_codes):,}）",
+        f"schools          {len(t.schools):>9,} 行"
+        f"（市区町村が引けない {sum(not s.city for s in t.schools):,}）",
         "",
         "== 世帯数 ==",
         f"世帯数の合計 {sum(h.households for h in t.households):,}",

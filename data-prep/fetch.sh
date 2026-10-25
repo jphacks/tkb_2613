@@ -8,6 +8,12 @@ RAW="$(cd "$(dirname "$0")" && pwd)/raw"
 JAPANPOST_URL="https://www.post.japanpost.jp/service/search/zipcode/download/utf/zip/utf_ken_all.zip"
 STAT_MESH_URL="https://www.stat.go.jp/data/mesh/csv"
 KSJ_N02_URL="https://nlftp.mlit.go.jp/ksj/gml/data/N02/N02-24/N02-24_GML.zip"
+# 文部科学省「学校コード」（令和8年5月1日時点・暫定版）。東日本の学校（2つに分かれている）と大学等
+MEXT_URLS=(
+  "https://www.mext.go.jp/content/20260825-mxt_chousa01-000011635_2-1.csv"
+  "https://www.mext.go.jp/content/20260825-mxt_chousa01-000011635_2-2.csv"
+  "https://www.mext.go.jp/content/20260825-mxt_chousa01-000011635_6.csv"
+)
 PREFECTURES=(11 12 13 14)
 
 if ! compgen -G "$RAW/estat/*.zip" >/dev/null; then
@@ -37,3 +43,6 @@ for pref in "${PREFECTURES[@]}"; do
   fetch "$STAT_MESH_URL/$pref.csv" "$RAW/stat_mesh/$pref.csv"
 done
 fetch "$KSJ_N02_URL" "$RAW/ksj/N02-24_GML.zip"
+for url in "${MEXT_URLS[@]}"; do
+  fetch "$url" "$RAW/mext/$(basename "$url")"
+done

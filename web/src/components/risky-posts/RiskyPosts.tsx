@@ -13,7 +13,7 @@ const t = messages.risky;
 
 /** engine の IMPORTANT_ATTRIBUTES（tkb_engine/planner.py）とそろえる。全部崩れたら逃げ切り */
 const IMPORTANT_ATTRIBUTES = [
-  "full_name", "given_name_or_nickname", "birthday", "home_area", "station", "active_time", "routine",
+  "full_name", "given_name_or_nickname", "birthday", "home_area", "home_block", "station", "active_time", "routine",
 ] as const;
 
 /** 投稿の本文はこの文字数で切って見せる */
