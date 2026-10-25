@@ -51,6 +51,8 @@ R2_MIN_POSTS = 2
 # R3：「同じ曜日の同じ時間帯」とみなす幅（±時間）と、要る投稿の数
 R3_WINDOW_HOURS = 1.0
 R3_MIN_POSTS = 3
+# R3：結論の括弧の中に並べる、生活の決まりの言葉の数（根拠の手がかりはすべて残す）
+R3_MAX_WORDS = 2
 # R4：R1 の駅がなくても路線を結論にするのに要る、その路線名が出てくる投稿の数
 R4_MIN_POSTS = 2
 # ----------------------------
@@ -168,12 +170,13 @@ def rule_r3(clues: Sequence[Clue], posts: Sequence[Post]) -> list[Conclusion]:
             continue
         ids = {p.post_id for p in group}
         indices = [i for i, c in routine.items() if c.post_id in ids]
-        words = sorted({c.value for i, c in routine.items() if i in indices})
+        words = _short_words([routine[i].value for i in indices])
+        detail = f"（{'・'.join(words)}）" if words else ""
         conclusions.append(
             Conclusion(
                 "R3",
                 "routine",
-                f"毎週{WEEKDAYS[day]}曜 {_hour_label(group)}に出かけている（{'・'.join(words)}）",
+                f"毎週{WEEKDAYS[day]}曜 {_hour_label(group)}に出かけている{detail}",
                 indices,
                 f"同じ曜日・時間帯の投稿 {len(group)} 件（根拠の番号は、その投稿の routine_text）",
             )
@@ -297,6 +300,25 @@ def infer(clues: Sequence[Clue], posts: Sequence[Post], gaz: Gazetteer) -> list[
         *rule_r6(clues, posts),
         *rule_r7(clues),
     ]
+
+
+def _short_words(values: Sequence[str]) -> list[str]:
+    """括弧の中に並べる言葉。多く出てきた順、同じなら短い順に R3_MAX_WORDS 個まで。
+
+    片方がもう片方を含む言葉（「電車混んでる」と「月曜の朝から電車混んでる」）は、先に選んだ方だけにする。
+    """
+    counts: dict[str, int] = {}
+    for value in values:
+        word = value.strip()
+        if word:
+            counts[word] = counts.get(word, 0) + 1
+    picked: list[str] = []
+    for word in sorted(counts, key=lambda w: (-counts[w], len(w), w)):
+        if not any(word in p or p in word for p in picked):
+            picked.append(word)
+        if len(picked) == R3_MAX_WORDS:
+            break
+    return picked
 
 
 def _strip_honorifics(value: str) -> str:
