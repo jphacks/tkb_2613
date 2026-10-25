@@ -1,7 +1,7 @@
 "use client";
 
 import { messages } from "@/lib/messages";
-import { cropStyle, pickFace, pickName, pickReveal, type RevealItem } from "@/lib/reveal";
+import { cropStyle, identityName, pickFace, pickReveal, type RevealItem } from "@/lib/reveal";
 import { useLoadedSize } from "@/lib/useLoadedSize";
 import type { Clue, ClueType } from "@/types/clue";
 import type { Conclusion } from "@/types/diagnose";
@@ -93,6 +93,8 @@ export function Reveal({ posts, clues, conclusions }: RevealProps) {
   if (items.length === 0 && conclusions.length === 0) return null;
   const postCount = new Set(clues.map((c) => c.post_id)).size;
 
+  const identity = identityName(clues, conclusions);
+
   return (
     <section aria-labelledby="reveal-heading" className="reveal space-y-10">
       <div aria-hidden="true" className="found-flash" />
@@ -104,9 +106,9 @@ export function Reveal({ posts, clues, conclusions }: RevealProps) {
       </div>
 
       <IdentityCard
-        name={pickName(clues)}
+        name={identity.name}
         face={pickFace(posts, clues)}
-        conclusions={conclusions}
+        conclusions={identity.rest}
         highlights={items
           // 名前は大きく出し、推定の根拠は推定の行で見えるので、それ以外を並べる
           .filter((item) => item.clue.type !== "name_text" && !item.used)

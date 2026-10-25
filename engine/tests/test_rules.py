@@ -17,6 +17,7 @@ from tkb_engine import (
     rule_r5,
     rule_r6,
     rule_r7,
+    rule_r8,
 )
 
 JST = ZoneInfo("Asia/Tokyo")
@@ -544,3 +545,45 @@ def test_r3_leaves_out_empty_parentheses() -> None:
     (got,) = rule_r3([], posts)
 
     assert got.value == "毎週土曜 19時ごろに出かけている"
+
+
+# ---- R8 生年月日 ----
+
+
+def test_r8_takes_the_birthday_and_year_from_an_age_post() -> None:
+    posts = [_post("p1", "2026-10-17 21:00")]
+
+    got = rule_r8([_clue("p1", ClueType.AGE_TEXT, "25歳になりました")], posts)
+
+    assert got == [
+        Conclusion("R8", "birthday", "2001年10月17日ごろ", [0], "本文の年齢と、誕生日の投稿の日付")
+    ]
+
+
+def test_r8_prefers_a_written_date_and_counts_a_birthday_not_yet_reached() -> None:
+    posts = [_post("p1", "2026-10-17 21:00"), _post("p2", "2026-03-01 09:00")]
+    clues = [
+        _clue("p1", ClueType.AGE_TEXT, "誕生日"),
+        _clue("p2", ClueType.AGE_TEXT, "4/12生まれ、いま24歳"),
+    ]
+
+    (got,) = rule_r8(clues, posts)
+
+    # 3/1 の投稿の時点で 4/12 はまだ来ていないので、いま 24 歳なら 2001 年生まれ
+    assert got.value == "2001年4月12日ごろ"
+    assert got.clue_indices == [1]
+
+
+def test_r8_without_age_gives_only_month_and_day() -> None:
+    posts = [_post("p1", "2026-10-17 21:00")]
+
+    (got,) = rule_r8([_clue("p1", ClueType.AGE_TEXT, "誕生日ケーキ")], posts)
+
+    assert got.value == "10月17日ごろ"
+
+
+def test_r8_ignores_ages_without_a_birthday_and_impossible_dates() -> None:
+    posts = [_post("p1", "2026-10-17 21:00")]
+    clues = [_clue("p1", ClueType.AGE_TEXT, "25歳"), _clue("p1", ClueType.AGE_TEXT, "13/45")]
+
+    assert rule_r8(clues, posts) == []

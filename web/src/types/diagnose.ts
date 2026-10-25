@@ -18,7 +18,7 @@ import { isPost, type Post } from "./post";
 /** 推理ルールが出した結論 1 つ（engine の Conclusion） */
 export interface Conclusion {
   readonly rule: string;
-  /** 項目の名前（station / home_area / active_time / routine / line / full_name / age / school など。まだ試作の名前） */
+  /** 項目の名前（station / home_area / active_time / routine / line / full_name / age / school / birthday など。まだ試作の名前） */
   readonly attribute: string;
   readonly value: string;
   readonly clue_indices: readonly number[];

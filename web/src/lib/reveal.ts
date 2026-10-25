@@ -108,6 +108,25 @@ export function cropStyle(
   };
 }
 
+/** 身元カードの名前に使う推定。先にあるものを使う（engine の R5） */
+const NAME_ATTRIBUTES: readonly string[] = ["full_name", "given_name_or_nickname"];
+
+/**
+ * 身元カードに大きく出す名前と、その下に並べる残りの推定。
+ * 推定したフルネーム、呼び名の順に使い、どちらもなければ写っていた名前の文字（pickName）。
+ * 名前に使った推定は、残りの推定の行には出さない（同じ名前を2回出さない）。
+ */
+export function identityName(
+  clues: readonly Clue[],
+  conclusions: readonly Conclusion[],
+): { name: string | null; rest: readonly Conclusion[] } {
+  for (const attribute of NAME_ATTRIBUTES) {
+    const found = conclusions.find((c) => c.attribute === attribute);
+    if (found) return { name: found.value, rest: conclusions.filter((c) => !NAME_ATTRIBUTES.includes(c.attribute)) };
+  }
+  return { name: pickName(clues), rest: conclusions };
+}
+
 /**
  * 身元カードに出す名前。写真や本文に写っていた文字（name_text）をそのまま使い、推測で補わない。
  * 読めない文字（x）の少ないもの、確からしいものを選ぶ。なければ null。
