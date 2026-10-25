@@ -4,12 +4,13 @@ import { useEffect, useRef, useState } from "react";
 
 import { ConclusionBoard } from "@/components/conclusion-board/ConclusionBoard";
 import { PostCard, type PostClues } from "@/components/post-list/PostCard";
+import { RiskyPosts } from "@/components/risky-posts/RiskyPosts";
 import { SeekerEyes } from "@/components/seeker-eyes/SeekerEyes";
 import { useSession } from "@/components/session/SessionProvider";
 import { ApiError, diagnose } from "@/lib/api";
 import { messages } from "@/lib/messages";
 import type { Clue } from "@/types/clue";
-import type { Conclusion } from "@/types/diagnose";
+import type { Conclusion, RiskyPost, Simulation } from "@/types/diagnose";
 import type { Post } from "@/types/post";
 
 const t = messages.diagnose;
@@ -55,6 +56,8 @@ export function DiagnosePanel() {
   const [posts, setPosts] = useState<readonly Post[]>([]);
   const [found, setFound] = useState<Readonly<Record<string, PostClues>>>({});
   const [result, setResult] = useState<Result | null>(null);
+  const [risky, setRisky] = useState<readonly RiskyPost[] | null>(null);
+  const [simulation, setSimulation] = useState<Simulation | null>(null);
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   const controller = useRef<AbortController | null>(null);
 
@@ -70,6 +73,8 @@ export function DiagnosePanel() {
     setPosts([]);
     setFound({});
     setResult(null);
+    setRisky(null);
+    setSimulation(null);
     setPhase({ kind: "connecting" });
     try {
       for await (const event of diagnose({ signal: current.signal })) {
@@ -84,6 +89,9 @@ export function DiagnosePanel() {
             break;
           case "conclusions":
             setResult({ clues: event.clues, conclusions: event.conclusions });
+            break;
+          case "plan":
+            setRisky(event.posts);
             break;
           case "done":
             setPhase({ kind: "done", postsSeen: event.posts_seen });
@@ -134,7 +142,17 @@ export function DiagnosePanel() {
         )}
       </div>
 
-      {result && <ConclusionBoard clues={result.clues} conclusions={result.conclusions} />}
+      {result && (
+        <ConclusionBoard
+          clues={result.clues}
+          conclusions={simulation ? simulation.after : result.conclusions}
+          unknown={simulation?.broken}
+        />
+      )}
+
+      {result && risky && (
+        <RiskyPosts posts={posts} risky={risky} clueCount={result.clues.length} onSimulated={setSimulation} />
+      )}
 
       {posts.length > 0 && (
         <ol aria-label={t.postsLabel} className="max-w-2xl space-y-5">
