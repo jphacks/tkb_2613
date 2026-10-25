@@ -63,7 +63,14 @@ class Knowledge:
     universities: list[University] = field(default_factory=list)
 
     @classmethod
-    def load(cls, path: Path = KNOWLEDGE_PATH) -> "Knowledge":
+    def load(cls, path: Path | None = None) -> "Knowledge":
+        # 開発時はソースの相対位置、Dockerの非editableインストール時は起動場所から読む。
+        if path is None:
+            path = (
+                KNOWLEDGE_PATH
+                if KNOWLEDGE_PATH.is_file()
+                else Path("data-prep/manual/knowledge.json")
+            )
         doc = json.loads(path.read_text(encoding="utf-8"))
         return cls(
             trash_bags=[TrashBag(**_fields(r, TrashBag)) for r in doc["trash_bags"]],

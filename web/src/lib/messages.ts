@@ -46,11 +46,14 @@ const ATTRIBUTE_LABELS: Readonly<Record<string, string>> = {
   home_block: "住所の区画",
   active_time: "よくいる時間",
   routine: "決まった外出",
-  school: "通っている学校",
   name: "名前",
   age: "年齢",
   occupation: "仕事",
   line: "使っている路線",
+  full_name: "名前",
+  given_name_or_nickname: "呼び名",
+  school: "学校",
+  birthday: "生年月日",
 };
 
 export const messages = {
@@ -148,9 +151,22 @@ export const messages = {
     fromText: "本文から",
     count: (clues: number, posts: number) => `${posts} 件の投稿から、手がかりを ${clues} 個`,
   },
+  identity: {
+    label: "推定した身元",
+    /** 写真の枠。顔は出さず、人影を出す */
+    silhouette: "顔は写していなくても",
+    /** 写真の枠に、本人の投稿に写っていた顔を出したとき。本人とは限らない */
+    faceCaption: "写っていた顔（本人とは限りません）",
+    faceAlt: "投稿の写真に写っていた顔",
+    nameLabel: "名前",
+    nameUnknown: "名前は不明",
+    cluesFound: "見つかった手がかり",
+    cluesUnit: "個",
+    inferred: "推定",
+  },
   risky: {
     heading: "まーだだよ",
-    lead: "この投稿を消すと、推定が崩れます。選んで「消したらどうなる」を押すと、消したあとの捜査ボードを見られます。実際には消しません。",
+    lead: "この投稿を消すと、推定が崩れます。選んで「消したらどうなる」を押すと、消したあとの捜査ボードを見られます（ここではまだ消しません）。納得したら「Bluesky から消す」で実際に消せます。",
     listLabel: "危ない投稿",
     breaks: (labels: string) => `消すと不明に：${labels}`,
     breaksNothing: "これだけでは崩れません",
@@ -161,9 +177,26 @@ export const messages = {
     reset: "元に戻す",
     result: (deleted: number, broken: number) =>
       broken > 0 ? `${deleted} 件消すと、${broken} つの項目が不明になります` : `${deleted} 件消しても、推定は崩れません`,
-    safe: "逃げ切り：最寄り駅・よくいる時間・決まった外出はもう推定できません",
+    safe: "逃げ切り：最寄り駅・住所の区画・よくいる時間・決まった外出はもう推定できません",
     none: "推定を崩せる投稿は見つかりませんでした",
     failed: "推理し直せませんでした",
+    /** ここから下は、Bluesky から実際に消すとき */
+    deleteForReal: "Bluesky から消す",
+    confirmHeading: "本当に消しますか？",
+    confirmLead: (count: number) =>
+      `Bluesky から次の ${count} 件の投稿を削除します。写真も本文も、いいねや返信もいっしょに消え、元に戻せません。`,
+    confirmListLabel: "消す投稿",
+    confirm: "削除する",
+    cancel: "やめる",
+    deleting: "Bluesky から消しています…",
+    deleteFailed: "消せませんでした",
+  },
+  /** 実際に消したあと */
+  escaped: {
+    heading: "もういいよ",
+    deleted: (count: number) => `${count} 件の投稿を Bluesky から消しました`,
+    failed: (count: number) => `${count} 件は消せませんでした。Bluesky のアプリから直接消してください`,
+    rediagnose: "もう一度「診断する」を押すと、残った投稿で最初から調べ直します",
   },
   hideAndSeek: {
     pickerLabel: "写真の選択",

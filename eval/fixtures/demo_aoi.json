@@ -340,7 +340,7 @@
       ]
     },
     {
-      "attribute": "name",
+      "attribute": "given_name_or_nickname",
       "value": "あおい",
       "note": "友達の返信での呼びかけ",
       "clue_indices": [

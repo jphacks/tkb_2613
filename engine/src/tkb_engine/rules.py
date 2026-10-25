@@ -1,4 +1,4 @@
-"""推理ルール R1〜R10。手がかりの組み合わせから結論を出す。
+"""推理ルール R1〜R12。手がかりの組み合わせから結論を出す。
 
 入力：
 - clues：投稿ごとに抜き出した手がかり（tkb_common.schemas.Clue）を全投稿ぶん並べた一覧。
@@ -10,9 +10,10 @@
 出力：Conclusion の一覧。1つの Conclusion が捜査ボードの1行のもとになる。
 attribute はまだ試作の名前。プロフィールの16項目（tkb_common.schemas.ProfileAttribute）への
 対応づけはこれから行う。station・line → commute_station_or_line、home_city・home_district・
-home_area・home_block → residential_area、school → school、name → given_name_or_nickname が
-当てはまる。
-age・occupation・active_time・routine は16項目にない。
+home_area・home_block → residential_area、school → school が当てはまる。
+full_name・given_name_or_nickname はそのまま使う。
+age・birthday・occupation・active_time・routine は16項目にない。
+名前は full_name / given_name_or_nickname を使い、main の身元カードとの互換性を保つ。
 
 ルールの中身：
 - R1 生活圏：station_sign / place_text（駅名）と address_text / postal_code（区と町名）から、
@@ -35,6 +36,7 @@ age・occupation・active_time・routine は16項目にない。
 - R9 年齢：age_text の「〇歳」。誕生日にお酒（「堂々と頼めた🍺」など）なら 20歳。成人式の準備なら
   19〜20歳。誕生日は投稿日
 - R10 仕事：夜勤などの生活の決まりと、作業靴・白衣などの身なり
+- R12 生年月日：本文の日付を優先し、投稿日を使うのは3日以上に投稿が分散しているときだけ。
 - R11 路線：手がかりの文字に出てくる路線名（「千代田線また遅延」など）。R1 の駅がその路線にあるか、
   別々の投稿に同じ路線名が R11_MIN_POSTS 件以上出てくれば、使っている路線（line）とする
 
@@ -53,7 +55,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from tkb_common.schemas import Clue, ClueType, Post
+from tkb_common.schemas import Clue, ClueSource, ClueType, Post
 from tkb_engine.gazetteer import CollectionArea, Gazetteer, TrashBag, distance_km
 
 # ---- しきい値（仮の値） ----
@@ -74,6 +76,12 @@ R8_MIN_CONFIDENCE = 0.7
 R7_EARLY_HOURS = 0.5
 # R11：R1 の駅がなくても路線を結論にするのに要る、その路線名が出てくる投稿の数
 R11_MIN_POSTS = 2
+# main のR3の表示と名前・生年月日の読み取りを維持する
+R3_MAX_WORDS = 2
+HONORIFICS = ("様", "さま", "さん", "くん", "君", "ちゃん", "殿", "氏")
+FULL_NAME_MIN_KANJI = 3
+BIRTHDAY_WORDS = ("誕生日", "歳になりました", "歳になった", "バースデー", "birthday")
+SCHOOL_WORDS = ("大学", "高校", "高等学校", "高等専門学校", "高専", "専門学校", "中学校")
 # ----------------------------
 
 JST = ZoneInfo("Asia/Tokyo")
@@ -207,12 +215,13 @@ def rule_r3(clues: Sequence[Clue], posts: Sequence[Post]) -> list[Conclusion]:
             continue
         ids = {p.post_id for p in group}
         indices = [i for i, c in routine.items() if c.post_id in ids]
-        words = sorted({c.value for i, c in routine.items() if i in indices})
+        words = _short_words([routine[i].value for i in indices])
+        detail = f"（{'・'.join(words)}）" if words else ""
         conclusions.append(
             Conclusion(
                 "R3",
                 "routine",
-                f"毎週{WEEKDAYS[day]}曜 {_hour_label(group)}に出かけている（{'・'.join(words)}）",
+                f"毎週{WEEKDAYS[day]}曜 {_hour_label(group)}に出かけている{detail}",
                 indices,
                 f"同じ曜日・時間帯の投稿 {len(group)} 件（根拠の番号は、その投稿の routine_text）",
             )
@@ -259,7 +268,7 @@ def rule_r4(clues: Sequence[Clue], gaz: Gazetteer, posts: Sequence[Post] = ()) -
         return []
     for i, station, far in _distance_hints(clues, gaz, texts):
         kept, notes_here = _by_distance(candidates, station, far, gaz)
-        if kept and kept != candidates:
+        if kept != candidates:
             candidates = kept
             evidence.add(i)
             notes.append(notes_here)
@@ -360,7 +369,7 @@ def _home_towns(clues: Sequence[Clue], gaz: Gazetteer, city: str) -> list[tuple[
     """郵便物のカスタマバーコードと住所表示から読める、その市区町村の町名。"""
     towns = []
     for i, c in enumerate(clues):
-        if c.type is ClueType.CODE and _is_customer_barcode(c.value):
+        if c.type is ClueType.CODE and c.source is ClueSource.OCR and _is_customer_barcode(c.value):
             m = POSTAL_IN_TEXT.search(c.value)
             rows = gaz.postal_rows(m[1] + m[2]) if m else []
             towns += [(i, _town_name(r["town"])) for r in rows if r["city"] == city]
@@ -388,6 +397,7 @@ def rule_r6(clues: Sequence[Clue], gaz: Gazetteer) -> list[Conclusion]:
         # 見分けがつかないので使わない
         if (
             c.type is ClueType.CODE
+            and c.source is ClueSource.OCR
             and _is_customer_barcode(c.value)
             and (m := POSTAL_IN_TEXT.search(c.value))
         ):
@@ -423,7 +433,7 @@ def rule_r7(
     2. なければ「大学」と「〇限」の投稿を、R4 の市区町村にある大学の時間割と照らす。
        時間割の分からない大学は候補に残し、1校に決まらなければ「〇〇市にある大学」までにする
     """
-    named = _named_school(clues, gaz) or _school_by_station(clues, gaz)
+    named = _named_school(clues, gaz) or _direct_school(clues) or _school_by_station(clues, gaz)
     if named:
         return named
     if not r4:
@@ -449,6 +459,7 @@ def rule_r7(
         n
         for n in names
         if n not in timetables
+        or not timetables[n]
         or all(
             k in timetables[n] and timetables[n][k][0] - R7_EARLY_HOURS <= t <= timetables[n][k][1]
             for _, k, t in periods
@@ -552,7 +563,11 @@ def rule_r8(clues: Sequence[Clue]) -> list[Conclusion]:
     shown: dict[str, str] = {}
     roles: dict[str, set[str]] = {}
     for i, c in enumerate(clues):
-        if c.type is ClueType.NAME_TEXT and (name := _clean_name(c.value)):
+        if (
+            c.type is ClueType.NAME_TEXT
+            and "x" not in c.value.lower()
+            and (name := _clean_name(c.value))
+        ):
             key = _hiragana(name)
             groups.setdefault(key, []).append(i)
             shown.setdefault(key, name)
@@ -570,14 +585,22 @@ def rule_r8(clues: Sequence[Clue]) -> list[Conclusion]:
     family = [k for k in sure if "family" in roles[k]]
     given = [k for k in sure if "given" in roles[k] and k not in family]
     if family and given:
-        f = max(family, key=confidence)
-        g = max(given, key=confidence)
+        if len(family) != 1 or len(given) != 1:
+            return []
+        f, g = family[0], given[0]
         note = f"名字（{shown[f]}）と下の名前（{shown[g]}）を別々の手がかりからつなげた"
-        return [Conclusion("R8", "name", shown[f] + shown[g], sorted(groups[f] + groups[g]), note)]
+        return [
+            Conclusion("R8", "full_name", shown[f] + shown[g], sorted(groups[f] + groups[g]), note)
+        ]
+    direct = _direct_names(clues)
+    if any(c.attribute == "full_name" for c in direct):
+        return direct
     best = max(sure, key=confidence)
+    if sum(confidence(k) == confidence(best) for k in sure) > 1:
+        return []
     indices = groups[best]
     note = f"名前の手がかり {len(indices)} 件（合わせた確からしさ {confidence(best):.2f}）"
-    return [Conclusion("R8", "name", shown[best], indices, note)]
+    return [Conclusion("R8", "given_name_or_nickname", shown[best], indices, note)]
 
 
 # 名前が名字か下の名前かを見分ける言葉
@@ -598,7 +621,16 @@ def _name_role(value: str) -> str:
 def rule_r9(clues: Sequence[Clue], posts: Sequence[Post]) -> list[Conclusion]:
     """R9 年齢（age）：「〇歳」、お酒が解禁された誕生日、成人式の準備。誕生日は投稿日。"""
     by_id = {p.post_id: p for p in posts}
-    for i, c in enumerate(clues):
+    ordered = sorted(
+        enumerate(clues),
+        key=lambda item: (
+            by_id[item[1].post_id].created_at.timestamp()
+            if item[1].post_id in by_id
+            else float("-inf")
+        ),
+        reverse=True,
+    )
+    for i, c in ordered:
         if c.type is not ClueType.AGE_TEXT:
             continue
         post = by_id.get(c.post_id)
@@ -689,6 +721,7 @@ def infer(clues: Sequence[Clue], posts: Sequence[Post], gaz: Gazetteer) -> list[
         *rule_r7(clues, posts, gaz, r4),
         *rule_r8(clues),
         *rule_r9(clues, posts),
+        *rule_birthday(clues, posts),
         *rule_r10(clues),
         *rule_r11(clues, r1, gaz),
     ]
@@ -725,7 +758,10 @@ def _matching_bags(value: str, gaz: Gazetteer) -> list[TrashBag]:
     if liters is None or price is None:
         return []
     count = re.search(r"(\d+)\s*枚", value)
-    unit = int(price[1].replace(",", "")) / (int(count[1]) if count else 1)
+    number = int(count[1]) if count else 1
+    if number <= 0:
+        return []
+    unit = int(price[1].replace(",", "")) / number
     color = next((ch for ch in COLORS if ch in value), None)
     return [
         b
@@ -867,3 +903,127 @@ def _largest_cluster(posts: list[Post], window: float) -> list[Post]:
 
 def _hour_label(posts: list[Post]) -> str:
     return f"{round(sum(_hour(p) for p in posts) / len(posts))}時ごろ"
+
+
+def _short_words(values: Sequence[str]) -> list[str]:
+    """括弧の中に並べる言葉。多く出てきた順、同じなら短い順に R3_MAX_WORDS 個まで。
+
+    片方がもう片方を含む言葉（「電車混んでる」と「月曜の朝から電車混んでる」）は、先に選んだ方だけにする。
+    """
+    counts: dict[str, int] = {}
+    for value in values:
+        word = value.strip()
+        if word:
+            counts[word] = counts.get(word, 0) + 1
+    picked: list[str] = []
+    for word in sorted(counts, key=lambda w: (-counts[w], len(w), w)):
+        if not any(word in p or p in word for p in picked):
+            picked.append(word)
+        if len(picked) == R3_MAX_WORDS:
+            break
+    return picked
+
+
+def _strip_honorifics(value: str) -> str:
+    """前後の空白と敬称を除き、全角の空白を半角にする。"""
+    name = value.replace("\u3000", " ").strip()
+    for honorific in HONORIFICS:
+        name = name.removesuffix(honorific).strip()
+    return " ".join(name.split())
+
+
+def _is_full_name(name: str) -> bool:
+    """「内藤 大貴」のように区切りがあるか、区切りなしの漢字が FULL_NAME_MIN_KANJI 文字以上。"""
+    if " " in name:
+        return len(name.split()) == 2
+    return len(name) >= FULL_NAME_MIN_KANJI and all("\u4e00" <= ch <= "\u9fff" for ch in name)
+
+
+def _most_frequent(candidates: dict[str, list[int]]) -> str | None:
+    """いちばん多く出てきた値。同じ数の値がほかにもあれば決めない（None）。"""
+    if not candidates:
+        return None
+    best = max(len(v) for v in candidates.values())
+    winners = [k for k, v in candidates.items() if len(v) == best]
+    return winners[0] if len(winners) == 1 else None
+
+
+def _direct_names(clues: Sequence[Clue]) -> list[Conclusion]:
+    """R8 名前の直接表記：フルネーム（full_name）と呼び名（given_name_or_nickname）。"""
+    full: dict[str, list[int]] = {}
+    given: dict[str, list[int]] = {}
+    for i, c in enumerate(clues):
+        if c.type is not ClueType.NAME_TEXT:
+            continue
+        name = _strip_honorifics(c.value)
+        if not name or "x" in name.lower() or _clean_name(c.value) != name.replace(" ", ""):
+            continue
+        if _is_full_name(name):
+            full.setdefault(name.replace(" ", ""), []).append(i)
+        else:
+            given.setdefault(name, []).append(i)
+
+    conclusions: list[Conclusion] = []
+    if (best := _most_frequent(full)) is not None:
+        conclusions.append(
+            Conclusion("R8", "full_name", best, full[best], "宛名・名札などの姓と名")
+        )
+    if (best := _most_frequent(given)) is not None:
+        conclusions.append(
+            Conclusion("R8", "given_name_or_nickname", best, given[best], "名前だけの手がかり")
+        )
+    return conclusions
+
+
+def _direct_school(clues: Sequence[Clue]) -> list[Conclusion]:
+    """R7 学校：学校の名前を含む org_text（school）。"""
+    schools: dict[str, list[int]] = {}
+    for i, c in enumerate(clues):
+        value = c.value.strip()
+        if (
+            c.type is ClueType.ORG_TEXT
+            and "x" not in value.lower()
+            and any(w in value for w in SCHOOL_WORDS)
+        ):
+            schools.setdefault(value, []).append(i)
+    best = _most_frequent(schools)
+    if best is None:
+        return []
+    return [Conclusion("R7", "school", best, schools[best], "学校の名前の手がかり")]
+
+
+def rule_birthday(clues: Sequence[Clue], posts: Sequence[Post]) -> list[Conclusion]:
+    """R12 生年月日：誕生日（と、年齢がわかれば生まれた年）（birthday）。
+
+    本文に書かれた日付を、投稿の日より優先する。どちらも複数あれば、いちばん新しい投稿のもの。
+    """
+    created = {p.post_id: _local(p) for p in posts}
+    found: list[tuple[bool, datetime, int, int, int | None, int]] = []
+    for i, c in enumerate(clues):
+        if c.type is not ClueType.AGE_TEXT or c.post_id not in created:
+            continue
+        when = created[c.post_id]
+        date = re.search(r"(\d{1,2})\s*(?:月|/)\s*(\d{1,2})", c.value)
+        if date:
+            month, day = int(date[1]), int(date[2])
+        elif timestamps_usable(posts) and any(w in c.value.lower() for w in BIRTHDAY_WORDS):
+            month, day = when.month, when.day
+        else:
+            continue
+        try:
+            # 2月30日のような実在しない日も除く。閏日は月日だけなら認める。
+            datetime(2000, month, day)
+        except ValueError:
+            continue
+        age = re.search(r"(\d{1,3})\s*歳", c.value)
+        year = None
+        if age:
+            # 投稿の日がその年の誕生日より前なら、まだ誕生日が来ていない
+            year = when.year - int(age[1]) - (1 if (when.month, when.day) < (month, day) else 0)
+        found.append((date is not None, when, month, day, year, i))
+    if not found:
+        return []
+    _, _, month, day, year, index = max(found)
+    value = f"{year}年{month}月{day}日ごろ" if year else f"{month}月{day}日ごろ"
+    note = "本文の年齢と、誕生日の投稿の日付" if year else "誕生日の投稿の日付"
+    return [Conclusion("R12", "birthday", value, [index], note)]

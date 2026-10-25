@@ -379,7 +379,7 @@
       ]
     },
     {
-      "attribute": "name",
+      "attribute": "given_name_or_nickname",
       "value": "はるき",
       "note": "ケーキのプレート。宛名の一部が裏づけ",
       "clue_indices": [

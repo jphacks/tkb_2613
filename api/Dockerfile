@@ -28,6 +28,8 @@ RUN useradd --system --no-create-home app
 COPY --from=build /app/.venv /app/.venv
 # MOCK_MODE の診断で流す架空のデモ用アカウントの投稿（写真本体は含まない）
 COPY eval/fixtures/demo_observations.json /app/eval/fixtures/
+# 市区町村・収集地区・キャンパスの知識表（公開情報のみ）
+COPY data-prep/manual/knowledge.json /app/data-prep/manual/knowledge.json
 # 推理の表（data/processed）はコミットしないのでイメージに入れない。
 # docker compose で読み取り専用でつなぐ（infra/docker-compose.yml）。なければ最寄り駅のルールを飛ばす
 WORKDIR /app

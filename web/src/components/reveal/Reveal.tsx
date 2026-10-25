@@ -1,19 +1,22 @@
 "use client";
 
-import { useEffect, useState } from "react";
-
 import { messages } from "@/lib/messages";
-import { type Size } from "@/lib/region";
-import { cropStyle, pickReveal, type RevealItem } from "@/lib/reveal";
+import { cropStyle, identityName, pickFace, pickReveal, type RevealItem } from "@/lib/reveal";
+import { useLoadedSize } from "@/lib/useLoadedSize";
 import type { Clue, ClueType } from "@/types/clue";
 import type { Conclusion } from "@/types/diagnose";
 import type { Post } from "@/types/post";
 
+import { IdentityCard } from "./IdentityCard";
+
 const t = messages.reveal;
 
-/** 1 枚ごとに叩きつける間隔（秒）。推定の文字が出終わってから始める */
-const FIRST_DELAY = 0.9;
+/** 1 枚ごとに叩きつける間隔（秒）。身元カードの数字が止まってから始める */
+const FIRST_DELAY = 1.6;
 const STEP = 0.35;
+
+/** 身元カードに並べる強い手がかりの数 */
+const MAX_HIGHLIGHTS = 4;
 
 /** 写真から出た手がかりでも、切り抜くより読み取った文字のほうがわかりやすい種類 */
 const TEXT_ONLY_TYPES: ReadonlySet<ClueType> = new Set(["address_text"]);
@@ -21,25 +24,6 @@ const TEXT_ONLY_TYPES: ReadonlySet<ClueType> = new Set(["address_text"]);
 /** カードを少しずつ傾けて、机に投げ出したように見せる。毎回同じ角度になるよう番号で決める */
 function tilt(i: number): string {
   return `${[-3, 2.5, -1.5, 3.5, -2.5, 1.5, -3.5, 2][i % 8]}deg`;
-}
-
-/**
- * 写真を先に読み込んでおき、読めた実寸を返す。読めるまでと読めなかったときは null。
- * 読み込む前に枠だけを出すと、読めなかったときに空の枠が一瞬見えてから消えるので、こうする。
- */
-function useLoadedSize(url: string | null): Size | null {
-  const [loaded, setLoaded] = useState<{ url: string; size: Size } | null>(null);
-  useEffect(() => {
-    if (!url) return;
-    const img = new Image();
-    img.referrerPolicy = "no-referrer";
-    img.onload = () => setLoaded({ url, size: { width: img.naturalWidth, height: img.naturalHeight } });
-    img.src = url;
-    return () => {
-      img.onload = null;
-    };
-  }, [url]);
-  return loaded && loaded.url === url ? loaded.size : null;
 }
 
 /** 写真の手がかりの箇所を拡大して切り抜く。写真が読めるまでと読めなかったときは文字のカードにする */
@@ -109,28 +93,29 @@ export function Reveal({ posts, clues, conclusions }: RevealProps) {
   if (items.length === 0 && conclusions.length === 0) return null;
   const postCount = new Set(clues.map((c) => c.post_id)).size;
 
+  const identity = identityName(clues, conclusions);
+
   return (
     <section aria-labelledby="reveal-heading" className="reveal space-y-10">
       <div aria-hidden="true" className="found-flash" />
       <div>
-        <h2 id="reveal-heading" className="horror-title reveal-heading text-6xl leading-tight sm:text-8xl">
+        <h2 id="reveal-heading" className="horror-title reveal-heading text-4xl leading-tight sm:text-8xl">
           {t.heading}
         </h2>
         <p className="mt-3 text-ink/70">{t.count(clues.length, postCount)}</p>
       </div>
 
-      {conclusions.length > 0 && (
-        <ol aria-label={t.conclusionsLabel} className="space-y-3">
-          {conclusions.map((c, i) => (
-            <li key={i} className="reveal-stamp" style={{ animationDelay: `${0.3 + i * 0.2}s` }}>
-              <span className="block text-sm tracking-widest text-ink/60">
-                {messages.board.attributeLabels[c.attribute] ?? c.attribute}
-              </span>
-              <span className="text-3xl font-bold text-seeker sm:text-4xl">{c.value}</span>
-            </li>
-          ))}
-        </ol>
-      )}
+      <IdentityCard
+        name={identity.name}
+        face={pickFace(posts, clues)}
+        conclusions={identity.rest}
+        highlights={items
+          // 名前は大きく出し、推定の根拠は推定の行で見えるので、それ以外を並べる
+          .filter((item) => item.clue.type !== "name_text" && !item.used)
+          .slice(0, MAX_HIGHLIGHTS)
+          .map((item) => ({ label: messages.clues.typeLabels[item.clue.type], value: item.clue.value }))}
+        clueCount={clues.length}
+      />
 
       {items.length > 0 && (
         <ul aria-label={t.evidenceLabel} className="grid grid-cols-1 gap-6 sm:grid-cols-2">

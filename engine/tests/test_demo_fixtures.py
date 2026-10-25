@@ -124,7 +124,7 @@ def test_aoi_plan_deletes_the_trash_bag_and_the_mail() -> None:
     assert set(proposal.delete) == set(doc["expected_plan"]["delete"])
     assert set(proposal.broken) == set(doc["expected_plan"]["broken"])
     # 残るのは名前と年齢だけで、住んでいる所はわからなくなる
-    assert {c.attribute for c in proposal.after} == {"name", "age"}
+    assert {c.attribute for c in proposal.after} == {"given_name_or_nickname", "age", "birthday"}
 
 
 def test_aoi_city_needs_both_the_trash_bag_and_the_distance_hint() -> None:

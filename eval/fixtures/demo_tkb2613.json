@@ -382,7 +382,7 @@
       ]
     },
     {
-      "attribute": "name",
+      "attribute": "full_name",
       "value": "内藤大貴",
       "note": "在室表の名字＋ケーキのプレートの下の名前",
       "clue_indices": [

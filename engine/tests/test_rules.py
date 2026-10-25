@@ -9,6 +9,7 @@ from tkb_common.schemas import TEXT_ONLY_TYPES, Clue, ClueSource, ClueType, Post
 from tkb_engine import Conclusion, Gazetteer, infer, rule_r1, rule_r2, rule_r3
 from tkb_engine.gazetteer import CollectionArea, Knowledge, TrashBag, University
 from tkb_engine.rules import (
+    rule_birthday,
     rule_r4,
     rule_r5,
     rule_r6,
@@ -61,7 +62,13 @@ def _clue(post_id: str, type_: ClueType, value: str) -> Clue:
         value=value,
         region=None,
         confidence=0.9,
-        source=ClueSource.TEXT if from_text else ClueSource.VLM,
+        source=(
+            ClueSource.TEXT
+            if from_text
+            else ClueSource.OCR
+            if type_ is ClueType.CODE
+            else ClueSource.VLM
+        ),
     )
 
 
@@ -325,7 +332,7 @@ def test_r3_finds_same_weekday_and_time() -> None:
     # 曜日を含む routine_text（0）は時刻のまとまりの結論に入っているので、別の結論にしない
     [got] = rule_r3(clues, posts)
 
-    assert got.value == "毎週火曜 20時ごろに出かけている（ジム・毎週火曜のジム）"
+    assert got.value == "毎週火曜 20時ごろに出かけている（ジム）"
     assert got.clue_indices == [0, 1, 2]
 
 
@@ -547,7 +554,7 @@ def test_r8_name_combines_readings_and_drops_honorifics() -> None:
     assert rule_r8(clues) == []
     clues.append(_clue("p3", ClueType.NAME_TEXT, "はるきへ"))
     name = rule_r8(clues)[0]
-    assert (name.value, name.clue_indices) == ("ハルキ", [1, 2])
+    assert (name.value, name.clue_indices) == ("はるき", [2])
 
 
 def test_r9_age_from_a_number_or_a_first_legal_drink() -> None:
@@ -726,3 +733,179 @@ def test_r9_reads_the_age_from_a_birthday_post() -> None:
     assert [c.value for c in rule_r9([_clue("p1", ClueType.AGE_TEXT, "今日で22")], posts)] == [
         "22歳"
     ]
+
+
+# ---- R5 名前・R6 年齢・R7 学校 ----
+
+
+def test_r5_reads_a_full_name_from_an_address_label() -> None:
+    clues = [
+        _clue("p1", ClueType.NAME_TEXT, "内藤 大貴 様"),
+        _clue("p2", ClueType.NAME_TEXT, "内藤　大貴さん"),
+        _clue("p3", ClueType.NAME_TEXT, "だいき"),
+    ]
+
+    got = _by_attribute(rule_r8(clues))
+
+    assert got["full_name"].value == "内藤大貴"
+    assert got["full_name"].clue_indices == [0, 1]
+    assert got["given_name_or_nickname"].value == "だいき"
+
+
+def test_r5_treats_three_or_more_kanji_without_a_space_as_a_full_name() -> None:
+    assert (
+        _by_attribute(rule_r8([_clue("p1", ClueType.NAME_TEXT, "内藤大貴")]))["full_name"].value
+        == "内藤大貴"
+    )
+    assert set(_by_attribute(rule_r8([_clue("p1", ClueType.NAME_TEXT, "大貴")]))) == {
+        "given_name_or_nickname"
+    }
+
+
+def test_r5_skips_names_with_unreadable_characters() -> None:
+    assert rule_r8([_clue("p1", ClueType.NAME_TEXT, "xx はるき 様")]) == []
+
+
+def test_r5_does_not_decide_between_names_that_tie() -> None:
+    clues = [
+        _clue("p1", ClueType.NAME_TEXT, "内藤 大貴"),
+        _clue("p2", ClueType.NAME_TEXT, "山田 花子"),
+    ]
+
+    assert rule_r8(clues) == []
+
+
+def test_r6_takes_the_age_from_the_latest_post() -> None:
+    posts = [_post("p1", "2025-10-17 21:00"), _post("p2", "2026-10-17 21:00")]
+    clues = [
+        _clue("p1", ClueType.AGE_TEXT, "24歳になりました"),
+        _clue("p2", ClueType.AGE_TEXT, "25歳になりました"),
+    ]
+
+    assert rule_r9(clues, posts) == [Conclusion("R9", "age", "25歳", [1], "本文の年齢")]
+
+
+def test_r6_needs_a_number_of_years() -> None:
+    posts = [_post("p1", "2026-10-17 21:00")]
+
+    assert rule_r9([_clue("p1", ClueType.AGE_TEXT, "誕生日")], posts) == []
+
+
+def test_r7_reads_school_names_only() -> None:
+    clues = [
+        _clue("p1", ClueType.ORG_TEXT, "東京xx大学"),
+        _clue("p2", ClueType.ORG_TEXT, "筑波大学"),
+        _clue("p3", ClueType.ORG_TEXT, "筑波大学"),
+        _clue("p4", ClueType.ORG_TEXT, "赤札堂"),
+    ]
+
+    assert rule_r7(clues, [], GAZ, []) == [
+        Conclusion("R7", "school", "筑波大学", [1, 2], "学校の名前の手がかり")
+    ]
+
+
+def test_r3_keeps_the_words_short_but_all_evidence() -> None:
+    posts = [_post(f"p{n}", f"2026-10-{17 + 7 * n:02d} 19:{10 * n:02d}") for n in range(3)]
+    clues = [
+        _clue("p0", ClueType.ROUTINE_TEXT, "夜勤前"),
+        _clue("p0", ClueType.ROUTINE_TEXT, "電車混んでる"),
+        _clue("p1", ClueType.ROUTINE_TEXT, "朝から電車混んでる"),
+        _clue("p1", ClueType.ROUTINE_TEXT, "夜勤明け"),
+        _clue("p2", ClueType.ROUTINE_TEXT, "電車混んでる"),
+    ]
+
+    (got,) = rule_r3(clues, posts)
+
+    assert got.value == "毎週土曜 19時ごろに出かけている（電車混んでる・夜勤前）"
+    assert got.clue_indices == [0, 1, 2, 3, 4]
+
+
+def test_r3_leaves_out_empty_parentheses() -> None:
+    posts = [_post(f"p{n}", f"2026-10-{17 + 7 * n:02d} 19:00") for n in range(3)]
+
+    (got,) = rule_r3([], posts)
+
+    assert got.value == "毎週土曜 19時ごろに出かけている"
+
+
+# ---- R8 生年月日 ----
+
+
+def test_r8_takes_the_birthday_and_year_from_an_age_post() -> None:
+    posts = [_post("p1", "2026-10-17 21:00"), *OTHER_DAYS]
+
+    got = rule_birthday([_clue("p1", ClueType.AGE_TEXT, "25歳になりました")], posts)
+
+    assert got == [
+        Conclusion("R12", "birthday", "2001年10月17日ごろ", [0], "本文の年齢と、誕生日の投稿の日付")
+    ]
+
+
+def test_r8_prefers_a_written_date_and_counts_a_birthday_not_yet_reached() -> None:
+    posts = [_post("p1", "2026-10-17 21:00"), _post("p2", "2026-03-01 09:00")]
+    clues = [
+        _clue("p1", ClueType.AGE_TEXT, "誕生日"),
+        _clue("p2", ClueType.AGE_TEXT, "4/12生まれ、いま24歳"),
+    ]
+
+    (got,) = rule_birthday(clues, posts)
+
+    # 3/1 の投稿の時点で 4/12 はまだ来ていないので、いま 24 歳なら 2001 年生まれ
+    assert got.value == "2001年4月12日ごろ"
+    assert got.clue_indices == [1]
+
+
+def test_r8_without_age_gives_only_month_and_day() -> None:
+    posts = [_post("p1", "2026-10-17 21:00"), *OTHER_DAYS]
+
+    (got,) = rule_birthday([_clue("p1", ClueType.AGE_TEXT, "誕生日ケーキ")], posts)
+
+    assert got.value == "10月17日ごろ"
+
+
+def test_r8_ignores_ages_without_a_birthday_and_impossible_dates() -> None:
+    posts = [_post("p1", "2026-10-17 21:00")]
+    clues = [_clue("p1", ClueType.AGE_TEXT, "25歳"), _clue("p1", ClueType.AGE_TEXT, "13/45")]
+
+    assert rule_birthday(clues, posts) == []
+
+
+def test_city_does_not_ignore_a_distance_that_refutes_every_candidate() -> None:
+    bag = _clue("p1", ClueType.LOCAL_ITEM, "指定ゴミ袋 40L 10枚 750円")
+    hint = _clue("p2", ClueType.PLACE_TEXT, "中野まで遠い")
+    # 2候補とも閾値以内になるデータでは「遠い」に合う市はない
+    gaz = Gazetteer(
+        stations=[
+            {"station_name": "中野", "mesh_1km": "near", "lat": 35.7, "lon": 139.6},
+        ],
+        postal=DIST_GAZ.postal,
+        muni_meshes={"13201": {"near"}, "13204": {"near"}},
+        knowledge=DIST_GAZ.knowledge,
+    )
+    assert rule_r4([bag, hint], gaz) == []
+
+
+def test_zero_bag_count_is_ignored_without_crashing_diagnosis() -> None:
+    assert rule_r4([_clue("p", ClueType.LOCAL_ITEM, "指定ゴミ袋40L 0枚750円")], KNOW_GAZ) == []
+
+
+def test_model_guesses_of_customer_barcodes_are_not_address_evidence() -> None:
+    guess = _clue("p", ClueType.CODE, "カスタマバーコード: 〒192-0083 住所表示番号 9-3")
+    guess = guess.model_copy(update={"source": ClueSource.VLM})
+    assert rule_r6([guess], KNOW_GAZ) == []
+
+
+def test_same_day_birthday_does_not_become_the_date_of_posting() -> None:
+    posts = [_post("p", "2026-10-25 12:00")]
+    assert rule_birthday([_clue("p", ClueType.AGE_TEXT, "22歳の誕生日")], posts) == []
+
+
+def test_explicit_birthday_is_kept_even_in_a_same_day_account() -> None:
+    posts = [_post("p", "2026-10-25 12:00")]
+    [birthday] = rule_birthday([_clue("p", ClueType.AGE_TEXT, "4/12生まれ、いま22歳")], posts)
+    assert birthday.value == "2004年4月12日ごろ"
+
+
+def test_birthday_rejects_nonexistent_calendar_dates() -> None:
+    posts = [_post("p", "2026-10-25 12:00")]
+    assert rule_birthday([_clue("p", ClueType.AGE_TEXT, "2月30日")], posts) == []

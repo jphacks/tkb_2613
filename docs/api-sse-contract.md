@@ -30,9 +30,11 @@ Pythonの正は `common/src/tkb_common/schemas.py`、画面側の対応型は `w
 
 - **Post**: `post_id`（AT URI）、`text`、時差付き `created_at`、`images`。画像は `index, url, alt, width, height`。URLは `https://cdn.bsky.app/` のみ、画像は最大4枚。
 - **Clue**: `post_id, image_index, type, value, region, confidence, source`。`region` は元画像ピクセルの `[x1,y1,x2,y2]` またはnull。本文由来は通常 `image_index/region=null`、`source=text`。確信度は0〜1。許容type/sourceの列挙と写真/本文の整合条件は共通スキーマを参照。
+- `Clue.type` に `local_item`（写真・本文）と `notice`（写真のみ）を追加。写真の `code` は画像処理で解読し、`source=ocr` として返す。モデルのバーコード解読の推測は住所の区画の根拠にしない。
 - **DetectResponse**: `{"clues":[Clue,…]}`。
 - **Simulation**: `{"delete":[投稿ID],"broken":[attribute],"after":[Conclusion]}`。`delete` の投稿を消したとして推理し直した結果。`broken` は、消す前に結論があり、消したあと1つもなくなる項目（値が別の値に変わっただけなら入れない）。`after` の `clue_indices` は、診断の `conclusions` イベントの `clues` での番号。Python は `tkb_api.pipeline.simulation_json`、TypeScript は `web/src/types/diagnose.ts` の `Simulation`。
-- **現在の診断Conclusion**: `rule, attribute, value, clue_indices, note`。`attribute` は試作の名前で、現在は `home_city`・`home_district`・`station`・`home_area`・`home_block`・`active_time`・`routine`・`school`・`name`・`age`・`occupation`（ルール R1〜R10。同じ attribute が複数出ることがある）。`clue_indices` は同じ `conclusions` イベントの `clues` 配列に対する0始まり番号。これは目標の16項目プロフィール型（status/confidence/evidence）とは別の試作型。
+- **Deletion**: Simulation ＋ `"failed":[投稿ID]`。`delete` は実際に消せた投稿だけで、`broken`・`after` はそれを除いて推理し直した結果（`clue_indices` は Simulation と同じく診断の `clues` での番号）。`failed` は消せなかった投稿。TypeScript は `web/src/types/diagnose.ts` の `Deletion`。
+- **現在の診断Conclusion**: `rule, attribute, value, clue_indices, note`。`attribute` は試作の名前で、現在は `home_city`・`home_district`・`station`・`home_area`・`home_block`・`active_time`・`routine`・`school`・`full_name`・`given_name_or_nickname`・`birthday`・`line`・`age`・`occupation`（ルール R1〜R12。同じ attribute が複数出ることがある）。`clue_indices` は同じ `conclusions` イベントの `clues` 配列に対する0始まり番号。これは目標の16項目プロフィール型（status/confidence/evidence）とは別の試作型。
 
 ## 診断 SSE のイベント
 
@@ -70,7 +72,7 @@ SSEブロックは `event: <name>\ndata: <JSON>\n\n`。JSONはUTF-8で送られ�
 ## まだ実装されていない目標機能
 
 - 16項目プロフィールの `found/weak/unknown`、確からしさ、根拠を含む共通出力（現行は試作Conclusion）。
-- 16項目プロフィールでの削除候補・仮除外（現行の planner と simulate は試作Conclusionの station・home_block・active_time・routine を対象にする）。実投稿の削除API。
+- 16項目プロフィールでの削除候補・仮除外（現行の planner と simulate は試作Conclusionの station・home_block・active_time・routine を対象にする）。
 - Blueskyログイン時以外の本番画像/本文抽出の統合完了確認。独立detectエンドポイントはモックのみで、本番は501。
 - SSEの全体失敗イベント、途中切断後の再開・再送プロトコル。
 

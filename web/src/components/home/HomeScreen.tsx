@@ -8,13 +8,23 @@ import { useSession } from "@/components/session/SessionProvider";
 import { messages } from "@/lib/messages";
 
 /**
- * ホーム画面。診断の結果が出たら、タイトルとログイン中の表示をしまい、結果だけを見せる。
- * ログアウトはページの一番下に小さく残す。
+ * ホーム画面。ログインしているアカウントが変わったら（ログアウトも含む）、中身をまるごと作り直す。
+ * 診断の結果は画面のメモリにしか置かないので、作り直せば前のアカウントの結果は残らない。
+ * 実行中の診断も、DiagnosePanel が外れるときに止まる。
  */
 export function HomeScreen() {
+  const { state: session } = useSession();
+  const account = session.status === "authenticated" ? session.session.did : "anonymous";
+  return <HomeContent key={account} />;
+}
+
+/**
+ * ホーム画面の中身。診断の結果が出たら、タイトルとログイン中の表示をしまい、結果だけを見せる。
+ * ログアウトはページの一番下に小さく残す。
+ */
+function HomeContent() {
   const { state: session, logout } = useSession();
   const [revealed, setRevealed] = useState(false);
-  // ログアウトしたら診断の結果も消えるので、タイトルを出し直す
   const showResult = revealed && session.status === "authenticated";
   const name = messages.app.name;
 

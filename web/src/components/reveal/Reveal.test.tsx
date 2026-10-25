@@ -48,6 +48,11 @@ const CONCLUSION: Conclusion = {
 /** jsdom は写真を読み込まないので、読み込みを手で終わらせられる代わりを置く */
 class FakeImage {
   static last: FakeImage | null = null;
+  static all: FakeImage[] = [];
+  /** 作られた写真をすべて読み込み済みにする */
+  static loadAll() {
+    for (const img of FakeImage.all) img.onload?.();
+  }
   onload: (() => void) | null = null;
   referrerPolicy = "";
   src = "";
@@ -55,11 +60,13 @@ class FakeImage {
   naturalHeight = 500;
   constructor() {
     FakeImage.last = this;
+    FakeImage.all.push(this);
   }
 }
 
 beforeEach(() => {
   FakeImage.last = null;
+  FakeImage.all = [];
   vi.stubGlobal("Image", FakeImage);
 });
 
@@ -85,16 +92,63 @@ describe("Reveal", () => {
     render(<Reveal posts={[POST]} clues={[PHOTO_CLUE]} conclusions={[]} />);
 
     // 読み込むまでは、空の写真の枠を出さずに文字で見せる
+    const evidence = screen.getByRole("list", { name: t.evidenceLabel });
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
-    expect(screen.getByText("根x")).toBeInTheDocument();
+    expect(within(evidence).getByText("根x")).toBeInTheDocument();
     expect(FakeImage.last?.src).toBe(POST.images[0].url);
     expect(FakeImage.last?.referrerPolicy).toBe("no-referrer");
 
-    act(() => FakeImage.last?.onload?.());
+    act(() => FakeImage.loadAll());
 
     expect(
       screen.getByRole("img", { name: t.photoAlt(messages.clues.typeLabels.station_sign, "根x") }),
     ).toHaveAttribute("src", POST.images[0].url);
+  });
+
+  it("shows the identity card with the written name, the strong clues and the clue count", () => {
+    const name: Clue = { ...PHOTO_CLUE, type: "name_text", value: "はるき" };
+    const blurred: Clue = { ...name, value: "xx はるき 様", confidence: 0.99 };
+    render(<Reveal posts={[POST]} clues={[TEXT_CLUE, PHOTO_CLUE, blurred, name]} conclusions={[CONCLUSION]} />);
+
+    const card = screen.getByRole("article", { name: messages.identity.label });
+    // 読めない文字の少ない名前を選ぶ
+    expect(within(card).getByText("はるき")).toBeInTheDocument();
+    // 推定の根拠（夜勤明け）は推定の行で見えるので、強い手がかりの行には出さない
+    expect(within(card).getByRole("definition")).toHaveTextContent("根x");
+    expect(within(card).getByText("夜勤のある仕事")).toBeInTheDocument();
+    // 回る数字は飾りなので、読み上げ用の数字で確かめる
+    expect(within(card).getByText("4", { selector: ".sr-only" })).toBeInTheDocument();
+  });
+
+  it("shows a confident face from the posts in the photo frame once the photo has loaded", () => {
+    const face: Clue = { ...PHOTO_CLUE, type: "face", value: "1人", confidence: 0.9 };
+    render(<Reveal posts={[POST]} clues={[face]} conclusions={[CONCLUSION]} />);
+    const card = screen.getByRole("article", { name: messages.identity.label });
+
+    // 読み込むまでは人影のまま
+    expect(within(card).getByText(messages.identity.silhouette)).toBeInTheDocument();
+
+    act(() => FakeImage.loadAll());
+
+    expect(within(card).getByRole("img", { name: messages.identity.faceAlt })).toHaveAttribute("src", POST.images[0].url);
+    expect(within(card).getByText(messages.identity.faceCaption)).toBeInTheDocument();
+  });
+
+  it("keeps the silhouette when the face is not confident enough", () => {
+    const face: Clue = { ...PHOTO_CLUE, type: "face", value: "1人", confidence: 0.5 };
+    render(<Reveal posts={[POST]} clues={[face]} conclusions={[CONCLUSION]} />);
+    const card = screen.getByRole("article", { name: messages.identity.label });
+
+    act(() => FakeImage.loadAll());
+
+    expect(within(card).queryByRole("img", { name: messages.identity.faceAlt })).not.toBeInTheDocument();
+    expect(within(card).getByText(messages.identity.silhouette)).toBeInTheDocument();
+  });
+
+  it("says the name is unknown when no name was written anywhere", () => {
+    render(<Reveal posts={[POST]} clues={[TEXT_CLUE]} conclusions={[CONCLUSION]} />);
+
+    expect(screen.getByText(messages.identity.nameUnknown)).toBeInTheDocument();
   });
 
   it("shows an address as text instead of cropping the photo", () => {
@@ -103,7 +157,7 @@ describe("Reveal", () => {
 
     expect(FakeImage.last).toBeNull();
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
-    expect(screen.getByText("文京区弥生二丁目xx")).toBeInTheDocument();
+    expect(within(screen.getByRole("list", { name: t.evidenceLabel })).getByText("文京区弥生二丁目xx")).toBeInTheDocument();
   });
 
   it("shows nothing when nothing was found", () => {

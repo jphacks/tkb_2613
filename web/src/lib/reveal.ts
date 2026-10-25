@@ -107,3 +107,62 @@ export function cropStyle(
     mark: { left: pct((x1 - left) / w), top: pct((y1 - top) / h), width: pct((x2 - x1) / w), height: pct((y2 - y1) / h) },
   };
 }
+
+/** 身元カードの名前に使う推定。先にあるものを使う（engine の R5） */
+const NAME_ATTRIBUTES: readonly string[] = ["full_name", "given_name_or_nickname"];
+
+/**
+ * 身元カードに大きく出す名前と、その下に並べる残りの推定。
+ * 推定したフルネーム、呼び名の順に使い、どちらもなければ写っていた名前の文字（pickName）。
+ * 名前に使った推定は、残りの推定の行には出さない（同じ名前を2回出さない）。
+ */
+export function identityName(
+  clues: readonly Clue[],
+  conclusions: readonly Conclusion[],
+): { name: string | null; rest: readonly Conclusion[] } {
+  for (const attribute of NAME_ATTRIBUTES) {
+    const found = conclusions.find((c) => c.attribute === attribute);
+    if (found) return { name: found.value, rest: conclusions.filter((c) => !NAME_ATTRIBUTES.includes(c.attribute)) };
+  }
+  return { name: pickName(clues), rest: conclusions };
+}
+
+/**
+ * 身元カードに出す名前。写真や本文に写っていた文字（name_text）をそのまま使い、推測で補わない。
+ * 読めない文字（x）の少ないもの、確からしいものを選ぶ。なければ null。
+ */
+export function pickName(clues: readonly Clue[]): string | null {
+  const unreadable = (value: string) => (value.match(/x/gi) ?? []).length;
+  const names = clues
+    .filter((c) => c.type === "name_text" && c.value.trim())
+    .sort((a, b) => unreadable(a.value) - unreadable(b.value) || b.confidence - a.confidence);
+  return names[0]?.value.trim() ?? null;
+}
+
+/**
+ * 顔を写真の枠に出すときの、顔の手がかりの確からしさの下限。
+ * これは「そこに顔が写っているか」の確からしさで、本人かどうかではない（顔で照合はしない）。
+ */
+export const FACE_MIN_CONFIDENCE = 0.8;
+
+export interface FacePhoto {
+  clue: Clue;
+  image: PostImage;
+}
+
+/**
+ * 身元カードの写真の枠に出す顔。本人の投稿の写真に写っていた顔の手がかりのうち、
+ * 位置があり、確からしさが FACE_MIN_CONFIDENCE 以上で、いちばん確からしいもの。なければ null。
+ */
+export function pickFace(posts: readonly Post[], clues: readonly Clue[]): FacePhoto | null {
+  const byId = new Map(posts.map((p) => [p.post_id, p]));
+  const faces = clues
+    .flatMap((clue): FacePhoto[] => {
+      if (clue.type !== "face" || !clue.region || clue.image_index === null) return [];
+      if (clue.confidence < FACE_MIN_CONFIDENCE) return [];
+      const image = byId.get(clue.post_id)?.images[clue.image_index];
+      return image ? [{ clue, image }] : [];
+    })
+    .sort((a, b) => b.clue.confidence - a.clue.confidence);
+  return faces[0] ?? null;
+}
