@@ -1,4 +1,8 @@
+"use client";
+
 import { messages } from "@/lib/messages";
+import { cropStyle, type FacePhoto } from "@/lib/reveal";
+import { useLoadedSize } from "@/lib/useLoadedSize";
 import type { Conclusion } from "@/types/diagnose";
 
 const t = messages.identity;
@@ -27,7 +31,7 @@ function Roller({ value }: { value: number }) {
   );
 }
 
-/** 写真の枠に出す人影。顔は出さない（顔の手がかりを出すかはチームで決めてから） */
+/** 写真の枠に出す人影。顔の手がかりがないとき */
 function Silhouette() {
   return (
     <svg viewBox="0 0 120 140" aria-hidden="true" className="h-full w-full">
@@ -40,6 +44,42 @@ function Silhouette() {
   );
 }
 
+/** 顔の切り抜きは、髪や肩も少し入るように、手がかりの位置より広めに取る */
+const FACE_MARGIN = 0.35;
+
+/**
+ * 写真の枠。本人の投稿に写っていた顔があれば、その箇所を切り抜いて出す。
+ * 写真が読めるまでと、顔がないときは人影を出す。顔は見せるだけで、照合や推定には使わない。
+ */
+function PhotoFrame({ face }: { face: FacePhoto | null }) {
+  const size = useLoadedSize(face?.image.url ?? null);
+  const crop = face?.clue.region && size ? cropStyle(face.clue.region, size, FACE_MARGIN) : null;
+  return (
+    <div className="relative mx-auto aspect-[6/7] w-40 overflow-hidden border border-ink/20 bg-paper sm:w-full">
+      {face && crop ? (
+        <div className="reveal-stamp absolute inset-0 flex items-center justify-center">
+          <div className="relative max-h-full w-full overflow-hidden" style={{ aspectRatio: crop.aspectRatio }}>
+            {/* Bluesky の CDN の画像をそのまま表示するので next/image は使わない。読み込み済みなのですぐ出る */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={face.image.url}
+              alt={t.faceAlt}
+              referrerPolicy="no-referrer"
+              className="absolute max-w-none"
+              style={crop.image}
+            />
+          </div>
+        </div>
+      ) : (
+        <Silhouette />
+      )}
+      <p className="absolute inset-x-0 bottom-0 bg-paper/80 px-3 py-1.5 text-center text-xs tracking-widest text-ink/70">
+        {face && crop ? t.faceCaption : t.silhouette}
+      </p>
+    </div>
+  );
+}
+
 /** 身元カードに並べる、強い手がかり 1 行 */
 export interface Highlight {
   label: string;
@@ -48,6 +88,8 @@ export interface Highlight {
 
 interface IdentityCardProps {
   name: string | null;
+  /** 写真の枠に出す顔。なければ人影 */
+  face: FacePhoto | null;
   conclusions: readonly Conclusion[];
   /** 名前のほかに並べる強い手がかり。危ない種類の順 */
   highlights: readonly Highlight[];
@@ -55,21 +97,16 @@ interface IdentityCardProps {
 }
 
 /**
- * 身元が割れた瞬間のカード。人影の枠、写っていた名前、推定できたこと、見つかった手がかりの数を並べる。
+ * 身元が割れた瞬間のカード。写真の枠（顔か人影）、写っていた名前、推定できたこと、見つかった手がかりの数を並べる。
  * 数字は「本人である確率」ではなく、実際に見つかった手がかりの数にする（確率は出せないので出さない）。
  */
-export function IdentityCard({ name, conclusions, highlights, clueCount }: IdentityCardProps) {
+export function IdentityCard({ name, face, conclusions, highlights, clueCount }: IdentityCardProps) {
   return (
     <article
       aria-label={t.label}
       className="identity-card reveal-slam relative grid gap-6 border border-ink/20 bg-paper-deep/80 p-5 shadow-[8px_8px_0_oklch(0%_0_0/0.5)] sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] sm:p-7"
     >
-      <div className="relative mx-auto aspect-[6/7] w-40 overflow-hidden border border-ink/20 bg-paper sm:w-full">
-        <Silhouette />
-        <p className="absolute inset-x-0 bottom-0 bg-paper/80 px-3 py-1.5 text-center text-xs tracking-widest text-ink/70">
-          {t.silhouette}
-        </p>
-      </div>
+      <PhotoFrame face={face} />
 
       <div className="flex min-w-0 flex-col gap-5">
         <div>

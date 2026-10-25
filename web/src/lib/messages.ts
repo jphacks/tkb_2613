@@ -147,6 +147,9 @@ export const messages = {
     label: "推定した身元",
     /** 写真の枠。顔は出さず、人影を出す */
     silhouette: "顔は写していなくても",
+    /** 写真の枠に、本人の投稿に写っていた顔を出したとき。本人とは限らない */
+    faceCaption: "写っていた顔（本人とは限りません）",
+    faceAlt: "投稿の写真に写っていた顔",
     nameLabel: "名前",
     nameUnknown: "名前は不明",
     cluesFound: "見つかった手がかり",

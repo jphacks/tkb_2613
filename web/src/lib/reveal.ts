@@ -119,3 +119,31 @@ export function pickName(clues: readonly Clue[]): string | null {
     .sort((a, b) => unreadable(a.value) - unreadable(b.value) || b.confidence - a.confidence);
   return names[0]?.value.trim() ?? null;
 }
+
+/**
+ * 顔を写真の枠に出すときの、顔の手がかりの確からしさの下限。
+ * これは「そこに顔が写っているか」の確からしさで、本人かどうかではない（顔で照合はしない）。
+ */
+export const FACE_MIN_CONFIDENCE = 0.8;
+
+export interface FacePhoto {
+  clue: Clue;
+  image: PostImage;
+}
+
+/**
+ * 身元カードの写真の枠に出す顔。本人の投稿の写真に写っていた顔の手がかりのうち、
+ * 位置があり、確からしさが FACE_MIN_CONFIDENCE 以上で、いちばん確からしいもの。なければ null。
+ */
+export function pickFace(posts: readonly Post[], clues: readonly Clue[]): FacePhoto | null {
+  const byId = new Map(posts.map((p) => [p.post_id, p]));
+  const faces = clues
+    .flatMap((clue): FacePhoto[] => {
+      if (clue.type !== "face" || !clue.region || clue.image_index === null) return [];
+      if (clue.confidence < FACE_MIN_CONFIDENCE) return [];
+      const image = byId.get(clue.post_id)?.images[clue.image_index];
+      return image ? [{ clue, image }] : [];
+    })
+    .sort((a, b) => b.clue.confidence - a.clue.confidence);
+  return faces[0] ?? null;
+}
