@@ -1,4 +1,7 @@
-"""X1 デモ投稿を指定アカウントへ追加する。パスワードは入力時だけメモリに置く。"""
+"""デモ投稿を指定アカウントへ追加する。パスワードは入力時だけメモリに置く。
+
+既定は X1 の投稿案（x1_posts.json）。X2〜X5 の投稿案は --plan chain_posts.json。
+"""
 
 import argparse
 import getpass
@@ -15,8 +18,11 @@ INTERVAL_SECONDS = 2
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--publish", action="store_true", help="Bluesky に実際に投稿する")
+    parser.add_argument(
+        "--plan", default=PLAN.name, help="投稿案のファイル名（このスクリプトと同じフォルダ）"
+    )
     args = parser.parse_args()
-    plan = json.loads(PLAN.read_text(encoding="utf-8"))
+    plan = json.loads(PLAN.with_name(args.plan).read_text(encoding="utf-8"))
     handle: str = plan["handle"]
     texts: list[str] = [post["text"] for post in plan["posts"]]
     for number, text in enumerate(texts, 1):

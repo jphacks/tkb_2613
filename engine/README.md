@@ -4,6 +4,7 @@
 
 - `rules.py`：推理ルール R1（生活圏）・R2（行動時間）・R3（留守の時間）・R4（市区町村）・R5（収集地区）・R6（区画）・R7（通学先）・R8（名前）・R9（年齢）・R10（仕事）・R11（路線）・R12（生年月日）と `infer`。入出力、しきい値の場所、ルールの足し方はファイル先頭の説明を参照
 - `planner.py`：消したらどうなるか（`simulate`）と危ない投稿の選び方（`plan`）。モデルは呼ばず、手がかりから消す投稿の分を除いて `infer` をかけ直す。`plan` は捜査ボードの末尾3項目を崩す投稿を最大3件選ぶ
+- `links.py`：別々の投稿をつなぐ推理ルール X2（生まれた年）・X3（留守の予定）・X4（行きつけの店）・X5（勤務先・バイト先）と `link`。`infer` の最後に当てはめる。X2 は誕生日の投稿と別の投稿の「◯歳」から生まれた年を出し、R12 の誕生日と置き換える（年齢の投稿を消すと年なしに戻る）。X3 は生活圏と「来週から3泊で帰省」のような予定から家を空ける時期（`long_term_home_absence`）、X4 は2件以上の投稿に出てくる同じ店（`frequent_shop`。最寄り駅も出てくれば「◯◯駅の近く」）、X5 は「シフト」「バイト」などの話をした投稿の店・会社（`workplace`）。投稿案は `eval/demo_account/chain_posts.json`（X1 の4件のあとに投稿する。`python eval/demo_account/post_x1.py --plan chain_posts.json` で文面を確認）、モック用の手がかりは `eval/fixtures/demo_chain.json`
 - `gazetteer.py`：data-prep の表（stations・postal・muni_mesh）を読み、駅名・郵便番号・住所を引き当てる
 
 X1 は既存の生活圏（市・町・駅の順で使う）と学校の結論に、別投稿の「家から大学へ通う」という本文を加える。3種類の根拠が別投稿にあるときだけ `home_school_commute` を出し、経路と時刻は推定しない。投稿案は `eval/demo_account/x1_posts.json`。投稿前に `python eval/demo_account/post_x1.py` で文面を確認できる。

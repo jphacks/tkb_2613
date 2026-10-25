@@ -14,7 +14,7 @@ import { DeleteConfirm } from "./DeleteConfirm";
 const t = messages.risky;
 
 /** engine の IMPORTANT_ATTRIBUTES（tkb_engine/planner.py）とそろえる。 */
-const IMPORTANT_ATTRIBUTES = ["full_name", "birthday", "home_block", "home_area", "home_district", "home_city", "school", "home_school_commute", "given_name_or_nickname", "station", "age", "line", "active_time", "routine"] as const;
+const IMPORTANT_ATTRIBUTES = ["full_name", "birthday", "home_block", "home_area", "long_term_home_absence", "home_district", "home_city", "workplace", "school", "home_school_commute", "given_name_or_nickname", "station", "age", "frequent_shop", "line", "active_time", "routine"] as const;
 const DIRECT_CLUES = ["face", "name_text", "address_text", "phone", "postal_code"] as const;
 
 /** 投稿の本文はこの文字数で切って見せる */

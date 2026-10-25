@@ -1,0 +1,31 @@
+{
+  "handle": "daikitus0414.bsky.social",
+  "profile_notice": "JPHACKS 2026 デモ用の架空アカウント",
+  "note": "X2〜X5 用の追加投稿。x1_posts.json の4件のあとに投稿する。店名は架空",
+  "posts": [
+    {
+      "text": "4月14日は誕生日だった。ケーキを1人で食べた。",
+      "expected_clue": "age_text: 4月14日は誕生日"
+    },
+    {
+      "text": "21歳、いまだに自炊がうまくならない。",
+      "expected_clue": "age_text: 21歳"
+    },
+    {
+      "text": "ベーカリーねこぜの塩パン、ここ毎週来てる。",
+      "expected_clue": "place_text: ベーカリーねこぜ / routine_text: 毎週来てる"
+    },
+    {
+      "text": "根津駅から歩いてすぐのベーカリーねこぜ、新作のあんバターがおいしい。",
+      "expected_clue": "place_text: 根津駅 / place_text: ベーカリーねこぜ"
+    },
+    {
+      "text": "カフェ コモレビのシフト終わり。まかないのオムライスが最高。",
+      "expected_clue": "place_text: カフェ コモレビ / routine_text: シフト終わり"
+    },
+    {
+      "text": "来週から3泊で実家に帰省する。猫の世話は友達に頼んだ。",
+      "expected_clue": "routine_text: 来週から3泊で実家に帰省 / relation_text: 猫"
+    }
+  ]
+}

@@ -53,7 +53,10 @@ TYPE_DESCRIPTIONS: dict[ClueType, str] = {
         "年齢や誕生日（「25歳になりました」「誕生日」など）。"
         "特に「〇歳になりました」は必ず age_text にしてください"
     ),
-    ClueType.ROUTINE_TEXT: "生活の決まり（「夜勤明け」「電車混んでる」「毎週火曜のジム」など）",
+    ClueType.ROUTINE_TEXT: (
+        "生活の決まりや予定（「夜勤明け」「電車混んでる」「毎週火曜のジム」"
+        "「シフト終わり」「来週から3泊で帰省」など）"
+    ),
     ClueType.RELATION_TEXT: "家族・同居人・ペット",
 }
 
