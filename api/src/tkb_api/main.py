@@ -1,3 +1,4 @@
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import cast
@@ -46,11 +47,26 @@ async def _validation_error(_: Request, exc: Exception) -> JSONResponse:
     return JSONResponse({"detail": detail}, status_code=status.HTTP_422_UNPROCESSABLE_CONTENT)
 
 
+def _configure_logging() -> None:
+    """tkb_api の INFO（診断にかかった時間など）を出す。uvicorn は自分のロガーしか設定しないため。
+
+    ログに出すのは件数と秒数だけにする。リクエスト本文・投稿の本文・写真は出さない。
+    """
+    app_logger = logging.getLogger("tkb_api")
+    if app_logger.handlers:
+        return
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("%(levelname)s:     %(name)s: %(message)s"))
+    app_logger.addHandler(handler)
+    app_logger.setLevel(logging.INFO)
+
+
 def create_app(
     settings: Settings | None = None,
     sessions: SessionStore | None = None,
 ) -> FastAPI:
     settings = settings or get_settings()
+    _configure_logging()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:

@@ -130,3 +130,39 @@ async def test_events_keep_failed_posts_and_index_conclusions_into_all_clues() -
     routine = next(c for c in result["conclusions"] if c["attribute"] == "routine")
     assert routine["clue_indices"] == [0]
     assert set(routine) == {"rule", "attribute", "value", "clue_indices", "note"}
+
+
+@pytest.mark.anyio
+async def test_events_log_timings_without_post_contents(caplog: pytest.LogCaptureFixture) -> None:
+    post = _post(2, text="毎週火曜はジム")
+    clue = Clue(
+        post_id=post.post_id,
+        image_index=None,
+        type=ClueType.ROUTINE_TEXT,
+        value="毎週火曜はジム",
+        region=None,
+        confidence=0.9,
+        source=ClueSource.TEXT,
+    )
+    ticks = iter([10.0, 13.5, 13.5, 13.75])
+
+    with caplog.at_level("INFO", logger="tkb_api"):
+        events = [
+            e
+            async for e in diagnose_events(
+                [post],
+                _stream([PostExtraction(post_id=post.post_id, clues=[clue])]),
+                Gazetteer(),
+                clock=lambda: next(ticks),
+            )
+        ]
+
+    assert events[-1][0] == "done"
+    messages = [r.getMessage() for r in caplog.records]
+    assert messages == [
+        "診断 1/1 件目：3.5 秒（写真 2 枚、手がかり 1 件）",
+        "診断の時間：手がかりの取り出し 3.5 秒（投稿 1 件、写真 2 枚、手がかり 1 件、失敗 0 件）"
+        "、推理と危ない投稿 0.25 秒",
+    ]
+    # 投稿の ID・本文・手がかりの中身はログに出さない
+    assert not any(post.post_id in m or "ジム" in m for m in messages)
