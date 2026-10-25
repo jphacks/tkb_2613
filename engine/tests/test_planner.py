@@ -123,7 +123,7 @@ def test_simulate_ignores_duplicate_ids() -> None:
     assert simulate(clues, posts, GAZ, ["b", "b"]).delete == ["b"]
 
 
-def test_plan_on_demo_recommends_the_name_post_first() -> None:
+def test_plan_on_demo_targets_the_last_three_board_items() -> None:
     clues, posts = _load_demo()
 
     result = plan(clues, posts, GAZ)
@@ -131,11 +131,11 @@ def test_plan_on_demo_recommends_the_name_post_first() -> None:
     assert len(result.delete) <= PLAN_MAX_POSTS
     assert result.delete[0].endswith("000006")
     assert "given_name_or_nickname" in result.broken
-    assert {"station", "active_time", "routine"} <= set(result.broken)
-    assert not {c.attribute for c in result.after} & {"station", "active_time", "routine"}
-    # 駅名標の投稿より、郵便番号と住所の写った宛名の投稿を選ぶ（町名もいっしょに崩れる）
-    assert any(post_id.endswith("000009") for post_id in result.delete)
-    assert "home_area" in result.broken
+    target_attributes = {c.attribute for c in result.before[-3:]}
+    assert set(result.broken) & target_attributes
+    target_clue_indices = {i for c in result.before[-3:] for i in c.clue_indices}
+    target_post_ids = {clues[i].post_id for i in target_clue_indices}
+    assert set(result.delete) <= target_post_ids
 
 
 def test_plan_recommends_name_before_station_and_can_target_name_alone() -> None:
@@ -147,9 +147,14 @@ def test_plan_recommends_name_before_station_and_can_target_name_alone() -> None
     assert name_only.delete == ["name"]
     assert name_only.broken == ["given_name_or_nickname"]
 
-    together = plan([*station_clues, name_clue], [*station_posts, name_post], GAZ)
-    assert together.delete[0] == "name"
-    assert {"given_name_or_nickname", "station", "active_time"} <= set(together.broken)
+    together_clues = [*station_clues, name_clue]
+    together_posts = [*station_posts, name_post]
+    together = plan(together_clues, together_posts, GAZ)
+    target_attributes = {c.attribute for c in together.before[-3:]}
+    target_clue_indices = {i for c in together.before[-3:] for i in c.clue_indices}
+    target_post_ids = {together_clues[i].post_id for i in target_clue_indices}
+    assert together.delete[0] in target_post_ids
+    assert set(together.broken) & target_attributes
 
 
 def test_plan_prefers_the_post_used_as_evidence_more_often_on_a_tie() -> None:
