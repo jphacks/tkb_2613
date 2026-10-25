@@ -15,7 +15,7 @@ from atproto import AsyncClient, models
 from atproto_client.exceptions import AtProtocolError, BadRequestError, UnauthorizedError
 from pydantic import ValidationError
 
-from tkb_common.schemas import Post, PostImage
+from tkb_common.schemas import Clue, Post, PostImage
 
 # 自分の投稿が limit 件そろうまでにタイムラインをたどるページ数の上限（リポストが多い人向け）
 MAX_FEED_PAGES = 3
@@ -136,6 +136,15 @@ class BlueskySession:
     expires_at: float
 
 
+@dataclass(frozen=True)
+class Diagnosis:
+    """最後に終わった診断の投稿と手がかり。消したらどうなるか（simulate）を、モデルを呼ばずに
+    計算し直すために、セッションといっしょにメモリにだけ置く。"""
+
+    posts: tuple[Post, ...]
+    clues: tuple[Clue, ...]
+
+
 class SessionStore:
     """セッション番号 → ログイン中のセッション。メモリ上だけに置き、期限が来たら捨てる。"""
 
@@ -143,6 +152,7 @@ class SessionStore:
         self._ttl = ttl_seconds
         self._clock = clock
         self._sessions: dict[str, BlueskySession] = {}
+        self._diagnoses: dict[str, Diagnosis] = {}
         self._lock = threading.Lock()
         self._closed = False
 
@@ -168,18 +178,33 @@ class SessionStore:
             if session is None:
                 return None
             if session.expires_at <= self._clock():
-                del self._sessions[session_id]
+                self._drop(session_id)
                 return None
             return session
 
     def delete(self, session_id: str) -> None:
         with self._lock:
-            self._sessions.pop(session_id, None)
+            self._drop(session_id)
+
+    def set_diagnosis(self, session_id: str, diagnosis: Diagnosis | None) -> None:
+        """セッションの最後の診断を置き換える。None なら消す。セッションがなければ何もしない。"""
+        with self._lock:
+            if session_id not in self._sessions:
+                return
+            if diagnosis is None:
+                self._diagnoses.pop(session_id, None)
+            else:
+                self._diagnoses[session_id] = diagnosis
+
+    def get_diagnosis(self, session_id: str) -> Diagnosis | None:
+        with self._lock:
+            return self._diagnoses.get(session_id) if session_id in self._sessions else None
 
     def close(self) -> None:
         with self._lock:
             self._closed = True
             self._sessions.clear()
+            self._diagnoses.clear()
 
     def __len__(self) -> int:
         with self._lock:
@@ -188,4 +213,8 @@ class SessionStore:
     def _purge_expired(self) -> None:
         now = self._clock()
         for session_id in [k for k, v in self._sessions.items() if v.expires_at <= now]:
-            del self._sessions[session_id]
+            self._drop(session_id)
+
+    def _drop(self, session_id: str) -> None:
+        self._sessions.pop(session_id, None)
+        self._diagnoses.pop(session_id, None)

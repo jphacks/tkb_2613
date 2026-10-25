@@ -231,7 +231,7 @@ describe("diagnose", () => {
   });
 
   it("skips events the screen does not know yet", async () => {
-    mockFetch(sse('event: plan\ndata: {"delete":[]}\n\nevent: done\ndata: {"posts_seen":0}\n\n'));
+    mockFetch(sse('event: profile\ndata: {"items":[]}\n\nevent: done\ndata: {"posts_seen":0}\n\n'));
     expect(await collect()).toEqual([{ event: "done", posts_seen: 0 }]);
   });
 

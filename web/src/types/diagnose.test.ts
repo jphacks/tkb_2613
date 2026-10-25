@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { toDiagnoseEvent } from "./diagnose";
+import { InvalidDiagnoseEventError, toDiagnoseEvent } from "./diagnose";
 
 const POST = {
   post_id: "at://did:plc:xxxx/app.bsky.feed.post/3kxxxx",
@@ -30,51 +30,113 @@ const CONCLUSION = {
 describe("toDiagnoseEvent", () => {
   it("reads a clues event", () => {
     const data = { post_id: POST.post_id, clues: [CLUE], error: null };
-    expect(toDiagnoseEvent("clues", JSON.stringify(data))).toEqual({ event: "clues", ...data });
+    expect(toDiagnoseEvent("clues", JSON.stringify(data))).toEqual({
+      event: "clues",
+      ...data,
+    });
   });
 
   it("reads a clues event for a post that failed", () => {
-    const data = { post_id: POST.post_id, clues: [], error: "写真を取得できませんでした" };
-    expect(toDiagnoseEvent("clues", JSON.stringify(data))).toEqual({ event: "clues", ...data });
+    const data = {
+      post_id: POST.post_id,
+      clues: [],
+      error: "写真を取得できませんでした",
+    };
+    expect(toDiagnoseEvent("clues", JSON.stringify(data))).toEqual({
+      event: "clues",
+      ...data,
+    });
   });
 
   it("reads a conclusions event", () => {
     const data = { clues: [CLUE], conclusions: [CONCLUSION] };
-    expect(toDiagnoseEvent("conclusions", JSON.stringify(data))).toEqual({ event: "conclusions", ...data });
-  });
-
-  it("reads a post event", () => {
-    expect(toDiagnoseEvent("post", JSON.stringify({ post: POST }))).toEqual({ event: "post", post: POST });
-  });
-
-  it("reads a done event", () => {
-    expect(toDiagnoseEvent("done", JSON.stringify({ posts_seen: 10 }))).toEqual({
-      event: "done",
-      posts_seen: 10,
+    expect(toDiagnoseEvent("conclusions", JSON.stringify(data))).toEqual({
+      event: "conclusions",
+      ...data,
     });
   });
 
+  it("reads a post event", () => {
+    expect(toDiagnoseEvent("post", JSON.stringify({ post: POST }))).toEqual({
+      event: "post",
+      post: POST,
+    });
+  });
+
+  it("reads a done event", () => {
+    expect(toDiagnoseEvent("done", JSON.stringify({ posts_seen: 10 }))).toEqual(
+      {
+        event: "done",
+        posts_seen: 10,
+      },
+    );
+  });
+
+  it("reads a plan event", () => {
+    const data = {
+      delete: [POST.post_id],
+      broken: ["routine"],
+      after: [],
+      posts: [{ post_id: POST.post_id, broken: ["routine"] }],
+    };
+    expect(toDiagnoseEvent("plan", JSON.stringify(data))).toEqual({
+      event: "plan",
+      ...data,
+    });
+  });
+
+  it("rejects a plan event without the per-post breakdown", () => {
+    const data = { delete: [], broken: [], after: [] };
+    expect(() => toDiagnoseEvent("plan", JSON.stringify(data))).toThrow(
+      InvalidDiagnoseEventError,
+    );
+  });
+
   it("skips event names added later, so the screen keeps working when the api grows", () => {
-    expect(toDiagnoseEvent("plan", JSON.stringify({ delete: [] }))).toBeNull();
+    expect(
+      toDiagnoseEvent("profile", JSON.stringify({ items: [] })),
+    ).toBeNull();
   });
 
   it.each([
     ["data not JSON", "post", "{"],
-    ["post in the wrong format", "post", JSON.stringify({ post: { ...POST, post_id: "" } })],
+    [
+      "post in the wrong format",
+      "post",
+      JSON.stringify({ post: { ...POST, post_id: "" } }),
+    ],
     ["post missing", "post", JSON.stringify({})],
     ["posts_seen negative", "done", JSON.stringify({ posts_seen: -1 })],
     ["posts_seen not an integer", "done", JSON.stringify({ posts_seen: "10" })],
-    ["clue in the wrong format", "clues", JSON.stringify({ post_id: "x", clues: [{ ...CLUE, type: "?" }], error: null })],
-    ["clues error not a string", "clues", JSON.stringify({ post_id: "x", clues: [], error: 1 })],
+    [
+      "clue in the wrong format",
+      "clues",
+      JSON.stringify({
+        post_id: "x",
+        clues: [{ ...CLUE, type: "?" }],
+        error: null,
+      }),
+    ],
+    [
+      "clues error not a string",
+      "clues",
+      JSON.stringify({ post_id: "x", clues: [], error: 1 }),
+    ],
     [
       "evidence pointing outside the clues",
       "conclusions",
-      JSON.stringify({ clues: [CLUE], conclusions: [{ ...CONCLUSION, clue_indices: [1] }] }),
+      JSON.stringify({
+        clues: [CLUE],
+        conclusions: [{ ...CONCLUSION, clue_indices: [1] }],
+      }),
     ],
     [
       "conclusion missing a field",
       "conclusions",
-      JSON.stringify({ clues: [CLUE], conclusions: [{ ...CONCLUSION, value: undefined }] }),
+      JSON.stringify({
+        clues: [CLUE],
+        conclusions: [{ ...CONCLUSION, value: undefined }],
+      }),
     ],
   ])("throws on %s", (_, event, data) => {
     expect(() => toDiagnoseEvent(event, data)).toThrow();

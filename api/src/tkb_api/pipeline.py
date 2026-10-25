@@ -1,4 +1,4 @@
-"""診断の流れ：投稿 → 手がかりの取り出し（detect）→ 推理（engine）。
+"""診断の流れ：投稿 → 手がかりの取り出し（detect）→ 推理（engine）→ 危ない投稿（engine.plan）。
 
 ルート（routes/diagnose.py）から使う。SSE の文字列の組み立てはルートの仕事で、ここは
 イベント名と data の組を順に返す。
@@ -8,7 +8,7 @@
 import asyncio
 import json
 import logging
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -20,6 +20,7 @@ from tkb_common.schemas import BSKY_CDN_PREFIX, Clue, Post
 from tkb_detect.batch import PostExtraction, extract_posts
 from tkb_detect.extract import Extractor
 from tkb_engine.gazetteer import Gazetteer
+from tkb_engine.planner import Simulation, plan, simulate
 from tkb_engine.rules import infer
 
 logger = logging.getLogger(__name__)
@@ -92,16 +93,46 @@ async def _replay(
         yield extraction
 
 
+def simulation_json(sim: Simulation, clues: Sequence[Clue]) -> dict[str, Any]:
+    """消したらどうなるかを、画面に渡す形にする。
+
+    after の clue_indices は、消したあとの手がかりの番号から、clues（診断の全手がかり）での
+    番号に直す。画面は conclusions イベントの clues をそのまま使える。
+    """
+    gone = set(sim.delete)
+    kept = [i for i, c in enumerate(clues) if c.post_id not in gone]
+    return {
+        "delete": sim.delete,
+        "broken": sim.broken,
+        "after": [
+            {**asdict(c), "clue_indices": [kept[i] for i in c.clue_indices]} for c in sim.after
+        ],
+    }
+
+
+def plan_json(clues: Sequence[Clue], posts: Sequence[Post], gazetteer: Gazetteer) -> dict[str, Any]:
+    """危ない投稿と、それを全部消したときの結果。投稿ごとに、それだけを消したときに崩れる項目も添える。"""
+    proposal = plan(clues, posts, gazetteer)
+    per_post = [
+        {"post_id": post_id, "broken": simulate(clues, posts, gazetteer, [post_id]).broken}
+        for post_id in proposal.delete
+    ]
+    return {**simulation_json(proposal, clues), "posts": per_post}
+
+
 async def diagnose_events(
     posts: Sequence[Post],
     extractions: AsyncIterator[PostExtraction],
     gazetteer: Gazetteer,
     interval: float = 0,
+    on_finished: Callable[[list[Clue]], None] | None = None,
 ) -> AsyncIterator[Event]:
     """診断のイベントを順に返す。
 
-    post（投稿ごと）→ clues（手がかりの取り出しが終わった順）→ conclusions（推理）→ done
-    conclusions の clue_indices は、同じイベントの clues の並びでの番号。
+    post（投稿ごと）→ clues（手がかりの取り出しが終わった順）→ conclusions（推理）
+    → plan（危ない投稿）→ done
+    conclusions の clue_indices は、同じイベントの clues の並びでの番号。plan の after も同じ番号。
+    on_finished は推理まで終わったときに全手がかりで呼ぶ（セッションに置いて simulate に使う）。
     """
     for post in posts:
         yield "post", {"post": post.model_dump(mode="json")}
@@ -120,6 +151,9 @@ async def diagnose_events(
             "conclusions": [asdict(c) for c in conclusions],
         },
     )
+    yield "plan", plan_json(all_clues, posts, gazetteer)
+    if on_finished is not None:
+        on_finished(all_clues)
     yield "done", {"posts_seen": len(posts)}
 
 
