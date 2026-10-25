@@ -5,7 +5,7 @@
 ## 対象と共通動作
 
 - api は FastAPI、画面からは同一オリジンの `/api` を使う。Next.js は `API_ORIGIN`（既定 `http://localhost:8001`）へ `/api/:path*` を中継する。
-- api の応答は `Cache-Control: no-store`。SSE にはさらに `X-Accel-Buffering: no` が付き、イベント間が設定値 `SSE_KEEPALIVE_SECONDS`（既定15秒）以上空くと `: keep-alive` コメントが流れる。コメントは画面で読み飛ばす。
+- api の応答は `Cache-Control: no-store, no-transform`（no-transform は、Next.js の中継が gzip で圧縮して SSE をためこむのを防ぐため）。SSE にはさらに `X-Accel-Buffering: no` が付き、イベント間が設定値 `SSE_KEEPALIVE_SECONDS`（既定15秒）以上空くと `: keep-alive` コメントが流れる。コメントは画面で読み飛ばす。
 - セッション Cookie 名は `tkb_session`。値はランダムなセッションID。Bluesky のセッション情報は api プロセスのメモリ上にあり、既定30分で失効する。
 - `MOCK_MODE=1` が既定。モックログインは架空DIDを使い、Blueskyへ接続しない。モック診断は `eval/fixtures/demo_observations.json` を再生し、モデルにも接続しない。
 - `MOCK_MODE=0` の診断では、セッションの DID の本人投稿だけを新しい順に最大 `MAX_POSTS` 件（既定30、設定上限100）取得する。

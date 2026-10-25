@@ -31,11 +31,11 @@ def test_api_responses_are_never_stored_by_caches(client: TestClient) -> None:
     logout = client.delete("/api/session")
 
     for res in (anonymous, login, me, diagnose, logout):
-        assert res.headers["cache-control"] == "no-store"
+        assert res.headers["cache-control"] == "no-store, no-transform"
 
 
 def test_validation_errors_are_never_stored_by_caches(client: TestClient) -> None:
     res = client.post("/api/session", json={"handle": ""})
 
     assert res.status_code == 422
-    assert res.headers["cache-control"] == "no-store"
+    assert res.headers["cache-control"] == "no-store, no-transform"
