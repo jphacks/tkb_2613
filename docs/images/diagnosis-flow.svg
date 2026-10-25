@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="420" height="1270" viewBox="0 0 420 1270" role="img" aria-labelledby="title desc">
   <title id="title">みーつけたの診断体験</title>
-  <desc id="desc">本人ログインから本人投稿の取得、OCRとVLMによる手がかり抽出、R1からR7の試作推理、最大3件の候補、仮除外、利用者確認後の実削除、再診断までを示す。</desc>
+  <desc id="desc">本人ログインから本人投稿の取得、OCRとVLMによる手がかり抽出、main実装のR1からR12の推理、結論リスト末尾3件から選んだ属性を対象とする最大3件の候補、仮除外、利用者確認後の実削除、再診断までを示す。</desc>
   <defs>
     <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#f15b55" /></marker>
     <style>
@@ -18,7 +18,7 @@
   </defs>
   <rect width="420" height="1270" rx="18" fill="#11182b" />
   <text class="title" x="24" y="40">投稿を見直す体験</text>
-  <text class="sub" x="24" y="66">本人のアカウントを診断する実モード</text>
+  <text class="sub" x="24" y="66">本人アカウントの投稿を診断する実モード</text>
 
   <rect class="card" x="24" y="94" width="372" height="100" rx="12" />
   <circle cx="51" cy="124" r="16" fill="#f15b55" /><text class="chip" x="51" y="128" text-anchor="middle">1</text>
@@ -44,7 +44,7 @@
   <rect class="card" x="24" y="500" width="372" height="116" rx="12" />
   <circle cx="51" cy="530" r="16" fill="#f15b55" /><text class="chip" x="51" y="534" text-anchor="middle">4</text>
   <text class="head" x="78" y="535">根拠付きの試作推理</text>
-  <text class="body" x="44" y="565">R1–R7が投稿をまたいで結論を作る</text>
+  <text class="body" x="44" y="565">mainのR1–R12が手がかりから結論を作る</text>
   <text class="body" x="44" y="588">各結論から使った手がかりをたどる</text>
   <text class="small" x="44" y="608">16項目プロフィールは目標段階</text>
   <path class="line" d="M210 617 V638" />
@@ -52,8 +52,8 @@
   <rect class="card" x="24" y="648" width="372" height="112" rx="12" />
   <circle cx="51" cy="678" r="16" fill="#f15b55" /><text class="chip" x="51" y="682" text-anchor="middle">5</text>
   <text class="head" x="78" y="683">削除候補を最大3件まで提示</text>
-  <text class="body" x="44" y="713">試作対象: station / active_time / routine</text>
-  <text class="small" x="44" y="738">候補がある場合だけ表示</text>
+  <text class="body" x="44" y="713">生成済み結論の末尾3件から属性を選ぶ</text>
+  <text class="small" x="44" y="738">貪欲に最大3投稿を選ぶ / 16項目は未接続</text>
   <path class="line" d="M210 761 V782" />
 
   <rect class="card" x="24" y="792" width="372" height="106" rx="12" />

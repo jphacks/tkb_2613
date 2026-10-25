@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="520" height="940" viewBox="0 0 520 940" role="img" aria-labelledby="title desc">
   <title id="title">みーつけたの技術構成</title>
-  <desc id="desc">Next.jsの画面とFastAPIが連携し、APIが本人のBluesky投稿を取得する。写真と本文はチーム管理のVLM、写真は接続設定時にOCRも使う。engineはR1からR7の試作推理とplan、simulateを行い、APIが結果をSSEで画面へ配信する。削除は画面での確認後に別リクエストで行う。</desc>
+  <desc id="desc">Next.jsの画面とFastAPIが連携し、APIが本人のBluesky投稿を取得する。写真と本文はチーム管理のVLM、写真は接続設定時にOCRも使う。main実装のR1からR12の推理仕様と、末尾3件の結論から対象属性を選んで最大3件を選ぶplan、simulateを示す。APIが結果をSSEで画面へ配信し、削除は画面での確認後に別リクエストで行う。</desc>
   <defs>
     <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#f15b55" /></marker>
     <marker id="arrowStart" markerWidth="8" markerHeight="8" refX="2" refY="4" orient="auto"><path d="M8,0 L0,4 L8,8 Z" fill="#f15b55" /></marker>
@@ -19,7 +19,7 @@
   </defs>
   <rect width="520" height="940" rx="18" fill="#11182b" />
   <text class="title" x="24" y="40">技術構成とデータの流れ</text>
-  <text class="sub" x="24" y="65">実モードの本人投稿から推理・操作まで</text>
+  <text class="sub" x="24" y="65">本人投稿から推理・操作までのデータの流れ</text>
 
   <rect class="card" x="24" y="88" width="210" height="92" rx="12" />
   <text class="head" x="42" y="119">Web</text><text class="body" x="42" y="143">Next.js / TypeScript</text><text class="small" x="42" y="165">本人操作・結果表示</text>
@@ -35,8 +35,8 @@
   <path class="both" d="M391 182 V225" />
 
   <rect class="card" x="24" y="390" width="472" height="132" rx="12" />
-  <text class="head" x="44" y="422">engine（試作）</text><text class="body" x="44" y="449">R1–R7 → 根拠付きConclusion</text><text class="body" x="44" y="472">plan / simulate → 最大3件の候補・仮除外比較</text>
-  <text class="small" x="44" y="499">対象は station / active_time / routine。16項目プロフィールは目標段階。</text>
+  <text class="head" x="44" y="422">engine（main仕様の説明）</text><text class="body" x="44" y="449">R1–R12 → 根拠付きConclusion</text><text class="body" x="44" y="472">plan: 末尾3結論から対象属性を選び最大3投稿</text>
+  <text class="small" x="44" y="499">simulateは仮除外で再推理。16項目目標は未接続。</text>
   <path class="line" d="M391 337 V382" />
 
   <rect class="card" x="24" y="566" width="472" height="106" rx="12" />
