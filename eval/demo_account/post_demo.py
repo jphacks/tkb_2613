@@ -1,15 +1,15 @@
 """デモ用アカウントに fixture の投稿をまとめて投稿する（tkb-2613.bsky.social など）。
 
-fixture（eval/fixtures/demo_tama.json など）の posts を、古い順に1件ずつ投稿する。
+fixture（eval/fixtures/demo_tkb2613.json など）の posts を、古い順に1件ずつ投稿する。
 写真つきの投稿は、--images のフォルダから「<画像のファイル名の頭>.jpg」を探して付ける
-（fixture の画像 URL の最後の部分。demo_tama.json なら tama04.jpg、tama21.jpg など）。
+（fixture の画像 URL の最後の部分。demo_tkb2613.json なら tkb02.jpg、tkb19.jpg など）。
 写真は書き出し直して EXIF などのメタデータを落としてから送る。
 
 ハンドル名とアプリパスワードは環境変数 BSKY_HANDLE と BSKY_APP_PASSWORD から読む
 （ファイルに書かない）。
 投稿する前に、プロフィールに「JPHACKS 2026 デモ用の架空アカウント」と書いておくこと。
 
-  F=eval/fixtures/demo_tama.json
+  F=eval/fixtures/demo_tkb2613.json
   uv run python eval/demo_account/post_demo.py $F --images ~/demo_photos --dry-run
   uv run python eval/demo_account/post_demo.py $F --images ~/demo_photos
   # 撮り直すときは、先に自分の投稿を全部消す（確認を求める）
