@@ -25,7 +25,7 @@ age・occupation・active_time・routine は16項目にない。
 - R4 市区町村：指定ゴミ袋（local_item）の色・容量・枚数・値段を知識表と照らす。
   ゴミ集積所などの掲示（notice）・品物に書かれた市区町村名も使う
 - R5 収集地区：R4 の市区町村で、集積所の掲示（notice）の燃やすごみの曜日が合う収集地区
-- R6 区画：郵便物のバーコードの中身（code）や住所表示（address_text）の郵便番号・町名と番地
+- R6 区画：郵便物のカスタマバーコードの中身（code）や住所表示（address_text）の郵便番号・町名と番地
 - R7 通学先：「大学」と「〇限」の本文を、R4 の市区町村にある大学の時間割と照らす
 - R8 名前：name_text（ケーキのプレート、宛名、返信での呼びかけなど）を、敬称や読めない字を
   落としてまとめる
@@ -263,7 +263,13 @@ def rule_r6(clues: Sequence[Clue], gaz: Gazetteer) -> list[Conclusion]:
     for i, c in enumerate(clues):
         if c.type not in {ClueType.CODE, ClueType.ADDRESS_TEXT}:
             continue
-        if c.type is ClueType.CODE and (m := POSTAL_IN_TEXT.search(c.value)):
+        # 住所が入っているのはカスタマバーコード（郵便物）だけ。宅配伝票などの番号は郵便番号と
+        # 見分けがつかないので使わない
+        if (
+            c.type is ClueType.CODE
+            and ("カスタマバーコード" in c.value or "〒" in c.value)
+            and (m := POSTAL_IN_TEXT.search(c.value))
+        ):
             rows = gaz.postal_rows(m[1] + m[2])
             if len({(r["city"], r["town"]) for r in rows}) != 1:
                 continue
@@ -272,7 +278,7 @@ def rule_r6(clues: Sequence[Clue], gaz: Gazetteer) -> list[Conclusion]:
                 continue
             place = rows[0]["city"] + _town_name(rows[0]["town"])
             value = f"{place} {'-'.join(numbers)} 付近"
-            return [Conclusion("R6", "home_block", value, [i], "郵便物のバーコードの中身")]
+            return [Conclusion("R6", "home_block", value, [i], "郵便物のカスタマバーコードの中身")]
         if c.type is ClueType.ADDRESS_TEXT and (block := BLOCK_IN_ADDRESS.search(c.value)):
             _, towns = gaz.area(c)
             if len(towns) != 1:

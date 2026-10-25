@@ -101,7 +101,7 @@
     },
     {
       "post_id": "at://did:plc:demoaoi0000000000000000/app.bsky.feed.post/3aoi00000010",
-      "text": "発送した！",
+      "text": "ポストにまたDM。宛名は消しといた",
       "created_at": "2026-10-18T15:02:00+09:00",
       "images": [
         {
@@ -226,15 +226,15 @@
       "post_id": "at://did:plc:demoaoi0000000000000000/app.bsky.feed.post/3aoi00000010",
       "image_index": 0,
       "type": "code",
-      "value": "伝票のバーコード（読み取ると 192-0083 9-3）",
+      "value": "カスタマバーコード: 〒192-0083 住所表示番号 9-3",
       "region": [
-        600,
+        640,
         700,
-        1100,
-        820
+        1080,
+        740
       ],
-      "confidence": 0.72,
-      "source": "vlm"
+      "confidence": 0.98,
+      "source": "ocr"
     },
     {
       "post_id": "at://did:plc:demoaoi0000000000000000/app.bsky.feed.post/3aoi00000011",
@@ -317,7 +317,7 @@
     {
       "attribute": "home_block",
       "value": "八王子市旭町 9-3 付近",
-      "note": "発送伝票のバーコードの中身（郵便番号と番地）",
+      "note": "届いた郵便物のカスタマバーコード（郵便番号と住所表示番号）",
       "clue_indices": [
         8
       ]
@@ -349,6 +349,6 @@
       "home_block",
       "active_time"
     ],
-    "note": "カフェの窓の写真と発送の伝票の写真。消すと収集地区までに戻る"
+    "note": "カフェの窓の写真と、届いた郵便物の写真。消すと収集地区までに戻る"
   }
 }

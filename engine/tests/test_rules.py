@@ -437,10 +437,13 @@ def test_r1_votes_for_a_station_written_in_a_shop_name() -> None:
 
 
 def test_r6_block_from_a_barcode_needs_a_known_postal_code() -> None:
-    clues = [_clue("p1", ClueType.CODE, "伝票のバーコード 192-0083 9-3")]
+    clues = [_clue("p1", ClueType.CODE, "カスタマバーコード: 〒192-0083 住所表示番号 9-3")]
     assert [c.value for c in rule_r6(clues, KNOW_GAZ)] == ["八王子市旭町 9-3 付近"]
-    unknown = [_clue("p1", ClueType.CODE, "伝票のバーコード 999-9999 9-3")]
+    unknown = [_clue("p1", ClueType.CODE, "カスタマバーコード: 〒999-9999 住所表示番号 9-3")]
     assert rule_r6(unknown, KNOW_GAZ) == []
+    # 宅配伝票の追跡番号は、郵便番号のように見えても使わない
+    tracking = [_clue("p1", ClueType.CODE, "Codabar: A1920083000193A")]
+    assert rule_r6(tracking, KNOW_GAZ) == []
 
 
 def test_r7_school_needs_the_timetable_to_fit() -> None:
