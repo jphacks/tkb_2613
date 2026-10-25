@@ -1006,7 +1006,10 @@ def rule_birthday(clues: Sequence[Clue], posts: Sequence[Post]) -> list[Conclusi
         date = re.search(r"(\d{1,2})\s*(?:月|/)\s*(\d{1,2})", c.value)
         if date:
             month, day = int(date[1]), int(date[2])
-        elif timestamps_usable(posts) and any(w in c.value.lower() for w in BIRTHDAY_WORDS):
+        elif any(w in c.value.lower() for w in BIRTHDAY_WORDS) and (
+            timestamps_usable(posts)
+            or re.search(r"\d{1,3}\s*歳にな(?:り|っ)ました", c.value)
+        ):
             month, day = when.month, when.day
         else:
             continue

@@ -18,15 +18,11 @@ from tkb_common.schemas import Clue, Post
 from tkb_engine.gazetteer import Gazetteer
 from tkb_engine.rules import Conclusion, infer
 
-# 名前・生年月日は身元に直結するので、場所や行動の推定より先に崩す。
-IDENTITY_ATTRIBUTES = ("full_name", "given_name_or_nickname", "birthday")
+# 現在は、捜査ボードの末尾3項目を診断ごとに推薦対象にする。
+BOARD_RECOMMENDATION_COUNT = 3
+# 互換用の一覧。実際の推薦対象は infer の結果から動的に決める。
 IMPORTANT_ATTRIBUTES = (
-    *IDENTITY_ATTRIBUTES,
-    "home_area",
-    "home_block",
-    "station",
-    "active_time",
-    "routine",
+    "full_name", "given_name_or_nickname", "birthday", "home_area", "home_block", "station", "active_time", "routine"
 )
 PLAN_MAX_POSTS = 3
 
@@ -69,23 +65,24 @@ def simulate(
 
 
 def plan(clues: Sequence[Clue], posts: Sequence[Post], gaz: Gazetteer) -> Simulation:
-    """重要な項目を崩す投稿を選び、その投稿を消したときの結果を返す。
+    """捜査ボード末尾3項目を崩す投稿を、効果の大きい順に選ぶ。
 
-    候補は、いま残っている重要な結論の根拠になっている投稿。1件ずつ足してみて、
-    (残る身元項目の数, 残る重要な項目の数, 重要な結論の根拠の手がかりの数,
-    残る項目の数) がいちばん小さくなる
-    投稿を選ぶ。
-    同じなら、根拠になっている回数の多い投稿、さらに同じなら posts で先の投稿。
-    根拠の数を見るのは、根拠が多い駅のように1件では崩れない項目も、少しずつ崩せるようにするため。
+    候補は、対象項目の根拠になっている投稿。1件ずつ足してみて、対象項目と根拠が
+    もっとも減る投稿を選ぶ。同じなら posts で先の投稿を先にする。
     どの候補でも小さくならないときは、そこでやめる。
     """
+    before = infer(clues, posts, gaz)
+    target_attributes = tuple(dict.fromkeys(c.attribute for c in before[-BOARD_RECOMMENDATION_COUNT:]))
+    if not target_attributes:
+        return simulate(clues, posts, gaz, [])
+
     chosen: list[str] = []
-    current = _score(infer(clues, posts, gaz))
-    while current[1] > 0 and len(chosen) < PLAN_MAX_POSTS:
-        best: tuple[tuple[int, int, int, int], int, str] | None = None
-        for rank, post_id in enumerate(_candidates(clues, posts, gaz, chosen)):
+    current = _score(before, target_attributes)
+    while current[0] > 0 and len(chosen) < PLAN_MAX_POSTS:
+        best: tuple[tuple[int, int], int, str] | None = None
+        for rank, post_id in enumerate(_candidates(clues, posts, gaz, chosen, target_attributes)):
             sim = simulate(clues, posts, gaz, [*chosen, post_id])
-            score = _score(sim.after)
+            score = _score(sim.after, target_attributes)
             if score < current and (best is None or (score, rank) < (best[0], best[1])):
                 best = (score, rank, post_id)
         if best is None:
@@ -99,24 +96,30 @@ def _important(conclusions: Sequence[Conclusion]) -> list[Conclusion]:
     return [c for c in conclusions if c.attribute in IMPORTANT_ATTRIBUTES]
 
 
-def _score(conclusions: Sequence[Conclusion]) -> tuple[int, int, int, int]:
-    important = _important(conclusions)
-    evidence = {i for c in important for i in c.clue_indices}
+def _score(
+    conclusions: Sequence[Conclusion], target_attributes: Sequence[str]
+) -> tuple[int, int]:
+    target = [c for c in conclusions if c.attribute in target_attributes]
+    evidence = {i for c in target for i in c.clue_indices}
     return (
-        len({c.attribute for c in important if c.attribute in IDENTITY_ATTRIBUTES}),
-        len({c.attribute for c in important}),
+        len({c.attribute for c in target}),
         len(evidence),
-        len({c.attribute for c in conclusions}),
     )
 
 
 def _candidates(
-    clues: Sequence[Clue], posts: Sequence[Post], gaz: Gazetteer, chosen: Sequence[str]
+    clues: Sequence[Clue],
+    posts: Sequence[Post],
+    gaz: Gazetteer,
+    chosen: Sequence[str],
+    target_attributes: Sequence[str],
 ) -> list[str]:
-    """chosen を消したあとに残る重要な結論の、根拠の投稿。根拠になった回数の多い順。"""
+    """chosen を消したあとに残る、ボード末尾3項目の根拠投稿。"""
     sim = simulate(clues, posts, gaz, chosen)
     counts: dict[str, int] = {}
-    for conclusion in _important(sim.after):
+    for conclusion in sim.after:
+        if conclusion.attribute not in target_attributes:
+            continue
         for i in conclusion.clue_indices:
             post_id = sim.after_clues[i].post_id
             counts[post_id] = counts.get(post_id, 0) + 1
