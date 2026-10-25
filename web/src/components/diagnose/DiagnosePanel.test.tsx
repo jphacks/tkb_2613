@@ -2,7 +2,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { SessionProvider } from "@/components/session/SessionProvider";
-import { ApiError, diagnose, getSession } from "@/lib/api";
+import { ApiError, diagnose, getSession, simulate } from "@/lib/api";
 import { messages } from "@/lib/messages";
 import type { Clue } from "@/types/clue";
 import type { DiagnoseEvent } from "@/types/diagnose";
@@ -15,7 +15,7 @@ const b = messages.board;
 
 vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
-  return { ...actual, diagnose: vi.fn(), getSession: vi.fn() };
+  return { ...actual, diagnose: vi.fn(), getSession: vi.fn(), simulate: vi.fn() };
 });
 
 const ALICE = { handle: "alice.bsky.social", did: "did:plc:abc" };
@@ -65,6 +65,7 @@ async function renderLoggedIn() {
 }
 
 afterEach(() => {
+  vi.mocked(simulate).mockReset();
   vi.mocked(diagnose).mockReset();
   vi.mocked(getSession).mockReset();
 });
@@ -232,5 +233,43 @@ describe("DiagnosePanel", () => {
     expect(
       await screen.findByText(b.empty),
     ).toBeInTheDocument();
+  });
+
+  it("lists the risky posts and turns broken conclusions into unknown when simulated", async () => {
+    const gymPost = post(2, "ジムおわり 毎週火曜はここ");
+    const gym = clue(gymPost.post_id, "毎週火曜のジム");
+    vi.mocked(diagnose).mockImplementation(async function* () {
+      yield { event: "post", post: gymPost };
+      yield { event: "clues", post_id: gymPost.post_id, clues: [gym], error: null };
+      yield {
+        event: "conclusions",
+        clues: [gym],
+        conclusions: [{ rule: "R3", attribute: "routine", value: "毎週火曜", clue_indices: [0], note: "" }],
+      };
+      yield {
+        event: "plan",
+        delete: [gymPost.post_id],
+        broken: ["routine"],
+        after: [],
+        posts: [{ post_id: gymPost.post_id, broken: ["routine"] }],
+      };
+      yield { event: "done", posts_seen: 1 };
+    });
+    vi.mocked(simulate).mockResolvedValue({ delete: [gymPost.post_id], broken: ["routine"], after: [] });
+
+    fireEvent.click(await renderLoggedIn());
+    const risky = await screen.findByRole("list", { name: messages.risky.listLabel });
+    expect(risky).toHaveTextContent(messages.risky.breaks(b.attributeLabels.routine));
+
+    fireEvent.click(screen.getByRole("button", { name: messages.risky.simulate }));
+
+    const board = screen.getByRole("list", { name: b.conclusionsLabel });
+    await vi.waitFor(() => expect(board).toHaveTextContent(b.unknown));
+    expect(board).not.toHaveTextContent("毎週火曜");
+    expect(vi.mocked(simulate).mock.calls[0][1]).toBe(1);
+
+    fireEvent.click(screen.getByRole("button", { name: messages.risky.reset }));
+
+    expect(screen.getByRole("list", { name: b.conclusionsLabel })).toHaveTextContent("毎週火曜");
   });
 });

@@ -101,6 +101,26 @@ export const messages = {
     reasons: (count: number) => `根拠（${count} 件）`,
     reasonsLabel: "根拠の手がかり",
     empty: "投稿からは、あなたについて推定できることは見つかりませんでした",
+    /** 消したらどうなるかで、推定できなくなった項目 */
+    unknown: "不明",
+    unknownNote: "選んだ投稿を消すと、ここは推定できなくなります",
+  },
+  risky: {
+    heading: "まーだだよ",
+    lead: "この投稿を消すと、推定が崩れます。選んで「消したらどうなる」を押すと、消したあとの捜査ボードを見られます。実際には消しません。",
+    listLabel: "危ない投稿",
+    breaks: (labels: string) => `消すと不明に：${labels}`,
+    breaksNothing: "これだけでは崩れません",
+    noText: "（本文なし）",
+    photos: (count: number) => `写真 ${count} 枚`,
+    simulate: "消したらどうなる",
+    simulating: "推理し直しています…",
+    reset: "元に戻す",
+    result: (deleted: number, broken: number) =>
+      broken > 0 ? `${deleted} 件消すと、${broken} つの項目が不明になります` : `${deleted} 件消しても、推定は崩れません`,
+    safe: "逃げ切り：最寄り駅・よくいる時間・決まった外出はもう推定できません",
+    none: "推定を崩せる投稿は見つかりませんでした",
+    failed: "推理し直せませんでした",
   },
   hideAndSeek: {
     pickerLabel: "写真の選択",
@@ -122,5 +142,6 @@ export const messages = {
     wrongCredentials: "ハンドル名かパスワードが違います",
     sessionExpired: "ログインし直してください",
     diagnoseInterrupted: "診断の途中で接続が切れました",
+    diagnoseFirst: "先に診断してください",
   },
 } as const;

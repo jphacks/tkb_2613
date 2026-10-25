@@ -14,6 +14,8 @@ const SAG = 28;
 interface ConclusionBoardProps {
   clues: readonly Clue[];
   conclusions: readonly Conclusion[];
+  /** 消したらどうなるかで推定できなくなった項目（attribute）。「不明」のカードで出す */
+  unknown?: readonly string[];
 }
 
 interface RedString {
@@ -54,13 +56,14 @@ function layoutStrings(
  * 捜査ボード。推定に使われた手がかりを「証拠」として留め、推定へ赤い糸を張る。
  * 推定には根拠の手がかりも文字で添える（糸は飾りなので読み上げない）。
  */
-export function ConclusionBoard({ clues, conclusions }: ConclusionBoardProps) {
+export function ConclusionBoard({ clues, conclusions, unknown = [] }: ConclusionBoardProps) {
   const boardRef = useRef<HTMLDivElement>(null);
   const pinRefs = useRef(new Map<number, HTMLElement>());
   const cardRefs = useRef(new Map<number, HTMLElement>());
   const [strings, setStrings] = useState<readonly RedString[]>([]);
 
-  const found = conclusions.length > 0;
+  // 消したらどうなるかで全部「不明」になっても、演出は出したままにする（出し直さない）
+  const found = conclusions.length > 0 || unknown.length > 0;
   const evidence = [...new Set(conclusions.flatMap((c) => c.clue_indices))].sort((a, b) => a - b);
 
   // カードの位置は描いてみないと分からないので、描いたあとに測る。幅が変わったら測り直す
@@ -86,7 +89,7 @@ export function ConclusionBoard({ clues, conclusions }: ConclusionBoardProps) {
       <h3 id="board-heading" className="font-display text-2xl">
         {t.heading}
       </h3>
-      {conclusions.length === 0 ? (
+      {!found ? (
         <p className="text-ink/70">{t.empty}</p>
       ) : (
         <div ref={boardRef} className="relative">
@@ -151,6 +154,16 @@ export function ConclusionBoard({ clues, conclusions }: ConclusionBoardProps) {
                     );
                   })}
                 </ul>
+              </li>
+            ))}
+            {unknown.map((attribute) => (
+              <li
+                key={`unknown-${attribute}`}
+                className="border-l-4 border-dashed border-ink/30 bg-paper-deep/50 px-4 py-3 text-ink/60"
+              >
+                <p className="text-xs tracking-widest">{t.attributeLabels[attribute] ?? attribute}</p>
+                <p className="mt-1 text-xl font-bold line-through decoration-seeker decoration-2">{t.unknown}</p>
+                <p className="mt-1 text-sm">{t.unknownNote}</p>
               </li>
             ))}
           </ol>

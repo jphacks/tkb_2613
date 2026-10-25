@@ -1,7 +1,7 @@
 import { messages } from "@/lib/messages";
 import { readSse } from "@/lib/sse";
 import { type DetectResponse, isDetectResponse } from "@/types/clue";
-import { type DiagnoseEvent, toDiagnoseEvent } from "@/types/diagnose";
+import { type DiagnoseEvent, isSimulation, type Simulation, toDiagnoseEvent } from "@/types/diagnose";
 import { isSessionResponse, type SessionResponse } from "@/types/session";
 
 /** api/src/tkb_api/routes/detect.py の上限とそろえる */
@@ -196,4 +196,43 @@ export async function* diagnose({
     throw new ApiError("network", messages.errors.diagnoseInterrupted);
   }
   throw new ApiError("network", messages.errors.diagnoseInterrupted);
+}
+
+/**
+ * 選んだ投稿を消したらどうなるかを api に計算させる。実際には消さない（削除の API は呼ばない）。
+ * 選べるのは、そのセッションで最後に診断した投稿だけ。clueCount は診断の手がかりの数（根拠の番号の確認用）。
+ */
+export async function simulate(
+  deleteIds: readonly string[],
+  clueCount: number,
+  { baseUrl = DEFAULT_BASE_URL, signal }: RequestOptions = {},
+): Promise<Simulation> {
+  let res: Response;
+  try {
+    res = await fetch(`${baseUrl}/api/simulate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ delete: deleteIds }),
+      credentials: "include",
+      signal,
+    });
+  } catch {
+    throw new ApiError("network", messages.errors.network);
+  }
+
+  if (res.status === 401) {
+    throw new ApiError("unauthorized", messages.errors.sessionExpired, 401);
+  }
+  if (res.status === 409) {
+    throw new ApiError("server", messages.errors.diagnoseFirst, 409);
+  }
+  if (!res.ok) {
+    throw new ApiError("server", messages.errors.server(res.status), res.status);
+  }
+
+  const data: unknown = await res.json().catch(() => undefined);
+  if (!isSimulation(data, clueCount)) {
+    throw new ApiError("invalid_response", messages.errors.invalidResponse);
+  }
+  return data;
 }

@@ -79,4 +79,15 @@ describe("ConclusionBoard", () => {
     expect(container.querySelector(".found-flash")).not.toBeInTheDocument();
     expect(screen.getByText(messages.board.empty)).toBeInTheDocument();
   });
+
+  it("shows broken items as unknown after a simulated deletion, without the evidence", () => {
+    render(<ConclusionBoard clues={[CLUE]} conclusions={[]} unknown={["station"]} />);
+
+    const cards = within(screen.getByRole("list", { name: messages.board.conclusionsLabel })).getAllByRole("listitem");
+    expect(cards).toHaveLength(1);
+    expect(cards[0]).toHaveTextContent(messages.board.attributeLabels.station);
+    expect(cards[0]).toHaveTextContent(messages.board.unknown);
+    expect(screen.queryByText(CLUE.value)).not.toBeInTheDocument();
+    expect(screen.queryByText(messages.board.empty)).not.toBeInTheDocument();
+  });
 });
