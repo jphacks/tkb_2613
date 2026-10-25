@@ -124,6 +124,9 @@ def _region(box: tuple[int, int, int, int], size: tuple[int, int]) -> Region | N
 
 # 傾いた写真は、まっすぐに直してから読む。0 度で読めなければ、この順に回してみる
 DESKEW_ANGLES = (0, 3, -3, 6, -6, 9, -9, 12, -12, 15, -15)
+# 読めなかったとき2倍に拡大して読み直すのは、長い辺がこれ以下の画像だけ
+# （Bluesky の写真は2000px まで）
+UPSCALE_MAX_SIDE_PX = 2000
 
 
 def read_customer_barcodes(image: Image.Image) -> list[tuple[str, tuple[int, int, int, int]]]:
@@ -131,6 +134,17 @@ def read_customer_barcodes(image: Image.Image) -> list[tuple[str, tuple[int, int
 
     傾いていれば回して直す（少しの傾きは棒の上端・下端の線ごと当てはめる）。上下が逆さでも読む。
     """
+    found = _read_any_angle(image)
+    if found or max(image.size) > UPSCALE_MAX_SIDE_PX:
+        return found
+    # 小さく写ったバーコード（棒の幅が2ピクセルほど）は、2倍に拡大して読み直す
+    big = image.resize((image.width * 2, image.height * 2), Image.Resampling.LANCZOS)
+    return [
+        (v, (box[0] // 2, box[1] // 2, box[2] // 2, box[3] // 2)) for v, box in _read_any_angle(big)
+    ]
+
+
+def _read_any_angle(image: Image.Image) -> list[tuple[str, tuple[int, int, int, int]]]:
     for angle in DESKEW_ANGLES:
         rotated = image.rotate(angle, expand=True, fillcolor=255) if angle else image
         found = _read_upright(rotated)
