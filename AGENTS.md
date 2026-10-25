@@ -74,7 +74,7 @@ Python は `common/` の Pydantic モデル（`tkb_common.schemas`）、TypeScri
 手がかりは「見えたもの・書いてあるもの」の観測だけにする。「この人は看護師」「最寄りは〇〇駅」のような推理は手がかりに入れない（推理は engine の推理ルールで行う）。
 
 - `type`：
-  - 写真から：station_sign（駅名標・駅名の文字。一部でも）/ rail_view（窓の外のホーム・線路・電車。駅名なしでも）/ reflection（瞳・窓ガラス・鏡などに映ったもの。何が映っているかを value に）/ shop（店名・看板・ロゴ）/ landmark（目立つ建物・橋・塔など）/ address_text / postal_code（一部でも）/ phone（一部でも）/ plate / uniform（制服・作業着・作業靴・社員証・名札）/ face / key / code（QRコード・バーコード）
+  - 写真から：station_sign（駅名標・駅名の文字。一部でも）/ rail_view（窓の外のホーム・線路・電車。駅名なしでも）/ reflection（瞳・窓ガラス・鏡などに映ったもの。何が映っているかを value に）/ shop（店名・看板・ロゴ）/ landmark（目立つ建物・橋・塔など）/ address_text / postal_code（一部でも）/ phone（一部でも）/ plate / uniform（制服・作業着・作業靴・社員証・名札）/ face / key / code（QRコード・バーコード。読み取れた中身も value に）/ local_item（自治体の指定ゴミ袋など地域が限られる品物。色・容量・枚数・値段を value に）/ notice（ゴミ集積所の収集曜日などの掲示）
   - 写真と本文の両方から：name_text（ケーキのプレート、名札、宛名、返信での呼びかけなど）/ org_text（会社・学校・団体の名前やロゴ）/ handle_text（SNSのユーザー名・URL）/ place_text（地名・駅名・店名）
   - 本文から：age_text（「25歳になりました」「誕生日」など）/ routine_text（「夜勤明け」「電車混んでる」「毎週火曜のジム」など生活の決まり）/ relation_text（家族・同居人・ペット）
 - `value`：一部しか読めない文字は、読めた所だけを入れ、読めない桁や文字は x にする（例：郵便番号 `270-01xx`）
@@ -106,6 +106,7 @@ Python は `common/` の Pydantic モデル（`tkb_common.schemas`）、TypeScri
 
 - プロフィール推定：手がかりの一覧（文字だけ）を言語モデルに渡し、項目ごとの候補と根拠（手がかりの番号）を出させる。項目の確からしさは、根拠の手がかりの confidence を 1 − ∏(1 − c_i) で合成する。`required` の根拠が1つでも消えたら、その項目は不明にする
 - 駅名は `data-prep` の stations 表で実在を確認する。生活時間帯は今回の16項目に含めない
+- 現在の実装は、言語モデルを使わない推理ルール R1〜R10（`engine/src/tkb_engine/rules.py`）。指定ゴミ袋・収集地区・大学の時間割は手で作る知識表 `data-prep/manual/knowledge.json` を引く（行ごとに出典を書く。デモ用の架空の行はそう書く）
 - 最小削除：投稿を1件抜いたときの各項目の確からしさを、モデルを呼ばずに計算し直す。16項目に対する重みは実装時に決める。重要な項目を最も多く崩す投稿から貪欲法で選ぶ。最大3件まで
 - 再診断：抜き出し済みの手がかりから、削除した投稿の分を除いてすぐに計算する
 

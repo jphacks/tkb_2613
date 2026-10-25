@@ -1,18 +1,91 @@
-"""data-prep の表（stations・postal・muni_mesh）と、手がかりの値の引き当て。
+"""data-prep の表（stations・postal・muni_mesh）と知識表、手がかりの値の引き当て。
 
 表は `make data` で data/processed/ に作る（コミットしない）。
+知識表（指定ゴミ袋・ゴミの収集地区・大学）は手で作る小さな表で、data-prep/manual/knowledge.json
+に置く。どの行にも出典（source）を書く。
 テストでは Gazetteer を直接組み立てる。
 """
 
+import dataclasses
+import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import pyarrow.parquet as pq
 
 from tkb_common.schemas import Clue, ClueType
 
 DATA_DIR = Path(__file__).resolve().parents[3] / "data" / "processed"
+KNOWLEDGE_PATH = Path(__file__).resolve().parents[3] / "data-prep" / "manual" / "knowledge.json"
+
+
+@dataclass(frozen=True)
+class TrashBag:
+    """自治体の指定ゴミ袋。color・liters・count・price は袋1種類の特徴。"""
+
+    city: str
+    color: str
+    liters: int
+    count: int
+    price: int
+
+
+@dataclass(frozen=True)
+class CollectionArea:
+    """ゴミの収集地区。burnable_days は燃やすごみの曜日（「水土」のように曜日の字を並べる）。"""
+
+    city: str
+    area: str
+    burnable_days: str
+
+
+@dataclass(frozen=True)
+class University:
+    """大学のキャンパス。periods は時限 → (始まり, 終わり)。時刻は時の小数（10:50 → 10.8333）。"""
+
+    name: str
+    campus: str
+    city: str
+    periods: dict[int, tuple[float, float]]
+
+
+@dataclass(frozen=True)
+class Knowledge:
+    trash_bags: list[TrashBag] = field(default_factory=list)
+    collection_areas: list[CollectionArea] = field(default_factory=list)
+    universities: list[University] = field(default_factory=list)
+
+    @classmethod
+    def load(cls, path: Path = KNOWLEDGE_PATH) -> "Knowledge":
+        doc = json.loads(path.read_text(encoding="utf-8"))
+        return cls(
+            trash_bags=[TrashBag(**_fields(r, TrashBag)) for r in doc["trash_bags"]],
+            collection_areas=[
+                CollectionArea(**_fields(r, CollectionArea)) for r in doc["collection_areas"]
+            ],
+            universities=[
+                University(
+                    name=r["name"],
+                    campus=r["campus"],
+                    city=r["city"],
+                    periods={int(k): (_hours(a), _hours(b)) for k, (a, b) in r["periods"].items()},
+                )
+                for r in doc["universities"]
+            ],
+        )
+
+
+def _fields(row: dict[str, Any], cls: type[Any]) -> dict[str, Any]:
+    """出典（source）などの説明の列を落とす。"""
+    names = {f.name for f in dataclasses.fields(cls)}
+    return {k: v for k, v in row.items() if k in names}
+
+
+def _hours(hhmm: str) -> float:
+    h, m = hhmm.split(":")
+    return int(h) + int(m) / 60
 
 
 @dataclass(frozen=True)
@@ -27,9 +100,10 @@ class Gazetteer:
     stations: list[dict[str, str]] = field(default_factory=list)
     postal: list[dict[str, str]] = field(default_factory=list)
     muni_meshes: dict[str, set[str]] = field(default_factory=dict)
+    knowledge: Knowledge = field(default_factory=Knowledge)
 
     @classmethod
-    def load(cls, data_dir: Path = DATA_DIR) -> "Gazetteer":
+    def load(cls, data_dir: Path = DATA_DIR, knowledge: Knowledge | None = None) -> "Gazetteer":
         meshes: dict[str, set[str]] = {}
         for row in pq.read_table(data_dir / "muni_mesh.parquet").to_pylist():
             meshes.setdefault(row["muni_code"], set()).add(row["mesh_1km"])
@@ -37,7 +111,23 @@ class Gazetteer:
             stations=pq.read_table(data_dir / "stations.parquet").to_pylist(),
             postal=pq.read_table(data_dir / "postal.parquet").to_pylist(),
             muni_meshes=meshes,
+            knowledge=Knowledge.load() if knowledge is None else knowledge,
         )
+
+    def city_munis(self, city: str) -> set[str]:
+        """市区町村名（「八王子市」など）の区市町村コード。"""
+        return {r["muni_code"] for r in self.postal if r["city"] == city}
+
+    def cities_in(self, text: str) -> set[str]:
+        """文字の中に出てくる市区町村名（郵便番号の表と知識表にあるもの）。"""
+        names = {r["city"] for r in self.postal} | {b.city for b in self.knowledge.trash_bags}
+        found = {name for name in names if name and name in text}
+        # 「八王子市」と「王子市」のように、ほかの名前に含まれるものは落とす
+        return {n for n in found if not any(n != m and n in m for m in found)}
+
+    def postal_rows(self, code: str) -> list[dict[str, str]]:
+        """ハイフンなし7桁の郵便番号の行。"""
+        return [r for r in self.postal if r["postal_code"] == code]
 
     def station_names(self, value: str) -> set[str]:
         """駅名の手がかり（「根x」「根津駅」など）に合う駅名。"""

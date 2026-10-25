@@ -70,9 +70,14 @@ def test_simulate_breaks_station_and_the_rules_that_depend_on_it() -> None:
 
     sim = simulate(clues, posts, GAZ, ["b"])
 
-    assert {c.attribute for c in sim.before} == {"home_area", "station", "active_time"}
+    assert {c.attribute for c in sim.before} == {
+        "home_area",
+        "station",
+        "home_block",
+        "active_time",
+    }
     assert sim.after == []
-    assert sim.broken == ["home_area", "station", "active_time"]
+    assert sim.broken == ["home_area", "station", "home_block", "active_time"]
     assert sim.delete == ["b"]
 
 

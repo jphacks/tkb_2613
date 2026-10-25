@@ -18,8 +18,8 @@ from tkb_common.schemas import Clue, Post
 from tkb_engine.gazetteer import Gazetteer
 from tkb_engine.rules import Conclusion, infer
 
-# 最寄り駅・行動時間・留守の時間。これが崩れれば、待ち伏せや空き巣の手がかりがなくなる
-IMPORTANT_ATTRIBUTES = ("station", "active_time", "routine")
+# 最寄り駅・住所の区画・行動時間・留守の時間。これが崩れれば、待ち伏せや空き巣の手がかりがなくなる
+IMPORTANT_ATTRIBUTES = ("station", "home_block", "active_time", "routine")
 PLAN_MAX_POSTS = 3
 
 

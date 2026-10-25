@@ -19,7 +19,7 @@ import httpx
 from tkb_common.schemas import BSKY_CDN_PREFIX, Clue, Post
 from tkb_detect.batch import PostExtraction, extract_posts
 from tkb_detect.extract import Extractor
-from tkb_engine.gazetteer import Gazetteer
+from tkb_engine.gazetteer import Gazetteer, Knowledge
 from tkb_engine.planner import Simulation, plan, simulate
 from tkb_engine.rules import infer
 
@@ -65,14 +65,29 @@ async def _download(client: httpx.AsyncClient, url: str) -> bytes:
 
 
 def load_gazetteer(data_dir: Path) -> Gazetteer:
-    """data-prep の表を読む。読めなければ空の表にして、表を使うルールだけを飛ばす。"""
+    """data-prep の表と知識表を読む。読めなければ空の表にして、その表を使うルールだけを飛ばす。
+
+    知識表（指定ゴミ袋・収集地区・大学）はリポジトリにあるので、data-prep の表がなくても使う。
+    """
+    knowledge = load_knowledge()
     try:
-        return Gazetteer.load(data_dir)
+        return Gazetteer.load(data_dir, knowledge=knowledge)
     except (OSError, ValueError, KeyError) as e:
         logger.warning(
             "推理の表を読めませんでした（%s）。最寄り駅のルールは使いません", type(e).__name__
         )
-        return Gazetteer()
+        return Gazetteer(knowledge=knowledge)
+
+
+def load_knowledge() -> Knowledge:
+    try:
+        return Knowledge.load()
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        logger.warning(
+            "知識表を読めませんでした（%s）。市区町村・収集地区・学校のルールは使いません",
+            type(e).__name__,
+        )
+        return Knowledge()
 
 
 def demo_extractions(fixture_path: Path, posts: Sequence[Post]) -> list[PostExtraction]:

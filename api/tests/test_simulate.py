@@ -67,7 +67,9 @@ def test_diagnose_streams_the_plan_before_done(client: TestClient) -> None:
     proposal = events["plan"]
     assert set(proposal["delete"]) == {ADDRESS_POST, GYM_POST}
     assert {"station", "active_time", "routine"} <= set(proposal["broken"])
-    assert proposal["after"] == []
+    # 重要な項目は残らない（名前・年齢・仕事などは残ってよい）
+    important = {"station", "home_block", "active_time", "routine"}
+    assert not important & {c["attribute"] for c in proposal["after"]}
     by_post = {p["post_id"]: p["broken"] for p in proposal["posts"]}
     assert "station" in by_post[ADDRESS_POST]
     assert "routine" in by_post[GYM_POST]
