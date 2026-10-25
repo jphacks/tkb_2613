@@ -123,7 +123,7 @@ async def test_events_keep_failed_posts_and_index_conclusions_into_all_clues() -
 
     events = [e async for e in diagnose_events([post], _stream(extractions), Gazetteer())]
 
-    assert [name for name, _ in events] == ["post", "clues", "clues", "conclusions", "done"]
+    assert [name for name, _ in events] == ["post", "clues", "clues", "conclusions", "plan", "done"]
     assert events[1][1]["error"] == "写真を取得できませんでした"
     result = events[3][1]
     assert result["clues"] == [clue.model_dump(mode="json")]

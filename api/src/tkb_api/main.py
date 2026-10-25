@@ -11,7 +11,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from tkb_api.bluesky import SessionStore
 from tkb_api.config import Settings, get_settings
-from tkb_api.routes import detect, diagnose, session
+from tkb_api.routes import detect, diagnose, session, simulate
 
 
 class NoStoreMiddleware:
@@ -76,6 +76,7 @@ def create_app(
     app.include_router(detect.router)
     app.include_router(session.router)
     app.include_router(diagnose.router)
+    app.include_router(simulate.router)
 
     @app.get("/health")
     def health() -> dict[str, str | bool]:

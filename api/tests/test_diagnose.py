@@ -66,7 +66,7 @@ def test_diagnose_requires_login(client: TestClient) -> None:
     assert client.post("/api/diagnose").status_code == 401
 
 
-def test_mock_diagnose_streams_posts_clues_conclusions_then_done(client: TestClient) -> None:
+def test_mock_diagnose_streams_posts_clues_conclusions_plan_then_done(client: TestClient) -> None:
     _login(client)
 
     res = client.post("/api/diagnose")
@@ -77,7 +77,7 @@ def test_mock_diagnose_streams_posts_clues_conclusions_then_done(client: TestCli
     posts, clues = doc["posts"], doc["clues"]
     events = _events(res.text)
     names = [name for name, _ in events]
-    assert names == ["post"] * 10 + ["clues"] * 10 + ["conclusions", "done"]
+    assert names == ["post"] * 10 + ["clues"] * 10 + ["conclusions", "plan", "done"]
     assert [data for name, data in events if name == "post"] == [{"post": p} for p in posts]
 
     # 手がかりはデモ用データのものを、投稿ごとにまとめて流す
@@ -87,7 +87,7 @@ def test_mock_diagnose_streams_posts_clues_conclusions_then_done(client: TestCli
     assert sum(len(e["clues"]) for e in clue_events) == len(clues)
 
     # 推理の根拠の番号は、conclusions の clues の並びでの番号
-    _, result = events[-2]
+    _, result = events[-3]
     by_attribute = {c["attribute"]: c for c in result["conclusions"]}
     station = by_attribute["station"]
     assert station["value"] == "根津駅"
@@ -156,7 +156,7 @@ def test_real_diagnose_extracts_clues_from_the_session_accounts_own_posts() -> N
     assert calls == [(REAL_CLIENT, REAL_DID, 5)]
     assert extractor.seen == [(post.post_id, 0)]
     events = _events(res.text)
-    assert [name for name, _ in events] == ["post", "clues", "conclusions", "done"]
+    assert [name for name, _ in events] == ["post", "clues", "conclusions", "plan", "done"]
     assert events[1][1]["post_id"] == post.post_id
     assert events[1][1]["clues"][0]["value"] == post.text
     assert events[2][1]["clues"] == events[1][1]["clues"]

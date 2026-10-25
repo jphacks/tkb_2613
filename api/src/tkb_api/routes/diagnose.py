@@ -5,7 +5,12 @@
   event: clues        data: {"post_id", "clues": [手がかり], "error"} 手がかりの取り出しが終わった順
   event: conclusions  data: {"clues": [全手がかり], "conclusions": [{"rule", "attribute",
                              "value", "clue_indices", "note"}]}      最後に1回。番号は clues の並び
+  event: plan         data: {"delete": [投稿ID], "broken": [項目], "after": [結論],
+                             "posts": [{"post_id", "broken"}]}       危ない投稿。番号は clues の並び
   event: done         data: {"posts_seen": 件数}
+
+推理まで終わったら、投稿と手がかりをセッションのメモリに置く（POST /api/simulate で使う）。
+ディスクやログには残さない。診断を始めたときに、前の診断の分は消す。
 
 MOCK_MODE=1 のときは、架空のデモ用アカウントの投稿と手がかりを流す
 （Bluesky にもモデルにも接続しない）。
@@ -24,11 +29,11 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 
 from tkb_api import bluesky
-from tkb_api.bluesky import BlueskySession, PostsFetcher
+from tkb_api.bluesky import BlueskySession, Diagnosis, PostsFetcher, SessionStore
 from tkb_api.config import Settings, get_settings
 from tkb_api.pipeline import diagnose_events, load_gazetteer, mock_extractions, real_extractions
-from tkb_api.routes.session import current_session
-from tkb_common.schemas import Post
+from tkb_api.routes.session import current_session, current_session_id, get_session_store
+from tkb_common.schemas import Clue, Post
 from tkb_detect.errors import DetectError
 from tkb_detect.extract import Extractor, build_extractor
 from tkb_engine.gazetteer import Gazetteer
@@ -147,7 +152,10 @@ async def diagnose(
     fetch_posts: Annotated[PostsFetcher, Depends(get_fetch_posts)],
     extractor_factory: Annotated[ExtractorFactory, Depends(get_extractor_factory)],
     gazetteer: Annotated[Gazetteer, Depends(get_gazetteer)],
+    store: Annotated[SessionStore, Depends(get_session_store)],
+    session_id: Annotated[str, Depends(current_session_id)],
 ) -> StreamingResponse:
+    store.set_diagnosis(session_id, None)
     if settings.mock_mode:
         posts = _load_demo_posts(settings)
         interval = settings.mock_event_interval_seconds
@@ -156,7 +164,11 @@ async def diagnose(
         posts = await _fetch_own_posts(session, settings, fetch_posts)
         interval = 0
         extractions = real_extractions(_build_extractor(extractor_factory), posts)
-    events = diagnose_events(posts, extractions, gazetteer, interval)
+
+    def save(clues: list[Clue]) -> None:
+        store.set_diagnosis(session_id, Diagnosis(posts=tuple(posts), clues=tuple(clues)))
+
+    events = diagnose_events(posts, extractions, gazetteer, interval, on_finished=save)
     return StreamingResponse(
         _with_keep_alive(_stream(events), settings.sse_keepalive_seconds),
         media_type="text/event-stream",

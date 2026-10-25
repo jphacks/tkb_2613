@@ -5,6 +5,8 @@ api の入出力（ログインなど）はこのファイルが Python 側の�
 ログインは web/src/types/session.ts と同時に変更すること。
 """
 
+from typing import Annotated
+
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
 from tkb_common.schemas import (
@@ -33,9 +35,13 @@ __all__ = [
     # api の入出力
     "SessionRequest",
     "SessionResponse",
+    "SimulateRequest",
 ]
 
-API_ONLY_NAMES = frozenset({"SessionRequest", "SessionResponse"})
+API_ONLY_NAMES = frozenset({"SessionRequest", "SessionResponse", "SimulateRequest"})
+
+# 消したらどうなるかで一度に選べる投稿の数（診断する投稿の上限 MAX_POSTS の設定上限と同じ）
+SIMULATE_MAX_POSTS = 100
 
 
 class SessionRequest(BaseModel):
@@ -67,3 +73,16 @@ class SessionResponse(BaseModel):
 
     handle: str
     did: str
+
+
+class SimulateRequest(BaseModel):
+    """消したらどうなるか（POST /api/simulate）。web/src/types/simulate.ts と同時に変更すること。
+
+    delete は、そのセッションで最後に診断した投稿の ID だけ。実際には消さない。
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    delete: list[Annotated[str, Field(min_length=1, max_length=512)]] = Field(
+        max_length=SIMULATE_MAX_POSTS
+    )

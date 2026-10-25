@@ -30,11 +30,21 @@ def get_login(settings: Annotated[Settings, Depends(get_settings)]) -> LoginFn:
     return partial(bluesky.login, service=settings.bsky_service)
 
 
-def current_session(
+def current_session_id(
     store: Annotated[SessionStore, Depends(get_session_store)],
     session_id: Annotated[str | None, Cookie(alias=SESSION_COOKIE)] = None,
+) -> str:
+    """ログイン中のセッション番号。期限切れやログアウト済みなら 401。"""
+    if not session_id or store.get(session_id) is None:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "ログインしてください")
+    return session_id
+
+
+def current_session(
+    store: Annotated[SessionStore, Depends(get_session_store)],
+    session_id: Annotated[str, Depends(current_session_id)],
 ) -> BlueskySession:
-    session = store.get(session_id) if session_id else None
+    session = store.get(session_id)
     if session is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "ログインしてください")
     return session
