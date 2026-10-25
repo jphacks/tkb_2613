@@ -16,10 +16,12 @@ from tkb_api.routes import detect, diagnose, session, simulate
 
 
 class NoStoreMiddleware:
-    """api のすべての応答に Cache-Control: no-store を付ける。
+    """api のすべての応答に Cache-Control: no-store, no-transform を付ける。
 
     途中の中継（Vercel の CDN など）に保存させない。ログイン状態の応答がキャッシュされると、
     別の人に他人のログイン情報が返るおそれがあるため。
+    no-transform は中継に圧縮させないため。画面の /api を中継する Next.js は、ブラウザが gzip を
+    受け付けると応答を圧縮し、診断の SSE を最後までためこんで一度に送ってしまう。
     応答本文には触らないので、SSE もためこまずにそのまま流れる。
     """
 
@@ -34,7 +36,7 @@ class NoStoreMiddleware:
         async def send_no_store(message: Message) -> None:
             if message["type"] == "http.response.start":
                 headers = MutableHeaders(scope=message)
-                headers["Cache-Control"] = "no-store"
+                headers["Cache-Control"] = "no-store, no-transform"
             await send(message)
 
         await self.app(scope, receive, send_no_store)
