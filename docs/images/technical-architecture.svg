@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="520" height="940" viewBox="0 0 520 940" role="img" aria-labelledby="title desc">
   <title id="title">みーつけたの技術構成</title>
-  <desc id="desc">Next.jsの画面とFastAPIが連携し、APIが本人のBluesky投稿を取得する。写真と本文はチーム管理のVLM、写真は接続設定時にOCRも使う。engineはR1からR7の試作推理とplan、simulateを行い、APIが結果をSSEで画面へ配信する。削除は画面での確認後に別リクエストで行う。</desc>
+  <desc id="desc">Next.jsの画面とFastAPIが連携し、APIが本人のBluesky投稿を取得する。写真と本文はチーム管理のVLM、写真は接続設定時にOCRも使う。engineはR1からR12とX1からX5の推理、重み付きのplan、simulateを行い、APIが結果をSSEで画面へ配信する。削除は画面での確認後に別リクエストで行う。</desc>
   <defs>
     <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#f15b55" /></marker>
     <marker id="arrowStart" markerWidth="8" markerHeight="8" refX="2" refY="4" orient="auto"><path d="M8,0 L0,4 L8,8 Z" fill="#f15b55" /></marker>
@@ -35,8 +35,8 @@
   <path class="both" d="M391 182 V225" />
 
   <rect class="card" x="24" y="390" width="472" height="132" rx="12" />
-  <text class="head" x="44" y="422">engine（試作）</text><text class="body" x="44" y="449">R1–R7 → 根拠付きConclusion</text><text class="body" x="44" y="472">plan / simulate → 最大3件の候補・仮除外比較</text>
-  <text class="small" x="44" y="499">対象は station / active_time / routine。16項目プロフィールは目標段階。</text>
+  <text class="head" x="44" y="422">engine</text><text class="body" x="44" y="449">R1–R12 / X1–X5 → 根拠付きConclusion</text><text class="body" x="44" y="472">plan / simulate → 最大3件の候補・仮除外比較</text>
+  <text class="small" x="44" y="499">重要な推定と写真・文字に直接写った手がかりを考慮。</text>
   <path class="line" d="M391 337 V382" />
 
   <rect class="card" x="24" y="566" width="472" height="106" rx="12" />
