@@ -325,7 +325,8 @@ def test_r3_finds_same_weekday_and_time() -> None:
     # 曜日を含む routine_text（0）は時刻のまとまりの結論に入っているので、別の結論にしない
     [got] = rule_r3(clues, posts)
 
-    assert got.value == "毎週火曜 20時ごろに出かけている（ジム・毎週火曜のジム）"
+    # 「毎週火曜のジム」は「ジム」を含むので、多く出てきた「ジム」だけを括弧に入れる
+    assert got.value == "毎週火曜 20時ごろに出かけている（ジム）"
     assert got.clue_indices == [0, 1, 2]
 
 
@@ -519,3 +520,27 @@ def test_r7_reads_school_names_only() -> None:
     assert rule_r7(clues) == [
         Conclusion("R7", "school", "筑波大学", [1, 2], "学校の名前の手がかり")
     ]
+
+
+def test_r3_keeps_the_words_short_but_all_evidence() -> None:
+    posts = [_post(f"p{n}", f"2026-10-{17 + 7 * n:02d} 19:{10 * n:02d}") for n in range(3)]
+    clues = [
+        _clue("p0", ClueType.ROUTINE_TEXT, "夜勤前"),
+        _clue("p0", ClueType.ROUTINE_TEXT, "電車混んでる"),
+        _clue("p1", ClueType.ROUTINE_TEXT, "朝から電車混んでる"),
+        _clue("p1", ClueType.ROUTINE_TEXT, "夜勤明け"),
+        _clue("p2", ClueType.ROUTINE_TEXT, "電車混んでる"),
+    ]
+
+    (got,) = rule_r3(clues, posts)
+
+    assert got.value == "毎週土曜 19時ごろに出かけている（電車混んでる・夜勤前）"
+    assert got.clue_indices == [0, 1, 2, 3, 4]
+
+
+def test_r3_leaves_out_empty_parentheses() -> None:
+    posts = [_post(f"p{n}", f"2026-10-{17 + 7 * n:02d} 19:00") for n in range(3)]
+
+    (got,) = rule_r3([], posts)
+
+    assert got.value == "毎週土曜 19時ごろに出かけている"
