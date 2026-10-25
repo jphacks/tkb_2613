@@ -38,6 +38,15 @@ export interface Simulation {
   readonly after: readonly Conclusion[];
 }
 
+/**
+ * 投稿を実際に消した結果（POST /api/delete の応答）。delete は消せた投稿だけで、broken・after は
+ * それを除いて推理し直した結果。api/src/tkb_api/routes/delete.py と同時に変更すること。
+ */
+export interface Deletion extends Simulation {
+  /** 消せなかった投稿の ID */
+  readonly failed: readonly string[];
+}
+
 /** 危ない投稿 1 件と、それだけを消したときに崩れる項目 */
 export interface RiskyPost {
   readonly post_id: string;
@@ -123,6 +132,11 @@ export function isSimulation(
     Array.isArray(value.after) &&
     value.after.every((c) => isConclusion(c, clueCount))
   );
+}
+
+/** 実際に消した結果の形を確かめる。clueCount は isSimulation と同じ */
+export function isDeletion(value: unknown, clueCount = Number.POSITIVE_INFINITY): value is Deletion {
+  return isRecord(value) && isStringList(value.failed) && isSimulation(value, clueCount);
 }
 
 function isRiskyPost(value: unknown): value is RiskyPost {

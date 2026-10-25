@@ -2,10 +2,12 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import { ApiError, simulate } from "@/lib/api";
+import { ApiError, deletePosts, simulate } from "@/lib/api";
 import { messages } from "@/lib/messages";
-import type { RiskyPost, Simulation } from "@/types/diagnose";
+import type { Deletion, RiskyPost, Simulation } from "@/types/diagnose";
 import type { Post } from "@/types/post";
+
+import { DeleteConfirm } from "./DeleteConfirm";
 
 const t = messages.risky;
 
@@ -20,7 +22,7 @@ interface RiskyPostsProps {
   risky: readonly RiskyPost[];
   /** 診断の手がかりの数（simulate の結果の根拠の番号を確かめる） */
   clueCount: number;
-  /** 消したらどうなるかの結果。元に戻したり選び直したりしたら null */
+  /** 消したらどうなるか・実際に消した結果。元に戻したり選び直したりしたら null */
   onSimulated: (simulation: Simulation | null) => void;
 }
 
@@ -34,14 +36,18 @@ function excerpt(text: string): string {
 }
 
 /**
- * 危ない投稿（診断の plan）を並べ、選んだ投稿を消したらどうなるかを見せる。
- * 実際には消さない。結果は捜査ボードに渡して、崩れた項目を「不明」にする。
+ * 危ない投稿（診断の plan）を並べ、選んだ投稿を消したらどうなるかを見せる（まーだだよ）。
+ * 結果は捜査ボードに渡して、崩れた項目を「不明」にする。
+ * 試したあと、確認ダイアログで OK したときだけ Bluesky から実際に消す（もういいよ）。消したあとは選び直せない。
  */
 export function RiskyPosts({ posts, risky, clueCount, onSimulated }: RiskyPostsProps) {
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set(risky.map((r) => r.post_id)));
   const [result, setResult] = useState<Simulation | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deletion, setDeletion] = useState<Deletion | null>(null);
   const controller = useRef<AbortController | null>(null);
 
   useEffect(() => () => controller.current?.abort(), []);
@@ -78,6 +84,24 @@ export function RiskyPosts({ posts, risky, clueCount, onSimulated }: RiskyPostsP
     });
   }
 
+  async function confirmDelete() {
+    if (!result) return;
+    setDeleting(true);
+    setError(null);
+    try {
+      // 試した投稿（result.delete）をそのまま消す
+      const deleted = await deletePosts(result.delete, clueCount);
+      setDeletion(deleted);
+      onSimulated(deleted);
+      setConfirming(false);
+    } catch (e) {
+      setConfirming(false);
+      setError(e instanceof ApiError ? e.message : t.deleteFailed);
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   async function run() {
     clear();
     const current = new AbortController();
@@ -100,7 +124,8 @@ export function RiskyPosts({ posts, risky, clueCount, onSimulated }: RiskyPostsP
     }
   }
 
-  const escaped = result !== null && IMPORTANT_ATTRIBUTES.every((a) => !result.after.some((c) => c.attribute === a));
+  const shown = deletion ?? result;
+  const escaped = shown !== null && IMPORTANT_ATTRIBUTES.every((a) => !shown.after.some((c) => c.attribute === a));
 
   return (
     <section aria-labelledby="risky-heading" aria-busy={pending} className="max-w-2xl space-y-4">
@@ -123,6 +148,7 @@ export function RiskyPosts({ posts, risky, clueCount, onSimulated }: RiskyPostsP
                 <input
                   type="checkbox"
                   checked={checked}
+                  disabled={deletion !== null}
                   onChange={() => toggle(r.post_id)}
                   className="mt-1 size-4 shrink-0 accent-[var(--color-seeker)]"
                 />
@@ -141,49 +167,87 @@ export function RiskyPosts({ posts, risky, clueCount, onSimulated }: RiskyPostsP
         })}
       </ol>
 
-      <div className="flex flex-wrap items-center gap-3">
-        <button
-          type="button"
-          onClick={run}
-          disabled={pending || selected.size === 0}
-          className="inline-flex items-center gap-3 rounded-sm bg-seeker px-5 py-2.5 font-display text-paper shadow-[4px_4px_0_var(--color-ink)] transition-transform hover:-translate-y-0.5 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-ink active:translate-y-0.5 active:shadow-none disabled:cursor-not-allowed disabled:opacity-60 disabled:shadow-none"
-        >
-          {pending && (
-            <span
-              aria-hidden
-              className="size-4 animate-spin rounded-full border-2 border-paper border-t-transparent motion-reduce:animate-none"
-            />
-          )}
-          {t.simulate}
-        </button>
-        {result && (
+      {!deletion && (
+        <div className="flex flex-wrap items-center gap-3">
           <button
             type="button"
-            onClick={clear}
-            className="rounded-sm border border-ink/40 px-4 py-2 transition-colors hover:bg-ink/10 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-ink"
+            onClick={run}
+            disabled={pending || selected.size === 0}
+            className="inline-flex items-center gap-3 rounded-sm bg-seeker px-5 py-2.5 font-display text-paper shadow-[4px_4px_0_var(--color-ink)] transition-transform hover:-translate-y-0.5 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-ink active:translate-y-0.5 active:shadow-none disabled:cursor-not-allowed disabled:opacity-60 disabled:shadow-none"
           >
-            {t.reset}
+            {pending && (
+              <span
+                aria-hidden
+                className="size-4 animate-spin rounded-full border-2 border-paper border-t-transparent motion-reduce:animate-none"
+              />
+            )}
+            {t.simulate}
           </button>
-        )}
-      </div>
+          {result && (
+            <button
+              type="button"
+              onClick={clear}
+              className="rounded-sm border border-ink/40 px-4 py-2 transition-colors hover:bg-ink/10 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-ink"
+            >
+              {t.reset}
+            </button>
+          )}
+          {result && result.delete.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setConfirming(true)}
+              className="rounded-sm border-2 border-seeker px-4 py-2 font-display text-seeker transition-colors hover:bg-seeker hover:text-paper focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-ink"
+            >
+              {t.deleteForReal}
+            </button>
+          )}
+        </div>
+      )}
 
       {pending && (
         <p role="status" className="text-ink/70">
           {t.simulating}
         </p>
       )}
-      {result && (
+      {result && !deletion && (
         <div role="status" className="space-y-1">
           <p className="font-bold">{t.result(result.delete.length, result.broken.length)}</p>
           {result.broken.length > 0 && <p className="text-sm text-ink/70">{labelsOf(result.broken)}</p>}
           {escaped && <p className="font-display text-xl text-seeker">{t.safe}</p>}
         </div>
       )}
+      {deletion && <Escaped deletion={deletion} escaped={escaped} />}
       {error && (
         <p role="alert" className="border-l-4 border-seeker bg-seeker/10 px-4 py-3">
           {error}
         </p>
       )}
+
+      {confirming && result && (
+        <DeleteConfirm
+          excerpts={result.delete.map((id) => excerpt(byId.get(id)?.text ?? ""))}
+          pending={deleting}
+          onConfirm={confirmDelete}
+          onCancel={() => setConfirming(false)}
+        />
+      )}
     </section>
+  );
+}
+
+/** 実際に消したあと：消せた数、消せなかった数、逃げ切れたか */
+function Escaped({ deletion, escaped }: { deletion: Deletion; escaped: boolean }) {
+  const e = messages.escaped;
+  return (
+    <div role="status" className="space-y-2 border-t border-ink/15 pt-4">
+      <p className="horror-title text-4xl">{e.heading}</p>
+      <p className="font-bold">{e.deleted(deletion.delete.length)}</p>
+      {deletion.broken.length > 0 && <p className="text-sm text-ink/70">{t.breaks(labelsOf(deletion.broken))}</p>}
+      {escaped && <p className="font-display text-xl text-seeker">{t.safe}</p>}
+      {deletion.failed.length > 0 && (
+        <p className="border-l-4 border-seeker bg-seeker/10 px-4 py-2">{e.failed(deletion.failed.length)}</p>
+      )}
+      <p className="text-sm text-ink/60">{e.rediagnose}</p>
+    </div>
   );
 }

@@ -141,7 +141,7 @@ export const messages = {
   },
   risky: {
     heading: "まーだだよ",
-    lead: "この投稿を消すと、推定が崩れます。選んで「消したらどうなる」を押すと、消したあとの捜査ボードを見られます。実際には消しません。",
+    lead: "この投稿を消すと、推定が崩れます。選んで「消したらどうなる」を押すと、消したあとの捜査ボードを見られます（ここではまだ消しません）。納得したら「Bluesky から消す」で実際に消せます。",
     listLabel: "危ない投稿",
     breaks: (labels: string) => `消すと不明に：${labels}`,
     breaksNothing: "これだけでは崩れません",
@@ -155,6 +155,23 @@ export const messages = {
     safe: "逃げ切り：最寄り駅・よくいる時間・決まった外出はもう推定できません",
     none: "推定を崩せる投稿は見つかりませんでした",
     failed: "推理し直せませんでした",
+    /** ここから下は、Bluesky から実際に消すとき */
+    deleteForReal: "Bluesky から消す",
+    confirmHeading: "本当に消しますか？",
+    confirmLead: (count: number) =>
+      `Bluesky から次の ${count} 件の投稿を削除します。写真も本文も、いいねや返信もいっしょに消え、元に戻せません。`,
+    confirmListLabel: "消す投稿",
+    confirm: "削除する",
+    cancel: "やめる",
+    deleting: "Bluesky から消しています…",
+    deleteFailed: "消せませんでした",
+  },
+  /** 実際に消したあと */
+  escaped: {
+    heading: "もういいよ",
+    deleted: (count: number) => `${count} 件の投稿を Bluesky から消しました`,
+    failed: (count: number) => `${count} 件は消せませんでした。Bluesky のアプリから直接消してください`,
+    rediagnose: "もう一度「診断する」を押すと、残った投稿で最初から調べ直します",
   },
   hideAndSeek: {
     pickerLabel: "写真の選択",
