@@ -55,6 +55,9 @@ const ATTRIBUTE_LABELS: Readonly<Record<string, string>> = {
   school: "学校",
   birthday: "生年月日",
   home_school_commute: "住まいと通学先のつながり",
+  long_term_home_absence: "家を空ける時期",
+  frequent_shop: "よく行く店",
+  workplace: "勤務先・バイト先",
 };
 
 export const messages = {
