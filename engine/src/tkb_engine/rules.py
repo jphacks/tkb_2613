@@ -266,7 +266,7 @@ def rule_r4(clues: Sequence[Clue], gaz: Gazetteer, posts: Sequence[Post] = ()) -
 FAR_WORDS = re.compile(r"遠い|遠くて|遠すぎ|遠いし|時間かかる|乗り換え多")
 NEAR_WORDS = re.compile(r"近い|近くて|すぐ着|すぐ行ける|歩いて行ける|チャリで行ける")
 FAR_KM = 15.0
-NEAR_KM = 12.0
+NEAR_KM = 13.0
 DISTANCE_TYPES = {ClueType.PLACE_TEXT, ClueType.ROUTINE_TEXT}
 
 
