@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 
 import { ApiError, deletePosts, simulate } from "@/lib/api";
 import { messages } from "@/lib/messages";
+import { isLikelyNameText } from "@/lib/reveal";
+import type { Clue } from "@/types/clue";
 import type { Deletion, RiskyPost, Simulation } from "@/types/diagnose";
 import type { Post } from "@/types/post";
 
@@ -11,17 +13,9 @@ import { DeleteConfirm } from "./DeleteConfirm";
 
 const t = messages.risky;
 
-/** 呼び出し元からボード項目が渡されない場合の互換用判定 */
-const FALLBACK_ATTRIBUTES = [
-  "full_name",
-  "given_name_or_nickname",
-  "birthday",
-  "home_area",
-  "home_block",
-  "station",
-  "active_time",
-  "routine",
-] as const;
+/** engine の IMPORTANT_ATTRIBUTES（tkb_engine/planner.py）とそろえる。 */
+const IMPORTANT_ATTRIBUTES = ["full_name", "birthday", "home_block", "home_area", "home_district", "home_city", "school", "home_school_commute", "given_name_or_nickname", "station", "age", "line", "active_time", "routine"] as const;
+const DIRECT_CLUES = ["face", "name_text", "address_text", "phone", "postal_code"] as const;
 
 /** 投稿の本文はこの文字数で切って見せる */
 const EXCERPT_LENGTH = 60;
@@ -29,8 +23,8 @@ const EXCERPT_LENGTH = 60;
 interface RiskyPostsProps {
   posts: readonly Post[];
   risky: readonly RiskyPost[];
-  /** 捜査ボードの末尾3項目（engine の推薦対象と同じ） */
-  targetAttributes?: readonly string[];
+  /** 各投稿に直接写っていた手がかりの説明に使う。 */
+  clues?: readonly Clue[];
   /** 診断の手がかりの数（simulate の結果の根拠の番号を確かめる） */
   clueCount: number;
   /** 消したらどうなるか・実際に消した結果。元に戻したり選び直したりしたら null */
@@ -51,7 +45,7 @@ function excerpt(text: string): string {
  * 結果は捜査ボードに渡して、崩れた項目を「不明」にする。
  * 試したあと、確認ダイアログで OK したときだけ Bluesky から実際に消す（もういいよ）。消したあとは選び直せない。
  */
-export function RiskyPosts({ posts, risky, targetAttributes, clueCount, onSimulated }: RiskyPostsProps) {
+export function RiskyPosts({ posts, risky, clues = [], clueCount, onSimulated }: RiskyPostsProps) {
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set(risky.map((r) => r.post_id)));
   const [result, setResult] = useState<Simulation | null>(null);
   const [pending, setPending] = useState(false);
@@ -136,11 +130,9 @@ export function RiskyPosts({ posts, risky, targetAttributes, clueCount, onSimula
   }
 
   const shown = deletion ?? result;
-  const escapeTargets = targetAttributes ?? FALLBACK_ATTRIBUTES;
-  const escaped =
-    shown !== null &&
-    escapeTargets.length > 0 &&
-    escapeTargets.every((a) => !shown.after.some((c) => c.attribute === a));
+  const gone = new Set(shown?.delete ?? []);
+  const directCluesLeft = clues.some((c) => !gone.has(c.post_id) && directClueLabel(c) !== null);
+  const escaped = shown !== null && !directCluesLeft && IMPORTANT_ATTRIBUTES.every((a) => !shown.after.some((c) => c.attribute === a));
 
   return (
     <section aria-labelledby="risky-heading" aria-busy={pending} className="max-w-2xl space-y-4">
@@ -153,6 +145,7 @@ export function RiskyPosts({ posts, risky, targetAttributes, clueCount, onSimula
         {risky.map((r) => {
           const post = byId.get(r.post_id);
           const checked = selected.has(r.post_id);
+          const direct = [...new Set(clues.filter((c) => c.post_id === r.post_id).map(directClueLabel).filter((label): label is string => label !== null))];
           return (
             <li key={r.post_id}>
               <label
@@ -175,6 +168,7 @@ export function RiskyPosts({ posts, risky, targetAttributes, clueCount, onSimula
                   <span className="mt-1 block text-sm font-bold text-seeker">
                     {r.broken.length > 0 ? t.breaks(labelsOf(r.broken)) : t.breaksNothing}
                   </span>
+                  {direct.length > 0 && <span className="mt-1 block text-sm text-ink/80">{t.directClues(direct.join("・"))}</span>}
                 </span>
               </label>
             </li>
@@ -248,6 +242,13 @@ export function RiskyPosts({ posts, risky, targetAttributes, clueCount, onSimula
       )}
     </section>
   );
+}
+
+function directClueLabel(clue: Clue): string | null {
+  if (!DIRECT_CLUES.some((type) => type === clue.type)) return null;
+  if (clue.type === "face" && clue.confidence < 0.8) return null;
+  if (clue.type === "name_text" && !isLikelyNameText(clue.value)) return null;
+  return messages.clues.typeLabels[clue.type];
 }
 
 /** 実際に消したあと：消せた数、消せなかった数、逃げ切れたか */

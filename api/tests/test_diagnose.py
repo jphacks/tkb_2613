@@ -66,6 +66,27 @@ def test_diagnose_requires_login(client: TestClient) -> None:
     assert client.post("/api/diagnose").status_code == 401
 
 
+def test_completed_diagnosis_can_be_read_again_only_in_its_session(client: TestClient) -> None:
+    assert client.get("/api/diagnosis").status_code == 401
+    _login(client)
+    assert client.get("/api/diagnosis").status_code == 404
+
+    result = client.post("/api/diagnose")
+    assert result.status_code == 200
+    restored = client.get("/api/diagnosis")
+    assert restored.status_code == 200
+    assert restored.headers["cache-control"] == "no-store, no-transform"
+    data = restored.json()
+    assert len(data["posts"]) == 10
+    assert len(data["clues"]) > 0
+    assert data["conclusions"] == _events(result.text)[-3][1]["conclusions"]
+    assert data["plan"] == _events(result.text)[-2][1]
+
+    # 同じブラウザでもログインし直すと別セッション。前の結果には入れない。
+    _login(client)
+    assert client.get("/api/diagnosis").status_code == 404
+
+
 def test_mock_diagnose_streams_posts_clues_conclusions_plan_then_done(client: TestClient) -> None:
     _login(client)
 

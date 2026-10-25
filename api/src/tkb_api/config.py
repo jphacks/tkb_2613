@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     # 診断の SSE で、イベントの間がこの秒数より空いたら keep-alive のコメントを送る
     # （Vercel は 120 秒、Cloudflare は 100 秒、何も届かないと接続を切るため）
     sse_keepalive_seconds: float = Field(default=15, gt=0)
+    # 明示的に共有した診断結果の保存先と有効期間。アプリ再起動後も閲覧できるようファイルに置く。
+    share_db_path: Path = Path("data/private/shared_results.sqlite3")
+    share_ttl_minutes: int = Field(default=120, ge=1, le=1440)
 
 
 @lru_cache

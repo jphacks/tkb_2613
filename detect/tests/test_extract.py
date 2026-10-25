@@ -193,6 +193,34 @@ async def test_drops_items_that_do_not_fit_the_clue_format(item: dict[str, Any])
 
 
 @pytest.mark.anyio
+async def test_drops_birthday_decoration_and_age_from_name_clues() -> None:
+    extractor = Extractor(_vlm_client(), coordinate_space=CoordinateSpace.RELATIVE_1000, zoom=False)
+    photo = {
+        "clues": [
+            {
+                "type": "name_text",
+                "value": "HAPPY BIRTHDAY",
+                "bbox_2d": [1, 1, 100, 100],
+                "confidence": 0.9,
+            },
+            {"type": "name_text", "value": "22", "bbox_2d": [1, 1, 100, 100], "confidence": 0.9},
+            {
+                "type": "name_text",
+                "value": "内藤大貴",
+                "bbox_2d": [1, 1, 100, 100],
+                "confidence": 0.9,
+            },
+        ]
+    }
+
+    with respx.mock as router:
+        router.post(f"{VLM}/chat/completions").mock(side_effect=_router(photo, {"clues": []}))
+        clues = await extractor.extract_post(_post("", 1), [_png(2560, 1440)])
+
+    assert [clue.value for clue in clues] == ["内藤大貴"]
+
+
+@pytest.mark.anyio
 @pytest.mark.parametrize("reply", ["これは JSON ではない", "[]", '{"items": []}'])
 async def test_raises_detect_error_on_unexpected_reply(reply: str) -> None:
     extractor = Extractor(_vlm_client())

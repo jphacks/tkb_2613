@@ -20,6 +20,10 @@
 | `DELETE /api/session` | `tkb_session` Cookie | 204、Cookie削除 | セッションがなくても204。 |
 | `POST /api/detect` | 画像バイナリをリクエスト本文に直接送信。許可Content-Type: JPEG/PNG/WebP/HEIC/HEIF | モック時200 `{"clues":[…]}` | 空本文400、未対応形式415、20MiB超413。`MOCK_MODE=0` は現状501「検出はまだ実装されていません」。このルートはログイン必須ではない。 |
 | `POST /api/diagnose` | `tkb_session` Cookie。JSON bodyなし | `text/event-stream` | Cookieなし・無効は401。成功時は以下のSSE順序。投稿/手がかり/結論の結果はディスクやログに保存しない。推理まで終わると、投稿と手がかりをそのセッションのメモリにだけ置く（simulate 用。ログアウト・期限切れで消え、次の診断を始めると消える）。 |
+| `GET /api/diagnosis` | `tkb_session` Cookie | 200 `{"posts":[Post],"clues":[Clue],"conclusions":[Conclusion],"plan":Plan}` | 同じセッションで完了済みの直近結果をモデル再解析なしで画面に復元する。Cookieなし・無効は401、結果がなければ404。結果はセッションとともに消える。 |
+| `POST /api/result-link` | `tkb_session` Cookie | 200 `{"token":"…"}` | 本人が画面で選んだとき、完了済みの結果を2時間の閲覧用スナップショットとして保存する。結果がなければ404。ランダムなトークンを URL のフラグメントに置き、アクセスログに記録しない。 |
+| `DELETE /api/result-link` | `tkb_session` Cookie、JSON `{"token":"…"}` | 204 | 作成者の DID と一致するリンクだけを無効化する。別人のリンクは消せない。 |
+| `POST /api/shared-result` | JSON `{"token":"…"}` | 200 `{"posts":[Post],"clues":[Clue],"conclusions":[Conclusion],"plan":Plan}` | トークンを知る人はログインなしで閲覧できる。無効・期限切れは404。閲覧側の画面に削除操作はない。結果は設定された `SHARE_DB_PATH` の SQLite に期限付きで保存し、APIプロセスの再起動後も読める。 |
 | `POST /api/simulate` | `tkb_session` Cookie。JSON `{"delete":["at://…",…]}`（最大100件） | 200 Simulation（下記） | 実際には消さない（Bluesky の削除APIを呼ばない）。モデルも呼ばない。Cookieなし・無効は401、そのセッションで診断が終わっていなければ409、最後の診断にない投稿IDや余計なキーは422（送られたIDは応答に入れない）。 |
 
 バリデーションエラーは422で `{"detail":[{"loc":[…],"msg":"…","type":"…"}]}` を返す。送信値そのものは詳細に含めない。その他のエラー形式は FastAPI のHTTPエラー応答に従う。
@@ -30,11 +34,13 @@ Pythonの正は `common/src/tkb_common/schemas.py`、画面側の対応型は `w
 
 - **Post**: `post_id`（AT URI）、`text`、時差付き `created_at`、`images`。画像は `index, url, alt, width, height`。URLは `https://cdn.bsky.app/` のみ、画像は最大4枚。
 - **Clue**: `post_id, image_index, type, value, region, confidence, source`。`region` は元画像ピクセルの `[x1,y1,x2,y2]` またはnull。本文由来は通常 `image_index/region=null`、`source=text`。確信度は0〜1。許容type/sourceの列挙と写真/本文の整合条件は共通スキーマを参照。
-- `Clue.type` に `local_item`（写真・本文）と `notice`（写真のみ）を追加。写真の `code` は画像処理で解読し、`source=ocr` として返す。モデルのバーコード解読の推測は住所の区画の根拠にしない。
+- `name_text` は人名として読めた文字に限る。誕生日の飾り文字や年齢の数字は抽出結果から除き、R8 の名前推定にも使わない。
+- `Clue.type` に `local_item`（写真・本文）と `notice`（写真のみ）がある。写真の `code` は画像処理で解読し、`source=ocr` として返す。モデルが推測したバーコードの中身は住所の区画の根拠にしない。
 - **DetectResponse**: `{"clues":[Clue,…]}`。
 - **Simulation**: `{"delete":[投稿ID],"broken":[attribute],"after":[Conclusion]}`。`delete` の投稿を消したとして推理し直した結果。`broken` は、消す前に結論があり、消したあと1つもなくなる項目（値が別の値に変わっただけなら入れない）。`after` の `clue_indices` は、診断の `conclusions` イベントの `clues` での番号。Python は `tkb_api.pipeline.simulation_json`、TypeScript は `web/src/types/diagnose.ts` の `Simulation`。
 - **Deletion**: Simulation ＋ `"failed":[投稿ID]`。`delete` は実際に消せた投稿だけで、`broken`・`after` はそれを除いて推理し直した結果（`clue_indices` は Simulation と同じく診断の `clues` での番号）。`failed` は消せなかった投稿。TypeScript は `web/src/types/diagnose.ts` の `Deletion`。
-- **現在の診断Conclusion**: `rule, attribute, value, clue_indices, note`。`attribute` は試作の名前で、現在は `home_city`・`home_district`・`station`・`home_area`・`home_block`・`active_time`・`routine`・`school`・`full_name`・`given_name_or_nickname`・`birthday`・`line`・`age`・`occupation`（ルール R1〜R12。同じ attribute が複数出ることがある）。`clue_indices` は同じ `conclusions` イベントの `clues` 配列に対する0始まり番号。これは目標の16項目プロフィール型（status/confidence/evidence）とは別の試作型。
+- **現在の診断Conclusion**: `rule, attribute, value, clue_indices, note`。`attribute` は試作の名前で、R1〜R12 は `home_city`・`home_district`・`station`・`home_area`・`home_block`・`active_time`・`routine`・`school`・`full_name`・`given_name_or_nickname`・`birthday`・`line`・`age`・`occupation` を返しうる。X1 は別投稿の生活圏・学校・家から通学する話を結び、`home_school_commute` を返す。これは経路や時刻の断定ではない。`clue_indices` は同じ `conclusions` イベントの `clues` 配列に対する0始まり番号。目標の16項目プロフィール型（status/confidence/evidence）とは別の試作型。
+- 投稿時刻から R2 の行動時間・R3 の定期外出を出すには、投稿が3日以上に分かれている必要がある。R12 が投稿日を誕生日に使う際も同様。ただし年齢が明記された誕生日投稿では、その投稿の日を使う。デモを同日にまとめて投稿しただけで毎週の習慣を推定しない。
 
 ## 診断 SSE のイベント
 
@@ -45,7 +51,7 @@ SSEブロックは `event: <name>\ndata: <JSON>\n\n`。JSONはUTF-8で送られ�
 | 1 | `post` | `{"post": Post}` | 診断対象投稿をすべて取得した後、投稿一覧の順に全件送信。各投稿を送るたび手がかり抽出を待つわけではない。 |
 | 2 | `clues` | `{"post_id":"…","clues":[Clue,…],"error":string|null}` | 抽出処理が完了した投稿ごと。抽出処理の完了順。成功時は `error:null`。投稿単位の抽出失敗時は空の `clues` とエラー文字列を送る。 |
 | 3 | `conclusions` | `{"clues":[全Clue,…],"conclusions":[Conclusion,…]}` | 全投稿の抽出処理の後に1回。cluesは `clues` イベントで得た配列を集めたもの。 |
-| 4 | `plan` | Simulation ＋ `"posts":[{"post_id","broken"},…]` | 推理の後に1回。`delete` は捜査ボードの結論末尾3項目を崩す投稿を最大3件、推薦順に並べる（`tkb_engine.planner.plan`）。`posts` は各投稿だけを消したときに崩れる項目。候補がなければ `delete` は空。 |
+| 4 | `plan` | Simulation ＋ `"posts":[{"post_id","broken"},…]` | 推理の後に1回。`delete` は名前・生年月日・住まいなどの推定と、顔・名前・住所など直接写った手がかりを重みづけし、効果の大きい投稿から最大3件選ぶ（`tkb_engine.planner.plan`）。根拠だけ減って推定も重要な直接手がかりも残る候補は外す。`posts` は各投稿だけを消したときに崩れる項目で、顔の写真だけを消す候補などでは空になりうる。候補がなければ `delete` は空。 |
 | 5 | `done` | `{"posts_seen":number}` | 正常完了時に1回。 |
 
 ### 失敗・切断の現状

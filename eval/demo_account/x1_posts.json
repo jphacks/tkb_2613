@@ -1,0 +1,22 @@
+{
+  "handle": "daikitus0414.bsky.social",
+  "profile_notice": "JPHACKS 2026 デモ用の架空アカウント",
+  "posts": [
+    {
+      "text": "根津駅、朝のホームが思ったより混んでる。",
+      "expected_clue": "place_text: 根津駅"
+    },
+    {
+      "text": "帰りに根津駅で降りて、駅前のパン屋に寄るのが最近の楽しみ。",
+      "expected_clue": "place_text: 根津駅"
+    },
+    {
+      "text": "筑波大学の研究室、今日は進捗ゼロ。",
+      "expected_clue": "org_text: 筑波大学"
+    },
+    {
+      "text": "家から大学まで毎日通ってると、往復だけでだいぶ疲れる。",
+      "expected_clue": "routine_text: 家から大学まで毎日通ってる"
+    }
+  ]
+}

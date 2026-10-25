@@ -55,6 +55,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+from tkb_common.name_text import is_person_name_text
 from tkb_common.schemas import Clue, ClueSource, ClueType, Post
 from tkb_engine.gazetteer import CollectionArea, Gazetteer, TrashBag, distance_km
 
@@ -188,7 +189,7 @@ def rule_r2(clues: Sequence[Clue], posts: Sequence[Post], r1: list[Conclusion]) 
     location_posts = {c.post_id for c in clues if c.type in LOCATION_TYPES}
     weekday = [p for p in posts if p.post_id in location_posts and _local(p).weekday() < 5]
     group = _largest_cluster(weekday, R2_WINDOW_HOURS)
-    if len(group) < R2_MIN_POSTS:
+    if len({_local(post).date() for post in group}) < R2_MIN_POSTS:
         return []
     ids = {p.post_id for p in group}
     indices = [i for i, c in enumerate(clues) if c.post_id in ids and c.type in LOCATION_TYPES]
@@ -211,7 +212,7 @@ def rule_r3(clues: Sequence[Clue], posts: Sequence[Post]) -> list[Conclusion]:
     for day in range(7) if timestamps_usable(posts) else ():
         same_day = [p for p in posts if _local(p).weekday() == day]
         group = _largest_cluster(same_day, R3_WINDOW_HOURS)
-        if len(group) < R3_MIN_POSTS:
+        if len({_local(post).date() for post in group}) < R3_MIN_POSTS:
             continue
         ids = {p.post_id for p in group}
         indices = [i for i, c in routine.items() if c.post_id in ids]
@@ -565,6 +566,7 @@ def rule_r8(clues: Sequence[Clue]) -> list[Conclusion]:
     for i, c in enumerate(clues):
         if (
             c.type is ClueType.NAME_TEXT
+            and is_person_name_text(c.value)
             and "x" not in c.value.lower()
             and (name := _clean_name(c.value))
         ):
@@ -711,7 +713,7 @@ def infer(clues: Sequence[Clue], posts: Sequence[Post], gaz: Gazetteer) -> list[
     r4 = rule_r4(clues, gaz, posts)
     r5 = rule_r5(clues, gaz, r4)
     r1 = rule_r1(clues, gaz, [*r4, *r5])
-    return [
+    base = [
         *r4,
         *r5,
         *r1,
@@ -725,6 +727,58 @@ def infer(clues: Sequence[Clue], posts: Sequence[Post], gaz: Gazetteer) -> list[
         *rule_r10(clues),
         *rule_r11(clues, r1, gaz),
     ]
+    return [*base, *rule_x1(clues, posts, base)]
+
+
+HOME_SCHOOL_LINK = re.compile(
+    r"(?:家|自宅).{0,18}(?:大学|学校|キャンパス).{0,14}(?:通|往復|行)"
+    r"|(?:大学|学校|キャンパス).{0,18}(?:家|自宅).{0,14}(?:帰|往復)"
+)
+
+
+def rule_x1(
+    clues: Sequence[Clue], posts: Sequence[Post], conclusions: Sequence[Conclusion]
+) -> list[Conclusion]:
+    """X1：住まい・通学先・家から通う話を別投稿で結び、移動の両端を示す。
+
+    駅や経路、通学時刻までは推定しない。どれか一つの投稿を除くと、この結論も消える。
+    """
+    home = next(
+        (
+            c
+            for attribute in ("home_city", "home_area", "station")
+            for c in conclusions
+            if c.attribute == attribute
+        ),
+        None,
+    )
+    school = next((c for c in conclusions if c.attribute == "school"), None)
+    if home is None or school is None or "のどれか" in school.value:
+        return []
+    texts = {p.post_id: p.text for p in posts}
+    home_ids = {clues[i].post_id for i in home.clue_indices}
+    school_ids = {clues[i].post_id for i in school.clue_indices}
+    for i, clue in enumerate(clues):
+        if clue.type not in {ClueType.ROUTINE_TEXT, ClueType.PLACE_TEXT}:
+            continue
+        if not HOME_SCHOOL_LINK.search(clue.value + " " + texts.get(clue.post_id, "")):
+            continue
+        if not any(
+            len({home_id, school_id, clue.post_id}) == 3
+            for home_id in home_ids
+            for school_id in school_ids
+        ):
+            continue
+        return [
+            Conclusion(
+                "X1",
+                "home_school_commute",
+                f"{home.value}付近から{school.value}へ通学している可能性",
+                sorted({*home.clue_indices, *school.clue_indices, i}),
+                "生活圏・通学先・家から大学へ通う話を別々の投稿から結合。経路と時刻は不明",
+            )
+        ]
+    return []
 
 
 POSTAL_IN_TEXT = re.compile(r"(\d{3})-?(\d{4})")
@@ -953,7 +1007,7 @@ def _direct_names(clues: Sequence[Clue]) -> list[Conclusion]:
     full: dict[str, list[int]] = {}
     given: dict[str, list[int]] = {}
     for i, c in enumerate(clues):
-        if c.type is not ClueType.NAME_TEXT:
+        if c.type is not ClueType.NAME_TEXT or not is_person_name_text(c.value):
             continue
         name = _strip_honorifics(c.value)
         if not name or "x" in name.lower() or _clean_name(c.value) != name.replace(" ", ""):
@@ -1025,7 +1079,9 @@ def rule_birthday(clues: Sequence[Clue], posts: Sequence[Post]) -> list[Conclusi
         found.append((date is not None, when, month, day, year, i))
     if not found:
         return []
-    _, _, month, day, year, index = max(found)
+    _, _, month, day, year, index = max(
+        found, key=lambda item: (item[0], item[1], item[4] is not None, item[5])
+    )
     value = f"{year}年{month}月{day}日ごろ" if year else f"{month}月{day}日ごろ"
     note = "本文の年齢と、誕生日の投稿の日付" if year else "誕生日の投稿の日付"
     return [Conclusion("R12", "birthday", value, [index], note)]

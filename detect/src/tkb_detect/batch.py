@@ -11,6 +11,8 @@
 """
 
 import asyncio
+import logging
+import time
 from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
 
 from pydantic import BaseModel, ConfigDict
@@ -18,6 +20,8 @@ from pydantic import BaseModel, ConfigDict
 from tkb_common.schemas import Clue, Post
 from tkb_detect.errors import DetectError
 from tkb_detect.extract import Extractor
+
+logger = logging.getLogger(__name__)
 
 # RunPod の vLLM で、1件ずつより速く、待ち時間が延びすぎない並列数
 CONCURRENCY = 4
@@ -66,12 +70,20 @@ async def extract_posts(
 async def _extract_one(
     extractor: Extractor, post: Post, fetch_images: FetchImages
 ) -> PostExtraction:
+    fetch_started = time.monotonic()
     try:
         images = await fetch_images(post) if post.images else []
     except Exception:
         # 取得の失敗の中身（URL など）は返さない
         return PostExtraction(post_id=post.post_id, clues=[], error=FETCH_FAILED_MESSAGE)
+    finally:
+        logger.info(
+            "診断の内訳：画像取得 %.2f 秒（写真 %d 枚）",
+            time.monotonic() - fetch_started,
+            len(post.images),
+        )
 
+    extract_started = time.monotonic()
     try:
         clues = await extractor.extract_post(post, images)
     except DetectError as e:
@@ -79,4 +91,6 @@ async def _extract_one(
         return PostExtraction(post_id=post.post_id, clues=[], error=str(e))
     except Exception:
         return PostExtraction(post_id=post.post_id, clues=[], error=EXTRACT_FAILED_MESSAGE)
+    finally:
+        logger.info("診断の内訳：投稿抽出 %.2f 秒", time.monotonic() - extract_started)
     return PostExtraction(post_id=post.post_id, clues=clues)

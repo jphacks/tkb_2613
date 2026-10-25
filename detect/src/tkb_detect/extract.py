@@ -7,11 +7,14 @@
 
 import asyncio
 import json
+import logging
+import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
 from pydantic import ValidationError
 
+from tkb_common.name_text import is_person_name_text
 from tkb_common.schemas import Clue, ClueSource, ClueType, Post, Region
 from tkb_detect.barcode import read_codes
 from tkb_detect.coords import COORDINATE_SPACE, CoordinateSpace, to_original_region
@@ -43,6 +46,18 @@ from tkb_detect.zoom import (
     resolve_zoom,
     select_zoom_targets,
 )
+
+logger = logging.getLogger(__name__)
+
+
+async def _timed[T](stage: str, operation: Awaitable[T]) -> T:
+    """並列の呼び出しごとの待ち時間。投稿の内容や ID は記録しない。"""
+    started = time.monotonic()
+    try:
+        return await operation
+    finally:
+        logger.info("診断の内訳：%s %.2f 秒", stage, time.monotonic() - started)
+
 
 __all__ = [
     "SMALL_REGION_MAX_CONFIDENCE",
@@ -93,10 +108,16 @@ class Extractor:
             tasks.append(self._extract_text(post.post_id, post.text))
 
         results = await asyncio.gather(*tasks)
-        return _dedupe([clue for clues in results for clue in clues])
+        return _dedupe(
+            [
+                clue
+                for clues in results
+                for clue in clues
+                if clue.type is not ClueType.NAME_TEXT or is_person_name_text(clue.value)
+            ]
+        )
 
     async def _extract_image(self, post_id: str, index: int, data: bytes) -> list[Clue]:
-        # バーコードは言語モデルでは読めないので、画像処理で読む（VLM の呼び出しと並べて走らせる）
         codes_task = asyncio.create_task(
             asyncio.to_thread(_read_codes_safely, data, post_id, index)
         )
@@ -104,28 +125,34 @@ class Extractor:
         codes = await codes_task
         if not codes:
             return clues
-        # 中身を読めたら、言語モデルの code（中身を推測した読み）は捨てる
         return [*codes, *(c for c in clues if c.type is not ClueType.CODE)]
 
     async def _extract_image_with_models(self, post_id: str, index: int, data: bytes) -> list[Clue]:
-        prepared = prepare_image(data)
-        vlm_task = _retry_if_cut_off(
-            lambda penalty: self._vlm.complete(
-                prepared.jpeg,
-                SENT_MIME_TYPE,
-                PHOTO_USER_PROMPT,
-                system=PHOTO_SYSTEM_PROMPT,
-                json_schema=PHOTO_SCHEMA,
-                max_tokens=PHOTO_MAX_TOKENS,
-                repetition_penalty=penalty,
-            )
+        prepare_started = time.monotonic()
+        try:
+            prepared = prepare_image(data)
+        finally:
+            logger.info("診断の内訳：画像準備 %.2f 秒", time.monotonic() - prepare_started)
+        vlm_task = _timed(
+            "写真VLM",
+            _retry_if_cut_off(
+                lambda penalty: self._vlm.complete(
+                    prepared.jpeg,
+                    SENT_MIME_TYPE,
+                    PHOTO_USER_PROMPT,
+                    system=PHOTO_SYSTEM_PROMPT,
+                    json_schema=PHOTO_SCHEMA,
+                    max_tokens=PHOTO_MAX_TOKENS,
+                    repetition_penalty=penalty,
+                )
+            ),
         )
         if self._ocr is None:
             raw = await vlm_task
             return await self._reread_small(data, self._photo_clues(post_id, index, raw, prepared))
 
         # OCR は元の画像を読み、元の画像のピクセルで箱を返す
-        raw, lines = await asyncio.gather(vlm_task, self._ocr.recognize(data))
+        raw, lines = await asyncio.gather(vlm_task, _timed("OCR", self._ocr.recognize(data)))
         clues = await self._reread_small(data, self._photo_clues(post_id, index, raw, prepared))
         return merge_ocr(post_id, index, clues, lines)
 
@@ -147,16 +174,19 @@ class Extractor:
         if region is None:  # select_zoom_targets は region のあるものだけを選ぶ
             return [target]
         try:
-            raw = await _retry_if_cut_off(
-                lambda penalty: self._vlm.complete(
-                    crop_and_enlarge(data, region),
-                    SENT_MIME_TYPE,
-                    ZOOM_USER_PROMPT,
-                    system=PHOTO_SYSTEM_PROMPT,
-                    json_schema=ZOOM_SCHEMA,
-                    max_tokens=ZOOM_MAX_TOKENS,
-                    repetition_penalty=penalty,
-                )
+            raw = await _timed(
+                "拡大VLM",
+                _retry_if_cut_off(
+                    lambda penalty: self._vlm.complete(
+                        crop_and_enlarge(data, region),
+                        SENT_MIME_TYPE,
+                        ZOOM_USER_PROMPT,
+                        system=PHOTO_SYSTEM_PROMPT,
+                        json_schema=ZOOM_SCHEMA,
+                        max_tokens=ZOOM_MAX_TOKENS,
+                        repetition_penalty=penalty,
+                    )
+                ),
             )
             items = _parse_items(raw)
         except DetectError:
@@ -185,14 +215,17 @@ class Extractor:
         return clues
 
     async def _extract_text(self, post_id: str, text: str) -> list[Clue]:
-        raw = await _retry_if_cut_off(
-            lambda penalty: self._vlm.complete_text(
-                text_user_prompt(text),
-                system=TEXT_SYSTEM_PROMPT,
-                json_schema=TEXT_SCHEMA,
-                max_tokens=TEXT_MAX_TOKENS,
-                repetition_penalty=penalty,
-            )
+        raw = await _timed(
+            "本文VLM",
+            _retry_if_cut_off(
+                lambda penalty: self._vlm.complete_text(
+                    text_user_prompt(text),
+                    system=TEXT_SYSTEM_PROMPT,
+                    json_schema=TEXT_SCHEMA,
+                    max_tokens=TEXT_MAX_TOKENS,
+                    repetition_penalty=penalty,
+                )
+            ),
         )
         clues = []
         for item in _parse_items(raw):
@@ -246,6 +279,7 @@ async def _retry_if_cut_off(call: Callable[[float | None], Awaitable[str]]) -> s
     try:
         return await call(None)
     except OutputCutOffError:
+        logger.info("診断の内訳：VLM出力上限による再試行 1 件")
         return await call(RETRY_REPETITION_PENALTY)
 
 
@@ -279,6 +313,8 @@ def _build_clue(
     if not isinstance(value, str) or not value.strip():
         return None
     if not isinstance(confidence, int | float) or isinstance(confidence, bool):
+        return None
+    if clue_type == ClueType.NAME_TEXT.value and not is_person_name_text(value):
         return None
 
     region = None

@@ -123,19 +123,15 @@ def test_simulate_ignores_duplicate_ids() -> None:
     assert simulate(clues, posts, GAZ, ["b", "b"]).delete == ["b"]
 
 
-def test_plan_on_demo_targets_the_last_three_board_items() -> None:
+def test_plan_on_demo_prioritizes_sensitive_evidence() -> None:
     clues, posts = _load_demo()
 
     result = plan(clues, posts, GAZ)
 
     assert len(result.delete) <= PLAN_MAX_POSTS
-    assert result.delete[0].endswith("000006")
-    assert "given_name_or_nickname" in result.broken
-    target_attributes = {c.attribute for c in result.before[-3:]}
-    assert set(result.broken) & target_attributes
-    target_clue_indices = {i for c in result.before[-3:] for i in c.clue_indices}
-    target_post_ids = {clues[i].post_id for i in target_clue_indices}
-    assert set(result.delete) <= target_post_ids
+    assert result.delete[0].endswith("000009")
+    assert "station" in result.broken
+    assert set(result.delete) <= {p.post_id for p in posts}
 
 
 def test_plan_recommends_name_before_station_and_can_target_name_alone() -> None:
@@ -174,6 +170,32 @@ def test_plan_returns_nothing_when_no_important_conclusion() -> None:
     assert result.broken == []
 
 
+def test_plan_prioritizes_identity_birthday_and_face_over_routine() -> None:
+    posts = [_post(pid, "2026-10-24 20:00") for pid in ("routine", "face", "birthday", "name")]
+    clues = [
+        _clue("routine", ClueType.ROUTINE_TEXT, "毎週土曜はジム"),
+        _clue("face", ClueType.FACE, "1人"),
+        _clue("birthday", ClueType.AGE_TEXT, "10/24生まれ、22歳"),
+        _clue("name", ClueType.NAME_TEXT, "山田花子"),
+    ]
+
+    result = plan(clues, posts, GAZ)
+
+    assert result.delete == ["name", "birthday", "face"]
+    assert {"full_name", "birthday", "age"} <= set(result.broken)
+    assert "routine" not in result.delete
+
+
+def test_plan_recommends_a_face_photo_even_without_an_inferred_conclusion() -> None:
+    posts = [_post("face", "2026-10-24 20:00")]
+    clues = [_clue("face", ClueType.FACE, "1人")]
+
+    result = plan(clues, posts, GAZ)
+
+    assert result.delete == ["face"]
+    assert result.broken == []
+
+
 def test_plan_stops_at_max_posts() -> None:
     # 曜日を含む本文が 4 投稿にあれば、留守の時間の結論が 4 つ。3 件消しても 1 つ残る
     days = ["月", "水", "木", "金"]
@@ -184,5 +206,5 @@ def test_plan_stops_at_max_posts() -> None:
 
     result = plan(clues, posts, GAZ)
 
-    assert len(result.delete) == PLAN_MAX_POSTS
+    assert result.delete == []
     assert "routine" not in result.broken

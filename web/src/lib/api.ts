@@ -4,7 +4,9 @@ import { type DetectResponse, isDetectResponse } from "@/types/clue";
 import {
   type Deletion,
   type DiagnoseEvent,
+  type DiagnosisSnapshot,
   isDeletion,
+  isDiagnosisSnapshot,
   isSimulation,
   type Simulation,
   toDiagnoseEvent,
@@ -148,6 +150,85 @@ export async function getSession({
   if (!isSessionResponse(data)) {
     throw new ApiError("invalid_response", messages.errors.invalidResponse);
   }
+  return data;
+}
+
+/** 現在のログインセッションに完了済みの診断があれば、再解析せずに読み直す。 */
+export async function getDiagnosis({
+  baseUrl = DEFAULT_BASE_URL,
+  signal,
+}: RequestOptions = {}): Promise<DiagnosisSnapshot | null> {
+  let res: Response;
+  try {
+    res = await fetch(`${baseUrl}/api/diagnosis`, { credentials: "include", signal });
+  } catch {
+    throw new ApiError("network", messages.errors.network);
+  }
+  if (res.status === 404) return null;
+  if (res.status === 401) throw new ApiError("unauthorized", messages.errors.sessionExpired, 401);
+  if (!res.ok) throw new ApiError("server", messages.errors.server(res.status), res.status);
+  const data: unknown = await res.json().catch(() => undefined);
+  if (!isDiagnosisSnapshot(data)) throw new ApiError("invalid_response", messages.errors.invalidResponse);
+  return data;
+}
+
+/** 今の診断を閲覧専用リンクに固定する。本人がボタンを押したときだけ呼ぶ。 */
+export async function createResultLink({
+  baseUrl = DEFAULT_BASE_URL,
+  signal,
+}: RequestOptions = {}): Promise<string> {
+  let res: Response;
+  try {
+    res = await fetch(`${baseUrl}/api/result-link`, { method: "POST", credentials: "include", signal });
+  } catch {
+    throw new ApiError("network", messages.errors.network);
+  }
+  if (!res.ok) throw new ApiError("server", messages.errors.server(res.status), res.status);
+  const data: unknown = await res.json().catch(() => undefined);
+  if (typeof data !== "object" || data === null || !("token" in data) || typeof data.token !== "string" || !/^[A-Za-z0-9_-]{32,128}$/.test(data.token)) {
+    throw new ApiError("invalid_response", messages.errors.invalidResponse);
+  }
+  return data.token;
+}
+
+export async function revokeResultLink(
+  token: string,
+  { baseUrl = DEFAULT_BASE_URL, signal }: RequestOptions = {},
+): Promise<void> {
+  let res: Response;
+  try {
+    res = await fetch(`${baseUrl}/api/result-link`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token }),
+      credentials: "include",
+      signal,
+    });
+  } catch {
+    throw new ApiError("network", messages.errors.network);
+  }
+  if (!res.ok) throw new ApiError("server", messages.errors.server(res.status), res.status);
+}
+
+/** # のトークンで共有された閲覧専用結果を取得する。ログインは不要。 */
+export async function getSharedResult(
+  token: string,
+  { baseUrl = DEFAULT_BASE_URL, signal }: RequestOptions = {},
+): Promise<DiagnosisSnapshot> {
+  let res: Response;
+  try {
+    res = await fetch(`${baseUrl}/api/shared-result`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token }),
+      signal,
+    });
+  } catch {
+    throw new ApiError("network", messages.errors.network);
+  }
+  if (!res.ok) throw new ApiError("server", messages.errors.server(res.status), res.status);
+  const data: unknown = await res.json().catch(() => undefined);
+  if (!isDiagnosisSnapshot(data)) throw new ApiError("invalid_response", messages.errors.invalidResponse);
   return data;
 }
 

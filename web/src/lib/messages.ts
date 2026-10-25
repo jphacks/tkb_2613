@@ -54,6 +54,7 @@ const ATTRIBUTE_LABELS: Readonly<Record<string, string>> = {
   given_name_or_nickname: "呼び名",
   school: "学校",
   birthday: "生年月日",
+  home_school_commute: "住まいと通学先のつながり",
 };
 
 export const messages = {
@@ -148,6 +149,8 @@ export const messages = {
     /** 推定の根拠になった証拠に付ける印 */
     used: "決め手",
     photoAlt: (type: string, value: string) => `${type}「${value}」が写った箇所`,
+    originalPhoto: "元の投稿写真（赤枠が手がかりの位置）",
+    faceObserved: "顔が写っています",
     fromText: "本文から",
     count: (clues: number, posts: number) => `${posts} 件の投稿から、手がかりを ${clues} 個`,
   },
@@ -166,10 +169,11 @@ export const messages = {
   },
   risky: {
     heading: "まーだだよ",
-    lead: "捜査ボードの下から3項目を崩せる投稿を、最大3件提案します。選んで「消したらどうなる」を押すと、消したあとの捜査ボードを見られます（ここではまだ消しません）。納得したら「Bluesky から消す」で実際に消せます。",
+    lead: "名前・生年月日・住まいなどの推定と、写真や本文に残った顔・名前・住所を重く見て選びました。「消したらどうなる」で削除後の捜査ボードを確認できます。ここではまだ消しません。",
     listLabel: "危ない投稿",
     breaks: (labels: string) => `消すと不明に：${labels}`,
-    breaksNothing: "これだけでは崩れません",
+    breaksNothing: "単独では推定は崩れません",
+    directClues: (labels: string) => `投稿に残った手がかり：${labels}`,
     noText: "（本文なし）",
     photos: (count: number) => `写真 ${count} 枚`,
     simulate: "消したらどうなる",
@@ -177,8 +181,8 @@ export const messages = {
     reset: "元に戻す",
     result: (deleted: number, broken: number) =>
       broken > 0 ? `${deleted} 件消すと、${broken} つの項目が不明になります` : `${deleted} 件消しても、推定は崩れません`,
-    safe: "逃げ切り：捜査ボード下から3項目の推定はもう残っていません",
-    none: "推定を崩せる投稿は見つかりませんでした",
+    safe: "重要な推定と直接写った手がかりがなくなりました",
+    none: "重要な推定や直接写った手がかりを減らせる投稿は見つかりませんでした",
     failed: "推理し直せませんでした",
     /** ここから下は、Bluesky から実際に消すとき */
     deleteForReal: "Bluesky から消す",

@@ -53,6 +53,14 @@ export interface RiskyPost {
   readonly broken: readonly string[];
 }
 
+/** 同じログインセッションで開き直したときに取得する完了済みの診断。 */
+export interface DiagnosisSnapshot {
+  readonly posts: readonly Post[];
+  readonly clues: readonly Clue[];
+  readonly conclusions: readonly Conclusion[];
+  readonly plan: Simulation & { readonly posts: readonly RiskyPost[] };
+}
+
 export type DiagnoseEvent =
   | { readonly event: "post"; readonly post: Post }
   | {
@@ -145,6 +153,14 @@ function isRiskyPost(value: unknown): value is RiskyPost {
     typeof value.post_id === "string" &&
     isStringList(value.broken)
   );
+}
+
+export function isDiagnosisSnapshot(value: unknown): value is DiagnosisSnapshot {
+  if (!isRecord(value) || !Array.isArray(value.posts) || !value.posts.every(isPost) || !isClueList(value.clues)) return false;
+  const clueCount = value.clues.length;
+  if (!Array.isArray(value.conclusions) || !value.conclusions.every((c) => isConclusion(c, clueCount))) return false;
+  const plan = value.plan;
+  return isSimulation(plan, clueCount) && isRecord(plan) && Array.isArray(plan.posts) && plan.posts.every(isRiskyPost);
 }
 
 /**

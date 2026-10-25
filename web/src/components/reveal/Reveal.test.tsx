@@ -83,12 +83,13 @@ describe("Reveal", () => {
 
     const cards = within(screen.getByRole("list", { name: t.evidenceLabel })).getAllByRole("listitem");
     expect(cards).toHaveLength(2);
-    expect(within(cards[0]).getByText(t.used)).toBeInTheDocument();
-    expect(within(cards[0]).getByText("夜勤明け", { selector: "mark" })).toBeInTheDocument();
-    expect(within(cards[1]).queryByText(t.used)).not.toBeInTheDocument();
+    expect(screen.getByRole("article", { name: messages.identity.label }).compareDocumentPosition(cards[0]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(cards[0]).getByText("根x")).toBeInTheDocument();
+    expect(within(cards[1]).getByText(t.used)).toBeInTheDocument();
+    expect(within(cards[1]).getByText("夜勤明け", { selector: "mark" })).toBeInTheDocument();
   });
 
-  it("shows the clue as text until the photo has loaded, then crops the photo around it", () => {
+  it("shows the clue as text until the full source photo has loaded", () => {
     render(<Reveal posts={[POST]} clues={[PHOTO_CLUE]} conclusions={[]} />);
 
     // 読み込むまでは、空の写真の枠を出さずに文字で見せる
@@ -151,13 +152,29 @@ describe("Reveal", () => {
     expect(screen.getByText(messages.identity.nameUnknown)).toBeInTheDocument();
   });
 
-  it("shows an address as text instead of cropping the photo", () => {
+  it("shows the entire source photo and a red mark for an address", () => {
     const address: Clue = { ...PHOTO_CLUE, type: "address_text", value: "文京区弥生二丁目xx" };
     render(<Reveal posts={[POST]} clues={[address]} conclusions={[]} />);
 
-    expect(FakeImage.last).toBeNull();
-    expect(screen.queryByRole("img")).not.toBeInTheDocument();
-    expect(within(screen.getByRole("list", { name: t.evidenceLabel })).getByText("文京区弥生二丁目xx")).toBeInTheDocument();
+    act(() => FakeImage.loadAll());
+
+    const evidence = screen.getByRole("list", { name: t.evidenceLabel });
+    const photo = within(evidence).getByRole("img", { name: t.photoAlt(messages.clues.typeLabels.address_text, address.value) });
+    expect(photo).toHaveAttribute("src", POST.images[0].url);
+    expect(within(evidence).getByText(t.originalPhoto)).toBeInTheDocument();
+    expect(photo.parentElement?.querySelector(".reveal-mark")).toBeInTheDocument();
+    expect(within(evidence).getByText(address.value)).toBeInTheDocument();
+  });
+
+  it("uses the loaded photo dimensions for the red mark", () => {
+    const postWithDifferentMetadata = { ...POST, images: [{ ...POST.images[0], width: 500, height: 250 }] };
+    render(<Reveal posts={[postWithDifferentMetadata]} clues={[PHOTO_CLUE]} conclusions={[]} />);
+    act(() => FakeImage.loadAll());
+
+    const photo = screen.getByRole("img", { name: t.photoAlt(messages.clues.typeLabels.station_sign, PHOTO_CLUE.value) });
+    const mark = photo.parentElement?.querySelector(".reveal-mark") as HTMLElement;
+    expect(mark.style.left).toBe("40%");
+    expect(mark.style.top).toBe("40%");
   });
 
   it("shows nothing when nothing was found", () => {

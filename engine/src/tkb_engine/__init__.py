@@ -23,6 +23,7 @@ from tkb_engine.rules import (
     rule_r9,
     rule_r10,
     rule_r11,
+    rule_x1,
 )
 
 __all__ = [
@@ -45,5 +46,6 @@ __all__ = [
     "rule_r9",
     "rule_r10",
     "rule_r11",
+    "rule_x1",
     "simulate",
 ]

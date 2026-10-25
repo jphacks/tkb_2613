@@ -6,6 +6,10 @@
 - `planner.py`：消したらどうなるか（`simulate`）と危ない投稿の選び方（`plan`）。モデルは呼ばず、手がかりから消す投稿の分を除いて `infer` をかけ直す。`plan` は捜査ボードの末尾3項目を崩す投稿を最大3件選ぶ
 - `gazetteer.py`：data-prep の表（stations・postal・muni_mesh）を読み、駅名・郵便番号・住所を引き当てる
 
+X1 は既存の生活圏（市・町・駅の順で使う）と学校の結論に、別投稿の「家から大学へ通う」という本文を加える。3種類の根拠が別投稿にあるときだけ `home_school_commute` を出し、経路と時刻は推定しない。投稿案は `eval/demo_account/x1_posts.json`。投稿前に `python eval/demo_account/post_x1.py` で文面を確認できる。
+
+投稿を同じ日にまとめたデモでは時刻から行動時間や毎週の外出を推定しない。R2 は場所の投稿が2日以上、R3 は同じ曜日の投稿が3日以上に分かれているときだけ時刻を使う。R8 で投稿の日を誕生日とみなすのは、投稿全体が3日以上に分かれているときだけ。本文に明記された誕生日の日付はこの制限を受けない。
+
 ```python
 from tkb_engine import Gazetteer, infer, plan, simulate
 
