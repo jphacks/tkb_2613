@@ -4,7 +4,7 @@ import type { Clue } from "@/types/clue";
 import type { Conclusion } from "@/types/diagnose";
 import type { Post } from "@/types/post";
 
-import { cropStyle, pickReveal } from "./reveal";
+import { cropStyle, FACE_MIN_CONFIDENCE, pickFace, pickName, pickReveal } from "./reveal";
 
 const POST: Post = {
   post_id: "at://did:plc:xxxx/app.bsky.feed.post/1",
@@ -76,5 +76,39 @@ describe("cropStyle", () => {
 
     expect(crop.image).toEqual({ width: "100%", height: "100%", left: "0%", top: "0%" });
     expect(crop.mark).toEqual({ left: "0%", top: "0%", width: "100%", height: "100%" });
+  });
+});
+
+describe("pickName", () => {
+  it("prefers the name with fewer unreadable letters, then the more confident one", () => {
+    const clues = [
+      clue("name_text", "xx はるき 様", { confidence: 0.99 }),
+      clue("name_text", "はるき", { confidence: 0.6 }),
+      clue("name_text", "はるか", { confidence: 0.5 }),
+    ];
+
+    expect(pickName(clues)).toBe("はるき");
+    expect(pickName([clue("shop", "赤札堂")])).toBeNull();
+  });
+});
+
+describe("pickFace", () => {
+  const face = (confidence: number, extra: Partial<Clue> = {}) =>
+    clue("face", "1人", { image_index: 0, region: [10, 10, 50, 50], source: "vlm", confidence, ...extra });
+
+  it("picks the most confident face at or above the threshold", () => {
+    const best = face(0.95);
+
+    const picked = pickFace([POST], [face(FACE_MIN_CONFIDENCE), best]);
+
+    expect(picked?.clue).toBe(best);
+    expect(picked?.image).toBe(POST.images[0]);
+  });
+
+  it("does not show a face below the threshold, without a position, or without the photo", () => {
+    expect(pickFace([POST], [face(FACE_MIN_CONFIDENCE - 0.01)])).toBeNull();
+    expect(pickFace([POST], [face(0.95, { region: null })])).toBeNull();
+    expect(pickFace([POST], [face(0.95, { image_index: 3 })])).toBeNull();
+    expect(pickFace([POST], [face(0.95, { post_id: "at://other" })])).toBeNull();
   });
 });
