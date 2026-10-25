@@ -6,7 +6,18 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from tkb_common.schemas import TEXT_ONLY_TYPES, Clue, ClueSource, ClueType, Post
-from tkb_engine import Conclusion, Gazetteer, infer, rule_r1, rule_r2, rule_r3, rule_r4
+from tkb_engine import (
+    Conclusion,
+    Gazetteer,
+    infer,
+    rule_r1,
+    rule_r2,
+    rule_r3,
+    rule_r4,
+    rule_r5,
+    rule_r6,
+    rule_r7,
+)
 
 JST = ZoneInfo("Asia/Tokyo")
 
@@ -437,3 +448,74 @@ def test_infer_adds_the_line_after_the_station() -> None:
 
     assert got["station"].value == "根津駅"
     assert got["line"].value == "千代田線"
+
+
+# ---- R5 名前・R6 年齢・R7 学校 ----
+
+
+def test_r5_reads_a_full_name_from_an_address_label() -> None:
+    clues = [
+        _clue("p1", ClueType.NAME_TEXT, "内藤 大貴 様"),
+        _clue("p2", ClueType.NAME_TEXT, "内藤　大貴さん"),
+        _clue("p3", ClueType.NAME_TEXT, "だいき"),
+    ]
+
+    got = _by_attribute(rule_r5(clues))
+
+    assert got["full_name"].value == "内藤大貴"
+    assert got["full_name"].clue_indices == [0, 1]
+    assert got["given_name_or_nickname"].value == "だいき"
+
+
+def test_r5_treats_three_or_more_kanji_without_a_space_as_a_full_name() -> None:
+    assert (
+        _by_attribute(rule_r5([_clue("p1", ClueType.NAME_TEXT, "内藤大貴")]))["full_name"].value
+        == "内藤大貴"
+    )
+    assert set(_by_attribute(rule_r5([_clue("p1", ClueType.NAME_TEXT, "大貴")]))) == {
+        "given_name_or_nickname"
+    }
+
+
+def test_r5_skips_names_with_unreadable_characters() -> None:
+    assert rule_r5([_clue("p1", ClueType.NAME_TEXT, "xx はるき 様")]) == []
+
+
+def test_r5_does_not_decide_between_names_that_tie() -> None:
+    clues = [
+        _clue("p1", ClueType.NAME_TEXT, "内藤 大貴"),
+        _clue("p2", ClueType.NAME_TEXT, "山田 花子"),
+    ]
+
+    assert rule_r5(clues) == []
+
+
+def test_r6_takes_the_age_from_the_latest_post() -> None:
+    posts = [_post("p1", "2025-10-17 21:00"), _post("p2", "2026-10-17 21:00")]
+    clues = [
+        _clue("p1", ClueType.AGE_TEXT, "24歳になりました"),
+        _clue("p2", ClueType.AGE_TEXT, "25歳になりました"),
+    ]
+
+    assert rule_r6(clues, posts) == [
+        Conclusion("R6", "age", "25歳（2026年10月の投稿）", [1], "本文の年齢と投稿の日付")
+    ]
+
+
+def test_r6_needs_a_number_of_years() -> None:
+    posts = [_post("p1", "2026-10-17 21:00")]
+
+    assert rule_r6([_clue("p1", ClueType.AGE_TEXT, "誕生日")], posts) == []
+
+
+def test_r7_reads_school_names_only() -> None:
+    clues = [
+        _clue("p1", ClueType.ORG_TEXT, "東京xx大学"),
+        _clue("p2", ClueType.ORG_TEXT, "筑波大学"),
+        _clue("p3", ClueType.ORG_TEXT, "筑波大学"),
+        _clue("p4", ClueType.ORG_TEXT, "赤札堂"),
+    ]
+
+    assert rule_r7(clues) == [
+        Conclusion("R7", "school", "筑波大学", [1, 2], "学校の名前の手がかり")
+    ]

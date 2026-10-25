@@ -7,9 +7,10 @@
 - gaz：data-prep の表（Gazetteer）。R1 が駅名・郵便番号・住所を引き当てる
 
 出力：Conclusion の一覧。1つの Conclusion が捜査ボードの1行のもとになる。
-attribute はまだ試作のときの名前（station / home_area / active_time / routine / line）のまま。
+attribute はまだ試作のときの名前（station / home_area / active_time / routine / line / age）のまま。
 プロフィールの16項目（tkb_common.schemas.ProfileAttribute）への対応づけはこれから行う。
 station・line → commute_station_or_line、home_area → residential_area はそのまま当てはまる。
+R5・R7 は16項目の名前（full_name・given_name_or_nickname・school）をそのまま使う。
 
 ルールの中身：
 - R1 生活圏：station_sign / place_text（駅名）と address_text / postal_code（区と町名）から、
@@ -20,6 +21,12 @@ station・line → commute_station_or_line、home_area → residential_area は�
 - R3 留守の時間：同じ曜日・同じ時間帯の投稿が R3_MIN_POSTS 件以上、または曜日を含む routine_text
 - R4 路線：手がかりの文字に出てくる路線名（「千代田線また遅延」など）。R1 の駅がその路線にあるか、
   別々の投稿に同じ路線名が R4_MIN_POSTS 件以上出てくれば、使っている路線（line）とする
+- R5 名前：name_text（宛名・名札・呼びかけ）から敬称を除く。姓と名がそろったものを
+  フルネーム（full_name）、名だけのものを呼び名（given_name_or_nickname）にする。
+  読めない文字 x を含むものは使わない
+- R6 年齢：age_text の「◯歳」と、その投稿の日付（age）
+- R7 学校：org_text のうち、学校の名前（大学・高校など）を含むもの（school）
+- R5〜R7 は、別の値が同じ数だけ出てきて決められないときは結論にしない
 
 ルールを足すときは rule_rN(clues, posts, ...) -> list[Conclusion] を書き、infer に並べる。
 しきい値は下の「しきい値」にまとめる。値は eval/fixtures/demo_observations.json で決めた仮の値で、
@@ -57,6 +64,12 @@ R1_AREA_TYPES = {ClueType.ADDRESS_TEXT, ClueType.POSTAL_CODE}
 LOCATION_TYPES = R1_NAME_TYPES | R1_AREA_TYPES | {ClueType.SHOP}
 # 路線名を探す手がかり。「電車混んでる」と同じく、遅延の愚痴は routine_text になることもある
 R4_LINE_TYPES = R1_NAME_TYPES | {ClueType.ROUTINE_TEXT}
+# R5：名前の前後につく敬称（宛名の「様」、呼びかけの「さん」など）
+HONORIFICS = ("様", "さま", "さん", "くん", "君", "ちゃん", "殿", "氏")
+# R5：区切りなしでフルネームとみなす、漢字の文字数（「内藤大貴」は4文字、名だけの「大貴」は2文字）
+FULL_NAME_MIN_KANJI = 3
+# R7：学校とみなす言葉
+SCHOOL_WORDS = ("大学", "高校", "高等学校", "高等専門学校", "高専", "専門学校", "中学校")
 
 
 @dataclass(frozen=True)
@@ -204,10 +217,110 @@ def rule_r4(clues: Sequence[Clue], r1: list[Conclusion], gaz: Gazetteer) -> list
     return [Conclusion("R4", "line", line, mentions[line], note)]
 
 
+def rule_r5(clues: Sequence[Clue]) -> list[Conclusion]:
+    """R5 名前：フルネーム（full_name）と呼び名（given_name_or_nickname）。"""
+    full: dict[str, list[int]] = {}
+    given: dict[str, list[int]] = {}
+    for i, c in enumerate(clues):
+        if c.type is not ClueType.NAME_TEXT:
+            continue
+        name = _strip_honorifics(c.value)
+        if not name or "x" in name.lower():
+            continue
+        if _is_full_name(name):
+            full.setdefault(name.replace(" ", ""), []).append(i)
+        else:
+            given.setdefault(name, []).append(i)
+
+    conclusions: list[Conclusion] = []
+    if (best := _most_frequent(full)) is not None:
+        conclusions.append(
+            Conclusion("R5", "full_name", best, full[best], "宛名・名札などの姓と名")
+        )
+    if (best := _most_frequent(given)) is not None:
+        conclusions.append(
+            Conclusion("R5", "given_name_or_nickname", best, given[best], "名前だけの手がかり")
+        )
+    return conclusions
+
+
+def rule_r6(clues: Sequence[Clue], posts: Sequence[Post]) -> list[Conclusion]:
+    """R6 年齢：いちばん新しい投稿の「◯歳」と、その投稿の年月（age）。"""
+    created = {p.post_id: _local(p) for p in posts}
+    ages = [
+        (created[c.post_id], int(m[1]), i)
+        for i, c in enumerate(clues)
+        if c.type is ClueType.AGE_TEXT
+        and c.post_id in created
+        and (m := re.search(r"(\d{1,3})\s*歳", c.value))
+    ]
+    if not ages:
+        return []
+    when, age, index = max(ages)
+    return [
+        Conclusion(
+            "R6",
+            "age",
+            f"{age}歳（{when.year}年{when.month}月の投稿）",
+            [index],
+            "本文の年齢と投稿の日付",
+        )
+    ]
+
+
+def rule_r7(clues: Sequence[Clue]) -> list[Conclusion]:
+    """R7 学校：学校の名前を含む org_text（school）。"""
+    schools: dict[str, list[int]] = {}
+    for i, c in enumerate(clues):
+        value = c.value.strip()
+        if (
+            c.type is ClueType.ORG_TEXT
+            and "x" not in value.lower()
+            and any(w in value for w in SCHOOL_WORDS)
+        ):
+            schools.setdefault(value, []).append(i)
+    best = _most_frequent(schools)
+    if best is None:
+        return []
+    return [Conclusion("R7", "school", best, schools[best], "学校の名前の手がかり")]
+
+
 def infer(clues: Sequence[Clue], posts: Sequence[Post], gaz: Gazetteer) -> list[Conclusion]:
     """すべてのルールを順に当てはめる。R2・R4 は R1 の結論を使う。"""
     r1 = rule_r1(clues, gaz)
-    return [*r1, *rule_r2(clues, posts, r1), *rule_r3(clues, posts), *rule_r4(clues, r1, gaz)]
+    return [
+        *r1,
+        *rule_r2(clues, posts, r1),
+        *rule_r3(clues, posts),
+        *rule_r4(clues, r1, gaz),
+        *rule_r5(clues),
+        *rule_r6(clues, posts),
+        *rule_r7(clues),
+    ]
+
+
+def _strip_honorifics(value: str) -> str:
+    """前後の空白と敬称を除き、全角の空白を半角にする。"""
+    name = value.replace("\u3000", " ").strip()
+    for honorific in HONORIFICS:
+        name = name.removesuffix(honorific).strip()
+    return " ".join(name.split())
+
+
+def _is_full_name(name: str) -> bool:
+    """「内藤 大貴」のように区切りがあるか、区切りなしの漢字が FULL_NAME_MIN_KANJI 文字以上。"""
+    if " " in name:
+        return len(name.split()) == 2
+    return len(name) >= FULL_NAME_MIN_KANJI and all("\u4e00" <= ch <= "\u9fff" for ch in name)
+
+
+def _most_frequent(candidates: dict[str, list[int]]) -> str | None:
+    """いちばん多く出てきた値。同じ数の値がほかにもあれば決めない（None）。"""
+    if not candidates:
+        return None
+    best = max(len(v) for v in candidates.values())
+    winners = [k for k, v in candidates.items() if len(v) == best]
+    return winners[0] if len(winners) == 1 else None
 
 
 def _region_area(clue: Clue) -> int:
