@@ -379,6 +379,17 @@ body::after {
   }
 }
 
+/* 診断の間の一言と実況：そっと浮かび上がる。点滅や大きな動きは使わない */
+.loading-line {
+  animation: loading-line 0.6s ease-out backwards;
+}
+
+@keyframes loading-line {
+  from {
+    opacity: 0;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

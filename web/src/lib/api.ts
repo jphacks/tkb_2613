@@ -1,7 +1,14 @@
 import { messages } from "@/lib/messages";
 import { readSse } from "@/lib/sse";
 import { type DetectResponse, isDetectResponse } from "@/types/clue";
-import { type DiagnoseEvent, isSimulation, type Simulation, toDiagnoseEvent } from "@/types/diagnose";
+import {
+  type Deletion,
+  type DiagnoseEvent,
+  isDeletion,
+  isSimulation,
+  type Simulation,
+  toDiagnoseEvent,
+} from "@/types/diagnose";
 import { isSessionResponse, type SessionResponse } from "@/types/session";
 
 /** api/src/tkb_api/routes/detect.py の上限とそろえる */
@@ -205,11 +212,40 @@ export async function* diagnose({
 export async function simulate(
   deleteIds: readonly string[],
   clueCount: number,
-  { baseUrl = DEFAULT_BASE_URL, signal }: RequestOptions = {},
+  options: RequestOptions = {},
 ): Promise<Simulation> {
+  const data = await postDeleteIds("/api/simulate", deleteIds, options);
+  if (!isSimulation(data, clueCount)) {
+    throw new ApiError("invalid_response", messages.errors.invalidResponse);
+  }
+  return data;
+}
+
+/**
+ * 選んだ投稿を Bluesky から実際に消し、残った投稿で推理し直した結果を受け取る。元に戻せない。
+ * 画面で選んで確認ダイアログで OK したときだけ呼ぶ。clueCount は simulate と同じ。
+ */
+export async function deletePosts(
+  deleteIds: readonly string[],
+  clueCount: number,
+  options: RequestOptions = {},
+): Promise<Deletion> {
+  const data = await postDeleteIds("/api/delete", deleteIds, options);
+  if (!isDeletion(data, clueCount)) {
+    throw new ApiError("invalid_response", messages.errors.invalidResponse);
+  }
+  return data;
+}
+
+/** {"delete": [投稿ID]} を送り、応答の JSON を返す（形は呼び出し側で確かめる） */
+async function postDeleteIds(
+  path: string,
+  deleteIds: readonly string[],
+  { baseUrl = DEFAULT_BASE_URL, signal }: RequestOptions,
+): Promise<unknown> {
   let res: Response;
   try {
-    res = await fetch(`${baseUrl}/api/simulate`, {
+    res = await fetch(`${baseUrl}${path}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ delete: deleteIds }),
@@ -230,9 +266,5 @@ export async function simulate(
     throw new ApiError("server", messages.errors.server(res.status), res.status);
   }
 
-  const data: unknown = await res.json().catch(() => undefined);
-  if (!isSimulation(data, clueCount)) {
-    throw new ApiError("invalid_response", messages.errors.invalidResponse);
-  }
-  return data;
+  return res.json().catch(() => undefined);
 }

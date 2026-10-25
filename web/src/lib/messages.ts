@@ -42,6 +42,10 @@ const ATTRIBUTE_LABELS: Readonly<Record<string, string>> = {
   active_time: "よくいる時間",
   routine: "決まった外出",
   line: "使っている路線",
+  full_name: "名前",
+  given_name_or_nickname: "呼び名",
+  age: "年齢",
+  school: "学校",
 };
 
 export const messages = {
@@ -72,11 +76,33 @@ export const messages = {
     heading: "診断",
     start: "診断する",
     connecting: "特定班AIが投稿を取りに行っています…",
-    reading: (posts: number) => `投稿を読んでいます…（${posts} 件）`,
+    reading: (posts: number) => `${posts} 件の投稿を調べています…`,
     searching: (searched: number, posts: number) => `手がかりを探しています…（${searched} / ${posts} 件）`,
     done: (posts: number) => `${posts} 件の投稿を読みました`,
     failed: "診断できませんでした",
     postsLabel: "読んだ投稿",
+  },
+  /** 診断の間の画面 */
+  loading: {
+    /** 診断を始めた直後に出す鬼の呼びかけ */
+    calling: "もういいかい？",
+    progressLabel: "手がかりを探し終えた投稿",
+    feedLabel: "特定班AIの実況",
+    /** 実況に流す、読んだ投稿の本文 */
+    reading: (text: string) => `読んだ：「${text}」`,
+    photoPost: (photos: number) => `写真 ${photos} 枚の投稿`,
+    /** label は手がかりの種類の表示名 */
+    found: (label: string) => `${label}を見つけた`,
+    /** 数秒ごとに切り替える一言。煽らず、いま実際にしていることだけを書く */
+    lines: [
+      "写真の隅まで見ています",
+      "写真に写った文字を読んでいます",
+      "窓の外の景色も見ています",
+      "投稿した時刻を並べています",
+      "何気ない一言も読んでいます",
+      "別々の投稿をつないでいます",
+      "1件ずつは無害でも、組み合わせて見ています",
+    ],
   },
   post: {
     /** 説明文（alt）のない写真の名前。index は 0 から */
@@ -129,7 +155,7 @@ export const messages = {
   },
   risky: {
     heading: "まーだだよ",
-    lead: "この投稿を消すと、推定が崩れます。選んで「消したらどうなる」を押すと、消したあとの捜査ボードを見られます。実際には消しません。",
+    lead: "この投稿を消すと、推定が崩れます。選んで「消したらどうなる」を押すと、消したあとの捜査ボードを見られます（ここではまだ消しません）。納得したら「Bluesky から消す」で実際に消せます。",
     listLabel: "危ない投稿",
     breaks: (labels: string) => `消すと不明に：${labels}`,
     breaksNothing: "これだけでは崩れません",
@@ -143,6 +169,23 @@ export const messages = {
     safe: "逃げ切り：最寄り駅・よくいる時間・決まった外出はもう推定できません",
     none: "推定を崩せる投稿は見つかりませんでした",
     failed: "推理し直せませんでした",
+    /** ここから下は、Bluesky から実際に消すとき */
+    deleteForReal: "Bluesky から消す",
+    confirmHeading: "本当に消しますか？",
+    confirmLead: (count: number) =>
+      `Bluesky から次の ${count} 件の投稿を削除します。写真も本文も、いいねや返信もいっしょに消え、元に戻せません。`,
+    confirmListLabel: "消す投稿",
+    confirm: "削除する",
+    cancel: "やめる",
+    deleting: "Bluesky から消しています…",
+    deleteFailed: "消せませんでした",
+  },
+  /** 実際に消したあと */
+  escaped: {
+    heading: "もういいよ",
+    deleted: (count: number) => `${count} 件の投稿を Bluesky から消しました`,
+    failed: (count: number) => `${count} 件は消せませんでした。Bluesky のアプリから直接消してください`,
+    rediagnose: "もう一度「診断する」を押すと、残った投稿で最初から調べ直します",
   },
   hideAndSeek: {
     pickerLabel: "写真の選択",

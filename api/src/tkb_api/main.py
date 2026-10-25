@@ -12,14 +12,16 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from tkb_api.bluesky import SessionStore
 from tkb_api.config import Settings, get_settings
-from tkb_api.routes import detect, diagnose, session, simulate
+from tkb_api.routes import delete, detect, diagnose, session, simulate
 
 
 class NoStoreMiddleware:
-    """api のすべての応答に Cache-Control: no-store を付ける。
+    """api のすべての応答に Cache-Control: no-store, no-transform を付ける。
 
     途中の中継（Vercel の CDN など）に保存させない。ログイン状態の応答がキャッシュされると、
     別の人に他人のログイン情報が返るおそれがあるため。
+    no-transform は中継に圧縮させないため。画面の /api を中継する Next.js は、ブラウザが gzip を
+    受け付けると応答を圧縮し、診断の SSE を最後までためこんで一度に送ってしまう。
     応答本文には触らないので、SSE もためこまずにそのまま流れる。
     """
 
@@ -34,7 +36,7 @@ class NoStoreMiddleware:
         async def send_no_store(message: Message) -> None:
             if message["type"] == "http.response.start":
                 headers = MutableHeaders(scope=message)
-                headers["Cache-Control"] = "no-store"
+                headers["Cache-Control"] = "no-store, no-transform"
             await send(message)
 
         await self.app(scope, receive, send_no_store)
@@ -93,6 +95,7 @@ def create_app(
     app.include_router(session.router)
     app.include_router(diagnose.router)
     app.include_router(simulate.router)
+    app.include_router(delete.router)
 
     @app.get("/health")
     def health() -> dict[str, str | bool]:
