@@ -13,3 +13,5 @@
 **/__pycache__
 **/.pytest_cache
 **/tests
+
+!data-prep/manual/knowledge.json
