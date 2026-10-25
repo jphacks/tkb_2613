@@ -8,7 +8,16 @@ import pyarrow.parquet as pq
 from tkb_common.schemas import TEXT_ONLY_TYPES, Clue, ClueSource, ClueType, Post
 from tkb_engine import Conclusion, Gazetteer, infer, rule_r1, rule_r2, rule_r3
 from tkb_engine.gazetteer import CollectionArea, Knowledge, TrashBag, University
-from tkb_engine.rules import rule_r4, rule_r5, rule_r6, rule_r7, rule_r8, rule_r9, rule_r10
+from tkb_engine.rules import (
+    rule_r4,
+    rule_r5,
+    rule_r6,
+    rule_r7,
+    rule_r8,
+    rule_r9,
+    rule_r10,
+    rule_r11,
+)
 
 JST = ZoneInfo("Asia/Tokyo")
 
@@ -605,3 +614,82 @@ def test_r4_far_and_near_hints_pick_one_of_the_bag_cities() -> None:
 def test_stations_named_in_prefers_the_longer_name() -> None:
     assert DIST_GAZ.stations_named_in("東中野まで遠い") == {"東中野"}
     assert DIST_GAZ.stations_named_in("中野まで遠い") == {"中野"}
+
+
+# ---- R4 路線 ----
+
+# 駅と路線の組ごとに1行。正式名は「9号線千代田線」のように番号がつく
+LINE_GAZ = Gazetteer(
+    stations=[
+        {"station_name": "根津", "mesh_1km": "m-bunkyo", "line_name": "9号線千代田線"},
+        {"station_name": "根岸", "mesh_1km": "m-taito", "line_name": "根岸線"},
+        {"station_name": "新宿", "mesh_1km": "m-shinjuku", "line_name": "山手線"},
+        {"station_name": "新宿", "mesh_1km": "m-shinjuku", "line_name": "中央線"},
+    ],
+)
+
+
+def _station_conclusion(name: str) -> Conclusion:
+    return Conclusion("R1", "station", f"{name}駅", [0])
+
+
+def test_line_names_drop_the_route_number_and_find_lines_in_text() -> None:
+    assert LINE_GAZ.lines_of("根津") == {"千代田線"}
+    assert LINE_GAZ.lines_of("新宿") == {"山手線", "中央線"}
+    assert LINE_GAZ.line_names("千代田線 また遅延") == {"千代田線"}
+    assert LINE_GAZ.line_names("電車混んでる") == set()
+
+
+def test_r4_finds_the_line_of_the_station_from_one_mention() -> None:
+    clues = [
+        _clue("p1", ClueType.STATION_SIGN, "根x"),
+        _clue("p2", ClueType.ROUTINE_TEXT, "千代田線また遅延"),
+        _clue("p3", ClueType.PLACE_TEXT, "山手線"),
+    ]
+
+    got = rule_r11(clues, [_station_conclusion("根津")], LINE_GAZ)
+
+    assert got == [Conclusion("R11", "line", "千代田線", [1], got[0].note)]
+    assert "根津駅" in got[0].note
+
+
+def test_r4_without_station_needs_the_line_in_several_posts() -> None:
+    once = [_clue("p1", ClueType.PLACE_TEXT, "中央線")]
+    twice = [*once, _clue("p2", ClueType.ROUTINE_TEXT, "中央線止まってる")]
+    same_post = [*once, _clue("p1", ClueType.ROUTINE_TEXT, "中央線止まってる")]
+
+    assert rule_r11(once, [], LINE_GAZ) == []
+    assert rule_r11(same_post, [], LINE_GAZ) == []
+    assert [(c.value, c.clue_indices) for c in rule_r11(twice, [], LINE_GAZ)] == [
+        ("中央線", [0, 1])
+    ]
+
+
+def test_r4_ignores_lines_in_clue_types_that_are_not_text_or_signs() -> None:
+    clues = [
+        _clue("p1", ClueType.SHOP, "千代田線ラーメン"),
+        _clue("p2", ClueType.SHOP, "千代田線ラーメン"),
+    ]
+
+    assert rule_r11(clues, [_station_conclusion("根津")], LINE_GAZ) == []
+
+
+def test_infer_adds_the_line_after_the_station() -> None:
+    gaz = Gazetteer(
+        stations=[*GAZ.stations, *LINE_GAZ.stations], postal=GAZ.postal, muni_meshes=GAZ.muni_meshes
+    )
+    posts = [
+        _post("p1", "2026-10-19 08:10"),
+        _post("p2", "2026-10-21 08:40"),
+        _post("p3", "2026-10-24 15:00"),
+    ]
+    clues = [
+        _clue("p1", ClueType.STATION_SIGN, "根x"),
+        _clue("p2", ClueType.POSTAL_CODE, "113-00xx"),
+        _clue("p3", ClueType.ROUTINE_TEXT, "千代田線遅延"),
+    ]
+
+    got = _by_attribute(infer(clues, posts, gaz))
+
+    assert got["station"].value == "根津駅"
+    assert got["line"].value == "千代田線"

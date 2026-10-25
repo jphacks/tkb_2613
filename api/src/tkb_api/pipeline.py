@@ -8,6 +8,7 @@
 import asyncio
 import json
 import logging
+import time
 from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import asdict
 from pathlib import Path
@@ -141,6 +142,7 @@ async def diagnose_events(
     gazetteer: Gazetteer,
     interval: float = 0,
     on_finished: Callable[[list[Clue]], None] | None = None,
+    clock: Callable[[], float] = time.monotonic,
 ) -> AsyncIterator[Event]:
     """診断のイベントを順に返す。
 
@@ -148,15 +150,33 @@ async def diagnose_events(
     → plan（危ない投稿）→ done
     conclusions の clue_indices は、同じイベントの clues の並びでの番号。plan の after も同じ番号。
     on_finished は推理まで終わったときに全手がかりで呼ぶ（セッションに置いて simulate に使う）。
+
+    かかった時間をログに出す（発表の段取りと、写真の数で時間がどう増えるかを見るため）。
+    出すのは件数と秒数だけで、投稿の ID・本文・写真の中身は出さない。
     """
     for post in posts:
         yield "post", {"post": post.model_dump(mode="json")}
         await asyncio.sleep(interval)
 
+    images = {p.post_id: len(p.images) for p in posts}
     all_clues: list[Clue] = []
+    finished = failed = 0
+    started = clock()
     async for extraction in extractions:
         all_clues.extend(extraction.clues)
+        finished += 1
+        failed += extraction.error is not None
+        logger.info(
+            "診断 %d/%d 件目：%.1f 秒（写真 %d 枚、手がかり %d 件%s）",
+            finished,
+            len(posts),
+            clock() - started,
+            images.get(extraction.post_id, 0),
+            len(extraction.clues),
+            "、失敗" if extraction.error is not None else "",
+        )
         yield "clues", extraction.model_dump(mode="json")
+    extracted = clock()
 
     conclusions = infer(all_clues, list(posts), gazetteer)
     yield (
@@ -167,6 +187,16 @@ async def diagnose_events(
         },
     )
     yield "plan", plan_json(all_clues, posts, gazetteer)
+    logger.info(
+        "診断の時間：手がかりの取り出し %.1f 秒"
+        "（投稿 %d 件、写真 %d 枚、手がかり %d 件、失敗 %d 件）、推理と危ない投稿 %.2f 秒",
+        extracted - started,
+        len(posts),
+        sum(images.values()),
+        len(all_clues),
+        failed,
+        clock() - extracted,
+    )
     if on_finished is not None:
         on_finished(all_clues)
     yield "done", {"posts_seen": len(posts)}

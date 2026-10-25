@@ -50,6 +50,7 @@ const ATTRIBUTE_LABELS: Readonly<Record<string, string>> = {
   name: "名前",
   age: "年齢",
   occupation: "仕事",
+  line: "使っている路線",
 };
 
 export const messages = {

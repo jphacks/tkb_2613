@@ -91,11 +91,15 @@ def _hours(hhmm: str) -> float:
     return int(h) + int(m) / 60
 
 
+# 「線」だけや1文字の路線名で、関係のない文字に合わないようにする
+MIN_LINE_NAME_LENGTH = 3
+
+
 @dataclass(frozen=True)
 class Gazetteer:
     """推理ルールが引く表。
 
-    - stations：駅ごとに {"station_name", "mesh_1km", ...}
+    - stations：駅ごとに {"station_name", "mesh_1km", "line_name", ...}（駅と路線の組ごとに1行）
     - postal：郵便番号ごとに {"postal_code"（ハイフンなし7桁）, "muni_code", "city", "town", ...}
     - muni_meshes：区市町村コード → その区市町村にかかる 1km メッシュの集合
     """
@@ -179,6 +183,20 @@ class Gazetteer:
         }
         return {n for n in found if not any(n != m and n in m for m in found)}
 
+    def lines_of(self, station_name: str) -> set[str]:
+        """駅が乗っている路線の名前（「9号線千代田線」は「千代田線」にする）。"""
+        return {
+            _line(s["line_name"])
+            for s in self.stations
+            if s["station_name"] == station_name and s.get("line_name")
+        }
+
+    def line_names(self, value: str) -> set[str]:
+        """手がかりの文字（「千代田線また遅延」など）に出てくる路線の名前。"""
+        text = value.replace(" ", "")
+        lines = {_line(s["line_name"]) for s in self.stations if s.get("line_name")}
+        return {line for line in lines if len(line) >= MIN_LINE_NAME_LENGTH and line in text}
+
     def stations_in(self, muni_codes: set[str]) -> set[str]:
         """区市町村のメッシュにある駅名。"""
         meshes = set().union(*(self.muni_meshes.get(m, set()) for m in muni_codes))
@@ -252,3 +270,8 @@ def _pattern(value: str) -> re.Pattern[str]:
 def _town(town: str) -> str:
     """「弥生（次のビルを除く）」のような括弧書きを落とす。"""
     return re.sub(r"（.*）$", "", town)
+
+
+def _line(line_name: str) -> str:
+    """「9号線千代田線」のような番号つきの正式名を、ふだんの呼び名（「千代田線」）にする。"""
+    return re.sub(r"^\d+号線", "", line_name)

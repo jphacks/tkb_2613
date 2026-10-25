@@ -20,6 +20,8 @@ MOCK_MODE=0 のときは、セッションの DID 本人の投稿を Bluesky か
 
 import asyncio
 import json
+import logging
+import time
 from collections.abc import AsyncIterator, Callable
 from functools import lru_cache
 from pathlib import Path
@@ -39,6 +41,7 @@ from tkb_detect.extract import Extractor, build_extractor
 from tkb_engine.gazetteer import Gazetteer
 
 router = APIRouter(prefix="/api")
+logger = logging.getLogger(__name__)
 
 
 def _sse(event: str, data: dict[str, Any]) -> str:
@@ -161,7 +164,10 @@ async def diagnose(
         interval = settings.mock_event_interval_seconds
         extractions = mock_extractions(settings.demo_fixture_path, posts, interval)
     else:
+        started = time.monotonic()
         posts = await _fetch_own_posts(session, settings, fetch_posts)
+        fetched = time.monotonic() - started
+        logger.info("診断の時間：投稿の取得 %.1f 秒（%d 件）", fetched, len(posts))
         interval = 0
         extractions = real_extractions(_build_extractor(extractor_factory), posts)
 
