@@ -68,10 +68,12 @@ def test_diagnose_streams_the_plan_before_done(client: TestClient) -> None:
     proposal = events["plan"]
     assert proposal["delete"][0] == NAME_POST
     assert {"given_name_or_nickname", "birthday"} <= set(proposal["broken"])
-    target_attributes = {c["attribute"] for c in proposal["before"][-3:]}
+    conclusions = events["conclusions"]["conclusions"]
+    target_conclusions = conclusions[-3:]
+    target_attributes = {c["attribute"] for c in target_conclusions}
     assert set(proposal["broken"]) & target_attributes
     assert not {c["attribute"] for c in proposal["after"]} & target_attributes
-    target_clue_indices = {i for c in proposal["before"][-3:] for i in c["clue_indices"]}
+    target_clue_indices = {i for c in target_conclusions for i in c["clue_indices"]}
     target_post_ids = {events["conclusions"]["clues"][i]["post_id"] for i in target_clue_indices}
     assert set(proposal["delete"]) <= target_post_ids
     by_post = {p["post_id"]: p["broken"] for p in proposal["posts"]}
