@@ -1,11 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="520" height="940" viewBox="0 0 520 940" role="img" aria-labelledby="title desc">
   <title id="title">みーつけたの技術構成</title>
-  <desc id="desc">Next.jsの画面とFastAPIが連携し、APIが本人のBluesky投稿を取得する。写真と本文はチーム管理のVLM、写真は接続設定時にOCRも使う。engineはR1からR7の試作推理とplan、simulateを行い、APIが結果をSSEで画面へ配信する。削除は画面での確認後に別リクエストで行う。</desc>
+  <desc id="desc">Next.jsの画面とFastAPIが連携し、APIが本人のBluesky投稿を取得する。写真と本文はチーム管理のVLM、写真は接続設定時にOCRも使う。engineはR1からR12の試作推理とplan、simulateを行い、APIが結果をSSEで画面へ配信する。削除は画面での確認後に別リクエストで行う。</desc>
   <defs>
     <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#f15b55" /></marker>
     <marker id="arrowStart" markerWidth="8" markerHeight="8" refX="2" refY="4" orient="auto"><path d="M8,0 L0,4 L8,8 Z" fill="#f15b55" /></marker>
     <style>
-      text { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+      text { font-family: "Noto Sans CJK JP", system-ui, -apple-system, "Segoe UI", sans-serif; }
       .title { fill:#f4f6fb; font-size:24px; font-weight:750; }
       .sub { fill:#bac5da; font-size:14px; }
       .head { fill:#f4f6fb; font-size:17px; font-weight:700; }
@@ -30,13 +30,13 @@
   <rect class="team" x="24" y="230" width="210" height="106" rx="12" />
   <text class="head" x="42" y="261">Bluesky</text><text class="body" x="42" y="285">セッション本人の投稿</text><text class="small" x="42" y="307">本人DIDにひもづけて取得</text><text class="small" x="42" y="326">写真: cdn.bsky.app</text>
   <rect class="team" x="286" y="230" width="210" height="106" rx="12" />
-  <text class="head" x="304" y="261">detect / チームサーバー</text><text class="body" x="304" y="285">VLM: vLLM互換API</text><text class="body" x="304" y="308">OCR: PP-OCRv5（任意接続）</text><text class="small" x="304" y="328">観測Clueを抽出</text>
+  <text class="head" x="304" y="261">detect / 手がかり抽出</text><text class="body" x="304" y="285">VLM: vLLM互換API</text><text class="body" x="304" y="308">OCR: PP-OCRv5（任意接続）</text><text class="small" x="304" y="328">観測Clueを抽出</text>
   <path class="both" d="M286 157 C264 174 248 199 222 225" />
   <path class="both" d="M391 182 V225" />
 
   <rect class="card" x="24" y="390" width="472" height="132" rx="12" />
-  <text class="head" x="44" y="422">engine（試作）</text><text class="body" x="44" y="449">R1–R7 → 根拠付きConclusion</text><text class="body" x="44" y="472">plan / simulate → 最大3件の候補・仮除外比較</text>
-  <text class="small" x="44" y="499">対象は station / active_time / routine。16項目プロフィールは目標段階。</text>
+  <text class="head" x="44" y="422">engine（試作）</text><text class="body" x="44" y="449">R1–R12 → 根拠付きConclusion</text><text class="body" x="44" y="472">plan / simulate → 最大3件の候補・仮除外比較</text>
+  <text class="small" x="44" y="499">推薦対象はボード末尾3項目。最大3投稿を比較・提案。</text>
   <path class="line" d="M391 337 V382" />
 
   <rect class="card" x="24" y="566" width="472" height="106" rx="12" />
@@ -51,6 +51,7 @@
   <text class="small" x="44" y="818">仮比較は POST /api/simulate。SSE受信で削除されない。</text>
 
   <rect class="card" x="24" y="860" width="472" height="68" rx="12" />
-  <text class="small" x="42" y="887">画面表示の画像読込みは、APIが画像をモデルへ送る処理とは別。</text>
+  <text class="small" x="42" y="887">表示用の画像読込みと、モデル解析用の画像取得は別処理。</text>
   <text class="small" x="42" y="909">どちらもBluesky CDNを利用し、本人投稿画像を扱う。</text>
 </svg>
+
