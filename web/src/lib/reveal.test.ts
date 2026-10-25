@@ -4,7 +4,7 @@ import type { Clue } from "@/types/clue";
 import type { Conclusion } from "@/types/diagnose";
 import type { Post } from "@/types/post";
 
-import { cropStyle, FACE_MIN_CONFIDENCE, pickFace, pickName, pickReveal } from "./reveal";
+import { cropStyle, identityName, FACE_MIN_CONFIDENCE, pickFace, pickName, pickReveal } from "./reveal";
 
 const POST: Post = {
   post_id: "at://did:plc:xxxx/app.bsky.feed.post/1",
@@ -110,5 +110,31 @@ describe("pickFace", () => {
     expect(pickFace([POST], [face(0.95, { region: null })])).toBeNull();
     expect(pickFace([POST], [face(0.95, { image_index: 3 })])).toBeNull();
     expect(pickFace([POST], [face(0.95, { post_id: "at://other" })])).toBeNull();
+  });
+});
+
+describe("identityName", () => {
+  const inferred = (attribute: string, value: string): Conclusion => ({
+    rule: "R5",
+    attribute,
+    value,
+    clue_indices: [0],
+    note: "",
+  });
+  const station = inferred("station", "根津駅");
+
+  it("uses the inferred full name, then the nickname, and drops them from the rest", () => {
+    const got = identityName(
+      [clue("name_text", "xx はるき 様")],
+      [inferred("given_name_or_nickname", "はるき"), inferred("full_name", "山田はるき"), station],
+    );
+
+    expect(got.name).toBe("山田はるき");
+    expect(got.rest).toEqual([station]);
+    expect(identityName([], [inferred("given_name_or_nickname", "はるき"), station]).name).toBe("はるき");
+  });
+
+  it("falls back to the name written in a post", () => {
+    expect(identityName([clue("name_text", "はるき")], [station])).toEqual({ name: "はるき", rest: [station] });
   });
 });

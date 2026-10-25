@@ -46,6 +46,7 @@ const ATTRIBUTE_LABELS: Readonly<Record<string, string>> = {
   given_name_or_nickname: "呼び名",
   age: "年齢",
   school: "学校",
+  birthday: "生年月日",
 };
 
 export const messages = {

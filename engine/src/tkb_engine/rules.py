@@ -7,7 +7,8 @@
 - gaz：data-prep の表（Gazetteer）。R1 が駅名・郵便番号・住所を引き当てる
 
 出力：Conclusion の一覧。1つの Conclusion が捜査ボードの1行のもとになる。
-attribute はまだ試作のときの名前（station / home_area / active_time / routine / line / age）のまま。
+attribute はまだ試作のときの名前（station / home_area / active_time / routine / line /
+age / birthday）のまま。
 プロフィールの16項目（tkb_common.schemas.ProfileAttribute）への対応づけはこれから行う。
 station・line → commute_station_or_line、home_area → residential_area はそのまま当てはまる。
 R5・R7 は16項目の名前（full_name・given_name_or_nickname・school）をそのまま使う。
@@ -26,6 +27,9 @@ R5・R7 は16項目の名前（full_name・given_name_or_nickname・school）を
   読めない文字 x を含むものは使わない
 - R6 年齢：age_text の「◯歳」と、その投稿の日付（age）
 - R7 学校：org_text のうち、学校の名前（大学・高校など）を含むもの（school）
+- R8 生年月日：age_text に日付（「10月17日」「10/17」）があればその日、
+  「誕生日」「◯歳になりました」ならその投稿の日を誕生日とする。
+  同じ手がかりに年齢があれば、生まれた年も出す（birthday）
 - R5〜R7 は、別の値が同じ数だけ出てきて決められないときは結論にしない
 
 ルールを足すときは rule_rN(clues, posts, ...) -> list[Conclusion] を書き、infer に並べる。
@@ -70,6 +74,8 @@ R4_LINE_TYPES = R1_NAME_TYPES | {ClueType.ROUTINE_TEXT}
 HONORIFICS = ("様", "さま", "さん", "くん", "君", "ちゃん", "殿", "氏")
 # R5：区切りなしでフルネームとみなす、漢字の文字数（「内藤大貴」は4文字、名だけの「大貴」は2文字）
 FULL_NAME_MIN_KANJI = 3
+# R8：その投稿の日を誕生日とみなす言葉
+BIRTHDAY_WORDS = ("誕生日", "歳になりました", "歳になった", "バースデー", "birthday")
 # R7：学校とみなす言葉
 SCHOOL_WORDS = ("大学", "高校", "高等学校", "高等専門学校", "高専", "専門学校", "中学校")
 
@@ -271,6 +277,40 @@ def rule_r6(clues: Sequence[Clue], posts: Sequence[Post]) -> list[Conclusion]:
     ]
 
 
+def rule_r8(clues: Sequence[Clue], posts: Sequence[Post]) -> list[Conclusion]:
+    """R8 生年月日：誕生日（と、年齢がわかれば生まれた年）（birthday）。
+
+    本文に書かれた日付を、投稿の日より優先する。どちらも複数あれば、いちばん新しい投稿のもの。
+    """
+    created = {p.post_id: _local(p) for p in posts}
+    found: list[tuple[bool, datetime, int, int, int | None, int]] = []
+    for i, c in enumerate(clues):
+        if c.type is not ClueType.AGE_TEXT or c.post_id not in created:
+            continue
+        when = created[c.post_id]
+        date = re.search(r"(\d{1,2})\s*(?:月|/)\s*(\d{1,2})", c.value)
+        if date:
+            month, day = int(date[1]), int(date[2])
+        elif any(w in c.value.lower() for w in BIRTHDAY_WORDS):
+            month, day = when.month, when.day
+        else:
+            continue
+        if not (1 <= month <= 12 and 1 <= day <= 31):
+            continue
+        age = re.search(r"(\d{1,3})\s*歳", c.value)
+        year = None
+        if age:
+            # 投稿の日がその年の誕生日より前なら、まだ誕生日が来ていない
+            year = when.year - int(age[1]) - (1 if (when.month, when.day) < (month, day) else 0)
+        found.append((date is not None, when, month, day, year, i))
+    if not found:
+        return []
+    _, _, month, day, year, index = max(found)
+    value = f"{year}年{month}月{day}日ごろ" if year else f"{month}月{day}日ごろ"
+    note = "本文の年齢と、誕生日の投稿の日付" if year else "誕生日の投稿の日付"
+    return [Conclusion("R8", "birthday", value, [index], note)]
+
+
 def rule_r7(clues: Sequence[Clue]) -> list[Conclusion]:
     """R7 学校：学校の名前を含む org_text（school）。"""
     schools: dict[str, list[int]] = {}
@@ -299,6 +339,7 @@ def infer(clues: Sequence[Clue], posts: Sequence[Post], gaz: Gazetteer) -> list[
         *rule_r5(clues),
         *rule_r6(clues, posts),
         *rule_r7(clues),
+        *rule_r8(clues, posts),
     ]
 
 
