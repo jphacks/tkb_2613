@@ -18,8 +18,9 @@ from tkb_common.schemas import Clue, Post
 from tkb_engine.gazetteer import Gazetteer
 from tkb_engine.rules import Conclusion, infer
 
-# 最寄り駅・行動時間・留守の時間。これが崩れれば、待ち伏せや空き巣の手がかりがなくなる
-IMPORTANT_ATTRIBUTES = ("station", "active_time", "routine")
+# 名前・生年月日は身元に直結するので、場所や行動の推定より先に崩す。
+IDENTITY_ATTRIBUTES = ("full_name", "given_name_or_nickname", "birthday")
+IMPORTANT_ATTRIBUTES = (*IDENTITY_ATTRIBUTES, "home_area", "station", "active_time", "routine")
 PLAN_MAX_POSTS = 3
 
 
@@ -64,16 +65,17 @@ def plan(clues: Sequence[Clue], posts: Sequence[Post], gaz: Gazetteer) -> Simula
     """重要な項目を崩す投稿を選び、その投稿を消したときの結果を返す。
 
     候補は、いま残っている重要な結論の根拠になっている投稿。1件ずつ足してみて、
-    (残る重要な項目の数, 重要な結論の根拠の手がかりの数, 残る項目の数) がいちばん小さくなる
+    (残る身元項目の数, 残る重要な項目の数, 重要な結論の根拠の手がかりの数,
+    残る項目の数) がいちばん小さくなる
     投稿を選ぶ。
     同じなら、根拠になっている回数の多い投稿、さらに同じなら posts で先の投稿。
-    2つ目の数を見るのは、根拠が多い駅のように1件では崩れない項目も、少しずつ崩せるようにするため。
+    根拠の数を見るのは、根拠が多い駅のように1件では崩れない項目も、少しずつ崩せるようにするため。
     どの候補でも小さくならないときは、そこでやめる。
     """
     chosen: list[str] = []
     current = _score(infer(clues, posts, gaz))
-    while current[0] > 0 and len(chosen) < PLAN_MAX_POSTS:
-        best: tuple[tuple[int, int, int], int, str] | None = None
+    while current[1] > 0 and len(chosen) < PLAN_MAX_POSTS:
+        best: tuple[tuple[int, int, int, int], int, str] | None = None
         for rank, post_id in enumerate(_candidates(clues, posts, gaz, chosen)):
             sim = simulate(clues, posts, gaz, [*chosen, post_id])
             score = _score(sim.after)
@@ -90,10 +92,11 @@ def _important(conclusions: Sequence[Conclusion]) -> list[Conclusion]:
     return [c for c in conclusions if c.attribute in IMPORTANT_ATTRIBUTES]
 
 
-def _score(conclusions: Sequence[Conclusion]) -> tuple[int, int, int]:
+def _score(conclusions: Sequence[Conclusion]) -> tuple[int, int, int, int]:
     important = _important(conclusions)
     evidence = {i for c in important for i in c.clue_indices}
     return (
+        len({c.attribute for c in important if c.attribute in IDENTITY_ATTRIBUTES}),
         len({c.attribute for c in important}),
         len(evidence),
         len({c.attribute for c in conclusions}),
