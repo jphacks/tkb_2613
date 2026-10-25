@@ -40,6 +40,7 @@ GAZ = Gazetteer(
         {"station_name": "青梅", "mesh_1km": "m-ome", "lat": 35.7905, "lon": 139.2583},
         {"station_name": "町田", "mesh_1km": "m-machida", "lat": 35.5422, "lon": 139.4455},
         {"station_name": "高尾", "mesh_1km": "m-hachioji", "lat": 35.6420, "lon": 139.2826},
+        {"station_name": "運河", "mesh_1km": "m-nagareyama", "lat": 35.9145, "lon": 139.9067},
         {"station_name": "高尾山口", "mesh_1km": "m-hachioji", "lat": 35.6324, "lon": 139.2700},
     ],
     postal=[

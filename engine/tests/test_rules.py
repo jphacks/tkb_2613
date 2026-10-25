@@ -693,3 +693,36 @@ def test_infer_adds_the_line_after_the_station() -> None:
 
     assert got["station"].value == "根津駅"
     assert got["line"].value == "千代田線"
+
+
+def test_r8_joins_a_family_name_and_a_given_name_from_different_posts() -> None:
+    board = _clue("p1", ClueType.NAME_TEXT, "在室表の名札「内藤」").model_copy(
+        update={"confidence": 0.85}
+    )
+    cake = _clue("p2", ClueType.NAME_TEXT, "ケーキのプレート「大貴くん おめでとう」")
+    got = rule_r8([board, cake])
+    assert [(c.value, c.clue_indices) for c in got] == [("内藤大貴", [0, 1])]
+    assert [c.value for c in rule_r8([cake])] == ["大貴"]
+
+
+def test_r7_campus_from_a_lab_post_and_its_nearest_station() -> None:
+    gaz = Gazetteer(
+        stations=[{"station_name": "運河", "mesh_1km": "m-n", "lat": 35.91, "lon": 139.91}],
+        knowledge=Knowledge(
+            universities=[University("東京理科大学", "野田キャンパス", "野田市", {}, ["運河"])]
+        ),
+    )
+    lab = _clue("p1", ClueType.ROUTINE_TEXT, "研究室に泊まり")
+    platform = _clue("p2", ClueType.PLACE_TEXT, "運河")
+    got = rule_r7([lab, platform], [], gaz, [])
+    assert [(c.value, c.clue_indices) for c in got] == [("東京理科大学 野田キャンパス", [0, 1])]
+    # どちらか片方だけでは決まらない
+    assert rule_r7([lab], [], gaz, []) == []
+    assert rule_r7([platform], [], gaz, []) == []
+
+
+def test_r9_reads_the_age_from_a_birthday_post() -> None:
+    posts = [_post("p1", "2026-10-25 13:00").model_copy(update={"text": "誕生日。今日で22"})]
+    assert [c.value for c in rule_r9([_clue("p1", ClueType.AGE_TEXT, "今日で22")], posts)] == [
+        "22歳"
+    ]
