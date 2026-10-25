@@ -380,8 +380,9 @@ KNOW_GAZ = Gazetteer(
     muni_meshes={"13201": {"m-hachioji"}, "13117": {"m-kita"}},
     knowledge=Knowledge(
         trash_bags=[
-            TrashBag(city="八王子市", color="青", liters=40, count=10, price=750),
-            TrashBag(city="立川市", color="青", liters=40, count=10, price=800),
+            TrashBag(city="八王子市", liters=40, price=75),
+            TrashBag(city="三鷹市", liters=40, price=75, color="黄"),
+            TrashBag(city="立川市", liters=40, price=80),
         ],
         collection_areas=[
             CollectionArea(city="八王子市", area="A地区", burnable_days="水土"),
@@ -399,17 +400,24 @@ KNOW_GAZ = Gazetteer(
 )
 
 
-def test_r4_city_from_trash_bag_needs_matching_features() -> None:
-    clues = [_clue("p1", ClueType.LOCAL_ITEM, "指定ゴミ袋 青 40L 10枚 750円")]
-    assert [c.value for c in rule_r4(clues, KNOW_GAZ)] == ["八王子市"]
-    # 値段がないと八王子市と立川市の両方に合うので決めない
-    vague = [_clue("p1", ClueType.LOCAL_ITEM, "指定ゴミ袋 青 40L 10枚")]
-    assert rule_r4(vague, KNOW_GAZ) == []
+def test_r4_city_from_trash_bag_compares_the_price_per_bag() -> None:
+    # 1枚 75円は八王子市と三鷹市。三鷹市の袋は黄色なので、青い袋なら八王子市
+    blue = [_clue("p1", ClueType.LOCAL_ITEM, "指定ゴミ袋 青 40L 10枚 750円")]
+    assert [c.value for c in rule_r4(blue, KNOW_GAZ)] == ["八王子市"]
+    # 色が分からなければ2つに合うので決めない
+    plain = [_clue("p1", ClueType.LOCAL_ITEM, "指定ゴミ袋 40L 10枚 750円")]
+    assert rule_r4(plain, KNOW_GAZ) == []
+    # 袋に市の名前が書いてあれば、それで決まる
+    named = [_clue("p1", ClueType.LOCAL_ITEM, "八王子市指定収集袋 40L 10枚 750円")]
+    assert [c.value for c in rule_r4(named, KNOW_GAZ)] == ["八王子市"]
+    # 1枚 80円は立川市だけ
+    single = [_clue("p1", ClueType.LOCAL_ITEM, "指定収集袋 40L 5枚入 400円")]
+    assert [c.value for c in rule_r4(single, KNOW_GAZ)] == ["立川市"]
 
 
 def test_r4_drops_conflicting_cities() -> None:
     clues = [
-        _clue("p1", ClueType.LOCAL_ITEM, "指定ゴミ袋 青 40L 10枚 750円"),
+        _clue("p1", ClueType.LOCAL_ITEM, "八王子市指定収集袋 40L"),
         _clue("p2", ClueType.NOTICE, "立川市 資源ごみ"),
     ]
     assert rule_r4(clues, KNOW_GAZ) == []
@@ -420,6 +428,26 @@ def test_r5_reads_only_the_burnable_days() -> None:
     r4 = rule_r4(clues, KNOW_GAZ)
     assert [c.value for c in rule_r5(clues, KNOW_GAZ, r4)] == ["八王子市 A地区"]
     assert rule_r5(clues, KNOW_GAZ, []) == []
+
+
+def test_r5_keeps_districts_with_unknown_days_and_narrows_by_town() -> None:
+    gaz = Gazetteer(
+        postal=KNOW_GAZ.postal,
+        knowledge=Knowledge(
+            collection_areas=[
+                CollectionArea("八王子市", "地区8", "月木", ["旭町", "南大沢1丁目"]),
+                CollectionArea("八王子市", "地区9", "", ["新町", "南大沢2丁目"]),
+                CollectionArea("八王子市", "地区10", "火金", ["天神町"]),
+            ],
+        ),
+    )
+    notice = _clue("p1", ClueType.NOTICE, "八王子市 燃やすごみ 月・木")
+    r4 = [Conclusion("R4", "home_city", "八王子市", [9])]
+    # 地区9は曜日が分からないので、まだ候補に残る
+    assert [c.value for c in rule_r5([notice], gaz, r4)] == ["八王子市 燃やすごみが月・木の地区"]
+    mail = _clue("p2", ClueType.CODE, "カスタマバーコード: 〒192-0083 住所表示番号 9-3")
+    district = rule_r5([notice, mail], gaz, r4)[0]
+    assert (district.value, district.clue_indices) == ("八王子市 地区8", [0, 1, 9])
 
 
 def test_r1_votes_for_a_station_written_in_a_shop_name() -> None:

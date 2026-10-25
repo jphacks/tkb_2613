@@ -24,7 +24,8 @@ age・occupation・active_time・routine は16項目にない。
 - R3 留守の時間：同じ曜日・同じ時間帯の投稿が R3_MIN_POSTS 件以上、または曜日を含む routine_text
 - R4 市区町村：指定ゴミ袋（local_item）の色・容量・枚数・値段を知識表と照らす。
   ゴミ集積所などの掲示（notice）・品物に書かれた市区町村名も使う
-- R5 収集地区：R4 の市区町村で、集積所の掲示（notice）の燃やすごみの曜日が合う収集地区
+- R5 収集地区：R4 の市区町村で、集積所の掲示（notice）の燃やすごみの曜日が合う収集地区。
+  郵便物・住所表示の町名でさらに絞る
 - R6 区画：郵便物のカスタマバーコードの中身（code）や住所表示（address_text）の郵便番号・町名と番地
 - R7 通学先：「大学」と「〇限」の本文を、R4 の市区町村にある大学の時間割と照らす
 - R8 名前：name_text（ケーキのプレート、宛名、返信での呼びかけなど）を、敬称や読めない字を
@@ -42,11 +43,10 @@ from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
 from zoneinfo import ZoneInfo
 
 from tkb_common.schemas import Clue, ClueType, Post
-from tkb_engine.gazetteer import Gazetteer, TrashBag
+from tkb_engine.gazetteer import CollectionArea, Gazetteer, TrashBag
 
 # ---- しきい値（仮の値） ----
 # R1：最寄り駅を決めるのに要る、支持する手がかりの数（駅名＋区を絞った住所・郵便番号）
@@ -103,8 +103,8 @@ def rule_r1(
 ) -> list[Conclusion]:
     """R1 生活圏：町名（home_area）と最寄り駅（station）。
 
-    area は R4・R5 の結論（先頭が R4 の市区町村、続いて収集地区）。住所・郵便番号の手がかりが
-    ないとき、駅を絞るのに使い、その根拠も駅の根拠に入れる。
+    area は R4・R5 の結論（先頭が R4 の市区町村）。住所・郵便番号の手がかりがないとき、
+    先頭の市区町村で駅を絞り、その根拠も駅の根拠に入れる。
     """
     name_hits = {
         i: names
@@ -140,7 +140,7 @@ def rule_r1(
     if not munis and area:
         # area の先頭は R4 の市区町村
         munis = gaz.city_munis(area[0].value)
-        area_evidence = {i for a in area for i in a.clue_indices}
+        area_evidence = set(area[0].clue_indices)
         area_note = f"{area[0].value}で絞った"
 
     # 最寄り駅：駅名の手がかりごとに候補へ票を入れ、区のメッシュで絞って、票のいちばん多い駅
@@ -232,30 +232,61 @@ def rule_r4(clues: Sequence[Clue], gaz: Gazetteer) -> list[Conclusion]:
 
 
 def rule_r5(clues: Sequence[Clue], gaz: Gazetteer, r4: list[Conclusion]) -> list[Conclusion]:
-    """R5 収集地区（home_district）：集積所の掲示の燃やすごみの曜日。"""
+    """R5 収集地区（home_district）：集積所の掲示の燃やすごみの曜日と、住所の町名。
+
+    曜日が分からない地区は、どの曜日にも合うとみなす（表が埋まるほど絞れる）。
+    地区が1つに決まらなければ「燃やすごみが月・木の地区」までにする。
+    """
     if not r4:
         return []
     city = r4[0].value
+    in_city = [a for a in gaz.knowledge.collection_areas if a.city == city]
     for i, c in enumerate(clues):
         if c.type is not ClueType.NOTICE or not (days := _burnable_days(c.value)):
             continue
-        areas = [
-            a
-            for a in gaz.knowledge.collection_areas
-            if a.city == city and set(a.burnable_days) == days
-        ]
-        if len(areas) == 1:
-            label = "・".join(d for d in WEEKDAYS if d in days)
-            return [
-                Conclusion(
-                    "R5",
-                    "home_district",
-                    f"{city} {areas[0].area}",
-                    sorted({i, *r4[0].clue_indices}),
-                    f"集積所の燃やすごみの曜日（{label}）が合う地区",
-                )
-            ]
+        label = "・".join(d for d in WEEKDAYS if d in days)
+        candidates = [a for a in in_city if not a.burnable_days or set(a.burnable_days) == days]
+        evidence = {i, *r4[0].clue_indices}
+        note = f"集積所の燃やすごみの曜日（{label}）が合う地区"
+        # 郵便物や住所表示の町名で、候補の地区をさらに絞る
+        for j, town in _home_towns(clues, gaz, city):
+            narrowed = [a for a in candidates if _has_town(a, town)]
+            if narrowed:
+                candidates = narrowed
+                evidence.add(j)
+                note += f"。町名（{town}）で絞った"
+                break
+        if len(candidates) == 1:
+            value = f"{city} {candidates[0].area}"
+        elif candidates:
+            value = f"{city} 燃やすごみが{label}の地区"
+        else:
+            continue
+        return [Conclusion("R5", "home_district", value, sorted(evidence), note)]
     return []
+
+
+def _home_towns(clues: Sequence[Clue], gaz: Gazetteer, city: str) -> list[tuple[int, str]]:
+    """郵便物のカスタマバーコードと住所表示から読める、その市区町村の町名。"""
+    towns = []
+    for i, c in enumerate(clues):
+        if c.type is ClueType.CODE and _is_customer_barcode(c.value):
+            m = POSTAL_IN_TEXT.search(c.value)
+            rows = gaz.postal_rows(m[1] + m[2]) if m else []
+            towns += [(i, _town_name(r["town"])) for r in rows if r["city"] == city]
+        elif c.type is ClueType.ADDRESS_TEXT and city in c.value:
+            _, found = gaz.area(c)
+            towns += [(i, t) for t in found]
+    return towns
+
+
+def _has_town(area: CollectionArea, town: str) -> bool:
+    """地区の町名の書き方（「子安町1・3・4丁目」「館町（館ヶ丘団地）」など）の町の部分が合うか。"""
+    return any(re.split(r"[0-9０-９（(]", t, maxsplit=1)[0] == town for t in area.towns)
+
+
+def _is_customer_barcode(value: str) -> bool:
+    return "カスタマバーコード" in value or "〒" in value
 
 
 def rule_r6(clues: Sequence[Clue], gaz: Gazetteer) -> list[Conclusion]:
@@ -267,7 +298,7 @@ def rule_r6(clues: Sequence[Clue], gaz: Gazetteer) -> list[Conclusion]:
         # 見分けがつかないので使わない
         if (
             c.type is ClueType.CODE
-            and ("カスタマバーコード" in c.value or "〒" in c.value)
+            and _is_customer_barcode(c.value)
             and (m := POSTAL_IN_TEXT.search(c.value))
         ):
             rows = gaz.postal_rows(m[1] + m[2])
@@ -433,24 +464,28 @@ GARBAGE_KINDS = re.compile(
     r"燃やさない|燃えない|不燃|プラスチック|プラ|資源|びん|缶|ペット|古紙|燃やす|燃える|可燃"
 )
 COLORS = "青緑黄赤白黒紫橙桃茶"
+# 1枚の値段の比べ方（「10枚 375円」は 37.5円で、表の 37円に合わせる）
+BAG_PRICE_TOLERANCE = 0.6
 
 
 def _matching_bags(value: str, gaz: Gazetteer) -> list[TrashBag]:
-    """品物の特徴（色・容量・枚数・値段）が全部合う指定ゴミ袋。特徴が2つ未満なら空。"""
-    features: dict[str, Any] = {}
-    if color := next((ch for ch in COLORS if ch in value), None):
-        features["color"] = color
-    for key, pattern in (
-        ("liters", r"(\d+)\s*(?:L|ℓ|リットル)"),
-        ("count", r"(\d+)\s*枚"),
-        ("price", r"(\d[\d,]*)\s*円"),
-    ):
-        if m := re.search(pattern, value):
-            features[key] = int(m[1].replace(",", ""))
-    if len(features) < 2:
+    """品物の容量と1枚の値段（色が分かる袋は色も）が合う指定ゴミ袋。
+
+    値段は「10枚入り 750円」のような袋の束の値段から、1枚あたりにして比べる。
+    """
+    liters = re.search(r"(\d+)\s*(?:L|ℓ|リットル)", value)
+    price = re.search(r"(\d[\d,]*)\s*円", value)
+    if liters is None or price is None:
         return []
+    count = re.search(r"(\d+)\s*枚", value)
+    unit = int(price[1].replace(",", "")) / (int(count[1]) if count else 1)
+    color = next((ch for ch in COLORS if ch in value), None)
     return [
-        b for b in gaz.knowledge.trash_bags if all(getattr(b, k) == v for k, v in features.items())
+        b
+        for b in gaz.knowledge.trash_bags
+        if b.liters == int(liters[1])
+        and abs(b.price - unit) < BAG_PRICE_TOLERANCE
+        and (not b.color or color is None or b.color == color)
     ]
 
 

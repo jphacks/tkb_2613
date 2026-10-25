@@ -23,22 +23,24 @@ KNOWLEDGE_PATH = Path(__file__).resolve().parents[3] / "data-prep" / "manual" / 
 
 @dataclass(frozen=True)
 class TrashBag:
-    """自治体の指定ゴミ袋。color・liters・count・price は袋1種類の特徴。"""
+    """自治体の指定ゴミ袋。price は1枚の値段（円）。color は分からなければ空。"""
 
     city: str
-    color: str
     liters: int
-    count: int
-    price: int
+    price: float
+    kind: str = ""
+    color: str = ""
 
 
 @dataclass(frozen=True)
 class CollectionArea:
-    """ゴミの収集地区。burnable_days は燃やすごみの曜日（「水土」のように曜日の字を並べる）。"""
+    """ゴミの収集地区。burnable_days は燃やすごみの曜日（「水土」のように曜日の字を並べる。
+    分からなければ空）。towns はその地区の町名（「子安町1・3・4丁目」のような書き方のまま）。"""
 
     city: str
     area: str
     burnable_days: str
+    towns: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
