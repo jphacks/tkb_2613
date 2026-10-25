@@ -24,7 +24,7 @@ GAZ = Gazetteer(
         {"station_name": "八王子", "mesh_1km": "m-hachioji", "lat": 35.6558, "lon": 139.3389},
         {"station_name": "京王八王子", "mesh_1km": "m-hachioji", "lat": 35.6575, "lon": 139.3437},
         {"station_name": "三鷹", "mesh_1km": "m-mitaka", "lat": 35.7027, "lon": 139.5607},
-        {"station_name": "中野", "mesh_1km": "m-nakano", "lat": 35.7056, "lon": 139.6659},
+        {"station_name": "吉祥寺", "mesh_1km": "m-musashino", "lat": 35.7031, "lon": 139.5797},
         {"station_name": "王子", "mesh_1km": "m-kita"},
     ],
     postal=[
@@ -33,14 +33,14 @@ GAZ = Gazetteer(
         {"postal_code": "1920082", "muni_code": "13201", "city": "八王子市", "town": "東町"},
         {"postal_code": "1140002", "muni_code": "13117", "city": "北区", "town": "王子"},
         {"postal_code": "1810013", "muni_code": "13204", "city": "三鷹市", "town": "下連雀"},
-        {"postal_code": "1640001", "muni_code": "13114", "city": "中野区", "town": "中野"},
+        {"postal_code": "1800004", "muni_code": "13203", "city": "武蔵野市", "town": "吉祥寺本町"},
     ],
     muni_meshes={
         "13105": {"m-bunkyo"},
         "13201": {"m-hachioji"},
         "13117": {"m-kita"},
         "13204": {"m-mitaka"},
-        "13114": {"m-nakano"},
+        "13203": {"m-musashino"},
     },
     knowledge=Knowledge.load(),
     schools=[

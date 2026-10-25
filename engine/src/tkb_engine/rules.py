@@ -258,7 +258,7 @@ def rule_r4(clues: Sequence[Clue], gaz: Gazetteer, posts: Sequence[Post] = ()) -
 # 距離の手がかり：遠い・近いの言葉と、遠い・近いとみなす距離（市区町村の駅の中心から、km）
 FAR_WORDS = re.compile(r"遠い|遠くて|遠すぎ|遠いし|時間かかる|乗り換え多")
 NEAR_WORDS = re.compile(r"近い|近くて|すぐ着|すぐ行ける|歩いて行ける|チャリで行ける")
-FAR_KM = 20.0
+FAR_KM = 15.0
 NEAR_KM = 12.0
 DISTANCE_TYPES = {ClueType.PLACE_TEXT, ClueType.ROUTINE_TEXT}
 

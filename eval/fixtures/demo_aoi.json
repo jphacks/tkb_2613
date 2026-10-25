@@ -115,7 +115,7 @@
     },
     {
       "post_id": "at://did:plc:demoaoi0000000000000000/app.bsky.feed.post/3aoi00000013",
-      "text": "サークルの集まり中野とか、遠くてだるい…",
+      "text": "サークルの集まり吉祥寺とか、遠くてだるい…",
       "created_at": "2026-10-20T22:05:00+09:00",
       "images": []
     },
@@ -246,7 +246,7 @@
       "post_id": "at://did:plc:demoaoi0000000000000000/app.bsky.feed.post/3aoi00000013",
       "image_index": null,
       "type": "place_text",
-      "value": "中野",
+      "value": "吉祥寺",
       "region": null,
       "confidence": 0.9,
       "source": "text"
@@ -283,7 +283,7 @@
     {
       "attribute": "home_city",
       "value": "八王子市",
-      "note": "指定ゴミ袋（40L 1枚75円）で八王子市・三鷹市。「中野まで遠い」を駅の位置と照らすと三鷹市ではない",
+      "note": "指定ゴミ袋（40L 1枚75円）で八王子市・三鷹市。「吉祥寺まで遠い」を駅の位置と照らすと三鷹市ではない",
       "clue_indices": [
         1,
         9
