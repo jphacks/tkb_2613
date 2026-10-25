@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="520" height="900" viewBox="0 0 520 900" role="img" aria-labelledby="title desc">
+  <title id="title">みーつけたの技術構成</title>
+  <desc id="desc">Next.jsの画面とFastAPIがSSEで連携し、実モードでは本人のBluesky投稿とチーム管理のOCR・VLMを使う。試作engineはR1からR7の推理とplan、simulateを行い、削除は確認後の別APIで扱う。モックは固定fixtureを再生する。</desc>
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#f15b55"/></marker>
+    <style>
+      text { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+      .title { fill:#f4f6fb; font-size:24px; font-weight:750; }
+      .sub { fill:#bac5da; font-size:14px; }
+      .head { fill:#f4f6fb; font-size:17px; font-weight:700; }
+      .body { fill:#e5eaf4; font-size:14px; }
+      .small { fill:#c7d1e3; font-size:12.5px; }
+      .card { fill:#1d2944; stroke:#465472; stroke-width:1.5; }
+      .team { fill:#22283f; stroke:#f15b55; stroke-width:1.5; }
+      .mock { fill:#172238; stroke:#76b7ff; stroke-width:1.5; }
+      .line { fill:none; stroke:#f15b55; stroke-width:2.3; marker-end:url(#arrow); }
+      .dash { fill:none; stroke:#76b7ff; stroke-width:2.3; stroke-dasharray:7 6; marker-end:url(#arrow); }
+    </style>
+  </defs>
+  <rect width="520" height="900" rx="18" fill="#11182b"/>
+  <text class="title" x="24" y="40">技術構成とデータの流れ</text>
+  <text class="sub" x="24" y="65">赤い実線: 実モード / 青い破線: モック経路</text>
+  <rect class="card" x="24" y="88" width="210" height="86" rx="12"/>
+  <text class="head" x="42" y="119">Web</text><text class="body" x="42" y="143">Next.js / TypeScript</text><text class="small" x="42" y="162">画面・操作・SSE表示</text>
+  <rect class="card" x="286" y="88" width="210" height="86" rx="12"/>
+  <text class="head" x="304" y="119">API</text><text class="body" x="304" y="143">FastAPI / Python</text><text class="small" x="304" y="162">本人セッション・処理の仲介</text>
+  <path class="line" d="M236 128 H278"/><text class="small" x="255" y="116" text-anchor="middle">/api</text>
+  <path class="line" d="M278 151 H236"/><text class="small" x="255" y="169" text-anchor="middle">SSE</text>
+  <rect class="team" x="24" y="218" width="210" height="104" rx="12"/>
+  <text class="head" x="42" y="249">Bluesky</text><text class="body" x="42" y="273">本人の投稿・画像</text><text class="small" x="42" y="295">セッションのDIDで取得</text><text class="small" x="42" y="313">画像URLはcdn.bsky.appに限定</text>
+  <path class="line" d="M286 150 L262 195 H130 V210"/>
+  <rect class="team" x="286" y="218" width="210" height="104" rx="12"/>
+  <text class="head" x="304" y="249">detect / チームサーバー</text><text class="body" x="304" y="273">OCR: PP-OCRv5</text><text class="body" x="304" y="295">VLM: vLLM互換API</text><text class="small" x="304" y="313">投稿ごとの観測Clueを抽出</text>
+  <path class="line" d="M391 174 V210"/>
+  <rect class="mock" x="24" y="355" width="210" height="92" rx="12"/>
+  <text x="42" y="385" fill="#9bcaff" font-size="17" font-weight="700">MOCK_MODE=1</text><text class="body" x="42" y="410">固定fixtureの投稿・Clue</text><text class="small" x="42" y="432">APIはBluesky/モデルへ接続しない</text>
+  <path class="dash" d="M234 401 H278"/><text class="small" x="255" y="389">fixture再生</text>
+  <rect class="card" x="286" y="355" width="210" height="120" rx="12"/>
+  <text class="head" x="304" y="386">engine（試作）</text><text class="body" x="304" y="410">R1–R7 → Conclusion</text><text class="body" x="304" y="433">plan / simulate</text><text class="small" x="304" y="456">モデルを呼ばず仮除外を再推理</text>
+  <path class="line" d="M391 322 V347"/>
+  <rect class="card" x="24" y="510" width="472" height="126" rx="12"/>
+  <text class="head" x="44" y="542">診断SSEの順序</text><text class="body" x="44" y="572">post → clues → conclusions → plan → done</text>
+  <text class="small" x="44" y="600">Clueは観測、Conclusionは推理。Conclusionはclue_indicesで根拠へ戻る。</text><text class="small" x="44" y="622">16項目プロフィールは目標。現行engineは試作Conclusion型。</text>
+  <path class="line" d="M391 476 V500 H260"/>
+  <rect class="team" x="24" y="680" width="210" height="100" rx="12"/>
+  <text class="head" x="42" y="711">POST /api/delete</text><text class="body" x="42" y="735">確認後に別リクエスト</text><text class="small" x="42" y="757">実モードは本人投稿を削除</text><text class="small" x="42" y="775">取り消せない操作</text>
+  <rect class="mock" x="286" y="680" width="210" height="100" rx="12"/>
+  <text x="304" y="711" fill="#9bcaff" font-size="17" font-weight="700">MOCK delete</text><text class="body" x="304" y="735">成功応答を模擬</text><text class="small" x="304" y="757">Bluesky投稿は変更しない</text>
+  <rect class="card" x="24" y="644" width="472" height="30" rx="8"/>
+  <text class="small" x="260" y="664" text-anchor="middle">Webで選択・確認後、別の POST /api/delete を呼び出す</text>
+  <rect class="card" x="24" y="818" width="472" height="58" rx="12"/>
+  <text class="small" x="42" y="843">モックでもブラウザがfixture内の画像URLを読み込む場合がある。</text><text class="small" x="42" y="864">これはAPIのBluesky/モデル接続とは別の画像表示リクエスト。</text>
+</svg>

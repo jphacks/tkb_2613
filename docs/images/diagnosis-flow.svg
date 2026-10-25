@@ -1,0 +1,99 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="420" height="1270" viewBox="0 0 420 1270" role="img" aria-labelledby="title desc">
+  <title id="title">みーつけたの診断体験</title>
+  <desc id="desc">本人ログインから投稿の観測、根拠付きの試作推理、最大3件の削除候補、仮除外、確認後の実削除と再診断までを示す説明図。モックでは外部削除を行わず、固定投稿を再生する。</desc>
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8 Z" fill="#f15b55" />
+    </marker>
+    <style>
+      text { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+      .title { fill: #f4f6fb; font-size: 24px; font-weight: 750; }
+      .subtitle { fill: #bac5da; font-size: 14px; }
+      .stepTitle { fill: #f4f6fb; font-size: 18px; font-weight: 700; }
+      .body { fill: #e5eaf4; font-size: 14.5px; }
+      .small { fill: #c7d1e3; font-size: 13px; }
+      .chip { fill: #f4f6fb; font-size: 12px; font-weight: 700; }
+      .card { fill: #1d2944; stroke: #465472; stroke-width: 1.5; }
+      .mock { fill: #172238; stroke: #76b7ff; stroke-width: 1.5; }
+      .real { fill: #2b202f; stroke: #f15b55; stroke-width: 1.5; }
+      .line { fill: none; stroke: #f15b55; stroke-width: 2.5; marker-end: url(#arrow); }
+      .branch { fill: none; stroke: #f15b55; stroke-width: 2.2; }
+    </style>
+  </defs>
+  <rect width="420" height="1270" rx="18" fill="#11182b" />
+  <text class="title" x="24" y="40">投稿を見直す体験</text>
+  <text class="subtitle" x="24" y="66">各段階を現行実装に沿って示した説明図</text>
+  <rect x="24" y="82" width="113" height="25" rx="12" fill="#2b202f" stroke="#f15b55" />
+  <text class="chip" x="80.5" y="99" text-anchor="middle">実モード</text>
+  <rect x="146" y="82" width="133" height="25" rx="12" fill="#172238" stroke="#76b7ff" />
+  <text class="chip" x="212.5" y="99" text-anchor="middle">MOCK_MODE=1</text>
+
+  <rect class="card" x="24" y="125" width="372" height="96" rx="12" />
+  <circle cx="51" cy="155" r="16" fill="#f15b55" />
+  <text class="chip" x="51" y="159" text-anchor="middle">1</text>
+  <text class="stepTitle" x="78" y="160">本人ログイン</text>
+  <text class="body" x="44" y="190">実モードは自分のBlueskyセッションで認証</text>
+  <text class="small" x="44" y="210">モックは架空アカウントでログイン</text>
+  <path class="line" d="M210 222 V245" />
+
+  <rect class="card" x="24" y="255" width="372" height="130" rx="12" />
+  <circle cx="51" cy="285" r="16" fill="#f15b55" />
+  <text class="chip" x="51" y="289" text-anchor="middle">2</text>
+  <text class="stepTitle" x="78" y="290">投稿と手がかりを集める</text>
+  <text class="body" x="44" y="321">実: 本人投稿から写真・本文を観測</text>
+  <text class="body" x="44" y="344">モック: 固定投稿と手がかりを再生</text>
+  <text class="small" x="44" y="367">観測（Clue）と推理（Conclusion）を分ける</text>
+  <path class="line" d="M210 386 V408" />
+
+  <rect class="card" x="24" y="418" width="372" height="128" rx="12" />
+  <circle cx="51" cy="448" r="16" fill="#f15b55" />
+  <text class="chip" x="51" y="452" text-anchor="middle">3</text>
+  <text class="stepTitle" x="78" y="453">根拠付きの試作推理</text>
+  <text class="body" x="44" y="484">R1–R7が投稿をまたいで結論を作る</text>
+  <text class="body" x="44" y="507">結論から clue_indices で根拠をたどる</text>
+  <text class="small" x="44" y="530">16項目プロフィールは目標段階</text>
+  <path class="line" d="M210 547 V569" />
+
+  <rect class="card" x="24" y="579" width="372" height="94" rx="12" />
+  <circle cx="51" cy="609" r="16" fill="#f15b55" />
+  <text class="chip" x="51" y="613" text-anchor="middle">4</text>
+  <text class="stepTitle" x="78" y="614">削除候補を最大3件まで提示</text>
+  <text class="small" x="44" y="645">現行 planner の優先対象: station / active_time / routine</text>
+  <path class="line" d="M210 674 V696" />
+
+  <rect class="card" x="24" y="706" width="372" height="116" rx="12" />
+  <circle cx="51" cy="736" r="16" fill="#f15b55" />
+  <text class="chip" x="51" y="740" text-anchor="middle">5</text>
+  <text class="stepTitle" x="78" y="741">仮除外して比較（simulate）</text>
+  <text class="body" x="44" y="772">選んだ投稿を除き、同じルールを再実行</text>
+  <text class="body" x="44" y="795">結論の変化を確認。ここでは削除しない</text>
+  <path class="line" d="M210 823 V845" />
+
+  <rect class="card" x="24" y="855" width="372" height="94" rx="12" />
+  <circle cx="51" cy="885" r="16" fill="#f15b55" />
+  <text class="chip" x="51" y="889" text-anchor="middle">6</text>
+  <text class="stepTitle" x="78" y="890">本人が確認してから削除</text>
+  <text class="body" x="44" y="920">確認ダイアログで確定した投稿だけ実行</text>
+  <path class="branch" d="M210 950 V963 H115 V976 M210 963 H305 V976" />
+
+  <rect class="mock" x="24" y="980" width="181" height="119" rx="12" />
+  <text x="40" y="1007" fill="#9bcaff" font-size="14" font-weight="700">モック</text>
+  <text class="small" x="40" y="1032">削除成功を模擬</text>
+  <text class="small" x="40" y="1053">Blueskyは変更しない</text>
+  <text class="small" x="40" y="1074">固定投稿は次回も再生</text>
+
+  <rect class="real" x="215" y="980" width="181" height="119" rx="12" />
+  <text x="231" y="1007" fill="#ff9a94" font-size="14" font-weight="700">実モード</text>
+  <text class="small" x="231" y="1032">本人投稿を削除</text>
+  <text class="small" x="231" y="1053">元に戻せない操作</text>
+  <text class="small" x="231" y="1074">確認後のみ実行</text>
+
+  <path class="branch" d="M114 1100 V1118 H210 M306 1100 V1118 H210" />
+  <path class="line" d="M210 1118 V1135" />
+  <rect class="card" x="24" y="1145" width="372" height="101" rx="12" />
+  <circle cx="51" cy="1175" r="16" fill="#f15b55" />
+  <text class="chip" x="51" y="1179" text-anchor="middle">7</text>
+  <text class="stepTitle" x="78" y="1180">残った投稿で再診断</text>
+  <text class="body" x="44" y="1210">実モードは削除後の本人投稿を読み直す</text>
+  <text class="small" x="44" y="1231">モックは固定データを再生する</text>
+</svg>
