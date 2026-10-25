@@ -3,7 +3,7 @@
 手がかりの一覧から推理ルールで結論を出す部分（`tkb_engine`）。最小削除プランナーと再診断もここに置く。
 
 - `rules.py`：推理ルール R1（生活圏）・R2（行動時間）・R3（留守の時間）・R4（市区町村）・R5（収集地区）・R6（区画）・R7（通学先）・R8（名前）・R9（年齢）・R10（仕事）・R11（路線）・R12（生年月日）と `infer`。入出力、しきい値の場所、ルールの足し方はファイル先頭の説明を参照
-- `planner.py`：消したらどうなるか（`simulate`）と危ない投稿の選び方（`plan`）。モデルは呼ばず、手がかりから消す投稿の分を除いて `infer` をかけ直す。`plan` は最寄り駅・住所の区画・行動時間・留守の時間が崩れるまで、効き目の大きい投稿から最大3件を選ぶ
+- `planner.py`：消したらどうなるか（`simulate`）と危ない投稿の選び方（`plan`）。モデルは呼ばず、手がかりから消す投稿の分を除いて `infer` をかけ直す。`plan` は名前・生年月日を優先し、住所の町域・区画・最寄り駅・行動時間・留守の時間も対象に最大3件を選ぶ
 - `gazetteer.py`：data-prep の表（stations・postal・muni_mesh）を読み、駅名・郵便番号・住所を引き当てる
 
 ```python
@@ -28,7 +28,7 @@ what_if = simulate(clues, posts, gaz, ["at://..."])  # 選んだ投稿を消し�
   本文と画像の手がかりだけを使い、投稿日を誕生日にしない。
 - `infer` の名前の出力は `full_name` / `given_name_or_nickname`。生年月日は `birthday`。
   mainの身元カードと接続し、路線ルールはR11、生年月日はR12として残す。
-- 削除提案と画面の「逃げ切り」は `station / home_block / active_time / routine` を対象にする。
+- 削除提案と画面の「逃げ切り」は `full_name / given_name_or_nickname / birthday / home_area / home_block / station / active_time / routine` を対象にする。
   シミュレーションは実際の削除もモデル呼び出しも行わない。
 
 知識表の指定袋価格は2025年1月31日の資料に基づく地域限定の候補照合であり、全国を網羅しない。

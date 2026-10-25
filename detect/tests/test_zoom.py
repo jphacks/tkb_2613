@@ -43,7 +43,7 @@ SMALL_SIGN = _clue(ClueType.ORG_TEXT, "サロンロコ厚生", (900, 400, 925, 5
 
 
 class TestSelectZoomTargets:
-    def test_picks_small_text_and_reflections_smallest_first(self) -> None:
+    def test_picks_profile_evidence_before_smaller_low_priority_text(self) -> None:
         big_sign = _clue(ClueType.STATION_SIGN, "根津", (500, 400, 1300, 700))
         plate = _clue(ClueType.PLATE, "160", (900, 600, 960, 619))
         reflection = _clue(ClueType.REFLECTION, "瞳に何か映っている", (600, 200, 700, 300))
@@ -53,12 +53,18 @@ class TestSelectZoomTargets:
         targets = select_zoom_targets([big_sign, SMALL_SIGN, face, reflection, plate, no_region])
 
         # 大きい駅名標、顔、位置のないものは選ばない。映り込みは大きくても選ぶ
-        assert targets == [plate, SMALL_SIGN, reflection]
+        assert targets == [SMALL_SIGN]
 
     def test_limits_the_number_per_image(self) -> None:
         many = [_clue(ClueType.SHOP, f"店{i}", (0, 0, 10 + i, 10 + i)) for i in range(6)]
 
         assert len(select_zoom_targets(many)) == MAX_ZOOMS_PER_IMAGE
+
+    def test_picks_the_smallest_region_within_same_type(self) -> None:
+        larger = _clue(ClueType.NAME_TEXT, "山田", (0, 0, 40, 40))
+        smaller = _clue(ClueType.NAME_TEXT, "佐藤", (0, 0, 20, 20))
+
+        assert select_zoom_targets([larger, smaller]) == [smaller]
 
 
 class TestResolveZoom:

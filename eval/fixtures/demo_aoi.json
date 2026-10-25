@@ -358,6 +358,7 @@
   ],
   "expected_plan": {
     "delete": [
+      "at://did:plc:demoaoi0000000000000000/app.bsky.feed.post/3aoi00000012",
       "at://did:plc:demoaoi0000000000000000/app.bsky.feed.post/3aoi00000002",
       "at://did:plc:demoaoi0000000000000000/app.bsky.feed.post/3aoi00000010"
     ],
@@ -367,8 +368,11 @@
       "station",
       "home_block",
       "active_time",
-      "school"
+      "school",
+      "given_name_or_nickname",
+      "age",
+      "birthday"
     ],
-    "note": "ゴミ袋の写真と、届いた郵便物の写真。ゴミ袋がなくなると市が決まらず、市で絞っていた収集地区・駅・学校も崩れる"
+    "note": "main #98 の名前・生年月日優先推薦を維持。誕生日の名前投稿、ゴミ袋、郵便物の最大3件。"
   }
 }

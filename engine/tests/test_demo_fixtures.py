@@ -116,15 +116,16 @@ def test_aoi_evidence_matches_the_expected_clues() -> None:
         assert got[e["attribute"]].clue_indices == sorted(e["clue_indices"]), e["attribute"]
 
 
-def test_aoi_plan_deletes_the_trash_bag_and_the_mail() -> None:
+def test_aoi_plan_includes_identity_trash_bag_and_mail() -> None:
     clues, posts, doc = _load("demo_aoi.json")
 
     proposal = plan(clues, posts, GAZ)
 
     assert set(proposal.delete) == set(doc["expected_plan"]["delete"])
     assert set(proposal.broken) == set(doc["expected_plan"]["broken"])
-    # 残るのは名前と年齢だけで、住んでいる所はわからなくなる
-    assert {c.attribute for c in proposal.after} == {"given_name_or_nickname", "age", "birthday"}
+    # main #98 の名前優先推薦も含めた3件で、このfixtureの推定はすべて崩れる
+    assert proposal.delete[0].endswith("000012")
+    assert proposal.after == []
 
 
 def test_aoi_city_needs_both_the_trash_bag_and_the_distance_hint() -> None:
