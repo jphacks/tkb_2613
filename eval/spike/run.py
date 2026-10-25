@@ -1,11 +1,9 @@
-"""デモ用の fixture に推理ルール（tkb_engine.rules）を当てはめ、expected と比べる。
+"""demo_observations.json に推理ルール（tkb_engine.rules）を当てはめ、expected と比べる。
 
-uv run python eval/spike/run.py                                  # demo_observations.json
-uv run python eval/spike/run.py eval/fixtures/demo_aoi.json      # 八王子・あおい
+uv run python eval/spike/run.py
 """
 
 import json
-import sys
 from pathlib import Path
 
 from tkb_common.schemas import Clue, Post
@@ -25,8 +23,7 @@ def _value_matches(attribute: str, expected: str, got: str) -> bool:
 
 
 def main() -> None:
-    fixture = Path(sys.argv[1]) if len(sys.argv) > 1 else FIXTURE
-    doc = json.loads(fixture.read_text(encoding="utf-8"))
+    doc = json.loads(FIXTURE.read_text(encoding="utf-8"))
     clues = [Clue.model_validate(c) for c in doc["clues"]]
     posts = [Post.model_validate(p) for p in doc["posts"]]
     conclusions = infer(clues, posts, Gazetteer.load())
