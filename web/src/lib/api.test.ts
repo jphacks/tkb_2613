@@ -8,6 +8,7 @@ import {
   diagnose,
   getSession,
   MAX_IMAGE_BYTES,
+  deletePosts,
   simulate,
 } from "./api";
 import { messages } from "@/lib/messages";
@@ -295,5 +296,36 @@ describe("simulate", () => {
   it("asks to log in again when the session has expired", async () => {
     mockFetch(json({ detail: "ログインしてください" }, 401));
     await expect(simulate([POST_ID], 3)).rejects.toMatchObject({ kind: "unauthorized" });
+  });
+});
+
+describe("deletePosts", () => {
+  const POST_ID = "at://did:plc:abc/app.bsky.feed.post/3k9";
+  const KEPT_ID = "at://did:plc:abc/app.bsky.feed.post/3k2";
+  const RESULT = { delete: [POST_ID], failed: [KEPT_ID], broken: ["station"], after: [] };
+
+  function json(body: unknown, status = 200): Response {
+    return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+  }
+
+  it("posts the ids to delete with cookies and returns what was deleted and what failed", async () => {
+    const fetchFn = mockFetch(json(RESULT));
+
+    expect(await deletePosts([POST_ID, KEPT_ID], 3, { baseUrl: "http://api.test" })).toEqual(RESULT);
+    const [url, init] = fetchFn.mock.calls[0];
+    expect(url).toBe("http://api.test/api/delete");
+    expect(init?.method).toBe("POST");
+    expect(init?.credentials).toBe("include");
+    expect(JSON.parse(init?.body as string)).toEqual({ delete: [POST_ID, KEPT_ID] });
+  });
+
+  it("rejects a reply without the failed posts", async () => {
+    mockFetch(json({ delete: [POST_ID], broken: [], after: [] }));
+    await expect(deletePosts([POST_ID], 3)).rejects.toMatchObject({ kind: "invalid_response" });
+  });
+
+  it("asks to log in again when the session has expired", async () => {
+    mockFetch(json({ detail: "ログインしてください" }, 401));
+    await expect(deletePosts([POST_ID], 3)).rejects.toMatchObject({ kind: "unauthorized" });
   });
 });

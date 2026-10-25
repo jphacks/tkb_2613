@@ -1,4 +1,4 @@
-"""Bluesky へのログインと、ログイン中のセッション、自分の投稿の取得。
+"""Bluesky へのログインと、ログイン中のセッション、自分の投稿の取得と削除。
 
 パスワードはログインに使うだけで、保存もログ出力もしない。
 セッションはメモリ上だけに置き、ブラウザにはランダムなセッション番号だけを渡す。
@@ -8,7 +8,7 @@
 import secrets
 import threading
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 
 from atproto import AsyncClient, models
@@ -126,6 +126,34 @@ async def fetch_own_posts(client: AsyncClient, did: str, limit: int) -> list[Pos
         if not cursor:
             break
     return posts
+
+
+PostsDeleter = Callable[[AsyncClient, str, Sequence[str]], Awaitable[list[str]]]
+
+
+def is_own_post_uri(post_id: str, did: str) -> bool:
+    """post_id が did 本人の投稿（at://<did>/app.bsky.feed.post/<rkey>）の AT URI か。"""
+    prefix = f"at://{did}/app.bsky.feed.post/"
+    rkey = post_id.removeprefix(prefix)
+    return post_id.startswith(prefix) and bool(rkey) and "/" not in rkey
+
+
+async def delete_own_posts(client: AsyncClient, did: str, post_ids: Sequence[str]) -> list[str]:
+    """did 本人の投稿を 1 件ずつ消し、消せた投稿の ID を返す。
+
+    本人の投稿でない ID は消さない（delete_post は URI の DID のリポジトリを消しに行くため）。
+    消せなかった投稿は飛ばして、残りを続ける。
+    """
+    deleted: list[str] = []
+    for post_id in post_ids:
+        if not is_own_post_uri(post_id, did):
+            continue
+        try:
+            await client.delete_post(post_id)
+        except AtProtocolError:
+            continue
+        deleted.append(post_id)
+    return deleted
 
 
 @dataclass(frozen=True)

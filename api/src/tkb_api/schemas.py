@@ -29,6 +29,7 @@ __all__ = [
     "Clue",
     "ClueSource",
     "ClueType",
+    "DeleteRequest",  # api の入出力
     "DetectResponse",
     "NonNegativeInt",
     "Region",
@@ -38,10 +39,14 @@ __all__ = [
     "SimulateRequest",
 ]
 
-API_ONLY_NAMES = frozenset({"SessionRequest", "SessionResponse", "SimulateRequest"})
+API_ONLY_NAMES = frozenset(
+    {"DeleteRequest", "SessionRequest", "SessionResponse", "SimulateRequest"}
+)
 
 # 消したらどうなるかで一度に選べる投稿の数（診断する投稿の上限 MAX_POSTS の設定上限と同じ）
 SIMULATE_MAX_POSTS = 100
+# 一度に実際に消せる投稿の数。提案は最大 3 件なので、多めに取っておく
+DELETE_MAX_POSTS = 10
 
 
 class SessionRequest(BaseModel):
@@ -85,4 +90,17 @@ class SimulateRequest(BaseModel):
 
     delete: list[Annotated[str, Field(min_length=1, max_length=512)]] = Field(
         max_length=SIMULATE_MAX_POSTS
+    )
+
+
+class DeleteRequest(BaseModel):
+    """投稿を実際に消す（POST /api/delete）。web/src/lib/api.ts の deletePosts と同時に変えること。
+
+    delete は、そのセッションで最後に診断した投稿の ID だけ。画面で選んで確認したものだけを送る。
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    delete: list[Annotated[str, Field(min_length=1, max_length=512)]] = Field(
+        min_length=1, max_length=DELETE_MAX_POSTS
     )

@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ApiError, simulate } from "@/lib/api";
+import { ApiError, deletePosts, simulate } from "@/lib/api";
 import { messages } from "@/lib/messages";
 import type { RiskyPost, Simulation } from "@/types/diagnose";
 import type { Post } from "@/types/post";
@@ -12,7 +12,7 @@ const t = messages.risky;
 
 vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
-  return { ...actual, simulate: vi.fn() };
+  return { ...actual, simulate: vi.fn(), deletePosts: vi.fn() };
 });
 
 function post(n: number, text: string): Post {
@@ -43,6 +43,7 @@ function renderRisky(onSimulated = vi.fn()) {
 
 afterEach(() => {
   vi.mocked(simulate).mockReset();
+  vi.mocked(deletePosts).mockReset();
 });
 
 describe("RiskyPosts", () => {
@@ -121,6 +122,99 @@ describe("RiskyPosts", () => {
     fireEvent.click(screen.getByRole("button", { name: t.simulate }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(messages.errors.diagnoseFirst);
+  });
+
+  it("offers to delete for real only after simulating", async () => {
+    vi.mocked(simulate).mockResolvedValue(ALL_BROKEN);
+    renderRisky();
+    expect(screen.queryByRole("button", { name: t.deleteForReal })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: t.simulate }));
+
+    expect(await screen.findByRole("button", { name: t.deleteForReal })).toBeInTheDocument();
+  });
+
+  it("does not delete until the user confirms, and cancelling deletes nothing", async () => {
+    vi.mocked(simulate).mockResolvedValue(ALL_BROKEN);
+    renderRisky();
+    fireEvent.click(screen.getByRole("button", { name: t.simulate }));
+    fireEvent.click(await screen.findByRole("button", { name: t.deleteForReal }));
+
+    const dialog = screen.getByRole("alertdialog", { name: t.confirmHeading });
+    expect(dialog).toHaveTextContent(t.confirmLead(2));
+    expect(within(dialog).getByRole("list", { name: t.confirmListLabel })).toHaveTextContent(ADDRESS.text);
+    expect(within(dialog).getByRole("button", { name: t.cancel })).toHaveFocus();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: t.cancel }));
+
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(deletePosts).not.toHaveBeenCalled();
+  });
+
+  it("closes the confirmation with Escape", async () => {
+    vi.mocked(simulate).mockResolvedValue(ALL_BROKEN);
+    renderRisky();
+    fireEvent.click(screen.getByRole("button", { name: t.simulate }));
+    fireEvent.click(await screen.findByRole("button", { name: t.deleteForReal }));
+
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(deletePosts).not.toHaveBeenCalled();
+  });
+
+  it("deletes the simulated posts once confirmed and shows that the user got away", async () => {
+    vi.mocked(simulate).mockResolvedValue(ALL_BROKEN);
+    vi.mocked(deletePosts).mockResolvedValue({ ...ALL_BROKEN, failed: [] });
+    const onSimulated = renderRisky();
+    fireEvent.click(screen.getByRole("button", { name: t.simulate }));
+    fireEvent.click(await screen.findByRole("button", { name: t.deleteForReal }));
+
+    fireEvent.click(screen.getByRole("button", { name: t.confirm }));
+
+    expect(await screen.findByText(messages.escaped.heading)).toBeInTheDocument();
+    expect(screen.getByText(messages.escaped.deleted(2))).toBeInTheDocument();
+    expect(screen.getByText(t.safe)).toBeInTheDocument();
+    expect(vi.mocked(deletePosts).mock.calls[0][0]).toEqual([ADDRESS.post_id, GYM.post_id]);
+    expect(vi.mocked(deletePosts).mock.calls[0][1]).toBe(20);
+    expect(onSimulated).toHaveBeenLastCalledWith({ ...ALL_BROKEN, failed: [] });
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    // 消したあとは選び直せない
+    expect(screen.queryByRole("button", { name: t.simulate })).not.toBeInTheDocument();
+    for (const box of screen.getAllByRole("checkbox")) expect(box).toBeDisabled();
+  });
+
+  it("says which posts could not be deleted", async () => {
+    vi.mocked(simulate).mockResolvedValue(ALL_BROKEN);
+    vi.mocked(deletePosts).mockResolvedValue({
+      delete: [GYM.post_id],
+      failed: [ADDRESS.post_id],
+      broken: ["routine"],
+      after: [{ rule: "R1", attribute: "station", value: "根津駅", clue_indices: [0], note: "" }],
+    });
+    renderRisky();
+    fireEvent.click(screen.getByRole("button", { name: t.simulate }));
+    fireEvent.click(await screen.findByRole("button", { name: t.deleteForReal }));
+
+    fireEvent.click(screen.getByRole("button", { name: t.confirm }));
+
+    expect(await screen.findByText(messages.escaped.deleted(1))).toBeInTheDocument();
+    expect(screen.getByText(messages.escaped.failed(1))).toBeInTheDocument();
+    expect(screen.queryByText(t.safe)).not.toBeInTheDocument();
+  });
+
+  it("shows the error when deleting fails and keeps the simulation", async () => {
+    vi.mocked(simulate).mockResolvedValue(ALL_BROKEN);
+    vi.mocked(deletePosts).mockRejectedValue(new Error("boom"));
+    renderRisky();
+    fireEvent.click(screen.getByRole("button", { name: t.simulate }));
+    fireEvent.click(await screen.findByRole("button", { name: t.deleteForReal }));
+
+    fireEvent.click(screen.getByRole("button", { name: t.confirm }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(t.deleteFailed);
+    expect(screen.getByRole("alert")).not.toHaveTextContent("boom");
+    expect(screen.getByRole("button", { name: t.deleteForReal })).toBeInTheDocument();
   });
 
   it("says so when no post can break the profile", () => {
