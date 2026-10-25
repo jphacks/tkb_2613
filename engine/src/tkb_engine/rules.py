@@ -337,7 +337,7 @@ def rule_r5(clues: Sequence[Clue], gaz: Gazetteer, r4: list[Conclusion]) -> list
         label = "・".join(d for d in WEEKDAYS if d in days)
         candidates = [a for a in in_city if not a.burnable_days or set(a.burnable_days) == days]
         evidence = {i, *r4[0].clue_indices}
-        note = f"集積所の燃やすごみの曜日（{label}）が合う地区"
+        note = f"燃やすごみの曜日（{label}）が合う地区"
         # 郵便物や住所表示の町名で、候補の地区をさらに絞る
         for j, town in _home_towns(clues, gaz, city):
             narrowed = [a for a in candidates if _has_town(a, town)]
@@ -465,7 +465,11 @@ def rule_r7(
         )
     else:
         value = f"{city}内の大学（{len(candidates)}校のどれか）"
-        note = "「大学」と時限の投稿。候補：" + "・".join(candidates[:5])
+        note = (
+            ("「大学」と時限の投稿" if periods else "「大学」の投稿")
+            + "。候補："
+            + "・".join(candidates[:5])
+        )
     value += "・歩いて通学" if walk else ""
     evidence = sorted({*college, *(i for i, _, _ in periods), *r4[0].clue_indices})
     return [Conclusion("R7", "school", value, evidence, note)]

@@ -1,0 +1,423 @@
+{
+  "note": "JPHACKS 2026 デモ用の架空アカウント（tkb-2613.bsky.social、架空の大学生「あおい」）。八王子市・八王子駅のそばに住む設定（mite.html と同じ筋書き）。投稿は全部同じ日にまとめて投稿するので、時刻を使う推理は出ない。番地は架空（99-99）",
+  "account": {
+    "did": "did:plc:demotkb2613000000000000",
+    "handle": "tkb-2613.bsky.social",
+    "display_name": "あおい（デモ用の架空アカウント）"
+  },
+  "posts": [
+    {
+      "post_id": "at://did:plc:demotkb2613000000000000/app.bsky.feed.post/3tkb00000001",
+      "text": "新しいイヤホン買った、ノイキャンすごすぎて駅のアナウンス聞こえない",
+      "created_at": "2026-10-25T13:02:00+09:00",
+      "images": []
+    },
+    {
+      "post_id": "at://did:plc:demotkb2613000000000000/app.bsky.feed.post/3tkb00000002",
+      "text": "ゴミ袋、40Lが10枚で750円…地味に効く",
+      "created_at": "2026-10-25T13:04:00+09:00",
+      "images": [
+        {
+          "index": 0,
+          "url": "https://cdn.bsky.app/img/feed_fullsize/plain/did:plc:demotkb2613000000000000/tkb02@jpeg",
+          "alt": "",
+          "width": 1200,
+          "height": 900
+        }
+      ]
+    },
+    {
+      "post_id": "at://did:plc:demotkb2613000000000000/app.bsky.feed.post/3tkb00000003",
+      "text": "レポート3000字、まだ200字",
+      "created_at": "2026-10-25T13:06:00+09:00",
+      "images": []
+    },
+    {
+      "post_id": "at://did:plc:demotkb2613000000000000/app.bsky.feed.post/3tkb00000004",
+      "text": "空がきれいすぎる",
+      "created_at": "2026-10-25T13:08:00+09:00",
+      "images": [
+        {
+          "index": 0,
+          "url": "https://cdn.bsky.app/img/feed_fullsize/plain/did:plc:demotkb2613000000000000/tkb04@jpeg",
+          "alt": "",
+          "width": 1200,
+          "height": 900
+        }
+      ]
+    },
+    {
+      "post_id": "at://did:plc:demotkb2613000000000000/app.bsky.feed.post/3tkb00000005",
+      "text": "サークルの集まり吉祥寺とか、遠くてだるい…",
+      "created_at": "2026-10-25T13:10:00+09:00",
+      "images": []
+    },
+    {
+      "post_id": "at://did:plc:demotkb2613000000000000/app.bsky.feed.post/3tkb00000006",
+      "text": "推しの新曲が良すぎて作業が進まない",
+      "created_at": "2026-10-25T13:12:00+09:00",
+      "images": []
+    },
+    {
+      "post_id": "at://did:plc:demotkb2613000000000000/app.bsky.feed.post/3tkb00000007",
+      "text": "コンビニの新作プリン、70点",
+      "created_at": "2026-10-25T13:14:00+09:00",
+      "images": [
+        {
+          "index": 0,
+          "url": "https://cdn.bsky.app/img/feed_fullsize/plain/did:plc:demotkb2613000000000000/tkb07@jpeg",
+          "alt": "",
+          "width": 1200,
+          "height": 900
+        }
+      ]
+    },
+    {
+      "post_id": "at://did:plc:demotkb2613000000000000/app.bsky.feed.post/3tkb00000008",
+      "text": "今日は歩いて大学行くか",
+      "created_at": "2026-10-25T13:16:00+09:00",
+      "images": []
+    },
+    {
+      "post_id": "at://did:plc:demotkb2613000000000000/app.bsky.feed.post/3tkb00000009",
+      "text": "猫の動画見てたら一日終わってた",
+      "created_at": "2026-10-25T13:18:00+09:00",
+      "images": []
+    },
+    {
+      "post_id": "at://did:plc:demotkb2613000000000000/app.bsky.feed.post/3tkb00000010",
+      "text": "紅葉、今年はちょっと早い気がする",
+      "created_at": "2026-10-25T13:20:00+09:00",
+      "images": [
+        {
+          "index": 0,
+          "url": "https://cdn.bsky.app/img/feed_fullsize/plain/did:plc:demotkb2613000000000000/tkb10@jpeg",
+          "alt": "",
+          "width": 1200,
+          "height": 900
+        }
+      ]
+    },
+    {
+      "post_id": "at://did:plc:demotkb2613000000000000/app.bsky.feed.post/3tkb00000011",
+      "text": "ネイル変えた、秋っぽい色",
+      "created_at": "2026-10-25T13:22:00+09:00",
+      "images": [
+        {
+          "index": 0,
+          "url": "https://cdn.bsky.app/img/feed_fullsize/plain/did:plc:demotkb2613000000000000/tkb11@jpeg",
+          "alt": "",
+          "width": 1200,
+          "height": 900
+        }
+      ]
+    },
+    {
+      "post_id": "at://did:plc:demotkb2613000000000000/app.bsky.feed.post/3tkb00000012",
+      "text": "燃やすごみ月木なの完全に忘れてた。もう回収済み",
+      "created_at": "2026-10-25T13:24:00+09:00",
+      "images": []
+    },
+    {
+      "post_id": "at://did:plc:demotkb2613000000000000/app.bsky.feed.post/3tkb00000013",
+      "text": "ドラマの最終回、泣いた",
+      "created_at": "2026-10-25T13:26:00+09:00",
+      "images": []
+    },
+    {
+      "post_id": "at://did:plc:demotkb2613000000000000/app.bsky.feed.post/3tkb00000014",
+      "text": "バイト前に一杯。窓の外、今日もいい天気",
+      "created_at": "2026-10-25T13:28:00+09:00",
+      "images": [
+        {
+          "index": 0,
+          "url": "https://cdn.bsky.app/img/feed_fullsize/plain/did:plc:demotkb2613000000000000/tkb14@jpeg",
+          "alt": "",
+          "width": 1200,
+          "height": 900
+        }
+      ]
+    },
+    {
+      "post_id": "at://did:plc:demotkb2613000000000000/app.bsky.feed.post/3tkb00000015",
+      "text": "朝ごはん抜いたら昼までもたない",
+      "created_at": "2026-10-25T13:30:00+09:00",
+      "images": []
+    },
+    {
+      "post_id": "at://did:plc:demotkb2613000000000000/app.bsky.feed.post/3tkb00000016",
+      "text": "古着屋で300円のシャツ見つけた",
+      "created_at": "2026-10-25T13:32:00+09:00",
+      "images": [
+        {
+          "index": 0,
+          "url": "https://cdn.bsky.app/img/feed_fullsize/plain/did:plc:demotkb2613000000000000/tkb16@jpeg",
+          "alt": "",
+          "width": 1200,
+          "height": 900
+        }
+      ]
+    },
+    {
+      "post_id": "at://did:plc:demotkb2613000000000000/app.bsky.feed.post/3tkb00000017",
+      "text": "バイト遅番おわった〜。エプロン洗わなきゃ",
+      "created_at": "2026-10-25T13:34:00+09:00",
+      "images": []
+    },
+    {
+      "post_id": "at://did:plc:demotkb2613000000000000/app.bsky.feed.post/3tkb00000018",
+      "text": "寒くなってきたし、そろそろ鍋の季節",
+      "created_at": "2026-10-25T13:36:00+09:00",
+      "images": []
+    },
+    {
+      "post_id": "at://did:plc:demotkb2613000000000000/app.bsky.feed.post/3tkb00000019",
+      "text": "ポストにまたDM。宛名は塗っといた",
+      "created_at": "2026-10-25T13:38:00+09:00",
+      "images": [
+        {
+          "index": 0,
+          "url": "https://cdn.bsky.app/img/feed_fullsize/plain/did:plc:demotkb2613000000000000/tkb19@jpeg",
+          "alt": "",
+          "width": 1200,
+          "height": 900
+        }
+      ]
+    },
+    {
+      "post_id": "at://did:plc:demotkb2613000000000000/app.bsky.feed.post/3tkb00000020",
+      "text": "明日の小テスト、範囲どこだっけ",
+      "created_at": "2026-10-25T13:40:00+09:00",
+      "images": []
+    },
+    {
+      "post_id": "at://did:plc:demotkb2613000000000000/app.bsky.feed.post/3tkb00000021",
+      "text": "誕生日、やっと堂々と頼めた🍺",
+      "created_at": "2026-10-25T13:42:00+09:00",
+      "images": [
+        {
+          "index": 0,
+          "url": "https://cdn.bsky.app/img/feed_fullsize/plain/did:plc:demotkb2613000000000000/tkb21@jpeg",
+          "alt": "",
+          "width": 1200,
+          "height": 900
+        }
+      ]
+    },
+    {
+      "post_id": "at://did:plc:demotkb2613000000000000/app.bsky.feed.post/3tkb00000022",
+      "text": "財布忘れて取りに帰った、えらい",
+      "created_at": "2026-10-25T13:44:00+09:00",
+      "images": []
+    },
+    {
+      "post_id": "at://did:plc:demotkb2613000000000000/app.bsky.feed.post/3tkb00000023",
+      "text": "友達と通話しながら課題",
+      "created_at": "2026-10-25T13:46:00+09:00",
+      "images": []
+    },
+    {
+      "post_id": "at://did:plc:demotkb2613000000000000/app.bsky.feed.post/3tkb00000024",
+      "text": "雨の日のバス、なぜか毎回満員",
+      "created_at": "2026-10-25T13:48:00+09:00",
+      "images": []
+    },
+    {
+      "post_id": "at://did:plc:demotkb2613000000000000/app.bsky.feed.post/3tkb00000025",
+      "text": "今日は早く寝る（寝ない）",
+      "created_at": "2026-10-25T13:50:00+09:00",
+      "images": []
+    }
+  ],
+  "clues": [
+    {
+      "post_id": "at://did:plc:demotkb2613000000000000/app.bsky.feed.post/3tkb00000002",
+      "image_index": 0,
+      "type": "local_item",
+      "value": "指定収集袋 可燃系 大 40L 10枚入り 750円",
+      "region": [
+        260,
+        140,
+        980,
+        820
+      ],
+      "confidence": 0.86,
+      "source": "vlm"
+    },
+    {
+      "post_id": "at://did:plc:demotkb2613000000000000/app.bsky.feed.post/3tkb00000005",
+      "image_index": null,
+      "type": "place_text",
+      "value": "吉祥寺",
+      "region": null,
+      "confidence": 0.9,
+      "source": "text"
+    },
+    {
+      "post_id": "at://did:plc:demotkb2613000000000000/app.bsky.feed.post/3tkb00000008",
+      "image_index": null,
+      "type": "routine_text",
+      "value": "歩いて大学行く",
+      "region": null,
+      "confidence": 0.93,
+      "source": "text"
+    },
+    {
+      "post_id": "at://did:plc:demotkb2613000000000000/app.bsky.feed.post/3tkb00000012",
+      "image_index": null,
+      "type": "routine_text",
+      "value": "燃やすごみ月木",
+      "region": null,
+      "confidence": 0.88,
+      "source": "text"
+    },
+    {
+      "post_id": "at://did:plc:demotkb2613000000000000/app.bsky.feed.post/3tkb00000014",
+      "image_index": 0,
+      "type": "reflection",
+      "value": "窓ガラスに向かいの看板が反転して映っている「八王子駅前店」",
+      "region": [
+        40,
+        60,
+        420,
+        230
+      ],
+      "confidence": 0.82,
+      "source": "vlm"
+    },
+    {
+      "post_id": "at://did:plc:demotkb2613000000000000/app.bsky.feed.post/3tkb00000017",
+      "image_index": null,
+      "type": "routine_text",
+      "value": "バイト遅番",
+      "region": null,
+      "confidence": 0.88,
+      "source": "text"
+    },
+    {
+      "post_id": "at://did:plc:demotkb2613000000000000/app.bsky.feed.post/3tkb00000019",
+      "image_index": 0,
+      "type": "code",
+      "value": "カスタマバーコード: 〒192-0083 住所表示番号 99-99",
+      "region": [
+        640,
+        700,
+        1080,
+        740
+      ],
+      "confidence": 0.98,
+      "source": "ocr"
+    },
+    {
+      "post_id": "at://did:plc:demotkb2613000000000000/app.bsky.feed.post/3tkb00000021",
+      "image_index": null,
+      "type": "age_text",
+      "value": "誕生日",
+      "region": null,
+      "confidence": 0.95,
+      "source": "text"
+    },
+    {
+      "post_id": "at://did:plc:demotkb2613000000000000/app.bsky.feed.post/3tkb00000021",
+      "image_index": 0,
+      "type": "name_text",
+      "value": "Happy Birthday あおい",
+      "region": [
+        300,
+        380,
+        900,
+        520
+      ],
+      "confidence": 0.84,
+      "source": "vlm"
+    }
+  ],
+  "expected": [
+    {
+      "attribute": "home_city",
+      "value": "八王子市",
+      "note": "指定ゴミ袋（40L 1枚75円）で八王子市・三鷹市。「吉祥寺まで遠い」で三鷹市ではない",
+      "clue_indices": [
+        0,
+        1
+      ]
+    },
+    {
+      "attribute": "home_district",
+      "value": "八王子市 収集地区8",
+      "note": "「燃やすごみ月木」＋郵便物の町名（旭町）",
+      "clue_indices": [
+        0,
+        1,
+        3,
+        6
+      ]
+    },
+    {
+      "attribute": "station",
+      "value": "八王子駅",
+      "note": "窓に映った「八王子駅前店」＋八王子市で絞る",
+      "clue_indices": [
+        0,
+        1,
+        4
+      ]
+    },
+    {
+      "attribute": "home_block",
+      "value": "八王子市旭町 99-99 付近",
+      "note": "届いた郵便物のカスタマバーコード（番地は架空）",
+      "clue_indices": [
+        6
+      ]
+    },
+    {
+      "attribute": "school",
+      "value": "八王子市内の大学（2校のどれか）・歩いて通学",
+      "note": "「歩いて大学」＋八王子市。テストの学校の表は2校だけ",
+      "clue_indices": [
+        0,
+        1,
+        2
+      ]
+    },
+    {
+      "attribute": "name",
+      "value": "あおい",
+      "note": "ケーキのプレート（お店が書いた名前）",
+      "clue_indices": [
+        8
+      ]
+    },
+    {
+      "attribute": "age",
+      "value": "20歳",
+      "note": "誕生日にお酒を頼めるようになった（同じ日の投稿なので誕生日の日付は出さない）",
+      "clue_indices": [
+        7
+      ]
+    },
+    {
+      "attribute": "occupation",
+      "value": "遅番のある仕事",
+      "note": "バイトの遅番",
+      "clue_indices": [
+        5
+      ]
+    }
+  ],
+  "expected_plan": {
+    "delete": [
+      "at://did:plc:demotkb2613000000000000/app.bsky.feed.post/3tkb00000002",
+      "at://did:plc:demotkb2613000000000000/app.bsky.feed.post/3tkb00000019"
+    ],
+    "broken": [
+      "home_city",
+      "home_district",
+      "station",
+      "home_block",
+      "school"
+    ],
+    "note": "ゴミ袋の写真と、届いた郵便物の写真"
+  }
+}

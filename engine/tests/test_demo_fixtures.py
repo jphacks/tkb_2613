@@ -26,7 +26,7 @@ GAZ = Gazetteer(
         {"station_name": "三鷹", "mesh_1km": "m-mitaka", "lat": 35.7027, "lon": 139.5607},
         {"station_name": "吉祥寺", "mesh_1km": "m-musashino", "lat": 35.7031, "lon": 139.5797},
         {"station_name": "王子", "mesh_1km": "m-kita"},
-        # 多摩市・みお（demo_tama.json）：40L 1枚60円の市と、青梅・町田
+        # 多摩地域の駅（高尾は demo_tkb2613.json の「高尾山が近い」）
         {"station_name": "聖蹟桜ヶ丘", "mesh_1km": "m-tama", "lat": 35.6508, "lon": 139.4469},
         {"station_name": "永山", "mesh_1km": "m-tama", "lat": 35.6302, "lon": 139.4479},
         {"station_name": "多摩センター", "mesh_1km": "m-tama", "lat": 35.6250, "lon": 139.4243},
@@ -39,6 +39,8 @@ GAZ = Gazetteer(
         {"station_name": "秋川", "mesh_1km": "m-akiruno", "lat": 35.7275, "lon": 139.2850},
         {"station_name": "青梅", "mesh_1km": "m-ome", "lat": 35.7905, "lon": 139.2583},
         {"station_name": "町田", "mesh_1km": "m-machida", "lat": 35.5422, "lon": 139.4455},
+        {"station_name": "高尾", "mesh_1km": "m-hachioji", "lat": 35.6420, "lon": 139.2826},
+        {"station_name": "高尾山口", "mesh_1km": "m-hachioji", "lat": 35.6324, "lon": 139.2700},
     ],
     postal=[
         {"postal_code": "1130032", "muni_code": "13105", "city": "文京区", "town": "弥生"},
@@ -89,7 +91,7 @@ def _load(name: str) -> tuple[list[Clue], list[Post], dict[str, Any]]:
     return clues, posts, doc
 
 
-@pytest.mark.parametrize("name", ["demo_observations.json", "demo_aoi.json", "demo_tama.json"])
+@pytest.mark.parametrize("name", ["demo_observations.json", "demo_aoi.json", "demo_tkb2613.json"])
 def test_infer_gives_the_expected_values(name: str) -> None:
     clues, posts, doc = _load(name)
 
@@ -136,8 +138,8 @@ def test_aoi_city_needs_both_the_trash_bag_and_the_distance_hint() -> None:
         assert not {"home_city", "home_district", "station", "school"} & got, clue_type
 
 
-def test_tama_evidence_and_plan() -> None:
-    clues, posts, doc = _load("demo_tama.json")
+def test_tkb2613_evidence_and_plan() -> None:
+    clues, posts, doc = _load("demo_tkb2613.json")
 
     got = {c.attribute: c for c in infer(clues, posts, GAZ)}
     proposal = plan(clues, posts, GAZ)
@@ -150,10 +152,9 @@ def test_tama_evidence_and_plan() -> None:
     assert set(proposal.broken) == set(doc["expected_plan"]["broken"])
 
 
-def test_tama_city_needs_the_trash_bag_and_the_machida_hint() -> None:
-    clues, posts, _ = _load("demo_tama.json")
-    # 「青梅まで遠い」は西側の市を外す裏付けで、それだけを消しても多摩市は決まる
-    needed = [c.post_id for c in clues if c.value == "町田" or c.type.value == "local_item"]
+def test_tkb2613_city_needs_the_trash_bag_and_the_kichijoji_hint() -> None:
+    clues, posts, _ = _load("demo_tkb2613.json")
+    needed = [c.post_id for c in clues if c.value == "吉祥寺" or c.type.value == "local_item"]
     for gone in needed:
         kept = [c for c in clues if c.post_id != gone]
 
