@@ -105,6 +105,17 @@ export const messages = {
     unknown: "不明",
     unknownNote: "選んだ投稿を消すと、ここは推定できなくなります",
   },
+  reveal: {
+    /** 診断のあと、画面の一番上に大きく出す見出し */
+    heading: "ぜんぶ、みえてる",
+    conclusionsLabel: "あなたについて推定できたこと",
+    evidenceLabel: "見つかった証拠",
+    /** 推定の根拠になった証拠に付ける印 */
+    used: "決め手",
+    photoAlt: (type: string, value: string) => `${type}「${value}」が写った箇所`,
+    fromText: "本文から",
+    count: (clues: number, posts: number) => `${posts} 件の投稿から、手がかりを ${clues} 個`,
+  },
   risky: {
     heading: "まーだだよ",
     lead: "この投稿を消すと、推定が崩れます。選んで「消したらどうなる」を押すと、消したあとの捜査ボードを見られます。実際には消しません。",
