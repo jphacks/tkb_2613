@@ -74,8 +74,8 @@ Python は `common/` の Pydantic モデル（`tkb_common.schemas`）、TypeScri
 手がかりは「見えたもの・書いてあるもの」の観測だけにする。「この人は看護師」「最寄りは〇〇駅」のような推理は手がかりに入れない（推理は engine の推理ルールで行う）。
 
 - `type`：
-  - 写真から：station_sign（駅名標・駅名の文字。一部でも）/ rail_view（窓の外のホーム・線路・電車。駅名なしでも）/ reflection（瞳・窓ガラス・鏡などに映ったもの。何が映っているかを value に）/ shop（店名・看板・ロゴ）/ landmark（目立つ建物・橋・塔など）/ address_text / postal_code（一部でも）/ phone（一部でも）/ plate / uniform（制服・作業着・作業靴・社員証・名札）/ face / key / code（QRコード・バーコード。読み取れた中身も value に）/ local_item（自治体の指定ゴミ袋など地域が限られる品物。色・容量・枚数・値段を value に）/ notice（ゴミ集積所の収集曜日などの掲示）
-  - 写真と本文の両方から：name_text（ケーキのプレート、名札、宛名、返信での呼びかけなど）/ org_text（会社・学校・団体の名前やロゴ）/ handle_text（SNSのユーザー名・URL）/ place_text（地名・駅名・店名）
+  - 写真から：station_sign（駅名標・駅名の文字。一部でも）/ rail_view（窓の外のホーム・線路・電車。駅名なしでも）/ reflection（瞳・窓ガラス・鏡などに映ったもの。何が映っているかを value に）/ shop（店名・看板・ロゴ）/ landmark（目立つ建物・橋・塔など）/ address_text / postal_code（一部でも）/ phone（一部でも）/ plate / uniform（制服・作業着・作業靴・社員証・名札）/ face / key / code（QRコード・バーコード。読み取れた中身も value に）/ notice（ゴミ集積所の収集曜日などの掲示）
+  - 写真と本文の両方から：name_text（ケーキのプレート、名札、宛名、返信での呼びかけなど）/ org_text（会社・学校・団体の名前やロゴ）/ handle_text（SNSのユーザー名・URL）/ place_text（地名・駅名・店名）/ local_item（自治体の指定ゴミ袋など地域が限られる品物。色・容量・枚数・値段を value に）
   - 本文から：age_text（「25歳になりました」「誕生日」など）/ routine_text（「夜勤明け」「電車混んでる」「毎週火曜のジム」など生活の決まり）/ relation_text（家族・同居人・ペット）
 - `value`：一部しか読めない文字は、読めた所だけを入れ、読めない桁や文字は x にする（例：郵便番号 `270-01xx`）
 - `image_index`：写真から出た手がかり（source が ocr / vlm）だけに入れる。本文から出たもの（text / meta）は null

@@ -31,7 +31,11 @@ age・occupation・active_time・routine は16項目にない。
   本文を、R4 の市区町村にある大学の時間割と照らす
 - R8 名前：name_text（ケーキのプレート、宛名、返信での呼びかけなど）を、敬称や読めない字を
   落としてまとめる
-- R9 年齢：age_text の「〇歳」。誕生日にお酒（「堂々と頼めた🍺」など）なら 20歳。誕生日は投稿日
+- R9 年齢：age_text の「〇歳」。誕生日にお酒（「堂々と頼めた🍺」など）なら 20歳。成人式の準備なら
+  19〜20歳。誕生日は投稿日
+
+R2・R3、R7 の時間割、R9 の誕生日は投稿の時刻を使うので、投稿の日付が TIME_MIN_DAYS 日以上に
+散らばっているときだけ使う（同じ日にまとめて投稿したアカウントでは時刻が生活を表さない）。
 - R10 仕事：夜勤などの生活の決まりと、作業靴・白衣などの身なり
 
 ルールを足すときは rule_rN(clues, posts, ...) -> list[Conclusion] を書き、infer に並べる。
@@ -58,6 +62,9 @@ R2_MIN_POSTS = 2
 # R3：「同じ曜日の同じ時間帯」とみなす幅（±時間）と、要る投稿の数
 R3_WINDOW_HOURS = 1.0
 R3_MIN_POSTS = 3
+# 投稿の時刻を推理に使うのは、投稿の日付が TIME_MIN_DAYS 日以上に散らばっているときだけ。
+# デモ用アカウントのように同じ日にまとめて投稿すると、時刻は生活のリズムを表さない
+TIME_MIN_DAYS = 3
 # R8：名前の手がかりの確からしさを 1 − ∏(1 − c) で合わせたとき、名前とみなす下限
 R8_MIN_CONFIDENCE = 0.7
 # R7：「〇限」の投稿が、その時限の始まりより何時間前までなら合うとみなすか（休み時間の投稿）
@@ -161,7 +168,7 @@ def rule_r1(
 def rule_r2(clues: Sequence[Clue], posts: Sequence[Post], r1: list[Conclusion]) -> list[Conclusion]:
     """R2 行動時間：平日のどの時間帯に R1 の駅のまわりにいるか（active_time）。"""
     station = next((c for c in r1 if c.attribute == "station"), None)
-    if station is None:
+    if station is None or not timestamps_usable(posts):
         return []
     location_posts = {c.post_id for c in clues if c.type in LOCATION_TYPES}
     weekday = [p for p in posts if p.post_id in location_posts and _local(p).weekday() < 5]
@@ -186,7 +193,7 @@ def rule_r3(clues: Sequence[Clue], posts: Sequence[Post]) -> list[Conclusion]:
     conclusions: list[Conclusion] = []
     routine = {i: c for i, c in enumerate(clues) if c.type is ClueType.ROUTINE_TEXT}
 
-    for day in range(7):
+    for day in range(7) if timestamps_usable(posts) else ():
         same_day = [p for p in posts if _local(p).weekday() == day]
         group = _largest_cluster(same_day, R3_WINDOW_HOURS)
         if len(group) < R3_MIN_POSTS:
@@ -316,7 +323,9 @@ def rule_r5(clues: Sequence[Clue], gaz: Gazetteer, r4: list[Conclusion]) -> list
     city = r4[0].value
     in_city = [a for a in gaz.knowledge.collection_areas if a.city == city]
     for i, c in enumerate(clues):
-        if c.type is not ClueType.NOTICE or not (days := _burnable_days(c.value)):
+        if c.type not in {ClueType.NOTICE, ClueType.ROUTINE_TEXT} or not (
+            days := _burnable_days(c.value)
+        ):
             continue
         label = "・".join(d for d in WEEKDAYS if d in days)
         candidates = [a for a in in_city if not a.burnable_days or set(a.burnable_days) == days]
@@ -421,8 +430,11 @@ def rule_r7(
         for i, c in texts.items()
         if (m := re.search(r"([1-7１-７])\s*限", c.value)) and c.post_id in times
     ]
-    if not college or not periods:
+    if not college:
         return []
+    if not timestamps_usable(posts):
+        # 投稿の時刻が当てにならなければ、時間割とは照らさない
+        periods = []
     timetables = {u.name: u.periods for u in gaz.knowledge.universities}
     names = {s["name"] for s in gaz.schools if s["kind"] == "大学" and s["city"] == city}
     names |= {u.name for u in gaz.knowledge.universities if u.city == city}
@@ -441,7 +453,9 @@ def rule_r7(
     if len(candidates) == 1:
         campus = next((u.campus for u in gaz.knowledge.universities if u.name == candidates[0]), "")
         value = f"{candidates[0]} {campus}".strip()
-        note = f"{city}の大学で時間割が合うのはここだけ"
+        note = (
+            f"{city}の大学で時間割が合うのはここだけ" if periods else f"{city}にある大学はここだけ"
+        )
     else:
         value = f"{city}にある大学（{len(candidates)}校のどれか）"
         note = "「大学」と時限の投稿。候補：" + "・".join(candidates[:5])
@@ -502,7 +516,7 @@ def rule_r8(clues: Sequence[Clue]) -> list[Conclusion]:
 
 
 def rule_r9(clues: Sequence[Clue], posts: Sequence[Post]) -> list[Conclusion]:
-    """R9 年齢（age）：「〇歳」、またはお酒が解禁された誕生日。誕生日は投稿日。"""
+    """R9 年齢（age）：「〇歳」、お酒が解禁された誕生日、成人式の準備。誕生日は投稿日。"""
     by_id = {p.post_id: p for p in posts}
     for i, c in enumerate(clues):
         if c.type is not ClueType.AGE_TEXT:
@@ -514,9 +528,11 @@ def rule_r9(clues: Sequence[Clue], posts: Sequence[Post]) -> list[Conclusion]:
             age, note = f"{m[1]}歳", "本文の年齢"
         elif birthday and ALCOHOL.search(text):
             age, note = "20歳", "誕生日にお酒を頼めるようになった"
+        elif COMING_OF_AGE.search(text):
+            age, note = "19〜20歳", "成人式（二十歳のつどい）の準備"
         else:
             continue
-        if birthday and post is not None:
+        if birthday and post is not None and timestamps_usable(posts):
             t = _local(post)
             age += f"（誕生日は{t.month}月{t.day}日ごろ）"
             note += "。誕生日は投稿日"
@@ -571,6 +587,7 @@ POSTAL_IN_TEXT = re.compile(r"(\d{3})-?(\d{4})")
 BLOCK_IN_ADDRESS = re.compile(r"[0-9０-９一二三四五六七八九十]+丁目")
 BIRTHDAY = re.compile(r"誕生日|歳になりました|バースデー|birthday", re.IGNORECASE)
 ALCOHOL = re.compile(r"🍺|🍻|お酒|ビール|酒|飲める|解禁|堂々と")
+COMING_OF_AGE = re.compile(r"成人式|二十歳のつどい|はたちのつどい|二十歳を祝う|前撮り")
 SHIFT = re.compile(r"夜勤|早番|遅番|日勤|シフト")
 # 身なり → 仕事の種類
 OUTFITS = [
@@ -710,6 +727,11 @@ def _vote_station(
     if len(winners) != 1:
         return None
     return winners[0], set(votes[winners[0]]), used_area
+
+
+def timestamps_usable(posts: Sequence[Post]) -> bool:
+    """投稿の日付が TIME_MIN_DAYS 日以上に散らばっていれば、時刻を推理に使ってよい。"""
+    return len({_local(p).date() for p in posts}) >= TIME_MIN_DAYS
 
 
 def _local(post: Post) -> datetime:

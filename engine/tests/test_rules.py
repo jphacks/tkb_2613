@@ -474,8 +474,12 @@ def test_r6_block_from_a_barcode_needs_a_known_postal_code() -> None:
     assert rule_r6(tracking, KNOW_GAZ) == []
 
 
+# 手がかりのない投稿。投稿の日付を3日に散らばらせ、時刻を推理に使えるようにする
+OTHER_DAYS = [_post("d1", "2026-10-21 12:00"), _post("d2", "2026-10-23 12:00")]
+
+
 def test_r7_school_needs_the_timetable_to_fit() -> None:
-    posts = [_post("p1", "2026-10-19 08:05"), _post("p2", "2026-10-19 10:41")]
+    posts = [_post("p1", "2026-10-19 08:05"), _post("p2", "2026-10-19 10:41"), *OTHER_DAYS]
     clues = [
         _clue("p0", ClueType.NOTICE, "八王子市 燃やすごみ 水・土"),
         _clue("p1", ClueType.ROUTINE_TEXT, "歩いて大学行く"),
@@ -484,8 +488,14 @@ def test_r7_school_needs_the_timetable_to_fit() -> None:
     r4 = rule_r4(clues, KNOW_GAZ)
     school = rule_r7(clues, posts, KNOW_GAZ, r4)
     assert [c.value for c in school] == ["X大学 本校（歩いて通える所に住んでいる）"]
-    late = [_post("p1", "2026-10-19 08:05"), _post("p2", "2026-10-19 13:30")]
+    late = [_post("p1", "2026-10-19 08:05"), _post("p2", "2026-10-19 13:30"), *OTHER_DAYS]
     assert rule_r7(clues, late, KNOW_GAZ, r4) == []
+    # 同じ日にまとめて投稿したなら時刻は使わず、市区町村の大学だけで決める
+    same_day = [_post("p1", "2026-10-19 08:05"), _post("p2", "2026-10-19 13:30")]
+    school = rule_r7(clues, same_day, KNOW_GAZ, r4)
+    assert [(c.value, c.note) for c in school] == [
+        ("X大学 本校（歩いて通える所に住んでいる）", "八王子市にある大学はここだけ")
+    ]
 
 
 def test_r7_school_from_a_name_in_a_photo() -> None:
@@ -532,9 +542,13 @@ def test_r8_name_combines_readings_and_drops_honorifics() -> None:
 
 
 def test_r9_age_from_a_number_or_a_first_legal_drink() -> None:
-    posts = [_post("p1", "2026-10-22 21:30")]
+    posts = [_post("p1", "2026-10-22 21:30"), *OTHER_DAYS]
     drink = [_clue("p1", ClueType.AGE_TEXT, "誕生日、やっと堂々と頼めた🍺")]
     assert [c.value for c in rule_r9(drink, posts)] == ["20歳（誕生日は10月22日ごろ）"]
+    # 同じ日にまとめて投稿したなら、投稿日を誕生日にしない
+    assert [c.value for c in rule_r9(drink, posts[:1])] == ["20歳"]
+    seijin = [_clue("p1", ClueType.AGE_TEXT, "成人式の前撮り")]
+    assert [c.value for c in rule_r9(seijin, posts)] == ["19〜20歳"]
     plain = [_clue("p1", ClueType.AGE_TEXT, "30歳の抱負")]
     assert [c.value for c in rule_r9(plain, posts)] == ["30歳"]
     assert rule_r9([_clue("p1", ClueType.AGE_TEXT, "誕生日")], posts) == []
