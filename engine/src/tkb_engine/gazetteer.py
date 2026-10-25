@@ -8,6 +8,7 @@
 
 import dataclasses
 import json
+import math
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -99,7 +100,7 @@ class Gazetteer:
     - muni_meshes：区市町村コード → その区市町村にかかる 1km メッシュの集合
     """
 
-    stations: list[dict[str, str]] = field(default_factory=list)
+    stations: list[dict[str, Any]] = field(default_factory=list)
     postal: list[dict[str, str]] = field(default_factory=list)
     muni_meshes: dict[str, set[str]] = field(default_factory=dict)
     knowledge: Knowledge = field(default_factory=Knowledge)
@@ -156,6 +157,28 @@ class Gazetteer:
         pattern = _pattern(value.strip().removesuffix("駅"))
         return {s["station_name"] for s in self.stations if pattern.fullmatch(s["station_name"])}
 
+    def station_point(self, name: str) -> tuple[float, float] | None:
+        """駅（同じ名前の駅をまとめた中心）の緯度経度。同じ名前の別の場所の駅がある
+        （中心から STATION_SPREAD_KM より離れた行がある）か、緯度経度がなければ None。"""
+        rows = [s for s in self.stations if s["station_name"] == name and s.get("lat") is not None]
+        return _center(rows, STATION_SPREAD_KM)
+
+    def city_point(self, city: str) -> tuple[float, float] | None:
+        """市区町村の中にある駅の中心（市区町村の代わりの位置）。"""
+        meshes = set().union(*(self.muni_meshes.get(m, set()) for m in self.city_munis(city)))
+        rows = [s for s in self.stations if s["mesh_1km"] in meshes and s.get("lat") is not None]
+        return _center(rows, None)
+
+    def stations_named_in(self, text: str) -> set[str]:
+        """文字の中に出てくる駅名。2文字以上で、ほかに見つかった駅名の一部になっているものは落とす
+        （「東中野」があれば「中野」は落とす）。"""
+        found = {
+            s["station_name"]
+            for s in self.stations
+            if len(s["station_name"]) >= 2 and s["station_name"] in text
+        }
+        return {n for n in found if not any(n != m and n in m for m in found)}
+
     def stations_in(self, muni_codes: set[str]) -> set[str]:
         """区市町村のメッシュにある駅名。"""
         meshes = set().union(*(self.muni_meshes.get(m, set()) for m in muni_codes))
@@ -191,6 +214,34 @@ def school_name_variants(name: str) -> set[str]:
             if name.startswith(("東京都立", "都立")):
                 variants.add("都立" + stem + short)
     return {v for v in variants if len(v) > 2}
+
+
+# 同じ名前の駅をまとめるとき、中心からこれより離れた行があれば別の場所の駅とみなす
+STATION_SPREAD_KM = 3.0
+
+
+def distance_km(a: tuple[float, float], b: tuple[float, float]) -> float:
+    """2点（緯度, 経度）の距離（km）。"""
+    lat1, lon1, lat2, lon2 = map(math.radians, (*a, *b))
+    h = (
+        math.sin((lat2 - lat1) / 2) ** 2
+        + math.cos(lat1) * math.cos(lat2) * math.sin((lon2 - lon1) / 2) ** 2
+    )
+    return 2 * 6371 * math.asin(math.sqrt(h))
+
+
+def _center(rows: list[dict[str, Any]], spread_km: float | None) -> tuple[float, float] | None:
+    if not rows:
+        return None
+    center = (
+        sum(float(r["lat"]) for r in rows) / len(rows),
+        sum(float(r["lon"]) for r in rows) / len(rows),
+    )
+    if spread_km is not None and any(
+        distance_km(center, (float(r["lat"]), float(r["lon"]))) > spread_km for r in rows
+    ):
+        return None
+    return center
 
 
 def _pattern(value: str) -> re.Pattern[str]:

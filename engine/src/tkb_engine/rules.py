@@ -22,8 +22,8 @@ age・occupation・active_time・routine は16項目にない。
 - R2 行動時間：R1 で駅が決まったとき、場所の手がかりがある平日の投稿が、同じ時間帯に
   R2_MIN_POSTS 件以上
 - R3 留守の時間：同じ曜日・同じ時間帯の投稿が R3_MIN_POSTS 件以上、または曜日を含む routine_text
-- R4 市区町村：指定ゴミ袋（local_item）の色・容量・枚数・値段を知識表と照らす。
-  ゴミ集積所などの掲示（notice）・品物に書かれた市区町村名も使う
+- R4 市区町村：指定ゴミ袋（local_item）の容量と1枚の値段で候補を絞り、「〇〇まで遠い」のような
+  距離の手がかりを駅の位置と照らして1つに決める。掲示・品物に書かれた市区町村名も使う
 - R5 収集地区：R4 の市区町村で、集積所の掲示（notice）の燃やすごみの曜日が合う収集地区。
   郵便物・住所表示の町名でさらに絞る
 - R6 区画：郵便物のカスタマバーコードの中身（code）や住所表示（address_text）の郵便番号・町名と番地
@@ -47,7 +47,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from tkb_common.schemas import Clue, ClueType, Post
-from tkb_engine.gazetteer import CollectionArea, Gazetteer, TrashBag
+from tkb_engine.gazetteer import CollectionArea, Gazetteer, TrashBag, distance_km
 
 # ---- しきい値（仮の値） ----
 # R1：最寄り駅を決めるのに要る、支持する手がかりの数（駅名＋区を絞った住所・郵便番号）
@@ -214,22 +214,95 @@ def rule_r3(clues: Sequence[Clue], posts: Sequence[Post]) -> list[Conclusion]:
     return conclusions
 
 
-def rule_r4(clues: Sequence[Clue], gaz: Gazetteer) -> list[Conclusion]:
-    """R4 市区町村（home_city）：指定ゴミ袋と、掲示・品物に書かれた市区町村名。"""
-    votes: dict[str, set[int]] = {}
+def rule_r4(clues: Sequence[Clue], gaz: Gazetteer, posts: Sequence[Post] = ()) -> list[Conclusion]:
+    """R4 市区町村（home_city）。手がかりごとに市区町村の候補を絞り、1つに決まれば結論にする。
+
+    - 指定ゴミ袋（local_item）：容量と1枚の値段が合う市区町村（ふつうは複数）
+    - 掲示・品物に書かれた市区町村名
+    - 距離の手がかり：「中野まで遠くてだるい」「新宿まですぐ」のような、駅名と遠い・近いの組。
+      候補の市区町村から、その駅までの距離が合わないものを外す。これ単体では市区町村は決まらない
+    """
+    texts = {p.post_id: p.text for p in posts}
+    candidates: set[str] | None = None
+    evidence: set[int] = set()
+    notes: list[str] = []
     for i, c in enumerate(clues):
-        if c.type is ClueType.LOCAL_ITEM:
-            cities = {b.city for b in _matching_bags(c.value, gaz)}
-            if len(cities) == 1:
-                votes.setdefault(next(iter(cities)), set()).add(i)
-        if c.type in {ClueType.LOCAL_ITEM, ClueType.NOTICE}:
-            for city in gaz.cities_in(c.value):
-                votes.setdefault(city, set()).add(i)
-    if len(votes) != 1:
+        found: set[str] = set()
+        if c.type is ClueType.LOCAL_ITEM and (bags := _matching_bags(c.value, gaz)):
+            found = {b.city for b in bags}
+            notes.append(
+                f"指定ゴミ袋（{bags[0].liters}L 1枚{bags[0].price:g}円）で{_cities(found)}"
+            )
+        if c.type in {ClueType.LOCAL_ITEM, ClueType.NOTICE} and (named := gaz.cities_in(c.value)):
+            found = named
+            notes.append(f"{_cities(named)}の文字")
+        if not found:
+            continue
+        candidates = found if candidates is None else candidates & found
+        evidence.add(i)
+    if not candidates:
         # 手がかりがないか、市区町村が食い違う
         return []
-    city, evidence = next(iter(votes.items()))
-    return [Conclusion("R4", "home_city", city, sorted(evidence), "指定ゴミ袋や掲示の市区町村")]
+    for i, station, far in _distance_hints(clues, gaz, texts):
+        kept, notes_here = _by_distance(candidates, station, far, gaz)
+        if kept and kept != candidates:
+            candidates = kept
+            evidence.add(i)
+            notes.append(notes_here)
+    if len(candidates) != 1:
+        return []
+    city = next(iter(candidates))
+    return [Conclusion("R4", "home_city", city, sorted(evidence), "。".join(notes))]
+
+
+# 距離の手がかり：遠い・近いの言葉と、遠い・近いとみなす距離（市区町村の駅の中心から、km）
+FAR_WORDS = re.compile(r"遠い|遠くて|遠すぎ|遠いし|時間かかる|乗り換え多")
+NEAR_WORDS = re.compile(r"近い|近くて|すぐ着|すぐ行ける|歩いて行ける|チャリで行ける")
+FAR_KM = 20.0
+NEAR_KM = 12.0
+DISTANCE_TYPES = {ClueType.PLACE_TEXT, ClueType.ROUTINE_TEXT}
+
+
+def _distance_hints(
+    clues: Sequence[Clue], gaz: Gazetteer, texts: dict[str, str]
+) -> list[tuple[int, str, bool]]:
+    """(手がかりの番号, 駅名, 遠いなら True)。遠い・近いは手がかりと投稿の本文から読む。"""
+    hints = []
+    for i, c in enumerate(clues):
+        if c.type not in DISTANCE_TYPES:
+            continue
+        text = c.value + " " + texts.get(c.post_id, "")
+        far, near = FAR_WORDS.search(text), NEAR_WORDS.search(text)
+        if bool(far) == bool(near):
+            continue
+        for station in gaz.stations_named_in(c.value):
+            hints.append((i, station, bool(far)))
+    return hints
+
+
+def _by_distance(
+    candidates: set[str], station: str, far: bool, gaz: Gazetteer
+) -> tuple[set[str], str]:
+    """駅までの距離が遠い・近いに合う候補と、そのメモ。距離が測れなければ候補をそのまま返す。"""
+    point = gaz.station_point(station)
+    if point is None:
+        return candidates, ""
+    distances = {}
+    for city in candidates:
+        center = gaz.city_point(city)
+        if center is None:
+            return candidates, ""
+        distances[city] = distance_km(center, point)
+    kept = {c for c, d in distances.items() if (d > FAR_KM if far else d < NEAR_KM)}
+    word = "遠い" if far else "近い"
+    detail = "、".join(
+        f"{c}から約{d:.0f}km" for c, d in sorted(distances.items(), key=lambda x: x[1])
+    )
+    return kept, f"{station}まで{word}（{detail}）ので{_cities(kept)}"
+
+
+def _cities(cities: set[str]) -> str:
+    return "・".join(sorted(cities))
 
 
 def rule_r5(clues: Sequence[Clue], gaz: Gazetteer, r4: list[Conclusion]) -> list[Conclusion]:
@@ -477,7 +550,7 @@ def rule_r10(clues: Sequence[Clue]) -> list[Conclusion]:
 
 def infer(clues: Sequence[Clue], posts: Sequence[Post], gaz: Gazetteer) -> list[Conclusion]:
     """すべてのルールを順に当てはめる。R1・R5・R7 は R4 の、R2 は R1 の結論を使う。"""
-    r4 = rule_r4(clues, gaz)
+    r4 = rule_r4(clues, gaz, posts)
     r5 = rule_r5(clues, gaz, r4)
     r1 = rule_r1(clues, gaz, [*r4, *r5])
     return [

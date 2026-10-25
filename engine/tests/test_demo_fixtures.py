@@ -21,8 +21,10 @@ GAZ = Gazetteer(
     stations=[
         {"station_name": "根津", "mesh_1km": "m-bunkyo"},
         {"station_name": "根岸", "mesh_1km": "m-taito"},
-        {"station_name": "八王子", "mesh_1km": "m-hachioji"},
-        {"station_name": "京王八王子", "mesh_1km": "m-hachioji"},
+        {"station_name": "八王子", "mesh_1km": "m-hachioji", "lat": 35.6558, "lon": 139.3389},
+        {"station_name": "京王八王子", "mesh_1km": "m-hachioji", "lat": 35.6575, "lon": 139.3437},
+        {"station_name": "三鷹", "mesh_1km": "m-mitaka", "lat": 35.7027, "lon": 139.5607},
+        {"station_name": "中野", "mesh_1km": "m-nakano", "lat": 35.7056, "lon": 139.6659},
         {"station_name": "王子", "mesh_1km": "m-kita"},
     ],
     postal=[
@@ -30,8 +32,16 @@ GAZ = Gazetteer(
         {"postal_code": "1920083", "muni_code": "13201", "city": "八王子市", "town": "旭町"},
         {"postal_code": "1920082", "muni_code": "13201", "city": "八王子市", "town": "東町"},
         {"postal_code": "1140002", "muni_code": "13117", "city": "北区", "town": "王子"},
+        {"postal_code": "1810013", "muni_code": "13204", "city": "三鷹市", "town": "下連雀"},
+        {"postal_code": "1640001", "muni_code": "13114", "city": "中野区", "town": "中野"},
     ],
-    muni_meshes={"13105": {"m-bunkyo"}, "13201": {"m-hachioji"}, "13117": {"m-kita"}},
+    muni_meshes={
+        "13105": {"m-bunkyo"},
+        "13201": {"m-hachioji"},
+        "13117": {"m-kita"},
+        "13204": {"m-mitaka"},
+        "13114": {"m-nakano"},
+    },
     knowledge=Knowledge.load(),
     schools=[
         {"name": "中央大学", "kind": "大学", "city": "八王子市"},
@@ -72,23 +82,24 @@ def test_aoi_evidence_matches_the_expected_clues() -> None:
         assert got[e["attribute"]].clue_indices == sorted(e["clue_indices"]), e["attribute"]
 
 
-def test_aoi_plan_deletes_the_cafe_window_and_the_shipping_label() -> None:
+def test_aoi_plan_deletes_the_trash_bag_and_the_mail() -> None:
     clues, posts, doc = _load("demo_aoi.json")
 
     proposal = plan(clues, posts, GAZ)
 
     assert set(proposal.delete) == set(doc["expected_plan"]["delete"])
     assert set(proposal.broken) == set(doc["expected_plan"]["broken"])
-    # 市と収集地区までは残る（約4万世帯に戻る）
-    assert {"home_city", "home_district"} <= {c.attribute for c in proposal.after}
+    # 残るのは名前と年齢だけで、住んでいる所はわからなくなる
+    assert {c.attribute for c in proposal.after} == {"name", "age"}
 
 
-def test_aoi_without_the_trash_bag_still_finds_the_city_from_the_notice() -> None:
+def test_aoi_city_needs_both_the_trash_bag_and_the_distance_hint() -> None:
     clues, posts, _ = _load("demo_aoi.json")
-    bag = next(c.post_id for c in clues if c.type.value == "local_item")
-    kept = [c for c in clues if c.post_id != bag]
+    for clue_type in ("local_item", "place_text"):
+        gone = next(c.post_id for c in clues if c.type.value == clue_type)
+        kept = [c for c in clues if c.post_id != gone]
 
-    got = {c.attribute: c.value for c in infer(kept, posts, GAZ)}
+        got = {c.attribute for c in infer(kept, posts, GAZ)}
 
-    assert got["home_city"] == "八王子市"
-    assert got["station"] == "八王子駅"
+        # どちらか片方だけでは八王子市に決まらず、市で絞る駅・収集地区・学校も出ない
+        assert not {"home_city", "home_district", "station", "school"} & got, clue_type

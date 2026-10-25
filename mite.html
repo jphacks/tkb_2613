@@ -162,64 +162,70 @@ button:focus-visible{outline:3px solid var(--seeker);outline-offset:2px}
 const RM = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 const rungs = [
-  {k:'日本全国',      n:55000000},
-  {k:'多摩地域',      n:1800000},
-  {k:'八王子市',      n:290000},
-  {k:'収集地区',      n:40000},
-  {k:'八王子駅 徒歩圏',n:2800},
-  {k:'この区画',      n:300},
+  {k:'日本全国',          n:55000000},
+  {k:'多摩地域',          n:1800000},
+  {k:'八王子市か三鷹市',  n:380000},
+  {k:'八王子市',          n:290000},
+  {k:'燃やすごみ月・木の地区', n:100000},
+  {k:'八王子駅 徒歩圏',    n:2800},
+  {k:'この区画',          n:300},
 ];
 
 const posts = {
   p1:{av:'？',meta:'火 19:40',txt:'ゴミ袋、10枚でこの値段か…地味に効くな',ph:'写真：指定収集袋（大40L・10枚750円）'},
   p2:{av:'？',meta:'木 8:12', txt:'ゴミ出し間に合わんかった、もう回収済みだった',ph:'写真：集積所の看板（収集曜日）'},
   p3:{av:'？',meta:'月 8:05', txt:'今日は歩いて大学行くか'},
-  p4:{av:'？',meta:'月 10:41',txt:'2限ねむい',ph:'写真：教室のスライド（隅に大学のロゴ）'},
+  p4:{av:'？',meta:'月 10:41',txt:'2限ねむい'},
   p5:{av:'？',meta:'土 14:20',txt:'バイト前に一杯。窓の外、今日もいい天気',ph:'写真：カフェの窓（ガラスに向かいの看板が反射）'},
   p6:{av:'？',meta:'平日 よく同じ時間帯',txt:'ついた / ただいま（短い投稿が何度も）'},
   p7:{av:'？',meta:'日 15:02',txt:'ポストにまたDM。宛名は消しといた',ph:'写真：届いた封筒（宛名は塗った、バーコードはそのまま）'},
   p8:{av:'？',meta:'木 21:30',txt:'誕生日、やっと堂々と頼めた🍺',reply:'友達：あおいおめ〜！🎉'},
+  p9:{av:'？',meta:'火 22:05',txt:'サークルの集まり中野とか、遠くてだるい…'},
   n1:{av:'？',meta:'金 23:10',txt:'レポート終わらん'},
   n2:{av:'？',meta:'日 17:00',txt:'空きれい'},
 };
-const order = ['p1','p2','p3','p4','p5','n1','p6','p7','p8','n2'];
+const order = ['p1','p2','p3','p4','p5','n1','p6','p9','p7','p8','n2'];
 
 const steps = [
   {eye:'20件の投稿', line:'どれも、ひとつずつは何でもない投稿です。重ねてみましょう。', lvl:0, ev:[]},
   {eye:'手がかり①　ゴミ袋',
-   chips:[{t:'指定ゴミ袋',v:'大(40L)・10枚750円'},{t:'投稿',v:'「10枚でこの値段か…」'}],
-   line:'ゴミ袋が有料なのは、多摩地域の市町村。40Lが1枚75円なのは八王子市と三鷹市だけで、袋には八王子市の文字。',
-   know:'東京都 → 八王子市', lvl:2, ev:['p1']},
-  {eye:'手がかり②　集積所の看板',
+   chips:[{t:'指定ゴミ袋',v:'大(40L)・10枚750円'},{t:'1枚あたり',v:'75円'}],
+   line:'ゴミ袋が有料なのは多摩地域の市町村。40Lが1枚75円になるのは、八王子市と三鷹市だけです。',
+   know:'東京都 → 八王子市か三鷹市', lvl:2, ev:['p1']},
+  {eye:'手がかり②　ぼやき',
+   chips:[{t:'投稿',v:'「中野とか、遠くてだるい…」'},{t:'地図',v:'中野駅まで 三鷹から約10km・八王子から約30km'}],
+   line:'それだけなら、ただのぼやき。でも三鷹市に住んでいたら、中野はすぐそこです。',
+   know:'三鷹市ではない → 八王子市', lvl:3, ev:['p9']},
+  {eye:'手がかり③　集積所の看板',
    chips:[{t:'看板',v:'燃やすごみ 月・木'},{t:'知識',v:'曜日の組は地区ごと'}],
    line:'ゴミの収集曜日の組み合わせは、地区ごとに違います。市内20地区のうち、燃やすごみが月・木の地区まで絞れます。',
-   know:'八王子市 → 収集地区', lvl:3, ev:['p2']},
-  {eye:'手がかり③　通学',
-   chips:[{t:'8:05',v:'「歩いて大学行くか」'},{t:'10:41',v:'「2限ねむい」＋教室の写真'}],
-   line:'2限の教室の写真。スライドの隅に、大学のロゴが写っています。',
-   know:'中央大学（八王子市）の学生', lvl:3, ev:['p3','p4']},
-  {eye:'手がかり④　窓の外',
-   chips:[{t:'カフェの写真',v:'窓際の一杯'},{t:'ガラスの反射',v:'向かいの看板'}],
-   line:'窓ガラスに、向かいの看板が映っています。この店は、ある駅の目の前。',
-   know:'収集地区 ∩ 4.5km圏 → 最寄りは八王子駅', lvl:4, ev:['p5']},
-  {eye:'手がかり⑤　いつもの時間',
+   know:'八王子市 → 燃やすごみが月・木の地区', lvl:4, ev:['p2']},
+  {eye:'手がかり④　通学',
+   chips:[{t:'8:05',v:'「歩いて大学行くか」'},{t:'10:41',v:'「2限ねむい」'}],
+   line:'2限に出ている大学生。しかも歩いて通っています。大学は、八王子市の中にあります。',
+   know:'八王子市内の大学に歩いて通う学生', lvl:4, ev:['p3','p4']},
+  {eye:'手がかり⑤　窓の外',
+   chips:[{t:'カフェの写真',v:'窓際の一杯'},{t:'ガラスの反射',v:'向かいの看板「八王子駅前店」'}],
+   line:'窓ガラスに、向かいの看板が映っています。八王子市に住む人が通う、駅の目の前の店。',
+   know:'八王子市 → 最寄りは八王子駅', lvl:5, ev:['p5']},
+  {eye:'手がかり⑥　いつもの時間',
    chips:[{t:'平日',v:'同じ時間帯の短い投稿'},{t:'回数',v:'2回以上'}],
    line:'平日の同じ時間帯に、この駅から何度も。あなたの生活のリズムまで見えています。',
-   know:'八王子駅／平日のこの時間帯', lvl:4, ev:['p6']},
-  {eye:'手がかり⑥　届いた郵便物',
+   know:'八王子駅／平日のこの時間帯', lvl:5, ev:['p6']},
+  {eye:'手がかり⑦　届いた郵便物',
    chips:[{t:'封筒',v:'宛名は塗った'},{t:'でも',v:'バーコードはそのまま'}],
    line:'宛名は隠した。……でも、宛名の下のバーコードには、郵便番号と番地が入っています。',
-   know:'駅の徒歩圏 → この区画', lvl:5, ev:['p7']},
-  {eye:'手がかり⑦　誕生日',
+   know:'駅の徒歩圏 → この区画', lvl:6, ev:['p7']},
+  {eye:'手がかり⑧　誕生日',
    chips:[{t:'投稿',v:'「やっと堂々と頼めた🍺」'},{t:'友達の返信',v:'「あおいおめ〜！」'}],
    line:'本人は、名前を一度も書いていません。書いたのは、お祝いしてくれた友達でした。',
-   know:'名前：アオイ／20歳', lvl:5, ev:['p8']},
+   know:'名前：アオイ／20歳', lvl:6, ev:['p8']},
   {eye:'ここまでの結論', person:true, found:true,
    line:'アオイさん・20歳・八王子市、八王子駅のそば。住所も名前も、自分では一文字も書いていません。',
-   lvl:5, ev:[]},
+   lvl:6, ev:[]},
   {eye:'次の一手', payoff:true,
    line:'全部消す必要はありません。効いているのは、この2件です。',
-   lvl:5, ev:['p5','p7']},
+   lvl:6, ev:['p1','p7']},
 ];
 
 let cur = 0, collapsed = false;
@@ -271,14 +277,14 @@ function renderFeed(){
         <div class="meta">${p.meta}</div>
         <div class="txt">${p.txt}</div>
         ${p.ph?`<div class="ph">${p.ph}</div>`:''}
-        ${p.reply?`<div class="ph">${(id==='p8'&&cur<7)?p.reply.replace('あおい','○○'):p.reply}</div>`:''}
+        ${p.reply?`<div class="ph">${(id==='p8'&&cur<8)?p.reply.replace('あおい','○○'):p.reply}</div>`:''}
       </div></div>`;
   }).join('');
 }
 
 function stageHTML(s){
   if (s.person){
-    const fields = [['名前','アオイ'],['年齢','20歳'],['大学','中央大学（八王子）'],['市','八王子市'],['最寄り','八王子駅・徒歩圏'],['エリア','この区画 約300世帯'],['生活リズム','平日のこの時間帯']];
+    const fields = [['名前','アオイ'],['年齢','20歳'],['大学','八王子市内（歩いて通学）'],['市','八王子市'],['最寄り','八王子駅・徒歩圏'],['エリア','この区画 約300世帯'],['生活リズム','平日のこの時間帯']];
     return `<div class="eyebrow">${s.eye}</div><div class="found">みーつけた</div>`
       + '<div class="dossier">' + fields.map(f=>`<div class="f"><div class="k">${f[0]}</div><div class="v">${f[1]}</div></div>`).join('') + '</div>'
       + `<div class="line">${s.line}</div>`;
@@ -296,13 +302,13 @@ function stageHTML(s){
   if (s.payoff){
     if (!collapsed){
       h += `<div class="chips">
-        <div class="chip"><div class="t">消す①</div><div class="v">届いた郵便物の写真</div></div>
-        <div class="chip"><div class="t">消す②</div><div class="v">カフェの窓の写真</div></div>
+        <div class="chip"><div class="t">消す①</div><div class="v">ゴミ袋の写真</div></div>
+        <div class="chip"><div class="t">消す②</div><div class="v">届いた郵便物の写真</div></div>
       </div>
       <button class="danger" id="del">この2件を消す</button>`;
     } else {
-      h += `<div class="line" style="color:var(--safe)">約300世帯 → 約4万世帯。130倍の人混みに紛れ直せます。</div>
-      <div class="know safe"><span class="dot"></span>一番効いていたのは、何気ない窓の写真でした</div>`;
+      h += `<div class="line" style="color:var(--safe)">約300世帯 → 約5,500万世帯。住んでいる市も、もうわかりません。</div>
+      <div class="know safe"><span class="dot"></span>一番効いていたのは、何気ないゴミ袋の写真でした</div>`;
     }
   }
   return h;
@@ -310,7 +316,7 @@ function stageHTML(s){
 
 let playing = true, timer = null;
 function updatePlay(){ $('#play').textContent = playing ? '⏸ 一時停止' : '▶ 再生'; }
-function dwell(i){ const d = i===0?2200 : i===6?3600 : i===8?4200 : 2800; return RM ? d+1500 : d; }
+function dwell(i){ const d = i===0?2200 : i===2?3600 : i===7?3600 : i===9?4200 : 2800; return RM ? d+1500 : d; }
 
 function schedule(){
   clearTimeout(timer);
@@ -325,13 +331,13 @@ function schedule(){
 function render(){
   const s = steps[cur];
   $('#stage').innerHTML = stageHTML(s);
-  const active = collapsed ? 3 : s.lvl;
+  const active = collapsed ? 0 : s.lvl;
   setNum(rungs[active].n, collapsed);
   renderLadder(active, collapsed);
   renderFeed();
   $('#count').textContent = `${cur+1} / ${steps.length}`;
   const del = $('#del');
-  if (del) del.onclick = ()=>{ deleted.add('p5'); deleted.add('p7'); collapsed=true; playing=false; updatePlay(); render(); };
+  if (del) del.onclick = ()=>{ deleted.add('p1'); deleted.add('p7'); collapsed=true; playing=false; updatePlay(); render(); };
   schedule();
 }
 

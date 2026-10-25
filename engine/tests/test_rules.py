@@ -545,3 +545,49 @@ def test_r10_occupation_needs_a_shift_or_two_outfits() -> None:
     assert rule_r10([boots]) == []
     night = _clue("p2", ClueType.ROUTINE_TEXT, "夜勤明け")
     assert [c.value for c in rule_r10([boots, night])] == ["夜勤のある現場仕事"]
+
+
+DIST_GAZ = Gazetteer(
+    stations=[
+        {"station_name": "八王子", "mesh_1km": "m-h", "lat": 35.6558, "lon": 139.3389},
+        {"station_name": "三鷹", "mesh_1km": "m-m", "lat": 35.7027, "lon": 139.5607},
+        {"station_name": "中野", "mesh_1km": "m-n", "lat": 35.7056, "lon": 139.6659},
+        {"station_name": "東中野", "mesh_1km": "m-n", "lat": 35.7067, "lon": 139.6826},
+    ],
+    postal=[
+        {"postal_code": "1920083", "muni_code": "13201", "city": "八王子市", "town": "旭町"},
+        {"postal_code": "1810013", "muni_code": "13204", "city": "三鷹市", "town": "下連雀"},
+    ],
+    muni_meshes={"13201": {"m-h"}, "13204": {"m-m"}},
+    knowledge=Knowledge(
+        trash_bags=[
+            TrashBag(city="八王子市", liters=40, price=75),
+            TrashBag(city="三鷹市", liters=40, price=75),
+        ]
+    ),
+)
+
+
+def _with_text(post_id: str, text: str) -> Post:
+    return _post(post_id, "2026-10-20 22:05").model_copy(update={"text": text})
+
+
+def test_r4_far_and_near_hints_pick_one_of_the_bag_cities() -> None:
+    bag = _clue("p1", ClueType.LOCAL_ITEM, "指定収集袋 40L 10枚 750円")
+    nakano = _clue("p2", ClueType.PLACE_TEXT, "中野")
+    assert rule_r4([bag], DIST_GAZ) == []
+
+    far = rule_r4([bag, nakano], DIST_GAZ, [_with_text("p2", "中野とか遠くてだるい")])
+    assert [(c.value, c.clue_indices) for c in far] == [("八王子市", [0, 1])]
+    assert "三鷹市から約10km" in far[0].note
+
+    near = rule_r4([bag, nakano], DIST_GAZ, [_with_text("p2", "中野ならすぐ行ける")])
+    assert [c.value for c in near] == ["三鷹市"]
+    # 遠い・近いの言葉がなければ使わない
+    plain = rule_r4([bag, nakano], DIST_GAZ, [_with_text("p2", "中野で飲み")])
+    assert plain == []
+
+
+def test_stations_named_in_prefers_the_longer_name() -> None:
+    assert DIST_GAZ.stations_named_in("東中野まで遠い") == {"東中野"}
+    assert DIST_GAZ.stations_named_in("中野まで遠い") == {"中野"}
