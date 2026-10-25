@@ -4,7 +4,7 @@ import type { Clue } from "@/types/clue";
 import type { Conclusion } from "@/types/diagnose";
 import type { Post } from "@/types/post";
 
-import { cropStyle, identityName, FACE_MIN_CONFIDENCE, pickFace, pickName, pickReveal } from "./reveal";
+import { cropStyle, identityName, FACE_MIN_CONFIDENCE, pickFace, pickName, pickReveal, pickSpotlight, validNameConclusions } from "./reveal";
 
 const POST: Post = {
   post_id: "at://did:plc:xxxx/app.bsky.feed.post/1",
@@ -58,6 +58,51 @@ describe("pickReveal", () => {
 
     expect(picked).toHaveLength(1);
     expect(picked[0].image).toBe(POST.images[0]);
+  });
+});
+
+describe("pickSpotlight", () => {
+  it("puts names and addresses before routine observations", () => {
+    const clues = [clue("routine_text", "夜勤明け"), clue("address_text", "文京区"), clue("name_text", "はるき")];
+    expect(pickSpotlight([POST], clues, [conclusion([0])]).map((p) => p.clue.value)).toEqual([
+      "はるき", "文京区", "夜勤明け",
+    ]);
+  });
+
+  it("shows a face only when the detection confidence meets the existing threshold", () => {
+    const face = (confidence: number) => clue("face", "1人", {
+      image_index: 0, region: [10, 10, 50, 50], source: "vlm", confidence,
+    });
+    expect(pickSpotlight([POST], [face(0.79)], [])).toEqual([]);
+    expect(pickSpotlight([POST], [face(0.8)], [])).toHaveLength(1);
+  });
+
+  it("chooses a photo when the same name also appears in the post text", () => {
+    const clues = [
+      clue("name_text", "はるき", { confidence: 0.99 }),
+      clue("name_text", "はるき", {
+        image_index: 0, region: [10, 10, 50, 50], source: "vlm", confidence: 0.8,
+      }),
+    ];
+    const picked = pickSpotlight([POST], clues, [conclusion([0])]);
+    expect(picked).toHaveLength(1);
+    expect(picked[0].image).toBe(POST.images[0]);
+  });
+
+  it("does not spotlight a number or a name that contradicts the inferred name", () => {
+    const clues = [
+      clue("name_text", "22", { image_index: 0, region: [10, 10, 50, 50], source: "vlm" }),
+      clue("name_text", "別人", { image_index: 0, region: [10, 10, 50, 50], source: "vlm" }),
+      clue("name_text", "内藤大貴"),
+    ];
+    const inferred = { ...conclusion([2]), attribute: "full_name", value: "内藤大貴" };
+    expect(pickSpotlight([POST], clues, [inferred]).map((item) => item.clue.value)).toEqual(["内藤大貴"]);
+  });
+
+  it("does not spotlight birthday decoration as a name", () => {
+    const clues = [clue("name_text", "HAPPY BIRTHDAY"), clue("name_text", "22")];
+    expect(pickSpotlight([POST], clues, [])).toEqual([]);
+    expect(pickName(clues)).toBeNull();
   });
 });
 
@@ -136,5 +181,11 @@ describe("identityName", () => {
 
   it("falls back to the name written in a post", () => {
     expect(identityName([clue("name_text", "はるき")], [station])).toEqual({ name: "はるき", rest: [station] });
+  });
+
+  it("removes an invalid inferred name from the identity card and board", () => {
+    const invalid = inferred("full_name", "HAPPY BIRTHDAY");
+    expect(identityName([], [invalid, station])).toEqual({ name: null, rest: [station] });
+    expect(validNameConclusions([invalid, station])).toEqual([station]);
   });
 });

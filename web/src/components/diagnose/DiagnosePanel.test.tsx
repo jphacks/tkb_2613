@@ -2,7 +2,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { SessionProvider } from "@/components/session/SessionProvider";
-import { ApiError, diagnose, getSession, simulate } from "@/lib/api";
+import { ApiError, diagnose, getDiagnosis, getSession, simulate } from "@/lib/api";
 import { messages } from "@/lib/messages";
 import type { Clue } from "@/types/clue";
 import type { DiagnoseEvent } from "@/types/diagnose";
@@ -15,7 +15,7 @@ const b = messages.board;
 
 vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
-  return { ...actual, diagnose: vi.fn(), getSession: vi.fn(), simulate: vi.fn() };
+  return { ...actual, diagnose: vi.fn(), getDiagnosis: vi.fn(), getSession: vi.fn(), simulate: vi.fn() };
 });
 
 const ALICE = { handle: "alice.bsky.social", did: "did:plc:abc" };
@@ -56,6 +56,7 @@ function pausedAfterFirst(events: DiagnoseEvent[]) {
 
 async function renderLoggedIn() {
   vi.mocked(getSession).mockResolvedValue(ALICE);
+  vi.mocked(getDiagnosis).mockResolvedValue(null);
   render(
     <SessionProvider>
       <DiagnosePanel />
@@ -68,9 +69,27 @@ afterEach(() => {
   vi.mocked(simulate).mockReset();
   vi.mocked(diagnose).mockReset();
   vi.mocked(getSession).mockReset();
+  vi.mocked(getDiagnosis).mockReset();
 });
 
 describe("DiagnosePanel", () => {
+  it("restores a completed diagnosis from the same login session", async () => {
+    const savedPost = post(1, "保存済みの投稿");
+    const savedClue = clue(savedPost.post_id, "毎週火曜はジム");
+    vi.mocked(getSession).mockResolvedValue(ALICE);
+    vi.mocked(getDiagnosis).mockResolvedValue({
+      posts: [savedPost], clues: [savedClue],
+      conclusions: [{ rule: "R3", attribute: "routine", value: "毎週火曜", clue_indices: [0], note: "" }],
+      plan: { delete: [savedPost.post_id], broken: ["routine"], after: [], posts: [{ post_id: savedPost.post_id, broken: ["routine"] }] },
+    });
+    render(<SessionProvider><DiagnosePanel /></SessionProvider>);
+
+    expect(await screen.findByRole("region", { name: b.heading })).toBeInTheDocument();
+    expect(screen.getAllByText("保存済みの投稿")).toHaveLength(2);
+    expect(screen.getByRole("list", { name: messages.risky.listLabel })).toBeInTheDocument();
+    expect(diagnose).not.toHaveBeenCalled();
+  });
+
   it("shows nothing when logged out", async () => {
     vi.mocked(getSession).mockResolvedValue(null);
     const { container } = render(
@@ -208,6 +227,12 @@ describe("DiagnosePanel", () => {
     stream.release();
 
     const board = await screen.findByRole("region", { name: b.heading });
+    const identity = screen.getByRole("article", { name: messages.identity.label });
+    const evidence = screen.getByRole("list", { name: messages.reveal.evidenceLabel });
+    const restart = screen.getByRole("button", { name: d.start });
+    expect(identity.compareDocumentPosition(evidence) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(evidence.compareDocumentPosition(board) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(board.compareDocumentPosition(restart) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     const [item] = within(within(board).getByRole("list", { name: b.conclusionsLabel })).getAllByRole(
       "listitem",
     );
@@ -220,6 +245,19 @@ describe("DiagnosePanel", () => {
     expect(screen.getByRole("list", { name: messages.post.cluesLabel })).toHaveTextContent("毎週火曜はジム");
     expect(screen.getByText(messages.clues.failed("写真を取得できませんでした"))).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent(d.done(2));
+  });
+
+  it("returns to the top after the result replaces the loading screen", async () => {
+    const scroll = vi.spyOn(window, "scrollTo").mockImplementation(() => {});
+    vi.mocked(diagnose).mockImplementation(async function* () {
+      yield { event: "conclusions", clues: [clue(post(1, "本文").post_id, "本文")], conclusions: [] };
+      yield { event: "done", posts_seen: 1 };
+    });
+
+    fireEvent.click(await renderLoggedIn());
+
+    await vi.waitFor(() => expect(scroll).toHaveBeenCalledWith(0, 0));
+    scroll.mockRestore();
   });
 
   it("says when nothing could be inferred", async () => {

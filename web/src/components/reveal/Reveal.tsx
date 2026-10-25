@@ -1,9 +1,10 @@
 "use client";
 
 import { messages } from "@/lib/messages";
-import { cropStyle, identityName, pickFace, pickReveal, type RevealItem } from "@/lib/reveal";
+import { identityName, pickFace, pickSpotlight, type RevealItem } from "@/lib/reveal";
+import { toPercentBox } from "@/lib/region";
 import { useLoadedSize } from "@/lib/useLoadedSize";
-import type { Clue, ClueType } from "@/types/clue";
+import type { Clue } from "@/types/clue";
 import type { Conclusion } from "@/types/diagnose";
 import type { Post } from "@/types/post";
 
@@ -13,43 +14,33 @@ const t = messages.reveal;
 
 /** 1 枚ごとに叩きつける間隔（秒）。身元カードの数字が止まってから始める */
 const FIRST_DELAY = 1.6;
-const STEP = 0.35;
+const STEP = 0.5;
 
 /** 身元カードに並べる強い手がかりの数 */
 const MAX_HIGHLIGHTS = 4;
-
-/** 写真から出た手がかりでも、切り抜くより読み取った文字のほうがわかりやすい種類 */
-const TEXT_ONLY_TYPES: ReadonlySet<ClueType> = new Set(["address_text"]);
 
 /** カードを少しずつ傾けて、机に投げ出したように見せる。毎回同じ角度になるよう番号で決める */
 function tilt(i: number): string {
   return `${[-3, 2.5, -1.5, 3.5, -2.5, 1.5, -3.5, 2][i % 8]}deg`;
 }
 
-/** 写真の手がかりの箇所を拡大して切り抜く。写真が読めるまでと読めなかったときは文字のカードにする */
+/** 写真全体に手がかりの位置を示す。 */
 function PhotoEvidence({ item, label }: { item: RevealItem; label: string }) {
   const { image, clue } = item;
-  // 手がかりの位置は元の写真のピクセル座標なので、読み込んだ写真の実寸で切り抜く
-  const size = useLoadedSize(image && clue.region ? image.url : null);
-  if (!image || !clue.region || !size) return <TextEvidence item={item} label={label} />;
-  const crop = cropStyle(clue.region, size);
+  const loaded = useLoadedSize(image && clue.region ? image.url : null);
+  if (!image || !clue.region || !loaded) return <TextEvidence item={item} label={label} />;
   return (
-    <figure className="space-y-2">
-      <div className="relative overflow-hidden bg-paper" style={{ aspectRatio: crop.aspectRatio }}>
-        {/* Bluesky の CDN の画像をそのまま表示するので next/image は使わない。読み込み済みなのですぐ出る */}
+    <figure className="space-y-4">
+      <p className="text-xs tracking-widest text-ink/60">{t.originalPhoto}</p>
+      <div className="relative mx-auto w-full max-w-xl overflow-hidden bg-paper" style={{ aspectRatio: `${loaded.width} / ${loaded.height}` }}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={image.url}
-          alt={t.photoAlt(label, clue.value)}
-          referrerPolicy="no-referrer"
-          className="absolute max-w-none"
-          style={crop.image}
-        />
-        <span aria-hidden="true" className="reveal-mark" style={crop.mark} />
+        <img src={image.url} alt={t.photoAlt(label, clue.value)} referrerPolicy="no-referrer" className="absolute inset-0 size-full" />
+        <span aria-hidden="true" className="reveal-mark" style={toPercentBox(clue.region, loaded)} />
       </div>
       <figcaption>
         <span className="block text-xs tracking-widest text-ink/60">{label}</span>
-        <span className="font-bold">{clue.value}</span>
+        <span className="text-2xl font-bold break-words text-seeker">{clue.type === "face" ? t.faceObserved : clue.value}</span>
+        {clue.type === "face" && <span className="ml-2 text-xs text-ink/60">{messages.identity.faceCaption}</span>}
       </figcaption>
     </figure>
   );
@@ -89,7 +80,7 @@ interface RevealProps {
  * 動きを減らす設定の人には、動きなしで並べて見せる（globals.css）。
  */
 export function Reveal({ posts, clues, conclusions }: RevealProps) {
-  const items = pickReveal(posts, clues, conclusions);
+  const items = pickSpotlight(posts, clues, conclusions);
   if (items.length === 0 && conclusions.length === 0) return null;
   const postCount = new Set(clues.map((c) => c.post_id)).size;
 
@@ -110,15 +101,14 @@ export function Reveal({ posts, clues, conclusions }: RevealProps) {
         face={pickFace(posts, clues)}
         conclusions={identity.rest}
         highlights={items
-          // 名前は大きく出し、推定の根拠は推定の行で見えるので、それ以外を並べる
-          .filter((item) => item.clue.type !== "name_text" && !item.used)
+          .filter((item) => item.clue.type !== "name_text" && item.clue.type !== "face" && !item.used)
           .slice(0, MAX_HIGHLIGHTS)
           .map((item) => ({ label: messages.clues.typeLabels[item.clue.type], value: item.clue.value }))}
         clueCount={clues.length}
       />
 
       {items.length > 0 && (
-        <ul aria-label={t.evidenceLabel} className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+        <ul aria-label={t.evidenceLabel} className="grid grid-cols-1 gap-8">
           {items.map((item, i) => {
             const label = messages.clues.typeLabels[item.clue.type];
             return (
@@ -132,7 +122,7 @@ export function Reveal({ posts, clues, conclusions }: RevealProps) {
                     {t.used}
                   </span>
                 )}
-                {item.image && !TEXT_ONLY_TYPES.has(item.clue.type) ? (
+                {item.image ? (
                   <PhotoEvidence item={item} label={label} />
                 ) : (
                   <TextEvidence item={item} label={label} />

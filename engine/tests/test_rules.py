@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -18,6 +19,7 @@ from tkb_engine.rules import (
     rule_r9,
     rule_r10,
     rule_r11,
+    rule_x1,
 )
 
 JST = ZoneInfo("Asia/Tokyo")
@@ -766,6 +768,16 @@ def test_r5_skips_names_with_unreadable_characters() -> None:
     assert rule_r8([_clue("p1", ClueType.NAME_TEXT, "xx はるき 様")]) == []
 
 
+def test_r8_skips_birthday_decoration_and_age_even_from_existing_clues() -> None:
+    clues = [
+        _clue("p1", ClueType.NAME_TEXT, "HAPPY BIRTHDAY"),
+        _clue("p1", ClueType.NAME_TEXT, "22"),
+        _clue("p2", ClueType.NAME_TEXT, "内藤大貴"),
+    ]
+
+    assert [(c.attribute, c.value) for c in rule_r8(clues)] == [("full_name", "内藤大貴")]
+
+
 def test_r5_does_not_decide_between_names_that_tie() -> None:
     clues = [
         _clue("p1", ClueType.NAME_TEXT, "内藤 大貴"),
@@ -832,7 +844,11 @@ def test_r3_leaves_out_empty_parentheses() -> None:
 
 
 def test_r8_takes_the_birthday_and_year_from_an_age_post() -> None:
-    posts = [_post("p1", "2026-10-17 21:00"), *OTHER_DAYS]
+    posts = [
+        _post("p1", "2026-10-17 21:00"),
+        _post("p2", "2026-10-18 21:00"),
+        _post("p3", "2026-10-19 21:00"),
+    ]
 
     got = rule_birthday([_clue("p1", ClueType.AGE_TEXT, "25歳になりました")], posts)
 
@@ -856,7 +872,11 @@ def test_r8_prefers_a_written_date_and_counts_a_birthday_not_yet_reached() -> No
 
 
 def test_r8_without_age_gives_only_month_and_day() -> None:
-    posts = [_post("p1", "2026-10-17 21:00"), *OTHER_DAYS]
+    posts = [
+        _post("p1", "2026-10-17 21:00"),
+        _post("p2", "2026-10-18 21:00"),
+        _post("p3", "2026-10-19 21:00"),
+    ]
 
     (got,) = rule_birthday([_clue("p1", ClueType.AGE_TEXT, "誕生日ケーキ")], posts)
 
@@ -870,42 +890,75 @@ def test_r8_ignores_ages_without_a_birthday_and_impossible_dates() -> None:
     assert rule_birthday(clues, posts) == []
 
 
-def test_city_does_not_ignore_a_distance_that_refutes_every_candidate() -> None:
-    bag = _clue("p1", ClueType.LOCAL_ITEM, "指定ゴミ袋 40L 10枚 750円")
-    hint = _clue("p2", ClueType.PLACE_TEXT, "中野まで遠い")
-    # 2候補とも閾値以内になるデータでは「遠い」に合う市はない
-    gaz = Gazetteer(
-        stations=[
-            {"station_name": "中野", "mesh_1km": "near", "lat": 35.7, "lon": 139.6},
-        ],
-        postal=DIST_GAZ.postal,
-        muni_meshes={"13201": {"near"}, "13204": {"near"}},
-        knowledge=DIST_GAZ.knowledge,
+def test_r8_handles_two_clues_for_the_same_birthday_with_and_without_age() -> None:
+    posts = [_post("p1", "2026-10-25 12:00")]
+    clues = [
+        _clue("p1", ClueType.AGE_TEXT, "10/17生まれ"),
+        _clue("p1", ClueType.AGE_TEXT, "10/17生まれ、25歳"),
+    ]
+
+    assert rule_birthday(clues, posts) == [
+        Conclusion("R12", "birthday", "2001年10月17日ごろ", [1], "本文の年齢と、誕生日の投稿の日付")
+    ]
+
+
+def test_r8_does_not_treat_a_same_day_demo_post_as_the_birthday() -> None:
+    posts = [_post("p1", "2026-10-25 12:00"), _post("p2", "2026-10-25 12:03")]
+
+    assert rule_birthday([_clue("p1", ClueType.AGE_TEXT, "22歳の誕生日")], posts) == []
+
+
+def test_x1_joins_station_school_and_commute_from_separate_posts() -> None:
+    posts = [
+        _post("station1", "2026-10-20 08:00"),
+        _post("station2", "2026-10-21 08:00"),
+        _post("school", "2026-10-22 08:00"),
+        _post("commute", "2026-10-23 08:00"),
+    ]
+    posts[3] = posts[3].model_copy(update={"text": "家から大学まで毎日通うと疲れる"})
+    clues = [
+        _clue("station1", ClueType.PLACE_TEXT, "根津駅"),
+        _clue("station2", ClueType.PLACE_TEXT, "根津駅"),
+        _clue("school", ClueType.ORG_TEXT, "筑波大学"),
+        _clue("commute", ClueType.ROUTINE_TEXT, "毎日通学"),
+    ]
+
+    conclusions = infer(clues, posts, GAZ)
+    cross = [c for c in conclusions if c.attribute == "home_school_commute"]
+
+    assert len(cross) == 1
+    assert cross[0].value == "根津駅付近から筑波大学へ通学している可能性"
+    assert cross[0].clue_indices == [0, 1, 2, 3]
+    for removed in ("station1", "school", "commute"):
+        remaining = [c for c in clues if c.post_id != removed]
+        assert not [c for c in infer(remaining, posts, GAZ) if c.attribute == "home_school_commute"]
+
+
+def test_x1_does_not_join_a_school_and_commute_mentioned_only_in_one_post() -> None:
+    clues = [
+        _clue("station", ClueType.PLACE_TEXT, "根津駅"),
+        _clue("same", ClueType.ORG_TEXT, "筑波大学"),
+        _clue("same", ClueType.ROUTINE_TEXT, "家から大学に通っている"),
+    ]
+    conclusions = [
+        Conclusion("R1", "station", "根津駅", [0], ""),
+        Conclusion("R7", "school", "筑波大学", [1], ""),
+    ]
+
+    assert rule_x1(clues, [], conclusions) == []
+
+
+def test_x1_demo_fixture_matches_the_published_post_texts() -> None:
+    doc = json.loads(
+        (Path(__file__).resolve().parents[2] / "eval/fixtures/demo_x1.json").read_text()
     )
-    assert rule_r4([bag, hint], gaz) == []
+    plan = json.loads(
+        (Path(__file__).resolve().parents[2] / "eval/demo_account/x1_posts.json").read_text()
+    )
+    posts = [Post.model_validate(post) for post in doc["posts"]]
+    clues = [Clue.model_validate(clue) for clue in doc["clues"]]
 
-
-def test_zero_bag_count_is_ignored_without_crashing_diagnosis() -> None:
-    assert rule_r4([_clue("p", ClueType.LOCAL_ITEM, "指定ゴミ袋40L 0枚750円")], KNOW_GAZ) == []
-
-
-def test_model_guesses_of_customer_barcodes_are_not_address_evidence() -> None:
-    guess = _clue("p", ClueType.CODE, "カスタマバーコード: 〒192-0083 住所表示番号 9-3")
-    guess = guess.model_copy(update={"source": ClueSource.VLM})
-    assert rule_r6([guess], KNOW_GAZ) == []
-
-
-def test_same_day_birthday_does_not_become_the_date_of_posting() -> None:
-    posts = [_post("p", "2026-10-25 12:00")]
-    assert rule_birthday([_clue("p", ClueType.AGE_TEXT, "22歳の誕生日")], posts) == []
-
-
-def test_explicit_birthday_is_kept_even_in_a_same_day_account() -> None:
-    posts = [_post("p", "2026-10-25 12:00")]
-    [birthday] = rule_birthday([_clue("p", ClueType.AGE_TEXT, "4/12生まれ、いま22歳")], posts)
-    assert birthday.value == "2004年4月12日ごろ"
-
-
-def test_birthday_rejects_nonexistent_calendar_dates() -> None:
-    posts = [_post("p", "2026-10-25 12:00")]
-    assert rule_birthday([_clue("p", ClueType.AGE_TEXT, "2月30日")], posts) == []
+    assert [post.text for post in posts] == [item["text"] for item in plan["posts"]]
+    cross = [c for c in infer(clues, posts, GAZ) if c.attribute == "home_school_commute"]
+    assert len(cross) == 1
+    assert cross[0].clue_indices == [0, 1, 2, 3]

@@ -46,6 +46,22 @@ async def test_fetches_images_in_order_from_the_cdn() -> None:
 
 
 @pytest.mark.anyio
+async def test_retries_temporary_cdn_failure() -> None:
+    calls = 0
+
+    def respond(_: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(503 if calls == 1 else 200, content=b"image")
+
+    with respx.mock as router:
+        router.get(f"{CDN}/0@jpeg").mock(side_effect=respond)
+
+        assert await fetch_images(_post(1)) == [b"image"]
+    assert calls == 2
+
+
+@pytest.mark.anyio
 async def test_refuses_hosts_other_than_the_cdn() -> None:
     # Post の検証を通り抜けた URL があっても、取りに行く前に止める
     post = _post(1)

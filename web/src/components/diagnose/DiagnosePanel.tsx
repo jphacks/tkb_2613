@@ -8,8 +8,10 @@ import { PostCard, type PostClues } from "@/components/post-list/PostCard";
 import { Reveal } from "@/components/reveal/Reveal";
 import { RiskyPosts } from "@/components/risky-posts/RiskyPosts";
 import { useSession } from "@/components/session/SessionProvider";
-import { ApiError, diagnose } from "@/lib/api";
+import { ResultShare } from "@/components/diagnose/ResultShare";
+import { ApiError, diagnose, getDiagnosis } from "@/lib/api";
 import { messages } from "@/lib/messages";
+import { validNameConclusions } from "@/lib/reveal";
 import type { Clue } from "@/types/clue";
 import type { Conclusion, RiskyPost, Simulation } from "@/types/diagnose";
 import type { Post } from "@/types/post";
@@ -66,13 +68,48 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
   const [simulation, setSimulation] = useState<Simulation | null>(null);
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   const controller = useRef<AbortController | null>(null);
+  const restoreController = useRef<AbortController | null>(null);
 
   // 画面を離れたら、読み込み中の診断を止める
-  useEffect(() => () => controller.current?.abort(), []);
+  useEffect(() => () => {
+    controller.current?.abort();
+    restoreController.current?.abort();
+  }, []);
+
+  // 同じログインセッションで画面を開き直した場合は、再解析せず直近の結果へ戻す。
+  const sessionDid = session.status === "authenticated" ? session.session.did : null;
+  useEffect(() => {
+    if (!sessionDid) return;
+    const current = new AbortController();
+    restoreController.current = current;
+    getDiagnosis({ signal: current.signal })
+      .then((snapshot) => {
+        if (!snapshot || current.signal.aborted || controller.current) return;
+        setPosts(snapshot.posts);
+        setFound(Object.fromEntries(snapshot.posts.map((post) => [
+          post.post_id,
+          { clues: snapshot.clues.filter((clue) => clue.post_id === post.post_id), error: null },
+        ])));
+        setResult({ clues: snapshot.clues, conclusions: validNameConclusions(snapshot.conclusions) });
+        setRisky(snapshot.plan.posts);
+        setPhase({ kind: "done", postsSeen: snapshot.posts.length });
+        onRevealedChange?.(true);
+      })
+      .catch(() => {
+        // 復元に失敗しても、診断ボタンからやり直せる。
+      });
+    return () => current.abort();
+  }, [sessionDid, onRevealedChange]);
+
+  // 結果への切り替えでヘッダーとローディング画面の高さが変わる。描画後に先頭へ戻す。
+  useEffect(() => {
+    if (phase.kind === "done" && result) window.scrollTo(0, 0);
+  }, [phase.kind, result]);
 
   if (session.status !== "authenticated") return null;
 
   async function start() {
+    restoreController.current?.abort();
     controller.current?.abort();
     const current = new AbortController();
     controller.current = current;
@@ -95,14 +132,14 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
             setPhase({ kind: "searching" });
             break;
           case "conclusions":
-            setResult({ clues: event.clues, conclusions: event.conclusions });
-            onRevealedChange?.(true);
+            setResult({ clues: event.clues, conclusions: validNameConclusions(event.conclusions) });
             break;
           case "plan":
             setRisky(event.posts);
             break;
           case "done":
             setPhase({ kind: "done", postsSeen: event.posts_seen });
+            onRevealedChange?.(true);
             break;
         }
       }
@@ -115,15 +152,9 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
   const busy = phase.kind === "connecting" || phase.kind === "reading" || phase.kind === "searching";
   const status = statusText(phase, posts.length, Object.keys(found).length);
 
-  // ログイン画面と同じ形：ボタンの文言は変えず、処理中は回る印を出し、状態とエラーはボタンの下に出す
-  return (
-    <section aria-labelledby="diagnose-heading" aria-busy={busy} className="mt-12 space-y-8">
-      {!busy && result && <Reveal posts={posts} clues={result.clues} conclusions={result.conclusions} />}
-
-      <div>
-        <h2 id="diagnose-heading" className="sr-only">
-          {t.heading}
-        </h2>
+  // 結果が出たら再診断ボタンを下へ移し、身元カード→写真→捜査ボードを続けて見せる。
+  const controls = (
+    <div>
         <button
           type="button"
           onClick={start}
@@ -146,25 +177,30 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
             {phase.message}
           </p>
         )}
-      </div>
+    </div>
+  );
+
+  return (
+    <section aria-labelledby="diagnose-heading" aria-busy={busy} className="mt-12 space-y-8">
+      <h2 id="diagnose-heading" className="sr-only">
+        {t.heading}
+      </h2>
+      {!busy && result && <Reveal posts={posts} clues={result.clues} conclusions={result.conclusions} />}
+      {(busy || !result) && controls}
 
       {!busy && result && (
         <ConclusionBoard
           clues={result.clues}
-          conclusions={simulation ? simulation.after : result.conclusions}
+          conclusions={simulation ? validNameConclusions(simulation.after) : result.conclusions}
           unknown={simulation?.broken}
         />
       )}
 
       {!busy && result && risky && (
-        <RiskyPosts
-          posts={posts}
-          risky={risky}
-          targetAttributes={[...new Set(result.conclusions.slice(-3).map((c) => c.attribute))]}
-          clueCount={result.clues.length}
-          onSimulated={setSimulation}
-        />
+        <RiskyPosts posts={posts} risky={risky} clues={result.clues} clueCount={result.clues.length} onSimulated={setSimulation} />
       )}
+      {!busy && result && <ResultShare />}
+      {!busy && result && controls}
 
       {posts.length > 0 && (
         <ol aria-label={t.postsLabel} className="max-w-2xl space-y-5">

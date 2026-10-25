@@ -30,6 +30,7 @@ BSKY_CDN_HOST = urlparse(BSKY_CDN_PREFIX).hostname
 # Bluesky の写真は 1MB 前後。大きすぎるものは読まない
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
 IMAGE_FETCH_TIMEOUT_S = 20.0
+IMAGE_FETCH_ATTEMPTS = 3
 
 Event = tuple[str, dict[str, Any]]
 
@@ -51,18 +52,35 @@ async def fetch_images(post: Post) -> list[bytes]:
 
 
 async def _download(client: httpx.AsyncClient, url: str) -> bytes:
-    try:
-        async with client.stream("GET", url) as res:
-            res.raise_for_status()
-            chunks, size = [], 0
-            async for chunk in res.aiter_bytes():
-                size += len(chunk)
-                if size > MAX_IMAGE_BYTES:
-                    raise ImageFetchError("写真が大きすぎます")
-                chunks.append(chunk)
-            return b"".join(chunks)
-    except httpx.HTTPError as e:
-        raise ImageFetchError(type(e).__name__) from e
+    for attempt in range(IMAGE_FETCH_ATTEMPTS):
+        try:
+            async with client.stream("GET", url) as res:
+                res.raise_for_status()
+                chunks, size = [], 0
+                async for chunk in res.aiter_bytes():
+                    size += len(chunk)
+                    if size > MAX_IMAGE_BYTES:
+                        raise ImageFetchError("写真が大きすぎます")
+                    chunks.append(chunk)
+                return b"".join(chunks)
+        except httpx.HTTPError as e:
+            status_code = e.response.status_code if isinstance(e, httpx.HTTPStatusError) else None
+            retryable = (
+                isinstance(e, httpx.RequestError)
+                or status_code == 429
+                or (status_code is not None and status_code >= 500)
+            )
+            logger.warning(
+                "写真取得失敗: %s status=%s attempt=%d/%d",
+                type(e).__name__,
+                status_code,
+                attempt + 1,
+                IMAGE_FETCH_ATTEMPTS,
+            )
+            if not retryable or attempt + 1 == IMAGE_FETCH_ATTEMPTS:
+                raise ImageFetchError(type(e).__name__) from e
+            await asyncio.sleep(0.5 * (attempt + 1))
+    raise AssertionError("unreachable")
 
 
 def load_gazetteer(data_dir: Path) -> Gazetteer:

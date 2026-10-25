@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError, deletePosts, simulate } from "@/lib/api";
 import { messages } from "@/lib/messages";
+import type { Clue } from "@/types/clue";
 import type { RiskyPost, Simulation } from "@/types/diagnose";
 import type { Post } from "@/types/post";
 
@@ -56,6 +57,18 @@ describe("RiskyPosts", () => {
     expect(items[0]).toHaveTextContent(t.breaks("最寄り駅・よくいる時間"));
     expect(items[1]).toHaveTextContent(t.breaks("決まった外出"));
     expect(screen.getAllByRole("checkbox").map((c) => (c as HTMLInputElement).checked)).toEqual([true, true]);
+  });
+
+  it("explains why a face photo is recommended even when it breaks no conclusion by itself", () => {
+    const face: Clue = {
+      post_id: ADDRESS.post_id, image_index: 0, type: "face", value: "1人",
+      region: [0, 0, 10, 10], confidence: 0.9, source: "vlm",
+    };
+    render(<RiskyPosts posts={[ADDRESS]} risky={[{ post_id: ADDRESS.post_id, broken: [] }]} clues={[face]} clueCount={1} onSimulated={vi.fn()} />);
+
+    const item = screen.getByRole("listitem");
+    expect(item).toHaveTextContent(t.breaksNothing);
+    expect(item).toHaveTextContent(t.directClues(messages.clues.typeLabels.face));
   });
 
   it("simulates the selected posts and reports that the user got away", async () => {

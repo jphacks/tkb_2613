@@ -12,7 +12,8 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from tkb_api.bluesky import SessionStore
 from tkb_api.config import Settings, get_settings
-from tkb_api.routes import delete, detect, diagnose, session, simulate
+from tkb_api.routes import delete, detect, diagnose, session, share, simulate
+from tkb_api.shares import ShareStore
 
 
 class NoStoreMiddleware:
@@ -50,17 +51,18 @@ async def _validation_error(_: Request, exc: Exception) -> JSONResponse:
 
 
 def _configure_logging() -> None:
-    """tkb_api の INFO（診断にかかった時間など）を出す。uvicorn は自分のロガーしか設定しないため。
+    """診断の所要時間を INFO で出す。uvicorn は自分のロガーしか設定しないため。
 
     ログに出すのは件数と秒数だけにする。リクエスト本文・投稿の本文・写真は出さない。
     """
-    app_logger = logging.getLogger("tkb_api")
-    if app_logger.handlers:
-        return
-    handler = logging.StreamHandler()
-    handler.setFormatter(logging.Formatter("%(levelname)s:     %(name)s: %(message)s"))
-    app_logger.addHandler(handler)
-    app_logger.setLevel(logging.INFO)
+    for name in ("tkb_api", "tkb_detect"):
+        app_logger = logging.getLogger(name)
+        if app_logger.handlers:
+            continue
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter("%(levelname)s:     %(name)s: %(message)s"))
+        app_logger.addHandler(handler)
+        app_logger.setLevel(logging.INFO)
 
 
 def create_app(
@@ -76,11 +78,15 @@ def create_app(
         store = cast(SessionStore | None, getattr(app.state, "sessions", None))
         if store is not None:
             store.close()
+        shares = cast(ShareStore | None, getattr(app.state, "shares", None))
+        if shares is not None:
+            shares.close()
 
     app = FastAPI(title="tkb_2613 API", lifespan=lifespan)
     app.state.sessions = (
         sessions if sessions is not None else SessionStore(settings.session_ttl_minutes * 60)
     )
+    app.state.shares = ShareStore(settings.share_db_path, settings.share_ttl_minutes * 60)
     app.add_exception_handler(RequestValidationError, _validation_error)
 
     app.add_middleware(NoStoreMiddleware)
@@ -96,6 +102,7 @@ def create_app(
     app.include_router(diagnose.router)
     app.include_router(simulate.router)
     app.include_router(delete.router)
+    app.include_router(share.router)
 
     @app.get("/health")
     def health() -> dict[str, str | bool]:

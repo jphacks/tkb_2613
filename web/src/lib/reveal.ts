@@ -4,6 +4,18 @@ import type { Post, PostImage } from "@/types/post";
 
 /** 診断のあとに叩きつける証拠の最大枚数 */
 export const MAX_REVEAL = 8;
+export const MAX_SPOTLIGHT = 4;
+
+/** 結果の冒頭で見せる、特に個人へ結び付きやすい観測。値は手がかりにあるものだけを使う。 */
+const SPOTLIGHT_ORDER: readonly ClueType[] = [
+  "name_text",
+  "face",
+  "address_text",
+  "age_text",
+  "postal_code",
+  "phone",
+  "station_sign",
+];
 
 /** 見せたときに効く順。名前や住所のように、それだけで本人に近づくものを先にする */
 const DANGER_ORDER: readonly ClueType[] = [
@@ -49,11 +61,10 @@ function dangerRank(type: ClueType): number {
  * 叩きつける証拠を選ぶ。推定の根拠になったものを先に、そのあとは危ない種類の順に並べる。
  * 同じ種類で同じ値の手がかり（別の投稿の「夜勤明け」など）は 1 枚にまとめる。
  */
-export function pickReveal(
+function revealItems(
   posts: readonly Post[],
   clues: readonly Clue[],
   conclusions: readonly Conclusion[],
-  max: number = MAX_REVEAL,
 ): RevealItem[] {
   const byId = new Map(posts.map((p) => [p.post_id, p]));
   const used = new Set(conclusions.flatMap((c) => c.clue_indices));
@@ -64,6 +75,16 @@ export function pickReveal(
     return [{ clueIndex, clue, post, image, used: used.has(clueIndex) }];
   });
 
+  return items;
+}
+
+export function pickReveal(
+  posts: readonly Post[],
+  clues: readonly Clue[],
+  conclusions: readonly Conclusion[],
+  max: number = MAX_REVEAL,
+): RevealItem[] {
+  const items = revealItems(posts, clues, conclusions);
   items.sort(
     (a, b) =>
       Number(b.used) - Number(a.used) ||
@@ -81,6 +102,42 @@ export function pickReveal(
       return true;
     })
     .slice(0, max);
+}
+
+/** 写真の根拠を優先し、強い手がかりを冒頭の拡大表示に選ぶ。 */
+export function pickSpotlight(
+  posts: readonly Post[],
+  clues: readonly Clue[],
+  conclusions: readonly Conclusion[],
+): RevealItem[] {
+  const seen = new Set<ClueType>();
+  const inferredName = conclusions.find((c) => NAME_ATTRIBUTES.includes(c.attribute) && isLikelyNameText(c.value))?.value.replace(/\s+/g, "") ?? null;
+  return revealItems(posts, clues, conclusions)
+    .filter((item) => {
+      if (item.clue.type === "face") {
+        return item.clue.confidence >= FACE_MIN_CONFIDENCE && Boolean(item.image && item.clue.region);
+      }
+      if (item.clue.type !== "name_text") return true;
+      if (!isLikelyNameText(item.clue.value)) return false;
+      const value = item.clue.value.replace(/\s+/g, "");
+      return !inferredName || inferredName.includes(value) || value.includes(inferredName);
+    })
+    .sort((a, b) => {
+      const rank = (type: ClueType) => {
+        const index = SPOTLIGHT_ORDER.indexOf(type);
+        return index < 0 ? SPOTLIGHT_ORDER.length : index;
+      };
+      return rank(a.clue.type) - rank(b.clue.type) ||
+        Number(Boolean(b.image && b.clue.region)) - Number(Boolean(a.image && a.clue.region)) ||
+        Number(b.used) - Number(a.used) ||
+        b.clue.confidence - a.clue.confidence;
+    })
+    .filter((item) => {
+      if (seen.has(item.clue.type)) return false;
+      seen.add(item.clue.type);
+      return true;
+    })
+    .slice(0, MAX_SPOTLIGHT);
 }
 
 /**
@@ -111,6 +168,14 @@ export function cropStyle(
 /** 身元カードの名前に使う推定。先にあるものを使う（engine の R5） */
 const NAME_ATTRIBUTES: readonly string[] = ["full_name", "given_name_or_nickname"];
 
+/** 数字や誕生日の飾り文字を人物名として画面に出さない。 */
+export function isLikelyNameText(value: string): boolean {
+  const text = value.normalize("NFKC").trim();
+  if (!text || /^\d/u.test(text)) return false;
+  if (/\b(?:happy|birthday|hbd|party|congratulations|congrats)\b|誕生日|おめでとう|記念日/iu.test(text)) return false;
+  return /[\p{L}]/u.test(text.replace(/x/gi, ""));
+}
+
 /**
  * 身元カードに大きく出す名前と、その下に並べる残りの推定。
  * 推定したフルネーム、呼び名の順に使い、どちらもなければ写っていた名前の文字（pickName）。
@@ -121,10 +186,15 @@ export function identityName(
   conclusions: readonly Conclusion[],
 ): { name: string | null; rest: readonly Conclusion[] } {
   for (const attribute of NAME_ATTRIBUTES) {
-    const found = conclusions.find((c) => c.attribute === attribute);
-    if (found) return { name: found.value, rest: conclusions.filter((c) => !NAME_ATTRIBUTES.includes(c.attribute)) };
+    const found = conclusions.find((c) => c.attribute === attribute && isLikelyNameText(c.value));
+    if (found) return { name: found.value, rest: validNameConclusions(conclusions).filter((c) => !NAME_ATTRIBUTES.includes(c.attribute)) };
   }
-  return { name: pickName(clues), rest: conclusions };
+  return { name: pickName(clues), rest: validNameConclusions(conclusions) };
+}
+
+/** 古い診断結果に誕生日の飾り文字が名前として残っていても表示しない。 */
+export function validNameConclusions(conclusions: readonly Conclusion[]): Conclusion[] {
+  return conclusions.filter((c) => !NAME_ATTRIBUTES.includes(c.attribute) || isLikelyNameText(c.value));
 }
 
 /**
@@ -134,7 +204,7 @@ export function identityName(
 export function pickName(clues: readonly Clue[]): string | null {
   const unreadable = (value: string) => (value.match(/x/gi) ?? []).length;
   const names = clues
-    .filter((c) => c.type === "name_text" && c.value.trim())
+    .filter((c) => c.type === "name_text" && isLikelyNameText(c.value))
     .sort((a, b) => unreadable(a.value) - unreadable(b.value) || b.confidence - a.confidence);
   return names[0]?.value.trim() ?? null;
 }

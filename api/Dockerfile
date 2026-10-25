@@ -25,6 +25,7 @@ RUN uv sync --frozen --no-dev --package tkb-api --no-editable
 
 FROM python:3.13-slim
 RUN useradd --system --no-create-home app
+RUN mkdir -p /app/data/private && chown app:app /app/data/private
 COPY --from=build /app/.venv /app/.venv
 # MOCK_MODE の診断で流す架空のデモ用アカウントの投稿（写真本体は含まない）
 COPY eval/fixtures/demo_observations.json /app/eval/fixtures/

@@ -23,6 +23,7 @@ import json
 import logging
 import time
 from collections.abc import AsyncIterator, Callable
+from dataclasses import asdict
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Any
@@ -33,12 +34,19 @@ from fastapi.responses import StreamingResponse
 from tkb_api import bluesky
 from tkb_api.bluesky import BlueskySession, Diagnosis, PostsFetcher, SessionStore
 from tkb_api.config import Settings, get_settings
-from tkb_api.pipeline import diagnose_events, load_gazetteer, mock_extractions, real_extractions
+from tkb_api.pipeline import (
+    diagnose_events,
+    load_gazetteer,
+    mock_extractions,
+    plan_json,
+    real_extractions,
+)
 from tkb_api.routes.session import current_session, current_session_id, get_session_store
 from tkb_common.schemas import Clue, Post
 from tkb_detect.errors import DetectError
 from tkb_detect.extract import Extractor, build_extractor
 from tkb_engine.gazetteer import Gazetteer
+from tkb_engine.rules import infer
 
 router = APIRouter(prefix="/api")
 logger = logging.getLogger(__name__)
@@ -146,6 +154,25 @@ async def _fetch_own_posts(
         raise HTTPException(
             status.HTTP_502_BAD_GATEWAY, "Bluesky から投稿を取得できませんでした"
         ) from None
+
+
+@router.get("/diagnosis")
+def read_diagnosis(
+    store: Annotated[SessionStore, Depends(get_session_store)],
+    session_id: Annotated[str, Depends(current_session_id)],
+    gazetteer: Annotated[Gazetteer, Depends(get_gazetteer)],
+) -> dict[str, Any]:
+    """同じログインセッションで画面を開き直したとき、直近の完了結果を返す。"""
+    diagnosis = store.get_diagnosis(session_id)
+    if diagnosis is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "復元できる診断結果はありません")
+    posts, clues = diagnosis.posts, diagnosis.clues
+    return {
+        "posts": [post.model_dump(mode="json") for post in posts],
+        "clues": [clue.model_dump(mode="json") for clue in clues],
+        "conclusions": [asdict(conclusion) for conclusion in infer(clues, posts, gazetteer)],
+        "plan": plan_json(clues, posts, gazetteer),
+    }
 
 
 @router.post("/diagnose")

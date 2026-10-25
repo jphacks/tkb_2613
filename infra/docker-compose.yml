@@ -19,6 +19,7 @@ services:
     # 推理の表（make data で作る）。読み取り専用でつなぐ。なければ最寄り駅のルールだけを飛ばす
     volumes:
       - ../data/processed:/app/data/processed:ro
+      - shared-results:/app/data/private
     # 写真をディスクに残さないよう、ファイルシステムを読み取り専用にする
     read_only: true
     tmpfs:
@@ -44,3 +45,6 @@ services:
     depends_on:
       api:
         condition: service_healthy
+
+volumes:
+  shared-results:
