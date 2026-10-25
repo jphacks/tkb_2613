@@ -339,6 +339,46 @@ body::after {
   pointer-events: none;
 }
 
+/* 身元カード：名前が赤くにじみ、手がかりの数がスロットのように回って止まる */
+.identity-name {
+  color: var(--ink);
+  text-shadow:
+    0 0 12px oklch(60% 0.23 27 / 0.6),
+    2px 2px 0 oklch(10% 0.05 265);
+}
+
+.roller {
+  display: inline-flex;
+  gap: 0.1em;
+  font-family: var(--font-display);
+  font-size: 4.5rem;
+  line-height: 1;
+  color: var(--seeker);
+  text-shadow: 0 0 14px oklch(60% 0.23 27 / 0.7);
+}
+
+.roller-digit {
+  display: inline-block;
+  height: 1em;
+  overflow: hidden;
+  padding-inline: 0.08em;
+  border: 1px solid oklch(60% 0.23 27 / 0.35);
+  background: oklch(10% 0.04 265 / 0.6);
+}
+
+/* 止まる位置は style の transform で渡す。動きを止めた人には止まった数字だけを見せる */
+.roller-strip {
+  display: flex;
+  flex-direction: column;
+  animation: roller-spin 1.1s cubic-bezier(0.15, 0.7, 0.2, 1) backwards;
+}
+
+@keyframes roller-spin {
+  from {
+    transform: translateY(0);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

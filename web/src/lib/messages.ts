@@ -117,6 +117,16 @@ export const messages = {
     fromText: "本文から",
     count: (clues: number, posts: number) => `${posts} 件の投稿から、手がかりを ${clues} 個`,
   },
+  identity: {
+    label: "推定した身元",
+    /** 写真の枠。顔は出さず、人影を出す */
+    silhouette: "顔は写していなくても",
+    nameLabel: "名前",
+    nameUnknown: "名前は不明",
+    cluesFound: "見つかった手がかり",
+    cluesUnit: "個",
+    inferred: "推定",
+  },
   risky: {
     heading: "まーだだよ",
     lead: "この投稿を消すと、推定が崩れます。選んで「消したらどうなる」を押すと、消したあとの捜査ボードを見られます。実際には消しません。",
