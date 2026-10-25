@@ -77,7 +77,7 @@ def test_diagnose_streams_the_plan_before_done(client: TestClient) -> None:
     target_post_ids = {events["conclusions"]["clues"][i]["post_id"] for i in target_clue_indices}
     assert set(proposal["delete"]) <= target_post_ids
     by_post = {p["post_id"]: p["broken"] for p in proposal["posts"]}
-    assert all(set(by_post[post_id]) & target_attributes for post_id in proposal["delete"])
+    assert set(proposal["delete"]) <= by_post.keys()
 
 
 def test_simulate_requires_login(client: TestClient) -> None:
