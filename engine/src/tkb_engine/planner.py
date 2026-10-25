@@ -105,9 +105,7 @@ def _important(conclusions: Sequence[Conclusion]) -> list[Conclusion]:
     return [c for c in conclusions if c.attribute in IMPORTANT_ATTRIBUTES]
 
 
-def _score(
-    conclusions: Sequence[Conclusion], target_attributes: Sequence[str]
-) -> tuple[int, int]:
+def _score(conclusions: Sequence[Conclusion], target_attributes: Sequence[str]) -> tuple[int, int]:
     target = [c for c in conclusions if c.attribute in target_attributes]
     evidence = {i for c in target for i in c.clue_indices}
     return (
