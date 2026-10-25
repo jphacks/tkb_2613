@@ -41,6 +41,7 @@ const ATTRIBUTE_LABELS: Readonly<Record<string, string>> = {
   home_area: "住んでいる町",
   active_time: "よくいる時間",
   routine: "決まった外出",
+  line: "使っている路線",
 };
 
 export const messages = {

@@ -7,9 +7,9 @@
 - gaz：data-prep の表（Gazetteer）。R1 が駅名・郵便番号・住所を引き当てる
 
 出力：Conclusion の一覧。1つの Conclusion が捜査ボードの1行のもとになる。
-attribute はまだ試作のときの名前（station / home_area / active_time / routine）のまま。
+attribute はまだ試作のときの名前（station / home_area / active_time / routine / line）のまま。
 プロフィールの16項目（tkb_common.schemas.ProfileAttribute）への対応づけはこれから行う。
-station → commute_station_or_line、home_area → residential_area はそのまま当てはまる。
+station・line → commute_station_or_line、home_area → residential_area はそのまま当てはまる。
 
 ルールの中身：
 - R1 生活圏：station_sign / place_text（駅名）と address_text / postal_code（区と町名）から、
@@ -18,6 +18,8 @@ station → commute_station_or_line、home_area → residential_area はその�
 - R2 行動時間：R1 で駅が決まったとき、場所の手がかりがある平日の投稿が、同じ時間帯に
   R2_MIN_POSTS 件以上
 - R3 留守の時間：同じ曜日・同じ時間帯の投稿が R3_MIN_POSTS 件以上、または曜日を含む routine_text
+- R4 路線：手がかりの文字に出てくる路線名（「千代田線また遅延」など）。R1 の駅がその路線にあるか、
+  別々の投稿に同じ路線名が R4_MIN_POSTS 件以上出てくれば、使っている路線（line）とする
 
 ルールを足すときは rule_rN(clues, posts, ...) -> list[Conclusion] を書き、infer に並べる。
 しきい値は下の「しきい値」にまとめる。値は eval/fixtures/demo_observations.json で決めた仮の値で、
@@ -42,6 +44,8 @@ R2_MIN_POSTS = 2
 # R3：「同じ曜日の同じ時間帯」とみなす幅（±時間）と、要る投稿の数
 R3_WINDOW_HOURS = 1.0
 R3_MIN_POSTS = 3
+# R4：R1 の駅がなくても路線を結論にするのに要る、その路線名が出てくる投稿の数
+R4_MIN_POSTS = 2
 # ----------------------------
 
 JST = ZoneInfo("Asia/Tokyo")
@@ -51,6 +55,8 @@ R1_NAME_TYPES = {ClueType.STATION_SIGN, ClueType.PLACE_TEXT}
 R1_AREA_TYPES = {ClueType.ADDRESS_TEXT, ClueType.POSTAL_CODE}
 # 場所の手がかり（R2 で「場所の投稿」とみなす）。shop は店の場所のデータがないので R1 には使わない
 LOCATION_TYPES = R1_NAME_TYPES | R1_AREA_TYPES | {ClueType.SHOP}
+# 路線名を探す手がかり。「電車混んでる」と同じく、遅延の愚痴は routine_text になることもある
+R4_LINE_TYPES = R1_NAME_TYPES | {ClueType.ROUTINE_TEXT}
 
 
 @dataclass(frozen=True)
@@ -170,10 +176,38 @@ def rule_r3(clues: Sequence[Clue], posts: Sequence[Post]) -> list[Conclusion]:
     return conclusions
 
 
+def rule_r4(clues: Sequence[Clue], r1: list[Conclusion], gaz: Gazetteer) -> list[Conclusion]:
+    """R4 路線：使っている路線（line）。"""
+    mentions: dict[str, list[int]] = {}
+    for i, c in enumerate(clues):
+        if c.type in R4_LINE_TYPES:
+            for line in gaz.line_names(c.value):
+                mentions.setdefault(line, []).append(i)
+    if not mentions:
+        return []
+
+    station = next((c for c in r1 if c.attribute == "station"), None)
+    station_lines = gaz.lines_of(station.value.removesuffix("駅")) if station else set()
+
+    def posts_of(line: str) -> int:
+        return len({clues[i].post_id for i in mentions[line]})
+
+    on_station = [line for line in mentions if line in station_lines]
+    if on_station:
+        line = max(on_station, key=lambda n: (posts_of(n), n))
+        note = f"本文の路線名が、最寄り駅（{station.value if station else ''}）の路線と一致"
+    else:
+        line = max(mentions, key=lambda n: (posts_of(n), n))
+        if posts_of(line) < R4_MIN_POSTS:
+            return []
+        note = f"同じ路線名が {posts_of(line)} 件の投稿に出てくる"
+    return [Conclusion("R4", "line", line, mentions[line], note)]
+
+
 def infer(clues: Sequence[Clue], posts: Sequence[Post], gaz: Gazetteer) -> list[Conclusion]:
-    """すべてのルールを順に当てはめる。R2 は R1 の結論を使う。"""
+    """すべてのルールを順に当てはめる。R2・R4 は R1 の結論を使う。"""
     r1 = rule_r1(clues, gaz)
-    return [*r1, *rule_r2(clues, posts, r1), *rule_r3(clues, posts)]
+    return [*r1, *rule_r2(clues, posts, r1), *rule_r3(clues, posts), *rule_r4(clues, r1, gaz)]
 
 
 def _region_area(clue: Clue) -> int:

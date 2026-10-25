@@ -8,7 +8,7 @@ from tkb_engine.planner import (
     plan,
     simulate,
 )
-from tkb_engine.rules import Conclusion, infer, rule_r1, rule_r2, rule_r3
+from tkb_engine.rules import Conclusion, infer, rule_r1, rule_r2, rule_r3, rule_r4
 
 __all__ = [
     "IMPORTANT_ATTRIBUTES",
@@ -21,5 +21,6 @@ __all__ = [
     "rule_r1",
     "rule_r2",
     "rule_r3",
+    "rule_r4",
     "simulate",
 ]
