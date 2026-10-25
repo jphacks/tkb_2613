@@ -36,7 +36,7 @@
 
   <rect class="card" x="24" y="390" width="472" height="132" rx="12" />
   <text class="head" x="44" y="422">engine（main仕様の説明）</text><text class="body" x="44" y="449">R1–R12 → 根拠付きConclusion</text><text class="body" x="44" y="472">plan: 末尾3結論から対象属性を選び最大3投稿</text>
-  <text class="small" x="44" y="499">simulateは仮除外で再推理。16項目目標は未接続。</text>
+  <text class="small" x="44" y="499">simulateは仮除外だけ。選択・確認後に削除する。</text>
   <path class="line" d="M391 337 V382" />
 
   <rect class="card" x="24" y="566" width="472" height="106" rx="12" />

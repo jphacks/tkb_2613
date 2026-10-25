@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="900" height="2290" viewBox="0 0 900 2290" role="img" aria-labelledby="title desc">
   <title id="title">みーつけた main の推理ルール R1〜R12</title>
-  <desc id="desc">投稿写真と本文からdetectがClueを抽出し、engineがClue、必要な投稿本文や時刻、知識表を使って12ルールを適用し、根拠番号付きConclusionを作る構造図。R4からR5、条件付きでR1とR7、R1からR2とR11への依存をノードと矢印で示す。planは結論リスト末尾3件から対象属性を選び、最大3投稿を貪欲に選ぶ。16項目プロフィールは未接続。</desc>
+  <desc id="desc">投稿写真と本文からdetectがClueを抽出し、engineがClue、必要な投稿本文や時刻、知識表を使って12ルールを適用し、根拠番号付きConclusionを作る構造図。R4からR5、条件付きでR1とR7、R1からR2とR11への依存をノードと矢印で示す。planは結論リスト末尾3件から対象属性を選び、最大3投稿を貪欲に選ぶ。</desc>
   <defs>
     <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 Z" fill="#f15b55" /></marker>
     <style>
@@ -114,7 +114,7 @@
   <text class="head" x="66" y="2100">出力と仮除外</text>
   <text class="body" x="66" y="2135">Conclusion = 項目・値・推理メモ・根拠の clue_indices</text>
   <text class="body" x="66" y="2168">simulateは投稿を仮除外して再推理。planは末尾3結論から対象属性を選び</text>
-  <text class="body" x="66" y="2197">貪欲に最大3投稿を選ぶ。16項目プロフィールはまだ未接続。</text>
+  <text class="body" x="66" y="2197">貪欲に最大3投稿を選ぶ。全属性の最小解を探す処理ではない。</text>
   <text class="small" x="66" y="2229">各ルールの条件を満たした場合だけ、対応する結論を返す。</text>
   <text class="small" x="42" y="2264">参照元: main の engine/src/tkb_engine/rules.py・planner.py。条件を整理した図。</text>
 </svg>
