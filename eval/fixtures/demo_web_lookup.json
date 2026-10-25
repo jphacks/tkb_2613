@@ -1,0 +1,9 @@
+{
+  "note": "MOCK_MODE の Web での照合で返す固定結果。架空の人物・架空のページ（example.com は予約されたドメイン）",
+  "query": "\"山田 はるき\" 架空大学",
+  "url": "https://example.com/users/haruki-demo",
+  "site": "example.com",
+  "title": "山田 はるき - 架空大学 理工学群",
+  "description": "架空大学 理工学群 4年。25歳。JPHACKS 2026 デモ用の架空のプロフィールです。",
+  "matched": ["school", "age"]
+}

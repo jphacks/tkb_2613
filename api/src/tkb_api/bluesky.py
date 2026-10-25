@@ -15,6 +15,7 @@ from atproto import AsyncClient, models
 from atproto_client.exceptions import AtProtocolError, BadRequestError, UnauthorizedError
 from pydantic import ValidationError
 
+from tkb_api.web_lookup.service import LookupResult
 from tkb_common.schemas import Clue, Post, PostImage
 
 # 自分の投稿が limit 件そろうまでにタイムラインをたどるページ数の上限（リポストが多い人向け）
@@ -153,6 +154,8 @@ class SessionStore:
         self._clock = clock
         self._sessions: dict[str, BlueskySession] = {}
         self._diagnoses: dict[str, Diagnosis] = {}
+        # Web での照合の結果。診断が変われば消す
+        self._lookups: dict[str, LookupResult] = {}
         self._lock = threading.Lock()
         self._closed = False
 
@@ -191,6 +194,7 @@ class SessionStore:
         with self._lock:
             if session_id not in self._sessions:
                 return
+            self._lookups.pop(session_id, None)
             if diagnosis is None:
                 self._diagnoses.pop(session_id, None)
             else:
@@ -200,11 +204,26 @@ class SessionStore:
         with self._lock:
             return self._diagnoses.get(session_id) if session_id in self._sessions else None
 
+    def set_lookup(self, session_id: str, result: LookupResult | None) -> None:
+        """Web での照合の結果を置き換える。None なら消す。セッションがなければ何もしない。"""
+        with self._lock:
+            if session_id not in self._sessions:
+                return
+            if result is None:
+                self._lookups.pop(session_id, None)
+            else:
+                self._lookups[session_id] = result
+
+    def get_lookup(self, session_id: str) -> LookupResult | None:
+        with self._lock:
+            return self._lookups.get(session_id) if session_id in self._sessions else None
+
     def close(self) -> None:
         with self._lock:
             self._closed = True
             self._sessions.clear()
             self._diagnoses.clear()
+            self._lookups.clear()
 
     def __len__(self) -> int:
         with self._lock:
@@ -218,3 +237,4 @@ class SessionStore:
     def _drop(self, session_id: str) -> None:
         self._sessions.pop(session_id, None)
         self._diagnoses.pop(session_id, None)
+        self._lookups.pop(session_id, None)

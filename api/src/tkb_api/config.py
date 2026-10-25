@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     # 診断の SSE で、イベントの間がこの秒数より空いたら keep-alive のコメントを送る
     # （Vercel は 120 秒、Cloudflare は 100 秒、何も届かないと接続を切るため）
     sse_keepalive_seconds: float = Field(default=15, gt=0)
+    # Web での照合（2段目）。既定はオフ。検索はチームのサーバーで動かす SearXNG を通す
+    web_lookup_enabled: bool = False
+    search_base_url: str = "http://localhost:8888"
+    # MOCK_MODE の照合で返す、架空の人物の固定結果
+    demo_lookup_path: Path = Path("eval/fixtures/demo_web_lookup.json")
 
 
 @lru_cache

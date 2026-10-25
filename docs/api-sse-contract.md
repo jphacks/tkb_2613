@@ -22,6 +22,9 @@
 | `POST /api/diagnose` | `tkb_session` Cookie。JSON bodyなし | `text/event-stream` | Cookieなし・無効は401。成功時は以下のSSE順序。投稿/手がかり/結論の結果はディスクやログに保存しない。推理まで終わると、投稿と手がかりをそのセッションのメモリにだけ置く（simulate 用。ログアウト・期限切れで消え、次の診断を始めると消える）。 |
 | `POST /api/simulate` | `tkb_session` Cookie。JSON `{"delete":["at://…",…]}`（最大100件） | 200 Simulation（下記） | 実際には消さない（Bluesky の削除APIを呼ばない）。モデルも呼ばない。Cookieなし・無効は401、そのセッションで診断が終わっていなければ409、最後の診断にない投稿IDや余計なキーは422（送られたIDは応答に入れない）。 |
 
+| `POST /api/lookup` | `tkb_session` Cookie。本文なし（送っても使わない） | 200 `{"found":true,"query","url","site","title","description","matched":["school","age"]}`、見つからなければ `{"found":false,"query"}` | Web での照合（2段目、CLAUDE.md の条件どおり）。`WEB_LOOKUP_ENABLED=0` なら404、ログインなし401、診断前またはフルネームを推定できていなければ409、検索できなければ502。名前・学校はセッションの最後の診断から engine が推定したものだけを使う。モックは `eval/fixtures/demo_web_lookup.json` の架空の結果。 |
+| `POST /api/lookup/photo` | `tkb_session` Cookie。本文なし | 200 画像そのもの（jpeg/png/webp/gif。モックはシルエットの SVG） | `/api/lookup` で見つけたページの og:image だけ。照合の前は409、写真のないページは404、取ってこられなければ502。`Content-Security-Policy: default-src 'none'; sandbox` を付ける。 |
+
 バリデーションエラーは422で `{"detail":[{"loc":[…],"msg":"…","type":"…"}]}` を返す。送信値そのものは詳細に含めない。その他のエラー形式は FastAPI のHTTPエラー応答に従う。
 
 ## 共通データ型
