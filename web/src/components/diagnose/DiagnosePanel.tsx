@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { ConclusionBoard } from "@/components/conclusion-board/ConclusionBoard";
 import { PostCard, type PostClues } from "@/components/post-list/PostCard";
+import { Reveal } from "@/components/reveal/Reveal";
 import { RiskyPosts } from "@/components/risky-posts/RiskyPosts";
 import { SeekerEyes } from "@/components/seeker-eyes/SeekerEyes";
 import { useSession } from "@/components/session/SessionProvider";
@@ -47,11 +48,16 @@ function statusText(phase: Phase, postCount: number, searchedCount: number): str
   }
 }
 
+interface DiagnosePanelProps {
+  /** 結果を叩きつけたら true、診断をやり直したら false。ホームがタイトルをしまうのに使う */
+  onRevealedChange?: (revealed: boolean) => void;
+}
+
 /**
  * 診断を始め、ログインした本人の投稿を届いた順に並べる。
  * 診断の結果は画面のメモリにだけ置き、保存しない。
  */
-export function DiagnosePanel() {
+export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
   const { state: session } = useSession();
   const [posts, setPosts] = useState<readonly Post[]>([]);
   const [found, setFound] = useState<Readonly<Record<string, PostClues>>>({});
@@ -75,6 +81,7 @@ export function DiagnosePanel() {
     setResult(null);
     setRisky(null);
     setSimulation(null);
+    onRevealedChange?.(false);
     setPhase({ kind: "connecting" });
     try {
       for await (const event of diagnose({ signal: current.signal })) {
@@ -89,6 +96,7 @@ export function DiagnosePanel() {
             break;
           case "conclusions":
             setResult({ clues: event.clues, conclusions: event.conclusions });
+            onRevealedChange?.(true);
             break;
           case "plan":
             setRisky(event.posts);
@@ -110,6 +118,8 @@ export function DiagnosePanel() {
   // ログイン画面と同じ形：ボタンの文言は変えず、処理中は回る印を出し、状態とエラーはボタンの下に出す
   return (
     <section aria-labelledby="diagnose-heading" aria-busy={busy} className="mt-12 space-y-8">
+      {result && <Reveal posts={posts} clues={result.clues} conclusions={result.conclusions} />}
+
       <div>
         <h2 id="diagnose-heading" className="sr-only">
           {t.heading}
