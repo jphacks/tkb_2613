@@ -3,10 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 
 import { ConclusionBoard } from "@/components/conclusion-board/ConclusionBoard";
+import { DiagnoseLoading } from "@/components/diagnose-loading/DiagnoseLoading";
 import { PostCard, type PostClues } from "@/components/post-list/PostCard";
 import { Reveal } from "@/components/reveal/Reveal";
 import { RiskyPosts } from "@/components/risky-posts/RiskyPosts";
-import { SeekerEyes } from "@/components/seeker-eyes/SeekerEyes";
 import { useSession } from "@/components/session/SessionProvider";
 import { ApiError, diagnose } from "@/lib/api";
 import { messages } from "@/lib/messages";
@@ -118,7 +118,7 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
   // ログイン画面と同じ形：ボタンの文言は変えず、処理中は回る印を出し、状態とエラーはボタンの下に出す
   return (
     <section aria-labelledby="diagnose-heading" aria-busy={busy} className="mt-12 space-y-8">
-      {result && <Reveal posts={posts} clues={result.clues} conclusions={result.conclusions} />}
+      {!busy && result && <Reveal posts={posts} clues={result.clues} conclusions={result.conclusions} />}
 
       <div>
         <h2 id="diagnose-heading" className="sr-only">
@@ -139,12 +139,8 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
           {t.start}
         </button>
 
-        {status && (
-          <p role="status" className="mt-4 flex items-center gap-3 text-ink/70">
-            {busy && <SeekerEyes className="h-5 w-16 shrink-0" />}
-            {status}
-          </p>
-        )}
+        {/* 診断の間は専用の画面を出し、done で捜査ボードに切り替える */}
+        {status && <DiagnoseLoading active={busy} posts={posts} found={found} status={status} />}
         {phase.kind === "error" && (
           <p role="alert" className="mt-4 border-l-4 border-seeker bg-seeker/10 px-4 py-3">
             {phase.message}
@@ -152,7 +148,7 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
         )}
       </div>
 
-      {result && (
+      {!busy && result && (
         <ConclusionBoard
           clues={result.clues}
           conclusions={simulation ? simulation.after : result.conclusions}
@@ -160,7 +156,7 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
         />
       )}
 
-      {result && risky && (
+      {!busy && result && risky && (
         <RiskyPosts posts={posts} risky={risky} clueCount={result.clues.length} onSimulated={setSimulation} />
       )}
 

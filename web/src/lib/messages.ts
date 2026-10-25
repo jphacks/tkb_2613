@@ -71,11 +71,33 @@ export const messages = {
     heading: "診断",
     start: "診断する",
     connecting: "特定班AIが投稿を取りに行っています…",
-    reading: (posts: number) => `投稿を読んでいます…（${posts} 件）`,
+    reading: (posts: number) => `${posts} 件の投稿を調べています…`,
     searching: (searched: number, posts: number) => `手がかりを探しています…（${searched} / ${posts} 件）`,
     done: (posts: number) => `${posts} 件の投稿を読みました`,
     failed: "診断できませんでした",
     postsLabel: "読んだ投稿",
+  },
+  /** 診断の間の画面 */
+  loading: {
+    /** 診断を始めた直後に出す鬼の呼びかけ */
+    calling: "もういいかい？",
+    progressLabel: "手がかりを探し終えた投稿",
+    feedLabel: "特定班AIの実況",
+    /** 実況に流す、読んだ投稿の本文 */
+    reading: (text: string) => `読んだ：「${text}」`,
+    photoPost: (photos: number) => `写真 ${photos} 枚の投稿`,
+    /** label は手がかりの種類の表示名 */
+    found: (label: string) => `${label}を見つけた`,
+    /** 数秒ごとに切り替える一言。煽らず、いま実際にしていることだけを書く */
+    lines: [
+      "写真の隅まで見ています",
+      "写真に写った文字を読んでいます",
+      "窓の外の景色も見ています",
+      "投稿した時刻を並べています",
+      "何気ない一言も読んでいます",
+      "別々の投稿をつないでいます",
+      "1件ずつは無害でも、組み合わせて見ています",
+    ],
   },
   post: {
     /** 説明文（alt）のない写真の名前。index は 0 から */
