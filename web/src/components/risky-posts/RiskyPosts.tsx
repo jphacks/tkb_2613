@@ -124,7 +124,10 @@ export function RiskyPosts({ posts, risky, targetAttributes = [], clueCount, onS
   }
 
   const shown = deletion ?? result;
-  const escaped = shown !== null && targetAttributes.every((a) => !shown.after.some((c) => c.attribute === a));
+  const escaped =
+    shown !== null &&
+    targetAttributes.length > 0 &&
+    targetAttributes.every((a) => !shown.after.some((c) => c.attribute === a));
 
   return (
     <section aria-labelledby="risky-heading" aria-busy={pending} className="max-w-2xl space-y-4">

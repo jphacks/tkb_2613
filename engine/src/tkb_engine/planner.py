@@ -22,7 +22,14 @@ from tkb_engine.rules import Conclusion, infer
 BOARD_RECOMMENDATION_COUNT = 3
 # 互換用の一覧。実際の推薦対象は infer の結果から動的に決める。
 IMPORTANT_ATTRIBUTES = (
-    "full_name", "given_name_or_nickname", "birthday", "home_area", "home_block", "station", "active_time", "routine"
+    "full_name",
+    "given_name_or_nickname",
+    "birthday",
+    "home_area",
+    "home_block",
+    "station",
+    "active_time",
+    "routine",
 )
 PLAN_MAX_POSTS = 3
 
@@ -72,7 +79,9 @@ def plan(clues: Sequence[Clue], posts: Sequence[Post], gaz: Gazetteer) -> Simula
     どの候補でも小さくならないときは、そこでやめる。
     """
     before = infer(clues, posts, gaz)
-    target_attributes = tuple(dict.fromkeys(c.attribute for c in before[-BOARD_RECOMMENDATION_COUNT:]))
+    target_attributes = tuple(
+        dict.fromkeys(c.attribute for c in before[-BOARD_RECOMMENDATION_COUNT:])
+    )
     if not target_attributes:
         return simulate(clues, posts, gaz, [])
 
