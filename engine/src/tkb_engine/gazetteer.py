@@ -46,12 +46,14 @@ class CollectionArea:
 
 @dataclass(frozen=True)
 class University:
-    """大学のキャンパス。periods は時限 → (始まり, 終わり)。時刻は時の小数（10:50 → 10.8333）。"""
+    """大学のキャンパス。periods は時限 → (始まり, 終わり)。時刻は時の小数（10:50 → 10.8333）。
+    stations はキャンパスの最寄り駅（大学のアクセス案内に書かれた駅）。"""
 
     name: str
     campus: str
     city: str
     periods: dict[int, tuple[float, float]]
+    stations: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -73,7 +75,10 @@ class Knowledge:
                     name=r["name"],
                     campus=r["campus"],
                     city=r["city"],
-                    periods={int(k): (_hours(a), _hours(b)) for k, (a, b) in r["periods"].items()},
+                    periods={
+                        int(k): (_hours(a), _hours(b)) for k, (a, b) in r.get("periods", {}).items()
+                    },
+                    stations=r.get("stations", []),
                 )
                 for r in doc["universities"]
             ],

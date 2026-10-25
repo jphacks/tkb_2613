@@ -423,7 +423,7 @@ def rule_r7(
     2. なければ「大学」と「〇限」の投稿を、R4 の市区町村にある大学の時間割と照らす。
        時間割の分からない大学は候補に残し、1校に決まらなければ「〇〇市にある大学」までにする
     """
-    named = _named_school(clues, gaz)
+    named = _named_school(clues, gaz) or _school_by_station(clues, gaz)
     if named:
         return named
     if not r4:
@@ -487,6 +487,45 @@ SCHOOL_NAME_TYPES = {
 }
 
 
+# 大学に通っていることがわかる言葉（大学の名前は出てこなくてよい）
+CAMPUS_WORDS = re.compile(r"大学|研究室|ゼミ|キャンパス|学食|院試|卒論|講義")
+
+
+def _school_by_station(clues: Sequence[Clue], gaz: Gazetteer) -> list[Conclusion]:
+    """「研究室に泊まり」のような大学に通っている投稿と、別の投稿に出てくる駅名を、
+    知識表のキャンパスの最寄り駅と照らす。駅が合うキャンパスが1つだけなら、そのキャンパス。"""
+    campus = [
+        i
+        for i, c in enumerate(clues)
+        if c.type in {ClueType.ROUTINE_TEXT, ClueType.PLACE_TEXT} and CAMPUS_WORDS.search(c.value)
+    ]
+    if not campus:
+        return []
+    hits: dict[tuple[str, str], list[int]] = {}
+    for i, c in enumerate(clues):
+        if c.type not in R1_NAME_TYPES | R1_MENTION_TYPES or i in campus:
+            continue
+        names = gaz.stations_named_in(c.value) | gaz.station_names(c.value)
+        for u in gaz.knowledge.universities:
+            if names & set(u.stations):
+                hits.setdefault((u.name, u.campus), []).append(i)
+    if len(hits) != 1:
+        return []
+    (name, place), stations = next(iter(hits.items()))
+    station = "・".join(
+        sorted({s for i in stations for s in gaz.stations_named_in(clues[i].value)})
+    )
+    return [
+        Conclusion(
+            "R7",
+            "school",
+            f"{name} {place}",
+            sorted({*campus, *stations}),
+            f"大学に通っている投稿と、キャンパスの最寄り駅（{station}）の投稿",
+        )
+    ]
+
+
 def _named_school(clues: Sequence[Clue], gaz: Gazetteer) -> list[Conclusion]:
     votes: dict[str, list[int]] = {}
     kinds: dict[str, str] = {}
@@ -504,26 +543,56 @@ def _named_school(clues: Sequence[Clue], gaz: Gazetteer) -> list[Conclusion]:
 
 
 def rule_r8(clues: Sequence[Clue]) -> list[Conclusion]:
-    """R8 名前（name）：name_text をまとめ、確からしさを合わせて下限を超えた名前。"""
+    """R8 名前（name）：name_text をまとめ、確からしさを合わせて下限を超えた名前。
+
+    名札・在室表・宛名に出てくるのは名字、ケーキのプレートやお祝いの呼びかけは下の名前とみなす。
+    別々の手がかりから名字と下の名前がそろえば、つなげてフルネームにする。
+    """
     groups: dict[str, list[int]] = {}
     shown: dict[str, str] = {}
+    roles: dict[str, set[str]] = {}
     for i, c in enumerate(clues):
         if c.type is ClueType.NAME_TEXT and (name := _clean_name(c.value)):
             key = _hiragana(name)
             groups.setdefault(key, []).append(i)
             shown.setdefault(key, name)
-    best: tuple[float, str] | None = None
-    for key, indices in groups.items():
+            roles.setdefault(key, set()).add(_name_role(c.value))
+
+    def confidence(key: str) -> float:
         miss = 1.0
-        for i in indices:
+        for i in groups[key]:
             miss *= 1 - clues[i].confidence
-        if best is None or 1 - miss > best[0]:
-            best = (1 - miss, key)
-    if best is None or best[0] < R8_MIN_CONFIDENCE:
+        return 1 - miss
+
+    sure = [k for k in groups if confidence(k) >= R8_MIN_CONFIDENCE]
+    if not sure:
         return []
-    indices = groups[best[1]]
-    note = f"名前の手がかり {len(indices)} 件（合わせた確からしさ {best[0]:.2f}）"
-    return [Conclusion("R8", "name", shown[best[1]], indices, note)]
+    family = [k for k in sure if "family" in roles[k]]
+    given = [k for k in sure if "given" in roles[k] and k not in family]
+    if family and given:
+        f = max(family, key=confidence)
+        g = max(given, key=confidence)
+        note = f"名字（{shown[f]}）と下の名前（{shown[g]}）を別々の手がかりからつなげた"
+        return [Conclusion("R8", "name", shown[f] + shown[g], sorted(groups[f] + groups[g]), note)]
+    best = max(sure, key=confidence)
+    indices = groups[best]
+    note = f"名前の手がかり {len(indices)} 件（合わせた確からしさ {confidence(best):.2f}）"
+    return [Conclusion("R8", "name", shown[best], indices, note)]
+
+
+# 名前が名字か下の名前かを見分ける言葉
+FAMILY_NAME_WORDS = re.compile(r"名札|表札|在室|宛名|様|ネームプレート|名字|苗字")
+GIVEN_NAME_WORDS = re.compile(
+    r"くん|君|ちゃん|おめでとう|おめ|happy|birthday|誕生日", re.IGNORECASE
+)
+
+
+def _name_role(value: str) -> str:
+    if FAMILY_NAME_WORDS.search(value):
+        return "family"
+    if GIVEN_NAME_WORDS.search(value):
+        return "given"
+    return "unknown"
 
 
 def rule_r9(clues: Sequence[Clue], posts: Sequence[Post]) -> list[Conclusion]:
@@ -537,6 +606,8 @@ def rule_r9(clues: Sequence[Clue], posts: Sequence[Post]) -> list[Conclusion]:
         birthday = BIRTHDAY.search(text)
         if m := re.search(r"(\d{1,3})\s*歳", text):
             age, note = f"{m[1]}歳", "本文の年齢"
+        elif birthday and (m := re.search(r"(?:今日で|ついに|とうとう)\s*(\d{2})(?!\d)", text)):
+            age, note = f"{m[1]}歳", "誕生日の投稿の「今日で〇〇」"
         elif birthday and ALCOHOL.search(text):
             age, note = "20歳", "誕生日にお酒を頼めるようになった"
         elif COMING_OF_AGE.search(text):
@@ -691,8 +762,9 @@ def _mentioned_stations(value: str, gaz: Gazetteer) -> set[str]:
 
 
 def _clean_name(value: str) -> str:
-    """敬称・読めない字（x）・お祝いの言葉などを落とした名前。"""
-    name = re.sub(r"[（(].*?[)）]", "", value)
+    """敬称・読めない字（x）・お祝いの言葉などを落とした名前。「」があれば、その中だけを見る。"""
+    quoted = re.search(r"「(.+?)」", value)
+    name = re.sub(r"[（(].*?[)）]", "", quoted[1] if quoted else value)
     name = re.sub(r"happy\s*birthday|hbd|dear", "", name, flags=re.IGNORECASE)
     name = re.sub(r"(おめ|おめでとう|お誕生日|誕生日|ありがとう|へ|より).*$", "", name)
     name = re.sub(r"(様|さま|さん|くん|君|ちゃん|氏)$", "", name.strip())
