@@ -113,17 +113,33 @@ def test_simulate_ignores_duplicate_ids() -> None:
     assert simulate(clues, posts, GAZ, ["b", "b"]).delete == ["b"]
 
 
-def test_plan_on_demo_breaks_station_time_and_routine() -> None:
+def test_plan_on_demo_recommends_the_name_post_first() -> None:
     clues, posts = _load_demo()
 
     result = plan(clues, posts, GAZ)
 
     assert len(result.delete) <= PLAN_MAX_POSTS
+    assert result.delete[0].endswith("000006")
+    assert "given_name_or_nickname" in result.broken
     assert {"station", "active_time", "routine"} <= set(result.broken)
     assert not {c.attribute for c in result.after} & {"station", "active_time", "routine"}
     # 駅名標の投稿より、郵便番号と住所の写った宛名の投稿を選ぶ（町名もいっしょに崩れる）
     assert any(post_id.endswith("000009") for post_id in result.delete)
     assert "home_area" in result.broken
+
+
+def test_plan_recommends_name_before_station_and_can_target_name_alone() -> None:
+    station_clues, station_posts = _station_case()
+    name_post = _post("name", "2026-10-22 12:00")
+    name_clue = _clue("name", ClueType.NAME_TEXT, "はるき")
+
+    name_only = plan([name_clue], [name_post], GAZ)
+    assert name_only.delete == ["name"]
+    assert name_only.broken == ["given_name_or_nickname"]
+
+    together = plan([*station_clues, name_clue], [*station_posts, name_post], GAZ)
+    assert together.delete[0] == "name"
+    assert {"given_name_or_nickname", "station", "active_time"} <= set(together.broken)
 
 
 def test_plan_prefers_the_post_used_as_evidence_more_often_on_a_tie() -> None:

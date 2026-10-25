@@ -17,7 +17,8 @@ PASSWORD = "correct horse battery staple"  # noqa: S105  テスト用の架空�
 FIXTURE = Path(__file__).resolve().parents[2] / "eval" / "fixtures" / "demo_observations.json"
 DOC = json.loads(FIXTURE.read_text(encoding="utf-8"))
 POST_IDS = [p["post_id"] for p in DOC["posts"]]
-# 宛名の郵便番号・住所の投稿と、「毎週火曜のジム」の投稿
+# 「25歳になりました」の投稿、宛名の郵便番号・住所の投稿、「毎週火曜のジム」の投稿
+NAME_POST = next(i for i in POST_IDS if i.endswith("000006"))
 ADDRESS_POST = next(i for i in POST_IDS if i.endswith("000009"))
 GYM_POST = next(i for i in POST_IDS if i.endswith("000002"))
 
@@ -65,10 +66,20 @@ def test_diagnose_streams_the_plan_before_done(client: TestClient) -> None:
     events = _diagnose(client)
 
     proposal = events["plan"]
-    assert set(proposal["delete"]) == {ADDRESS_POST, GYM_POST}
+    assert proposal["delete"][0] == NAME_POST
+    assert set(proposal["delete"]) == {NAME_POST, ADDRESS_POST, GYM_POST}
+    assert {"given_name_or_nickname", "birthday"} <= set(proposal["broken"])
     assert {"station", "active_time", "routine"} <= set(proposal["broken"])
-    # 重要な項目は消したあとに残らない（名前や年齢などは planner の対象外なので残る）
-    assert not {c["attribute"] for c in proposal["after"]} & {"station", "active_time", "routine"}
+    # 推薦対象の重要な項目は消したあとに残らない。年齢などは対象外なので残る
+    assert not {c["attribute"] for c in proposal["after"]} & {
+        "full_name",
+        "given_name_or_nickname",
+        "birthday",
+        "home_area",
+        "station",
+        "active_time",
+        "routine",
+    }
     by_post = {p["post_id"]: p["broken"] for p in proposal["posts"]}
     assert "station" in by_post[ADDRESS_POST]
     assert "routine" in by_post[GYM_POST]

@@ -45,7 +45,7 @@ SSEブロックは `event: <name>\ndata: <JSON>\n\n`。JSONはUTF-8で送られ�
 | 1 | `post` | `{"post": Post}` | 診断対象投稿をすべて取得した後、投稿一覧の順に全件送信。各投稿を送るたび手がかり抽出を待つわけではない。 |
 | 2 | `clues` | `{"post_id":"…","clues":[Clue,…],"error":string|null}` | 抽出処理が完了した投稿ごと。抽出処理の完了順。成功時は `error:null`。投稿単位の抽出失敗時は空の `clues` とエラー文字列を送る。 |
 | 3 | `conclusions` | `{"clues":[全Clue,…],"conclusions":[Conclusion,…]}` | 全投稿の抽出処理の後に1回。cluesは `clues` イベントで得た配列を集めたもの。 |
-| 4 | `plan` | Simulation ＋ `"posts":[{"post_id","broken"},…]` | 推理の後に1回。`delete` は危ない投稿（最寄り駅 station・行動時間 active_time・留守の時間 routine が崩れるまで、効き目の大きい投稿から最大3件。`tkb_engine.planner.plan`）。`posts` は各投稿だけを消したときに崩れる項目。候補がなければ `delete` は空。 |
+| 4 | `plan` | Simulation ＋ `"posts":[{"post_id","broken"},…]` | 推理の後に1回。`delete` は名前・生年月日の推定を優先し、住所・最寄り駅・行動時間・留守の時間も崩す危ない投稿を最大3件、推薦順に並べる（`tkb_engine.planner.plan`）。`posts` は各投稿だけを消したときに崩れる項目。候補がなければ `delete` は空。 |
 | 5 | `done` | `{"posts_seen":number}` | 正常完了時に1回。 |
 
 ### 失敗・切断の現状
@@ -72,7 +72,7 @@ SSEブロックは `event: <name>\ndata: <JSON>\n\n`。JSONはUTF-8で送られ�
 ## まだ実装されていない目標機能
 
 - 16項目プロフィールの `found/weak/unknown`、確からしさ、根拠を含む共通出力（現行は試作Conclusion）。
-- 16項目プロフィールでの削除候補・仮除外（現行の planner と simulate は試作Conclusionの station・active_time・routine を対象にする）。
+- 16項目プロフィールでの削除候補・仮除外（現行の planner と simulate は試作Conclusionを対象にする）。
 - Blueskyログイン時以外の本番画像/本文抽出の統合完了確認。独立detectエンドポイントはモックのみで、本番は501。
 - SSEの全体失敗イベント、途中切断後の再開・再送プロトコル。
 
