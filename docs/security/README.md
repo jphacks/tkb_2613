@@ -3,15 +3,42 @@
 みーつけた api（commit df27bac）のローカル実機テスト。カテゴリごとに独立した報告ファイルに分ける。
 破壊的操作（本物の投稿削除）は行わない。
 
+**総合報告書: [REPORT.md](REPORT.md)**（判定・推奨アクション・全カテゴリの要約を1枚にまとめたもの）
+
 | # | カテゴリ | 状態 | 報告 |
 |---|---|---|---|
 | 1 | 認証境界（本人だけを通せているか） | 実施済み・脆弱性なし | [01-auth-boundary.md](01-auth-boundary.md) |
-| 2 | セッション管理・Cookie属性 | 未実施 | [02-session.md](02-session.md) |
-| 3 | 認可・IDOR（他人のアカウントを触れないか） | 未実施 | [03-authz-idor.md](03-authz-idor.md) |
-| 4 | 削除対象の正当性（`at://` URI検証） | 未実施 | [04-uri-validation.md](04-uri-validation.md) |
-| 5 | 入力検証（スキーマ・境界・未知フィールド） | 未実施 | [05-input-validation.md](05-input-validation.md) |
-| 6 | エラー・ログの情報漏えい | 未実施 | [06-info-leak.md](06-info-leak.md) |
-| 7 | キャッシュ・レスポンスヘッダ | 未実施 | [07-headers-cache.md](07-headers-cache.md) |
-| 8 | CORS | 未実施 | [08-cors.md](08-cors.md) |
-| 9 | SSRF・画像取得先/モデル送信先ガード | 未実施 | [09-ssrf-guard.md](09-ssrf-guard.md) |
-| 10 | 認証不要エンドポイント・サイズ上限・SSE 耐性 | 未実施 | [10-dos-detect-sse.md](10-dos-detect-sse.md) |
+| 2 | セッション管理・Cookie属性 | 実施済み・脆弱性なし | [02-session.md](02-session.md) |
+| 3 | 認可・IDOR（他人のアカウントを触れないか） | 実施済み・脆弱性なし | [03-authz-idor.md](03-authz-idor.md) |
+| 4 | 削除対象の正当性（`at://` URI検証） | 実施済み・Low1件 | [04-uri-validation.md](04-uri-validation.md) |
+| 5 | 入力検証（スキーマ・境界・未知フィールド） | 実施済み・脆弱性なし | [05-input-validation.md](05-input-validation.md) |
+| 6 | エラー・ログの情報漏えい | 実施済み・脆弱性なし | [06-info-leak.md](06-info-leak.md) |
+| 7 | キャッシュ・レスポンスヘッダ | 実施済み・脆弱性なし | [07-headers-cache.md](07-headers-cache.md) |
+| 8 | CORS | 実施済み・脆弱性なし | [08-cors.md](08-cors.md) |
+| 9 | SSRF・画像取得先/モデル送信先ガード | 実施済み・Medium1件 | [09-ssrf-guard.md](09-ssrf-guard.md) |
+| 10 | 認証不要エンドポイント・サイズ上限 | 実施済み・脆弱性なし | [10-dos-detect-sse.md](10-dos-detect-sse.md) |
+| 11 | プロンプトインジェクション（本文はデータか） | 実施済み・脆弱性なし（画像経路は未） | [11-prompt-injection.md](11-prompt-injection.md) |
+| 12 | SSE 契約・耐性（ヘッダ・keep-alive・途中切断） | 実施済み・脆弱性なし | [12-sse.md](12-sse.md) |
+
+補足: 依存パッケージの既知脆弱性（`pip-audit` / `pnpm audit`）と git履歴の秘密情報も確認し、いずれも検出なし。Web画面のXSS面（生HTML挿入なし・React自動エスケープ・画像URLは`cdn.bsky.app`限定）、画像のデコード爆弾対策（`MAX_PIXELS`＋`DecompressionBombError`捕捉）も確認済み。
+
+## 総合所見（2026-11-06）
+
+致命的な脆弱性なし。カテゴリ1〜12を**すべてライブ実測で確認**（コード確認のみだった項目も実リクエスト／注入で裏取り済み）。対応を検討する点は3つ。
+
+- 🟠 Medium: モデル送信先ガードが拒否リスト方式（カテゴリ9）。許可リスト方式へ。利用者入力では送信先を変えられないため悪用可能性は低いが、「チームのサーバーだけ」を担保できていない。
+- 🟡 Low: `is_own_post_uri` が `%2e%2e`・制御文字入り rkey を通す（カテゴリ4）。DID固定＋診断リスト照合で実害なし・堅牢化推奨。
+- ⚠️ 運用: 本番HTTPS公開時は `COOKIE_SECURE=1`（カテゴリ2）。
+
+追加で実測済み（2026-11-06）:
+- プロンプトインジェクション（文章・画像の両経路、実VLM・架空データ）→ 従わず・漏えいなし・スキーマ準拠（カテゴリ11）
+- 同時実行/TOCTOU（`SessionStore` 20スレッド×200回、delete 10並列二重送信）→ 例外なし（カテゴリ2・3）
+- SSEへの敵対的データ混入（改行・`event:`・`data:`）→ 境界を壊さない（カテゴリ12）
+- レート制限の有無（/health 50並列）→ 制限なしを確認（カテゴリ10）
+- 本気の過負荷（ab 5万req・ログイン5万・診断SSE 3000本）→ クラッシュ・5xx・メモリリークなし、約3,300 req/s（カテゴリ10）
+- 依存監査（pip-audit / pnpm audit）・git履歴の秘密情報 → 検出なし
+- Web画面のXSS面・画像デコード爆弾対策 → 問題なし
+
+残課題（任意・破壊的または要環境）:
+- 実Blueskyでの実削除の最終確認（消えてよいデモ投稿で手動1件。実アカウントで本当に消すため私からは未実行）
+- SSE切断時に診断パイプラインの内部タスクが確実に解放されるか（実VLM接続の長い診断で要観測）
