@@ -172,6 +172,20 @@ def test_is_own_post_uri_accepts_only_the_session_accounts_posts() -> None:
     assert not is_own_post_uri("at://did:plc:mex/app.bsky.feed.post/3kabc", me)
 
 
+def test_is_own_post_uri_validates_rkey_charset() -> None:
+    me = "did:plc:me"
+    # 実在する形の rkey（TID やハイフン等）は許可
+    assert is_own_post_uri("at://did:plc:me/app.bsky.feed.post/3jwdwj2ctlk26", me)
+    assert is_own_post_uri("at://did:plc:me/app.bsky.feed.post/a.b-c_d~e", me)
+    # rkey に許可外の文字（%・改行・空白・?）や、. / .. 単体が入るものは拒否
+    assert not is_own_post_uri("at://did:plc:me/app.bsky.feed.post/%2e%2e%2f3x", me)
+    assert not is_own_post_uri("at://did:plc:me/app.bsky.feed.post/a\nb", me)
+    assert not is_own_post_uri("at://did:plc:me/app.bsky.feed.post/a b", me)
+    assert not is_own_post_uri("at://did:plc:me/app.bsky.feed.post/a?x=1", me)
+    assert not is_own_post_uri("at://did:plc:me/app.bsky.feed.post/.", me)
+    assert not is_own_post_uri("at://did:plc:me/app.bsky.feed.post/..", me)
+
+
 class FakeBluesky:
     def __init__(self, failing: set[str]) -> None:
         self.failing = failing
