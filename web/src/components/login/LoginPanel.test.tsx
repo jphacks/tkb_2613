@@ -144,4 +144,3 @@ describe("LoginPanel", () => {
     expect(await screen.findByText(REVOKE_APP_PASSWORD)).toBeInTheDocument();
   });
 });
-

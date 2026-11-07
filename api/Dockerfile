@@ -37,4 +37,6 @@ WORKDIR /app
 ENV PATH=/app/.venv/bin:$PATH PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 USER app
 EXPOSE 8001
-CMD ["uvicorn", "tkb_api.main:app", "--host", "0.0.0.0", "--port", "8001"]
+# アクセスログ（経路・送信元など）は出さない。動作の記録は件数と処理時間だけにする
+# （プライバシーポリシー：web/src/lib/legal.ts）
+CMD ["uvicorn", "tkb_api.main:app", "--host", "0.0.0.0", "--port", "8001", "--no-access-log"]

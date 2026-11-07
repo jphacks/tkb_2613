@@ -32,7 +32,7 @@ describe("legal pages", () => {
     expect(text).toContain("診断結果は保存しません");
     expect(text).toContain("パスワードは、ログインに使ったら捨てます");
     expect(text).toContain("IP アドレスは、攻撃を防ぐために一時的に処理するだけで、保存しません");
-    expect(text).toContain("顔から人物を調べたり");
+    expect(text).toContain("人物を特定したり、プロフィールの項目");
     expect(text).toContain("アプリパスワード");
     // 決定どおり、閲覧リンク（期限付きの保存）の例外は書かない
     expect(text).not.toContain("閲覧リンク");
