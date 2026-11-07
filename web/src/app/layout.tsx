@@ -6,6 +6,7 @@ import "@fontsource/zen-kaku-gothic-new/400.css";
 import "@fontsource/zen-kaku-gothic-new/700.css";
 import "./globals.css";
 
+import { SiteFooter } from "@/components/legal/SiteFooter";
 import { SessionProvider } from "@/components/session/SessionProvider";
 import { messages } from "@/lib/messages";
 
@@ -19,6 +20,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     <html lang="ja" className="h-full antialiased">
       <body className="min-h-full">
         <SessionProvider>{children}</SessionProvider>
+        <SiteFooter />
       </body>
     </html>
   );

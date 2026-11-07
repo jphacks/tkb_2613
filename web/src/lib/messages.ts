@@ -83,6 +83,12 @@ export const messages = {
     failed: "ログインできませんでした",
     loggedIn: "ログイン中",
     logout: "ログアウト",
+    // 同意と、アプリパスワードの取り消しの案内（文章の続きは web/src/lib/legal.ts）
+    consentBefore: "ログインすると、",
+    consentTerms: "利用規約",
+    consentAnd: "と",
+    consentPrivacy: "プライバシーポリシー",
+    consentAfter: "に同意したものとします。投稿の本文と写真は、チームの GPU サーバーでだけ読み、診断結果は保存しません。",
   },
   diagnose: {
     heading: "診断",
