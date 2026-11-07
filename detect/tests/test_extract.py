@@ -10,7 +10,7 @@ from PIL import Image
 
 from tkb_common.schemas import ClueSource, ClueType, Post
 from tkb_detect.coords import CoordinateSpace
-from tkb_detect.errors import DetectError
+from tkb_detect.errors import DetectError, ForbiddenEndpointError
 from tkb_detect.extract import (
     PHOTO_MAX_TOKENS,
     RETRY_REPETITION_PENALTY,
@@ -483,3 +483,37 @@ async def test_decoded_barcodes_replace_the_models_guess() -> None:
     assert [(c.type, c.value, c.source) for c in clues] == [
         (ClueType.CODE, "QRCode: https://example.com/demo", ClueSource.OCR)
     ]
+
+
+@pytest.mark.parametrize(
+    ("vlm", "ocr", "allowed"),
+    [
+        ("http://10.0.2.15:8000/v1", "http://10.0.2.99:8080", ["10.0.2.15"]),  # OCR が許可外
+        ("http://10.0.2.99:8000/v1", "http://10.0.2.15:8080", ["10.0.2.15"]),  # VLM が許可外
+        ("http://10.0.2.15:8000/v1", "http://10.0.2.15:8080", []),  # 空なら localhost だけ
+    ],
+)
+def test_build_extractor_applies_the_allowlist_to_both_vlm_and_ocr(
+    vlm: str, ocr: str, allowed: list[str]
+) -> None:
+    with pytest.raises(ForbiddenEndpointError):
+        build_extractor(
+            mock_mode=False,
+            vlm_base_url=vlm,
+            vlm_api_key="",
+            vlm_model="qwen",
+            ocr_base_url=ocr,
+            allowed_hosts=allowed,
+        )
+
+
+def test_build_extractor_accepts_vlm_and_ocr_on_the_allowed_host() -> None:
+    extractor = build_extractor(
+        mock_mode=False,
+        vlm_base_url="http://10.0.2.15:8000/v1",
+        vlm_api_key="",
+        vlm_model="qwen",
+        ocr_base_url="http://10.0.2.15:8080",
+        allowed_hosts=["10.0.2.15"],
+    )
+    assert extractor.uses_ocr

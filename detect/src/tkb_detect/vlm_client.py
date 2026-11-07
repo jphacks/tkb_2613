@@ -30,13 +30,17 @@ class VlmConfig:
     model: str
     mock_mode: bool = True
     timeout_s: float = DEFAULT_TIMEOUT_S
+    # 送り先の許可リスト。None なら環境変数 MODEL_ALLOWED_HOST_SUFFIXES を読む（guard.py）
+    allowed_hosts: tuple[str, ...] | None = None
 
 
 class VlmClient:
     def __init__(self, config: VlmConfig) -> None:
         self._config = config
         # モックでは接続しないので、接続先の確認もしない
-        self._base_url = "" if config.mock_mode else ensure_team_endpoint(config.base_url)
+        self._base_url = (
+            "" if config.mock_mode else ensure_team_endpoint(config.base_url, config.allowed_hosts)
+        )
 
     async def complete(
         self,
@@ -117,7 +121,8 @@ class VlmClient:
         if self._config.api_key:
             headers["Authorization"] = f"Bearer {self._config.api_key}"
         try:
-            async with httpx.AsyncClient(timeout=self._config.timeout_s) as client:
+            # 環境変数のプロキシ（HTTP_PROXY など）を経由させない。送るのはガードで確認した先だけ
+            async with httpx.AsyncClient(timeout=self._config.timeout_s, trust_env=False) as client:
                 for delay in (*CONNECT_RETRY_DELAYS_S, None):
                     try:
                         res = await client.post(

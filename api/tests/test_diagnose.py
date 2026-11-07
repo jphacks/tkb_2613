@@ -13,6 +13,7 @@ from tkb_api.main import create_app
 from tkb_api.routes.diagnose import get_extractor_factory, get_fetch_posts, get_gazetteer
 from tkb_api.routes.session import get_login
 from tkb_common.schemas import Clue, ClueSource, ClueType, Post
+from tkb_detect.errors import ForbiddenEndpointError
 from tkb_detect.extract import Extractor
 from tkb_detect.vlm_client import VlmClient, VlmConfig
 from tkb_engine.gazetteer import Gazetteer
@@ -203,6 +204,32 @@ def test_real_diagnose_reports_a_missing_or_forbidden_model_endpoint(vlm_base_ur
 
     assert res.status_code == 503
     assert "openai" not in res.text
+
+
+def _real_settings(allowed: str) -> Settings:
+    return Settings(
+        mock_mode=False,
+        vlm_base_url="http://10.0.2.15:8000/v1",
+        ocr_base_url="http://10.0.2.15:8080",
+        model_allowed_host_suffixes=allowed,
+    )
+
+
+def test_extractor_uses_the_allowlist_from_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    # .env から読んだ許可リストが、環境変数を経由せずに VLM と OCR の両方に効く
+    monkeypatch.delenv("MODEL_ALLOWED_HOST_SUFFIXES", raising=False)
+    extractor = get_extractor_factory(_real_settings("10.0.2.15"))()
+    assert isinstance(extractor, Extractor)
+
+
+@pytest.mark.parametrize("allowed", ["", "10.0.2.16", "0.2.15"])
+def test_extractor_rejects_hosts_outside_the_allowlist(
+    monkeypatch: pytest.MonkeyPatch, allowed: str
+) -> None:
+    # 環境変数に許可があっても、Settings の許可リスト（空なら localhost だけ）が優先される
+    monkeypatch.setenv("MODEL_ALLOWED_HOST_SUFFIXES", "10.0.2.15")
+    with pytest.raises(ForbiddenEndpointError):
+        get_extractor_factory(_real_settings(allowed))()
 
 
 def test_real_diagnose_reports_bluesky_errors_as_bad_gateway() -> None:

@@ -118,6 +118,7 @@ def get_extractor_factory(
             vlm_api_key=settings.vlm_api_key.get_secret_value(),
             vlm_model=settings.vlm_model,
             ocr_base_url=settings.ocr_base_url,
+            allowed_hosts=settings.model_allowed_host_suffixes.split(","),
         )
 
     return build

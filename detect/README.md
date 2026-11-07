@@ -16,7 +16,7 @@
 - `VlmClient`：vLLM（OpenAI 互換 `POST {VLM_BASE_URL}/chat/completions`）。毎回思考モードを切る（`enable_thinking: false`）。接続の段階の失敗（名前解決の失敗など）だけ、2回まで送り直す
 - `OcrClient`：PP-OCRv5。PaddleX の OCR サービス形式（`POST {OCR_BASE_URL}/ocr`）を想定。OCR の箱が VLM の手がかりと重なれば位置は OCR を使い、郵便番号と電話番号は正規表現でも拾う
 - `mock_mode=True`（既定）のときは接続せず、手がかりは空
-- 接続先は `ensure_team_endpoint` で確認し、第三者の AI サービス（OpenAI、Gemini など）は拒否する
+- 接続先は `ensure_team_endpoint`（`guard.py`）で確認する。許可リスト `MODEL_ALLOWED_HOST_SUFFIXES` に書いたホストにだけ送る（ホスト名はサブドメインまで、IP は完全一致）。空なら localhost だけ。169.254.* などの特別用途の IP と、第三者の AI サービス（OpenAI、Gemini など）は、許可リストに書いても拒否する。api は `.env` から読んだ値を `build_extractor(allowed_hosts=...)` で渡す
 - 型は `tkb_common.schemas`（`Post`、`Clue`）を使う。api は import しない（循環依存になるため）
 
 ## 座標の単位
