@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     # 明示的に共有した診断結果の保存先と有効期間。アプリ再起動後も閲覧できるようファイルに置く。
     share_db_path: Path = Path("data/private/shared_results.sqlite3")
     share_ttl_minutes: int = Field(default=120, ge=1, le=1440)
+    # 閲覧リンクの機能。0 なら保存先も作らず、閲覧リンクの API は 404（share_disabled）。
+    # 公開中の本番では 0（docs/aws-migration.md の 14.1）。ローカルの既定はこれまでどおり 1
+    share_enabled: bool = True
 
     # --- 乱用対策と公開時間帯（docs/aws-migration.md の 5章）。0 の上限は「制限しない」 ---
     # 1アカウント（DID）1日（日本時間）の診断回数

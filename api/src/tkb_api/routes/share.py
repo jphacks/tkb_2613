@@ -1,4 +1,7 @@
-"""本人が明示的に作る閲覧専用リンク。トークンは URL の # に置き、アクセスログに残さない。"""
+"""本人が明示的に作る閲覧専用リンク。トークンは URL の # に置き、アクセスログに残さない。
+
+SHARE_ENABLED=0 のときは、どの API も 404（share_disabled）を返し、何も保存しない。
+"""
 
 from typing import Annotated, Any
 
@@ -6,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from tkb_api.bluesky import BlueskySession, SessionStore
+from tkb_api.errors import refusal
 from tkb_api.routes.diagnose import get_gazetteer, read_diagnosis
 from tkb_api.routes.session import current_session, current_session_id, get_session_store
 from tkb_api.shares import ShareStore
@@ -19,7 +23,11 @@ class SharedResultRequest(BaseModel):
 
 
 def get_share_store(request: Request) -> ShareStore:
-    store: ShareStore = request.app.state.shares
+    store: ShareStore | None = request.app.state.shares
+    if store is None:
+        raise refusal(
+            status.HTTP_404_NOT_FOUND, "share_disabled", "閲覧リンクの機能は、いまは使えません"
+        )
     return store
 
 

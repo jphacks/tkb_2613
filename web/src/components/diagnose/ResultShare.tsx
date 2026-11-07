@@ -1,15 +1,27 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
-import { createResultLink, revokeResultLink } from "@/lib/api";
+import { createResultLink, getFeatures, revokeResultLink } from "@/lib/api";
 
-/** 診断した本人が押したときだけ、期限付きの閲覧リンクを作る。 */
+/**
+ * 診断した本人が押したときだけ、期限付きの閲覧リンクを作る。
+ * api で閲覧リンクの機能がオフ（SHARE_ENABLED=0、公開中の本番）のときや、オン・オフを読めないときは何も出さない。
+ */
 export function ResultShare() {
+  const [enabled, setEnabled] = useState(false);
   const [link, setLink] = useState<string | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState(false);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    getFeatures({ signal: controller.signal }).then((features) => {
+      if (!controller.signal.aborted) setEnabled(features.share_enabled);
+    });
+    return () => controller.abort();
+  }, []);
 
   async function create() {
     setPending(true);
@@ -39,6 +51,8 @@ export function ResultShare() {
       setPending(false);
     }
   }
+
+  if (!enabled) return null;
 
   return (
     <section aria-label="結果の閲覧リンク" className="max-w-2xl space-y-3 border-t border-ink/20 pt-6">

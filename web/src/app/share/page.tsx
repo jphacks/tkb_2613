@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { ConclusionBoard } from "@/components/conclusion-board/ConclusionBoard";
 import { PostCard } from "@/components/post-list/PostCard";
 import { Reveal } from "@/components/reveal/Reveal";
-import { getSharedResult } from "@/lib/api";
+import { ApiError, getSharedResult } from "@/lib/api";
 import { messages } from "@/lib/messages";
 import { validNameConclusions } from "@/lib/reveal";
 import type { DiagnosisSnapshot } from "@/types/diagnose";
@@ -13,6 +13,8 @@ import type { DiagnosisSnapshot } from "@/types/diagnose";
 export default function SharedResultPage() {
   const [result, setResult] = useState<DiagnosisSnapshot | null>(null);
   const [error, setError] = useState(false);
+  // 閲覧リンクの機能がオフのとき（公開中の本番）は、無効・期限切れとは別の文言にする
+  const [disabled, setDisabled] = useState(false);
 
   useEffect(() => {
     const token = window.location.hash.slice(1);
@@ -27,8 +29,10 @@ export default function SharedResultPage() {
       .then((snapshot) => {
         if (!controller.signal.aborted) setResult(snapshot);
       })
-      .catch(() => {
-        if (!controller.signal.aborted) setError(true);
+      .catch((e: unknown) => {
+        if (controller.signal.aborted) return;
+        setDisabled(e instanceof ApiError && e.code === "share_disabled");
+        setError(true);
       });
     return () => controller.abort();
   }, []);
@@ -38,7 +42,7 @@ export default function SharedResultPage() {
       <h1 className="sr-only">{messages.app.name} の閲覧用診断結果</h1>
       <p className="text-sm text-ink/70">閲覧専用の診断結果です。この画面から投稿を削除することはできません。</p>
       {!result && !error && <p role="status">結果を読み込んでいます…</p>}
-      {error && <p role="alert">リンクが無効か、有効期限が切れています。</p>}
+      {error && <p role="alert">{disabled ? messages.errors.shareDisabled : "リンクが無効か、有効期限が切れています。"}</p>}
       {result && (
         <>
           <Reveal posts={result.posts} clues={result.clues} conclusions={validNameConclusions(result.conclusions)} />

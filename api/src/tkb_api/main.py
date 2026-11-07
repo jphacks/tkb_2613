@@ -13,7 +13,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from tkb_api.bluesky import SessionStore
 from tkb_api.config import Settings, get_settings
 from tkb_api.limits import DiagnoseLimiter
-from tkb_api.routes import delete, detect, diagnose, session, share, simulate
+from tkb_api.routes import delete, detect, diagnose, features, session, share, simulate
 from tkb_api.shares import ShareStore
 
 
@@ -87,7 +87,12 @@ def create_app(
     app.state.sessions = (
         sessions if sessions is not None else SessionStore(settings.session_ttl_minutes * 60)
     )
-    app.state.shares = ShareStore(settings.share_db_path, settings.share_ttl_minutes * 60)
+    # 閲覧リンクをオフにしたときは、保存先（SQLite のファイル）も作らない
+    app.state.shares = (
+        ShareStore(settings.share_db_path, settings.share_ttl_minutes * 60)
+        if settings.share_enabled
+        else None
+    )
     app.state.diagnose_limiter = DiagnoseLimiter(
         daily_limit=settings.diagnose_daily_limit,
         max_concurrent=settings.max_concurrent_diagnoses,
@@ -109,6 +114,7 @@ def create_app(
     app.include_router(simulate.router)
     app.include_router(delete.router)
     app.include_router(share.router)
+    app.include_router(features.router)
 
     @app.get("/health")
     def health() -> dict[str, str | bool]:

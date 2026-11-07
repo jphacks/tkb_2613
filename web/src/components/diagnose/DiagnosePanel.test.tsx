@@ -15,7 +15,14 @@ const b = messages.board;
 
 vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
-  return { ...actual, diagnose: vi.fn(), getDiagnosis: vi.fn(), getSession: vi.fn(), simulate: vi.fn() };
+  return {
+    ...actual,
+    diagnose: vi.fn(),
+    getDiagnosis: vi.fn(),
+    getSession: vi.fn(),
+    simulate: vi.fn(),
+    getFeatures: vi.fn(async () => ({ share_enabled: false })),
+  };
 });
 
 const ALICE = { handle: "alice.bsky.social", did: "did:plc:abc" };
