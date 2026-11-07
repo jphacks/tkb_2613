@@ -1,5 +1,9 @@
-# 起動：make up（または docker compose -f infra/docker-compose.yml up --build）
+# 起動：make up（docker compose --env-file .env -f infra/docker-compose.yml up --build）
 # VLM と OCR はチームのサーバーで動かすので、ここには含めない
+#
+# api の設定（MOCK_MODE、CORS_ORIGINS、COOKIE_SECURE など）は、リポジトリ直下の .env から読む。
+# .env に書いていない項目は api の既定値（モック、CORS は http://localhost:3000、Cookie の Secure なし）。
+# AWS のアプリの EC2 で使う値は infra/aws.env.example を見る。
 
 name: tkb_2613
 
@@ -11,9 +15,7 @@ services:
     env_file:
       - path: ../.env
         required: false
-    environment:
-      MOCK_MODE: ${MOCK_MODE:-1}
-      CORS_ORIGINS: '["http://localhost:3000"]'
+    # api はホストの外に出さない（web だけが compose のネットワークの中で呼ぶ）
     ports:
       - "127.0.0.1:8001:8001"
     # 推理の表（make data で作る）。読み取り専用でつなぐ。なければ最寄り駅のルールだけを飛ばす
@@ -36,8 +38,10 @@ services:
       args:
         # 画面の /api を、同じネットワークの api コンテナに中継する
         API_ORIGIN: http://api:8001
+    # 既定は 127.0.0.1 だけに公開する。AWS のアプリの EC2 では WEB_BIND=0.0.0.0 にして、
+    # CloudFront の VPC origin から届くようにする（届く先はセキュリティグループで絞る）
     ports:
-      - "127.0.0.1:3000:3000"
+      - "${WEB_BIND:-127.0.0.1}:3000:3000"
     read_only: true
     tmpfs:
       - /tmp
