@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SessionProvider } from "@/components/session/SessionProvider";
 import { ApiError, createSession, deleteSession, getSession } from "@/lib/api";
+import { REVOKE_APP_PASSWORD } from "@/lib/legal";
 import { messages } from "@/lib/messages";
 
 import { LoginPanel } from "./LoginPanel";
@@ -123,4 +124,24 @@ describe("LoginPanel", () => {
     expect(await screen.findByLabelText(t.handle)).toBeInTheDocument();
     expect(deleteSession).toHaveBeenCalled();
   });
+
+  it("asks for consent with links to the terms and privacy policy, and explains how to revoke", async () => {
+    await renderLoggedOut();
+
+    expect(screen.getByRole("link", { name: t.consentTerms })).toHaveAttribute("href", "/terms");
+    expect(screen.getByRole("link", { name: t.consentPrivacy })).toHaveAttribute("href", "/privacy");
+    expect(screen.getByText(REVOKE_APP_PASSWORD)).toBeInTheDocument();
+  });
+
+  it("reminds a logged-in user to revoke the app password after use", async () => {
+    vi.mocked(getSession).mockResolvedValue(ALICE);
+    render(
+      <SessionProvider>
+        <LoginPanel />
+      </SessionProvider>,
+    );
+
+    expect(await screen.findByText(REVOKE_APP_PASSWORD)).toBeInTheDocument();
+  });
 });
+
