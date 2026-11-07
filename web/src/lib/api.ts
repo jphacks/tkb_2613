@@ -182,6 +182,30 @@ export async function getDiagnosis({
   return data;
 }
 
+/** 画面が出し分ける機能のオン・オフ（GET /api/features）。api/src/tkb_api/routes/features.py と同時に変更する */
+export interface Features {
+  readonly share_enabled: boolean;
+}
+
+/**
+ * 機能のオン・オフを読む。ログインは不要。読めなかったときは、閲覧リンクを出さない側に倒す
+ * （公開中の本番ではオフにしているため）。
+ */
+export async function getFeatures({ baseUrl = DEFAULT_BASE_URL, signal }: RequestOptions = {}): Promise<Features> {
+  const off: Features = { share_enabled: false };
+  try {
+    const res = await fetch(`${baseUrl}/api/features`, { signal });
+    if (!res.ok) return off;
+    const data: unknown = await res.json();
+    if (typeof data === "object" && data !== null && "share_enabled" in data && typeof data.share_enabled === "boolean") {
+      return { share_enabled: data.share_enabled };
+    }
+    return off;
+  } catch {
+    return off;
+  }
+}
+
 /** 今の診断を閲覧専用リンクに固定する。本人がボタンを押したときだけ呼ぶ。 */
 export async function createResultLink({
   baseUrl = DEFAULT_BASE_URL,
@@ -193,7 +217,7 @@ export async function createResultLink({
   } catch {
     throw new ApiError("network", messages.errors.network);
   }
-  if (!res.ok) throw new ApiError("server", messages.errors.server(res.status), res.status);
+  if (!res.ok) throw await failure(res);
   const data: unknown = await res.json().catch(() => undefined);
   if (typeof data !== "object" || data === null || !("token" in data) || typeof data.token !== "string" || !/^[A-Za-z0-9_-]{32,128}$/.test(data.token)) {
     throw new ApiError("invalid_response", messages.errors.invalidResponse);
@@ -236,7 +260,7 @@ export async function getSharedResult(
   } catch {
     throw new ApiError("network", messages.errors.network);
   }
-  if (!res.ok) throw new ApiError("server", messages.errors.server(res.status), res.status);
+  if (!res.ok) throw await failure(res);
   const data: unknown = await res.json().catch(() => undefined);
   if (!isDiagnosisSnapshot(data)) throw new ApiError("invalid_response", messages.errors.invalidResponse);
   return data;

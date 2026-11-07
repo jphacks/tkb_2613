@@ -237,5 +237,6 @@ export const messages = {
     ended: "公開は終了しました。ありがとうございました",
     modelUnavailable: "ただいま準備中です。しばらくしてからもう一度お試しください",
     blueskyBusy: "Bluesky が混雑しています。しばらくしてからもう一度お試しください",
+    shareDisabled: "閲覧リンクの機能は、いまは使えません",
   },
 } as const;

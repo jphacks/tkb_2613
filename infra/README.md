@@ -50,7 +50,9 @@ make up
 | `VLM_BASE_URL`・`OCR_BASE_URL` | 手元か RunPod | GPU のプライベート IP | GPU はインターネットから届かない |
 | `MODEL_ALLOWED_HOST_SUFFIXES` | 空（localhost だけ） | GPU のプライベート IP | 送り先の許可リスト。IP は完全一致 |
 | `VLM_API_KEY` | `.env` | Secrets Manager から起動時に渡す | キーをファイルに残さない |
-| `SHARE_ENABLED` | （未実装） | 0 | 公開中は閲覧リンクの機能をオフにする。api と画面への実装は別の PR |
+| `SHARE_ENABLED` | 1 | 0 | 公開中は閲覧リンクの機能をオフにし、診断結果を保存しない。画面にボタンを出さず、API は 404、保存先のファイルも作らない |
 
 - api の 8001 番は `127.0.0.1` のままにする。外から届くのは web だけで、api は compose のネットワークの中で web から呼ばれる
+- **閲覧リンクがオフになっているかを、起動のたびに確かめる**。`SHARE_ENABLED` の既定は 1（オン）なので、`.env` に書き忘れるとオンになる。api のログに「閲覧リンク：オフ（SHARE_ENABLED）」が出ていること、`curl -s https://<配信ID>.cloudfront.net/api/features` が `{"share_enabled":false}` を返すことを見る
+- 前に閲覧リンクを使ったホストでオフにするときは、保存先のボリュームに古い結果が残っているので消す（`docker compose --env-file .env -f infra/docker-compose.yml down`、`docker volume rm tkb_2613_shared-results`）。新しく作った EC2 なら残っていない
 - `.env` の値に `$` が入る場合は `'...'` で囲む（compose が変数として展開しないように）

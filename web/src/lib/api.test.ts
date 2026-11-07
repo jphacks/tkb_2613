@@ -9,6 +9,8 @@ import {
   getSession,
   MAX_IMAGE_BYTES,
   deletePosts,
+  getFeatures,
+  getSharedResult,
   simulate,
 } from "./api";
 import { messages } from "@/lib/messages";
@@ -386,3 +388,34 @@ describe("deletePosts", () => {
     await expect(deletePosts([POST_ID], 3)).rejects.toMatchObject({ kind: "unauthorized" });
   });
 });
+
+describe("getFeatures", () => {
+  it("reads whether result links are on", async () => {
+    const fetchFn = mockFetch(new Response(JSON.stringify({ share_enabled: true })));
+    expect(await getFeatures({ baseUrl: "http://api.test" })).toEqual({ share_enabled: true });
+    expect(fetchFn.mock.calls[0][0]).toBe("http://api.test/api/features");
+  });
+
+  it.each([
+    ["an error status", new Response("", { status: 500 })],
+    ["a wrong shape", new Response(JSON.stringify({ share_enabled: "yes" }))],
+    ["a body that is not JSON", new Response("oops")],
+    ["a network failure", new TypeError("offline")],
+  ])("treats %s as off", async (_label, response) => {
+    mockFetch(response);
+    expect(await getFeatures()).toEqual({ share_enabled: false });
+  });
+});
+
+describe("getSharedResult", () => {
+  it("explains that result links are turned off", async () => {
+    mockFetch(
+      new Response(JSON.stringify({ detail: { code: "share_disabled", message: "…" } }), { status: 404 }),
+    );
+    await expect(getSharedResult("a".repeat(43))).rejects.toMatchObject({
+      code: "share_disabled",
+      message: messages.errors.shareDisabled,
+    });
+  });
+});
+

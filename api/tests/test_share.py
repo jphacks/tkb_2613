@@ -1,8 +1,10 @@
 """明示的な閲覧リンクだけが、別ブラウザや API 再起動後に読める。"""
 
+import logging
 import stat
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from tkb_api.config import Settings, get_settings
@@ -74,3 +76,90 @@ def test_only_the_owner_can_revoke_a_result_link(tmp_path: Path) -> None:
     store.revoke(token, "did:plc:owner")
     assert store.get(token) is None
     store.close()
+
+
+# --- SHARE_ENABLED=0（公開中の本番） ---
+
+
+def test_features_tell_the_screen_whether_result_links_are_on(tmp_path: Path) -> None:
+    for enabled in (True, False):
+        settings = Settings(share_enabled=enabled, share_db_path=tmp_path / f"{enabled}.sqlite3")
+        with _client(settings) as client:
+            res = client.get("/api/features")  # ログインなしで読める
+            assert res.status_code == 200
+            assert res.json() == {"share_enabled": enabled}
+            assert res.headers["cache-control"] == "no-store, no-transform"
+
+
+def test_result_links_are_refused_and_nothing_is_saved_when_disabled(tmp_path: Path) -> None:
+    db = tmp_path / "private" / "shares.sqlite3"
+    settings = Settings(
+        mock_mode=True,
+        demo_fixture_path=FIXTURE,
+        mock_event_interval_seconds=0,
+        share_db_path=db,
+        share_enabled=False,
+    )
+    with _client(settings) as client:
+        # ログインしていなければ、これまでどおり先に 401
+        assert client.post("/api/result-link").status_code == 401
+        client.post("/api/session", json={"handle": "demo", "password": PASSWORD})
+        assert client.post("/api/diagnose").status_code == 200
+
+        responses = [
+            client.post("/api/result-link"),
+            client.request("DELETE", "/api/result-link", json={"token": "x" * 43}),
+            client.post("/api/shared-result", json={"token": "x" * 43}),
+        ]
+
+    for res in responses:
+        assert res.status_code == 404
+        assert res.json()["detail"]["code"] == "share_disabled"
+    assert not db.exists()
+    assert not db.parent.exists()
+
+
+def _mock_settings(db: Path, *, share_enabled: bool) -> Settings:
+    return Settings(
+        mock_mode=True,
+        demo_fixture_path=FIXTURE,
+        mock_event_interval_seconds=0,
+        share_db_path=db,
+        share_enabled=share_enabled,
+    )
+
+
+def test_links_made_before_turning_it_off_cannot_be_read(tmp_path: Path) -> None:
+    db = tmp_path / "shares.sqlite3"
+    with _client(_mock_settings(db, share_enabled=True)) as owner:
+        owner.post("/api/session", json={"handle": "demo", "password": PASSWORD})
+        owner.post("/api/diagnose")
+        token = owner.post("/api/result-link").json()["token"]
+
+    with _client(_mock_settings(db, share_enabled=False)) as viewer:
+        res = viewer.post("/api/shared-result", json={"token": token})
+
+    assert res.status_code == 404
+    assert res.json()["detail"]["code"] == "share_disabled"
+
+
+def test_login_is_checked_before_the_feature_switch(tmp_path: Path) -> None:
+    settings = _mock_settings(tmp_path / "shares.sqlite3", share_enabled=False)
+    with _client(settings) as client:
+        client.cookies.set("tkb_session", "not-a-real-session")  # 無効・期限切れの Cookie
+        created = client.post("/api/result-link")
+        revoked = client.request("DELETE", "/api/result-link", json={"token": "x" * 43})
+
+    assert created.status_code == 401
+    assert revoked.status_code == 401
+
+
+def test_startup_log_says_whether_result_links_are_on(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO, logger="tkb_api")
+    create_app(_mock_settings(tmp_path / "a.sqlite3", share_enabled=False))
+    app = create_app(_mock_settings(tmp_path / "b.sqlite3", share_enabled=True))
+    app.state.shares.close()  # lifespan を通していないので、ここで閉じる
+    assert "閲覧リンク：オフ（SHARE_ENABLED）" in caplog.text
+    assert "閲覧リンク：オン（SHARE_ENABLED）" in caplog.text

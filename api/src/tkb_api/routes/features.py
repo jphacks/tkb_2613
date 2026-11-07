@@ -1,0 +1,14 @@
+"""画面が出し分ける機能のオン・オフ。ログインなしで読める（秘密の値は入れない）。"""
+
+from typing import Annotated
+
+from fastapi import APIRouter, Depends
+
+from tkb_api.config import Settings, get_settings
+
+router = APIRouter(prefix="/api")
+
+
+@router.get("/features")
+def read_features(settings: Annotated[Settings, Depends(get_settings)]) -> dict[str, bool]:
+    return {"share_enabled": settings.share_enabled}
