@@ -1,0 +1,67 @@
+#!/bin/bash
+# アプリの EC2（Amazon Linux 2023）の初回起動。キーの値は出力しない（set -x を使わない）
+set -euo pipefail
+
+dnf install -y docker git make
+install -d /usr/local/lib/docker/cli-plugins
+curl -fsSL -o /usr/local/lib/docker/cli-plugins/docker-compose \
+  "https://github.com/docker/compose/releases/download/${compose_version}/docker-compose-linux-x86_64"
+curl -fsSL -o /usr/local/lib/docker/cli-plugins/docker-buildx \
+  "https://github.com/docker/buildx/releases/download/${buildx_version}/buildx-${buildx_version}.linux-amd64"
+chmod 755 /usr/local/lib/docker/cli-plugins/docker-compose /usr/local/lib/docker/cli-plugins/docker-buildx
+systemctl enable --now docker
+
+# t3.small（メモリ 2GB）で Next.js をビルドするためのスワップ
+if [ ! -f /swapfile ]; then
+  fallocate -l 4G /swapfile
+  chmod 600 /swapfile
+  mkswap /swapfile
+  swapon /swapfile
+  echo '/swapfile none swap sw 0 0' >> /etc/fstab
+fi
+
+if [ ! -d /opt/tkb_2613 ]; then
+  git clone --branch "${repo_ref}" --depth 1 "${repo_url}" /opt/tkb_2613
+fi
+
+# 起動スクリプト：Secrets Manager から VLM のキーを読み、メモリ上（/run は tmpfs）のファイルで
+# compose に渡す（infra/docker-compose.yml の2つめの env_file）。コンテナを作ったら消す
+cat > /usr/local/bin/tkb-app-start <<'SCRIPT'
+#!/bin/bash
+set -euo pipefail
+cd /opt/tkb_2613
+if [ ! -f .env ]; then
+  echo ".env がありません。infra/terraform/README.md の手順で作ってください" >&2
+  exit 1
+fi
+umask 077
+install -d -m 700 /run/tkb_2613
+trap 'rm -f /run/tkb_2613/secrets.env' EXIT
+key="$(aws secretsmanager get-secret-value --region "${region}" --secret-id "${secret_id}" \
+  --query SecretString --output text)"
+printf 'VLM_API_KEY=%s\n' "$key" > /run/tkb_2613/secrets.env
+unset key
+docker compose --env-file .env -f infra/docker-compose.yml up --build -d
+SCRIPT
+chmod 700 /usr/local/bin/tkb-app-start
+
+cat > /etc/systemd/system/tkb-app.service <<'UNIT'
+[Unit]
+Description=tkb_2613 web and api (docker compose)
+After=docker.service network-online.target
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/tkb-app-start
+ExecStop=/usr/bin/docker compose --env-file /opt/tkb_2613/.env -f /opt/tkb_2613/infra/docker-compose.yml down
+TimeoutStartSec=1800
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl daemon-reload
+# .env を作るまでは失敗する。README の手順で .env を作ってから systemctl start tkb-app
+systemctl enable tkb-app.service

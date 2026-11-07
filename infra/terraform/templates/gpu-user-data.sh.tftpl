@@ -1,0 +1,72 @@
+#!/bin/bash
+# GPU の EC2（Deep Learning Base OSS Nvidia Driver GPU AMI, Ubuntu 22.04）の初回起動。
+# キーの値は出力しない（set -x を使わない）。止めて起動し直すたびに systemd がコンテナを作り直す
+set -euo pipefail
+
+install -d -m 755 /opt/hf
+
+# Secrets Manager から VLM のキーを読み、メモリ上（/run は tmpfs）のファイルに置く
+cat > /usr/local/bin/tkb-vllm-env <<'SCRIPT'
+#!/bin/bash
+set -euo pipefail
+umask 077
+install -d -m 700 /run/tkb_2613
+key="$(aws secretsmanager get-secret-value --region "${region}" --secret-id "${secret_id}" \
+  --query SecretString --output text)"
+printf 'VLLM_API_KEY=%s\n' "$key" > /run/tkb_2613/vllm.env
+unset key
+SCRIPT
+chmod 700 /usr/local/bin/tkb-vllm-env
+
+# vLLM：今の RunPod と同じモデルと引数（thinking は api が毎回切る）。キーは VLLM_API_KEY で渡す
+cat > /etc/systemd/system/tkb-vllm.service <<'UNIT'
+[Unit]
+Description=tkb_2613 vLLM
+After=docker.service network-online.target
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+ExecStartPre=/usr/local/bin/tkb-vllm-env
+ExecStartPre=-/usr/bin/docker rm -f vllm
+ExecStart=/usr/bin/docker run --rm --name vllm --gpus all --ipc=host \
+  -p 8000:8000 -v /opt/hf:/root/.cache/huggingface \
+  --env-file /run/tkb_2613/vllm.env \
+  ${vllm_image} \
+  --model ${vlm_model} --served-model-name ${vlm_served_name} \
+  --max-num-seqs 8 --max-model-len 8192 \
+  --gpu-memory-utilization ${gpu_memory_util}
+ExecStop=/usr/bin/docker stop vllm
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=1800
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+%{ if ocr_image != "" ~}
+# OCR（PP-OCRv5 の HTTP サービス）。同じ GPU に同居させる
+cat > /etc/systemd/system/tkb-ocr.service <<'UNIT'
+[Unit]
+Description=tkb_2613 OCR (PP-OCRv5)
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+ExecStartPre=-/usr/bin/docker rm -f ocr
+ExecStart=/usr/bin/docker run --rm --name ocr --gpus all -p 8080:${ocr_container_port} ${ocr_image}
+ExecStop=/usr/bin/docker stop ocr
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+%{ endif ~}
+
+systemctl daemon-reload
+systemctl enable --now tkb-vllm.service
+%{ if ocr_image != "" ~}
+systemctl enable --now tkb-ocr.service
+%{ endif ~}

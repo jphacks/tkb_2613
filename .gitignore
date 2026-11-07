@@ -49,3 +49,13 @@ next-env.d.ts
 .idea/
 .DS_Store
 Thumbs.db
+
+# Terraform（state には ARN などが入るのでコミットしない。.terraform.lock.hcl はコミットする）
+infra/terraform/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+!*.tfvars.example
+crash.log
+crash.*.log
