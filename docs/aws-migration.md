@@ -236,7 +236,7 @@ E の GPU の分は、Award Day に約6時間、3晩はそれぞれ起動の15�
 - GPU の上限（`L-DB2E81BA`、Running On-Demand G and VT instances、us-east-1）は 11/7 に 8 vCPU で申請済み。審査中
 - **11/11 までに通らなければ、本番のモデルは RunPod のまま発表する**。その場合の構成：
   - web と api は予定どおり AWS（CloudFront、WAF、プライベートサブネットの EC2）に置く
-  - `VLM_BASE_URL` は RunPod の URL、`MODEL_ALLOWED_HOST_SUFFIXES=proxy.runpod.net`。キーは Secrets Manager に置く
+  - `VLM_BASE_URL` は RunPod の URL、`MODEL_ALLOWED_HOST_SUFFIXES=<POD_ID>-8000.proxy.runpod.net`（Pod ごとのホスト名まで書く。`proxy.runpod.net` だけだと、RunPod のほかの利用者の Pod にも送れてしまう）。キーは Secrets Manager に置く
   - 残るリスク：モデルの URL がインターネットに公開されたまま（守りはキーだけ）。4章の 5 は「未対策」として発表で正直に示す
   - OCR は RunPod の Pod に同居させるか、外す
 
@@ -272,7 +272,7 @@ E の GPU の分は、Award Day に約6時間、3晩はそれぞれ起動の15�
 
 | PR | ブランチ | 内容 | テスト |
 |---|---|---|---|
-| 2 | `fix/guard-fail-closed` | `detect/src/tkb_detect/guard.py`：許可リストが空なら、loopback 以外を拒否する（拒否リスト方式に戻さない）。IP を許可リストに書いたときは完全一致にする。169.254.0.0/16 は常に拒否。`.env.example` の説明を直す（開発では `proxy.runpod.net` を設定する）。OCR の接続先にも同じガードが効く | `detect/tests/test_guard.py` に、許可リストが空・似た IP・169.254.169.254・10.x の許可 |
+| 2 | `fix/guard-fail-closed`（#114） | `detect/src/tkb_detect/guard.py`：許可リストが空なら、loopback 以外を拒否する（拒否リスト方式に戻さない）。IP を許可リストに書いたときは完全一致にする。169.254.0.0/16 は常に拒否。api は `.env` から読んだ許可リストを VLM と OCR に渡す（uvicorn で直接起動すると `.env` がガードに届いていなかった）。`.env.example` の説明を直す（RunPod は Pod ごとのホスト名まで書く） | `detect/tests/test_guard.py`、`test_extract.py`、`api/tests/test_diagnose.py` |
 | 3 | `chore/compose-aws` | `infra/docker-compose.yml` の `CORS_ORIGINS`、`MOCK_MODE`、`COOKIE_SECURE`、web のバインド先（`WEB_BIND`）を環境変数で差し替えられるようにする。`infra/README.md` に本番の値を書く | `docker compose config` で値が入ること |
 | 4 | `feat/diagnose-limits` | 乱用対策（5.1）と公開時間外の表示（5.2）。`api/src/tkb_api/limits.py`（新規）、`config.py`、`routes/diagnose.py`。`docs/api-sse-contract.md` と web の型・表示（429・503・409 と次の公開時刻）を同時に変える | 上限の境界、日付の切り替わり、枠の解放（切断時も）、公開時間の内外と最後の公開の後 |
 | 5 | `feat/share-toggle` | `SHARE_ENABLED`（既定 1）。0 なら閲覧リンクの API を 404 にし、画面のボタンを出さない | オン・オフ両方 |
