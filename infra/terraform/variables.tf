@@ -23,10 +23,26 @@ variable "budget_limit_usd" {
   default     = 100
 }
 
-variable "budget_notify_usd" {
-  description = "この額（実績）を超えたらメールで知らせる"
+variable "budget_alert_step_usd" {
+  description = "実績がこの額の倍数（$10, $20, ... 予算まで）を超えるたびにメールで知らせる"
   type        = number
-  default     = 50
+  default     = 10
+
+  validation {
+    condition     = var.budget_alert_step_usd > 0 && floor(var.budget_alert_step_usd) == var.budget_alert_step_usd
+    error_message = "1 以上の整数にする"
+  }
+}
+
+variable "budget_notifications_per_budget" {
+  description = "1つの Budget に付ける通知の数。AWS の CreateBudget の説明の上限（5）に合わせる。これを超える分は Budget を分ける"
+  type        = number
+  default     = 5
+
+  validation {
+    condition     = var.budget_notifications_per_budget >= 1 && var.budget_notifications_per_budget <= 5
+    error_message = "1〜5 にする（CreateBudget の説明では、1つの Budget の通知は5つまで）"
+  }
 }
 
 variable "budget_stop_gpu_usd" {

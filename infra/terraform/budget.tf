@@ -1,28 +1,44 @@
-# 予算 $100：$50 でメール、$80 で GPU を自動で止める（6章）。
+# 予算 $100（6章）。実績が $10 刻みで増えるたびにメール、$80 で GPU を自動で止める。
 # 請求の集計は数時間〜1日遅れるので、これは最後の安全網。ふだんは公開時間帯のスケジュールで止める
 
-resource "aws_budgets_budget" "main" {
-  name         = "tkb_2613"
+locals {
+  # $10, $20, ... $100
+  budget_alert_thresholds = range(
+    var.budget_alert_step_usd, var.budget_limit_usd + 1, var.budget_alert_step_usd
+  )
+  # 1つの Budget に付けられる通知の数には上限がある（AWS の CreateBudget の説明では5つ）。
+  # 上限ごとに Budget を分ける：tkb_2613-alerts-1 が $10〜$50、tkb_2613-alerts-2 が $60〜$100
+  budget_alert_groups = chunklist(local.budget_alert_thresholds, var.budget_notifications_per_budget)
+}
+
+resource "aws_budgets_budget" "alerts" {
+  count = length(local.budget_alert_groups)
+
+  name         = "tkb_2613-alerts-${count.index + 1}"
   budget_type  = "COST"
   limit_amount = tostring(var.budget_limit_usd)
   limit_unit   = "USD"
   time_unit    = "MONTHLY"
 
-  notification {
-    comparison_operator        = "GREATER_THAN"
-    threshold                  = var.budget_notify_usd
-    threshold_type             = "ABSOLUTE_VALUE"
-    notification_type          = "ACTUAL"
-    subscriber_email_addresses = [var.alert_email]
+  dynamic "notification" {
+    for_each = local.budget_alert_groups[count.index]
+    content {
+      comparison_operator        = "GREATER_THAN"
+      threshold                  = notification.value
+      threshold_type             = "ABSOLUTE_VALUE"
+      notification_type          = "ACTUAL"
+      subscriber_email_addresses = [var.alert_email]
+    }
   }
+}
 
-  notification {
-    comparison_operator        = "GREATER_THAN"
-    threshold                  = var.budget_limit_usd
-    threshold_type             = "ABSOLUTE_VALUE"
-    notification_type          = "FORECASTED"
-    subscriber_email_addresses = [var.alert_email]
-  }
+# $80 で GPU を止める Budgets action を付ける Budget（通知は上の Budget が送る）
+resource "aws_budgets_budget" "actions" {
+  name         = "tkb_2613-actions"
+  budget_type  = "COST"
+  limit_amount = tostring(var.budget_limit_usd)
+  limit_unit   = "USD"
+  time_unit    = "MONTHLY"
 }
 
 data "aws_caller_identity" "current" {}
@@ -54,7 +70,7 @@ resource "aws_iam_role_policy_attachment" "budgets_action" {
 }
 
 resource "aws_budgets_budget_action" "stop_gpu" {
-  budget_name        = aws_budgets_budget.main.name
+  budget_name        = aws_budgets_budget.actions.name
   action_type        = "RUN_SSM_DOCUMENTS"
   approval_model     = "AUTOMATIC"
   notification_type  = "ACTUAL"
@@ -114,7 +130,7 @@ resource "aws_iam_role_policy" "budgets_attach_deny" {
 }
 
 resource "aws_budgets_budget_action" "block_gpu_restart" {
-  budget_name        = aws_budgets_budget.main.name
+  budget_name        = aws_budgets_budget.actions.name
   action_type        = "APPLY_IAM_POLICY"
   approval_model     = "AUTOMATIC"
   notification_type  = "ACTUAL"

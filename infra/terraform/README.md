@@ -6,7 +6,7 @@
 - 全リソースに `Project=tkb_2613` のタグが付く（provider の `default_tags`）
 - **`terraform apply` は承認を得てから行う**。このリポジトリでは plan までしか流していない
 
-## 作るもの（plan で 53 件）
+## 作るもの（plan で 58 件）
 
 | 種類 | 内容 |
 |---|---|
@@ -17,7 +17,7 @@
 | WAF | 全遮断（IP セット）、IP の評判リスト、`/api/detect` の遮断、レート制限（ログイン 10・診断 10・全体 600／5分／IP。全体は静的ファイルを数えない）。パスは URL のデコードと正規化をしてから比べる（`/api/%73ession` ですり抜けさせない）。ログは保存しない |
 | 秘密の値 | Secrets Manager の入れ物 `tkb_2613/vlm-api-key`（値は Terraform で扱わない） |
 | IAM | アプリと GPU のロール（SSM ＋ キーの読み取りだけ）、全遮断の予備の担当の IAM ユーザー、Budgets action とスケジュールのロール |
-| 予算 | 月 $100。実績 $50 でメール、予測 $100 でメール、**実績 $80 で GPU を自動で止め、スケジュールでの再起動も止める** |
+| 予算 | 月 $100。**実績が $10, $20, … $100 を超えるたびにメール**（Budget を2つに分ける。下の「予算の通知」）。**実績 $80 で GPU を自動で止め、スケジュールでの再起動も止める** |
 | スケジュール | 公開日ごとに GPU を起動・停止（下の表） |
 
 ### GPU のスケジュール（日本時間）
@@ -169,6 +169,19 @@ aws ec2 stop-instances --region us-east-1 --instance-ids "$(terraform output -ra
 ### 4. 全部消す（内藤だけ）
 
 下の「消す」。
+
+## 予算の通知
+
+| Budget | 通知（実績がこの額を超えたらメール） | Budgets action |
+|---|---|---|
+| `tkb_2613-alerts-1` | $10, $20, $30, $40, $50 | なし |
+| `tkb_2613-alerts-2` | $60, $70, $80, $90, $100 | なし |
+| `tkb_2613-actions` | なし | $80 で GPU を止め、スケジュールでの再起動を禁止する |
+
+- 1つの Budget に付けられる通知は5つまでなので（[CreateBudget](https://docs.aws.amazon.com/aws-cost-management/latest/APIReference/API_budgets_CreateBudget.html)：「A budget can have up to five notifications」。同じページの配列の制約は10個だが、少ないほうに合わせた）、10個の通知を2つの Budget に分けている。刻みは `budget_alert_step_usd`、1つの Budget の通知の数は `budget_notifications_per_budget`
+- 送り先は `terraform.tfvars` の `alert_email`。届かないときは迷惑メールのフォルダも確かめる
+- **通知は、お金が使われてから数時間（長いと1日近く）遅れて届く**。AWS Budgets のデータは「最大1日3回、前の更新から8〜12時間ごと」に更新される（[Managing your costs with AWS Budgets](https://docs.aws.amazon.com/cost-management/latest/userguide/budgets-managing-costs.html)）。別のページには「請求のデータは少なくとも1日1回更新され、通知もそれに合わせて送られる」とある（[Best practices for AWS Budgets](https://docs.aws.amazon.com/cost-management/latest/userguide/budgets-best-practices.html)）。そのため、**メールが届いた時点で、書いてある額より多く使っていることがある**。$80 の自動停止も同じだけ遅れるので、実際は $80 を超えてから止まる
+- 遅れがあるので、**ふだんの止め方は公開時間帯のスケジュール**で、予算の通知と自動停止は最後の安全網。公開期間中は、GPU を手で起動したら止め忘れていないかを毎回確かめる
 
 ## 予算 $80 で止まったあと
 

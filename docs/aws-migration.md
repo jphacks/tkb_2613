@@ -53,7 +53,7 @@ flowchart LR
   bsky[(bsky.social<br/>cdn.bsky.app)]
   sm[(Secrets Manager<br/>VLM のキー)]
   ssm[(SSM Session Manager)]
-  cw[(CloudWatch メトリクス<br/>Budgets：$50 通知 / $80 で GPU 停止<br/>Scheduler：公開時間帯に起動・停止)]
+  cw[(CloudWatch メトリクス<br/>Budgets：$10 刻みで通知 / $80 で GPU 停止<br/>Scheduler：公開時間帯に起動・停止)]
 
   user -- HTTPS --> cf
   waf -. 検査 .- cf
@@ -81,7 +81,7 @@ flowchart LR
 | Secrets Manager | VLM のキーをコード・`.env`・リポジトリ・Terraform の state に置かない。インスタンスロールで起動時に読む |
 | SSM Session Manager | SSH のポートを開けずに入れる。操作の記録も残る |
 | CloudWatch メトリクス | CloudFront と WAF のリクエスト数・遮断数・エラー率を、ログを保存せずに見る |
-| Budgets ＋ Budgets action | 予算 $100 に対して、$50 で通知、$80 で GPU を自動で止める |
+| Budgets ＋ Budgets action | 予算 $100 に対して、実績が $10 刻みで増えるたびに通知（通知は数時間遅れる）、$80 で GPU を自動で止める |
 | EventBridge Scheduler | 公開時間帯に合わせて GPU を起動・停止する（止め忘れを防ぐ。6.3） |
 | 全遮断用の IAM ユーザー | 予備の担当（谷口さん）が、WAF の全遮断と GPU の停止だけをできるようにする（7章） |
 
@@ -151,7 +151,7 @@ VLM では「写真のどこに書いてあるか」をうまく特定できな�
 | 9 | インスタンスのメタデータ（範囲外） | — | IMDSv2 必須、hop limit 1 | コンテナから 169.254.169.254 に届かない |
 | 10 | 乱用・踏み台（範囲外） | — | WAF で `/api/session` を厳しく制限し、Bluesky のパスワード総当たりの踏み台にさせない。本番で 501 の `/api/detect` は WAF で遮断 | 連続ログインが WAF で止まる |
 | 11 | 結果の保存（範囲外） | 本人が押せば閲覧リンク用に2時間保存した | 公開中の本番では閲覧リンクの機能をオフ（`SHARE_ENABLED=0`）。CloudFront・WAF のログも保存しない | 閲覧リンクのボタンが出ず、API も使えない。ログの保存先が設定されていない |
-| 12 | 費用の暴走（範囲外） | 管理なし | Budgets（$50 通知、$80 で GPU 自動停止）。公開時間帯だけ GPU を動かす | 予算の通知を試しに受ける。スケジュールどおりに GPU が止まる |
+| 12 | 費用の暴走（範囲外） | 管理なし | Budgets（$10 刻みで通知、$80 で GPU 自動停止）。公開時間帯だけ GPU を動かす | 予算の通知を試しに受ける。スケジュールどおりに GPU が止まる |
 | 13 | すぐ止める手段（範囲外） | Tunnel を止める | 全遮断の WAF ルール、GPU の停止（担当は内藤、予備は谷口。谷口さんには最小権限の IAM ユーザー）、CloudFront の無効化、`terraform destroy`（7章） | 訓練で、全遮断までの時間を測る。谷口さんの IAM ユーザーで、それ以外の操作ができないこと |
 | 14 | 残課題：SSE 切断時の内部タスクの解放（報告書 5章） | 未検証 | 同時実行の枠を、SSE の generator の finally で必ず返すようにする（PR 4） | 実際のモデルで長い診断を途中で切り、vLLM の `num_requests_running` が0に戻り、枠が返ること |
 
