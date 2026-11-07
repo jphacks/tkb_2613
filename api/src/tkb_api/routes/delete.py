@@ -69,11 +69,16 @@ async def delete(
         )
 
     requested = list(dict.fromkeys(body.delete))
-    deleted = set(await _delete(session, settings, delete_posts, requested))
+    bluesky_busy = False
+    try:
+        deleted = set(await _delete(session, settings, delete_posts, requested))
+    except bluesky.BlueskyRateLimitedError as e:
+        # 途中で Bluesky に回数の制限で断られた。消せた分だけで推理し直し、残りは failed に入れる
+        deleted, bluesky_busy = set(e.deleted), True
     done = [i for i in requested if i in deleted]
     failed = [i for i in requested if i not in deleted]
     # 投稿の ID は出さず、件数だけ
     logger.info("投稿の削除：%d 件を消し、%d 件は消せませんでした", len(done), len(failed))
 
     sim = simulate_deletion(diagnosis.clues, diagnosis.posts, gazetteer, done)
-    return {**simulation_json(sim, diagnosis.clues), "failed": failed}
+    return {**simulation_json(sim, diagnosis.clues), "failed": failed, "bluesky_busy": bluesky_busy}

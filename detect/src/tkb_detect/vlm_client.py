@@ -116,10 +116,28 @@ class VlmClient:
             }
         return payload
 
+    async def is_reachable(self, timeout_s: float) -> bool:
+        """モデルのサーバーが応答するか（GET {VLM_BASE_URL}/models）。
+
+        診断を始める前に、GPU が止まっている・起動中でないかを短い待ち時間で確かめる。
+        写真も本文も送らない。モックでは常に True。
+        """
+        if self._config.mock_mode:
+            return True
+        try:
+            async with httpx.AsyncClient(timeout=timeout_s, trust_env=False) as client:
+                res = await client.get(f"{self._base_url}/models", headers=self._headers())
+        except httpx.HTTPError:
+            return False
+        return res.is_success
+
+    def _headers(self) -> dict[str, str]:
+        if not self._config.api_key:
+            return {}
+        return {"Authorization": f"Bearer {self._config.api_key}"}
+
     async def _post(self, payload: dict[str, Any]) -> Any:
-        headers = {}
-        if self._config.api_key:
-            headers["Authorization"] = f"Bearer {self._config.api_key}"
+        headers = self._headers()
         try:
             # 環境変数のプロキシ（HTTP_PROXY など）を経由させない。送るのはガードで確認した先だけ
             async with httpx.AsyncClient(timeout=self._config.timeout_s, trust_env=False) as client:

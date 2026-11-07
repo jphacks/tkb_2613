@@ -13,6 +13,7 @@ from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
 from tkb_api import bluesky
 from tkb_api.bluesky import BlueskySession, LoginFn, LoginResult, SessionStore
 from tkb_api.config import Settings, get_settings
+from tkb_api.errors import BLUESKY_BUSY_MESSAGE, refusal
 from tkb_api.schemas import SessionRequest, SessionResponse
 
 router = APIRouter(prefix="/api")
@@ -67,6 +68,10 @@ async def create_session(
         except bluesky.LoginFailedError:
             raise HTTPException(
                 status.HTTP_401_UNAUTHORIZED, "ハンドル名かパスワードが違います"
+            ) from None
+        except bluesky.BlueskyRateLimitedError:
+            raise refusal(
+                status.HTTP_503_SERVICE_UNAVAILABLE, "bluesky_busy", BLUESKY_BUSY_MESSAGE
             ) from None
         except bluesky.BlueskyUnavailableError:
             raise HTTPException(

@@ -247,3 +247,44 @@ async def test_raises_detect_error_on_unexpected_response(payload: object) -> No
 def test_refuses_third_party_endpoint_outside_mock_mode() -> None:
     with pytest.raises(ForbiddenEndpointError):
         VlmClient(_config(base_url="https://api.openai.com/v1"))
+
+
+@pytest.mark.anyio
+async def test_is_reachable_asks_the_models_endpoint_with_the_key() -> None:
+    with respx.mock as router:
+        route = router.get(f"{BASE}/models").respond(json={"data": []})
+
+        assert await VlmClient(_config()).is_reachable(timeout_s=1) is True
+
+    request = route.calls.last.request
+    assert request.headers["Authorization"] == "Bearer secret"
+    assert request.content == b""  # 写真も本文も送らない
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "response",
+    [
+        httpx.Response(401),  # キーが違う
+        httpx.Response(503),  # 起動中
+        httpx.ConnectError("refused"),  # GPU が止まっている
+        httpx.ConnectTimeout("timeout"),
+    ],
+)
+async def test_is_reachable_is_false_when_the_model_does_not_answer(
+    response: httpx.Response | Exception,
+) -> None:
+    with respx.mock as router:
+        router.get(f"{BASE}/models").mock(side_effect=[response])
+
+        assert await VlmClient(_config()).is_reachable(timeout_s=1) is False
+
+
+@pytest.mark.anyio
+async def test_is_reachable_is_true_in_mock_mode_without_network() -> None:
+    client = VlmClient(VlmConfig(base_url="", api_key="", model="", mock_mode=True))
+
+    with respx.mock(assert_all_called=False) as router:
+        assert await client.is_reachable(timeout_s=1) is True
+
+    assert router.calls.call_count == 0

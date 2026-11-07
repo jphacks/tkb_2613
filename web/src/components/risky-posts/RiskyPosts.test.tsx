@@ -216,6 +216,25 @@ describe("RiskyPosts", () => {
     expect(screen.queryByText(t.safe)).not.toBeInTheDocument();
   });
 
+  it("says Bluesky was busy when it stopped the deletion midway", async () => {
+    vi.mocked(simulate).mockResolvedValue(ALL_BROKEN);
+    vi.mocked(deletePosts).mockResolvedValue({
+      delete: [GYM.post_id],
+      failed: [ADDRESS.post_id],
+      broken: ["routine"],
+      after: [{ rule: "R1", attribute: "station", value: "根津駅", clue_indices: [0], note: "" }],
+      bluesky_busy: true,
+    });
+    renderRisky();
+    fireEvent.click(screen.getByRole("button", { name: t.simulate }));
+    fireEvent.click(await screen.findByRole("button", { name: t.deleteForReal }));
+
+    fireEvent.click(screen.getByRole("button", { name: t.confirm }));
+
+    expect(await screen.findByText(messages.escaped.blueskyBusy(1))).toBeInTheDocument();
+    expect(screen.queryByText(messages.escaped.failed(1))).not.toBeInTheDocument();
+  });
+
   it("shows the error when deleting fails and keeps the simulation", async () => {
     vi.mocked(simulate).mockResolvedValue(ALL_BROKEN);
     vi.mocked(deletePosts).mockRejectedValue(new Error("boom"));

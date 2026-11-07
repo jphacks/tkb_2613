@@ -12,6 +12,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from tkb_api.bluesky import SessionStore
 from tkb_api.config import Settings, get_settings
+from tkb_api.limits import DiagnoseLimiter
 from tkb_api.routes import delete, detect, diagnose, session, share, simulate
 from tkb_api.shares import ShareStore
 
@@ -87,6 +88,11 @@ def create_app(
         sessions if sessions is not None else SessionStore(settings.session_ttl_minutes * 60)
     )
     app.state.shares = ShareStore(settings.share_db_path, settings.share_ttl_minutes * 60)
+    app.state.diagnose_limiter = DiagnoseLimiter(
+        daily_limit=settings.diagnose_daily_limit,
+        max_concurrent=settings.max_concurrent_diagnoses,
+        slot_timeout_s=settings.diagnose_slot_timeout_seconds,
+    )
     app.add_exception_handler(RequestValidationError, _validation_error)
 
     app.add_middleware(NoStoreMiddleware)

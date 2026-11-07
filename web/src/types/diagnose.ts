@@ -45,6 +45,8 @@ export interface Simulation {
 export interface Deletion extends Simulation {
   /** 消せなかった投稿の ID */
   readonly failed: readonly string[];
+  /** 途中で Bluesky に回数の制限で断られたか（そのときは残りを試さず failed に入る） */
+  readonly bluesky_busy?: boolean;
 }
 
 /** 危ない投稿 1 件と、それだけを消したときに崩れる項目 */
@@ -144,7 +146,12 @@ export function isSimulation(
 
 /** 実際に消した結果の形を確かめる。clueCount は isSimulation と同じ */
 export function isDeletion(value: unknown, clueCount = Number.POSITIVE_INFINITY): value is Deletion {
-  return isRecord(value) && isStringList(value.failed) && isSimulation(value, clueCount);
+  return (
+    isRecord(value) &&
+    isStringList(value.failed) &&
+    (value.bluesky_busy === undefined || typeof value.bluesky_busy === "boolean") &&
+    isSimulation(value, clueCount)
+  );
 }
 
 function isRiskyPost(value: unknown): value is RiskyPost {

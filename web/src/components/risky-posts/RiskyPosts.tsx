@@ -261,7 +261,9 @@ function Escaped({ deletion, escaped }: { deletion: Deletion; escaped: boolean }
       {deletion.broken.length > 0 && <p className="text-sm text-ink/70">{t.breaks(labelsOf(deletion.broken))}</p>}
       {escaped && <p className="font-display text-xl text-seeker">{t.safe}</p>}
       {deletion.failed.length > 0 && (
-        <p className="border-l-4 border-seeker bg-seeker/10 px-4 py-2">{e.failed(deletion.failed.length)}</p>
+        <p className="border-l-4 border-seeker bg-seeker/10 px-4 py-2">
+          {deletion.bluesky_busy ? e.blueskyBusy(deletion.failed.length) : e.failed(deletion.failed.length)}
+        </p>
       )}
       <p className="text-sm text-ink/60">{e.rediagnose}</p>
     </div>

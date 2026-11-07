@@ -127,6 +127,16 @@ describe("createSession", () => {
     await expect(createSession("a", "b")).rejects.toMatchObject({ kind: "unauthorized", status: 401 });
   });
 
+  it("explains that Bluesky is busy", async () => {
+    mockFetch(
+      new Response(JSON.stringify({ detail: { code: "bluesky_busy", message: "…" } }), { status: 503 }),
+    );
+    await expect(createSession("alice.bsky.social", "pw")).rejects.toMatchObject({
+      code: "bluesky_busy",
+      message: messages.errors.blueskyBusy,
+    });
+  });
+
   it("maps other errors to server", async () => {
     mockFetch(new Response(null, { status: 502 }));
     await expect(createSession("a", "b")).rejects.toMatchObject({ kind: "server", status: 502 });
@@ -252,6 +262,43 @@ describe("diagnose", () => {
     await expect(collect()).rejects.toMatchObject({ kind: "invalid_response" });
   });
 
+  function refusal(status: number, detail: Record<string, unknown>): Response {
+    return new Response(JSON.stringify({ detail }), {
+      status,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  it("tells when the service opens next outside the public hours", async () => {
+    mockFetch(
+      refusal(503, { code: "closed", message: "公開時間外です", next_open: "2026-11-17T20:00:00+09:00" }),
+    );
+    await expect(collect()).rejects.toMatchObject({
+      kind: "server",
+      code: "closed",
+      status: 503,
+      message: "公開時間外です。次は11月17日の20:00からです",
+    });
+  });
+
+  it.each([
+    [429, { code: "daily_limit", message: "…", limit: 3 }, "今日の診断は 3 回までです"],
+    [503, { code: "busy", message: "混雑しています", retry_after: 30 }, "混雑しています"],
+    [409, { code: "already_running", message: "…" }, "別の画面で診断が進んでいます"],
+    [503, { code: "model_unavailable", message: "…" }, "準備中"],
+    [503, { code: "bluesky_busy", message: "…" }, "Bluesky が混雑しています"],
+  ])("explains why the diagnosis could not start (%i %j)", async (status, detail, text) => {
+    mockFetch(refusal(status, detail));
+    const error = await collect().catch((e: unknown) => e);
+    expect(error).toMatchObject({ kind: "server", code: detail.code, status });
+    expect((error as Error).message).toContain(text);
+  });
+
+  it("falls back to the status for errors without a reason code", async () => {
+    mockFetch(refusal(502, { message: "コードなし" }));
+    await expect(collect()).rejects.toMatchObject({ message: messages.errors.server(502), code: undefined });
+  });
+
   it("fails when the stream ends before done", async () => {
     mockFetch(sse(`event: post\ndata: ${JSON.stringify({ post: POST })}\n\n`));
     const error = await collect().catch((e: unknown) => e);
@@ -317,6 +364,16 @@ describe("deletePosts", () => {
     expect(init?.method).toBe("POST");
     expect(init?.credentials).toBe("include");
     expect(JSON.parse(init?.body as string)).toEqual({ delete: [POST_ID, KEPT_ID] });
+  });
+
+  it("passes on that Bluesky stopped the deletion midway", async () => {
+    mockFetch(json({ ...RESULT, bluesky_busy: true }));
+    expect(await deletePosts([POST_ID, KEPT_ID], 3)).toMatchObject({ bluesky_busy: true });
+  });
+
+  it("rejects a bluesky_busy that is not a boolean", async () => {
+    mockFetch(json({ ...RESULT, bluesky_busy: "yes" }));
+    await expect(deletePosts([POST_ID], 3)).rejects.toMatchObject({ kind: "invalid_response" });
   });
 
   it("rejects a reply without the failed posts", async () => {

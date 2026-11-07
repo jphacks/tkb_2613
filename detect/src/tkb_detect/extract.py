@@ -98,6 +98,10 @@ class Extractor:
     def uses_ocr(self) -> bool:
         return self._ocr is not None
 
+    async def model_reachable(self, timeout_s: float) -> bool:
+        """画像を読むモデルのサーバーが応答するか（診断を始める前の確認）。"""
+        return await self._vlm.is_reachable(timeout_s)
+
     async def extract_post(self, post: Post, images: list[bytes]) -> list[Clue]:
         """投稿1件の手がかり。images は post.images と同じ順の画像のバイト列。"""
         if len(images) != len(post.images):
