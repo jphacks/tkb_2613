@@ -34,6 +34,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
+from starlette.background import BackgroundTask
 
 from tkb_api import bluesky
 from tkb_api.bluesky import BlueskySession, Diagnosis, PostsFetcher, SessionStore
@@ -112,12 +113,31 @@ async def _with_keep_alive(source: AsyncIterator[str], interval: float) -> Async
 
 
 async def _release_when_closed(source: AsyncIterator[str], lease: Lease) -> AsyncGenerator[str]:
-    """source を流し終えたとき・途中で切れたとき・失敗したときのどれでも、診断の枠を返す。"""
+    """source を流し終えたとき・途中で切れたとき・失敗したときのどれでも、診断の枠を返す。
+
+    送るたびに（keep-alive も）枠の期限を延ばすので、長い診断でも途中で枠を失わない。
+    """
     try:
         async for chunk in source:
+            lease.touch()
             yield chunk
     finally:
         lease.release()
+
+
+def _sse_response(source: AsyncIterator[str], lease: Lease) -> StreamingResponse:
+    """診断の SSE の応答。枠は generator の finally と、応答のあとの後始末の両方で返す。
+
+    本文を読み始める前に接続が切れると generator が始まらず、finally が走らない。
+    そのときも後始末（BackgroundTask）で返す。release は何度呼んでもよい。
+    """
+    return StreamingResponse(
+        _release_when_closed(source, lease),
+        media_type="text/event-stream",
+        # 途中の中継（プロキシ）にためこまれず、1 件ずつ届くようにする
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        background=BackgroundTask(lease.release),
+    )
 
 
 Clock = Callable[[], datetime]
@@ -234,7 +254,7 @@ def _acquire(
         return limiter.acquire(session_id, did)
     except AlreadyRunningError:
         raise refusal(
-            status.HTTP_409_CONFLICT, "already_running", "この画面とは別の診断が進んでいます"
+            status.HTTP_409_CONFLICT, "already_running", "このアカウントの別の診断が進んでいます"
         ) from None
     except DailyLimitError:
         resets_at = next_jst_midnight(now)
@@ -297,14 +317,7 @@ async def diagnose(
         store.set_diagnosis(session_id, Diagnosis(posts=tuple(posts), clues=tuple(clues)))
 
     stream = diagnose_events(posts, extractions, gazetteer, interval, on_finished=save)
-    return StreamingResponse(
-        _release_when_closed(
-            _with_keep_alive(_stream(stream), settings.sse_keepalive_seconds), lease
-        ),
-        media_type="text/event-stream",
-        # 途中の中継（プロキシ）にためこまれず、1 件ずつ届くようにする
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
+    return _sse_response(_with_keep_alive(_stream(stream), settings.sse_keepalive_seconds), lease)
 
 
 async def _prepare_events(

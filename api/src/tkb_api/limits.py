@@ -3,12 +3,15 @@
 - 公開時間帯（PUBLIC_WINDOWS）：設定が空なら制限しない（ローカル開発用）
 - 1アカウント（DID）1日（日本時間）の診断回数（DIAGNOSE_DAILY_LIMIT）
 - 同時に診断できる数（MAX_CONCURRENT_DIAGNOSES）。空きがなければ待たずに断る
-- 同じセッションでの同時診断は1つまで
+- 同じアカウント（DID）での同時診断は1つまで（セッションが違っても）
 
-どれもメモリだけに持ち、再起動で消えてよい。DID はハッシュにして持ち、DID そのものは残さない。
+どれもメモリだけに持ち、再起動で消えてよい。DID は、プロセスごとのランダムな鍵で HMAC にして持ち、
+DID そのものは残さない（鍵はメモリだけにあるので、公開されている DID から逆算できない）。
 """
 
 import hashlib
+import hmac
+import secrets
 import threading
 import time
 from collections.abc import Callable, Sequence
@@ -63,7 +66,7 @@ class DiagnoseRefusedError(Exception):
 
 
 class AlreadyRunningError(DiagnoseRefusedError):
-    """同じセッションで診断中。"""
+    """同じセッションか、同じアカウント（DID）で診断中。"""
 
 
 class DailyLimitError(DiagnoseRefusedError):
@@ -72,10 +75,6 @@ class DailyLimitError(DiagnoseRefusedError):
 
 class BusyError(DiagnoseRefusedError):
     """同時に診断できる数の上限に達した。"""
-
-
-def _did_key(did: str) -> str:
-    return hashlib.sha256(did.encode("utf-8")).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -91,13 +90,20 @@ class Lease:
     _limiter: "DiagnoseLimiter"
     session_id: str
     did_key: str
-    started: float
+    # 枠を取った日（日本時間）。回数はこの日に数える（日付の境目で翌日に数えないように）
+    day: date
+    # 最後に動きがあった時刻（monotonic）。slot_timeout はここから数える
+    last_active: float
     released: bool = field(default=False)
     counted: bool = field(default=False)
 
     def count(self) -> None:
-        """診断を本当に始めたときに、今日の回数に1を足す（1回だけ）。"""
+        """診断を本当に始めたときに、枠を取った日の回数に1を足す（1回だけ）。"""
         self._limiter._count(self)
+
+    def touch(self) -> None:
+        """診断がまだ動いている（SSE を送った）ことを伝え、枠の期限を延ばす。"""
+        self._limiter._touch(self)
 
     def release(self) -> None:
         self._limiter._release(self)
@@ -106,8 +112,8 @@ class Lease:
 class DiagnoseLimiter:
     """同時実行の枠と1日の回数。値が 0 の上限は「制限しない」。
 
-    枠を返し損ねても（途中で接続が切れて後始末が走らないなど）、slot_timeout 秒たてば
-    枠は空いたものとして扱う。
+    枠を返し損ねても（途中で接続が切れて後始末が走らないなど）、最後の動き（touch）から
+    slot_timeout 秒たてば枠は空いたものとして扱う。
     """
 
     def __init__(
@@ -127,25 +133,33 @@ class DiagnoseLimiter:
         self._lock = threading.Lock()
         self._leases: list[Lease] = []
         self._usage: dict[str, _Usage] = {}
+        self._key = secrets.token_bytes(32)
+
+    def _did_key(self, did: str) -> str:
+        return hmac.new(self._key, did.encode("utf-8"), hashlib.sha256).hexdigest()
 
     def acquire(self, session_id: str, did: str) -> Lease:
         """枠を取る。取れなければ理由の例外を出す（待たない）。回数はまだ数えない。"""
-        key = _did_key(did)
+        key = self._did_key(did)
         with self._lock:
             self._drop_expired()
-            if any(lease.session_id == session_id for lease in self._leases):
+            # 同じアカウントは1つずつ。別々にログインして枠を独り占めしたり、回数を数える前に
+            # 2つ同時に始めて1日の上限を超えたりできないようにする
+            if any(
+                lease.session_id == session_id or lease.did_key == key for lease in self._leases
+            ):
                 raise AlreadyRunningError
             if self._daily_limit and self._used_today(key) >= self._daily_limit:
                 raise DailyLimitError
             if self._max_concurrent and len(self._leases) >= self._max_concurrent:
                 raise BusyError
-            lease = Lease(self, session_id, key, self._monotonic())
+            lease = Lease(self, session_id, key, self._today(), self._monotonic())
             self._leases.append(lease)
             return lease
 
     def used_today(self, did: str) -> int:
         with self._lock:
-            return self._used_today(_did_key(did))
+            return self._used_today(self._did_key(did))
 
     @property
     def active(self) -> int:
@@ -158,12 +172,19 @@ class DiagnoseLimiter:
             if lease.counted:
                 return
             lease.counted = True
+            day = lease.day
+            prev = self._usage.get(lease.did_key)
+            used = prev.count if prev is not None and prev.day == day else 0
             today = self._today()
-            used = self._used_today(lease.did_key)
             self._usage = {
-                k: u for k, u in self._usage.items() if u.day == today and k != lease.did_key
+                k: u for k, u in self._usage.items() if u.day in (day, today) and k != lease.did_key
             }
-            self._usage[lease.did_key] = _Usage(today, used + 1)
+            self._usage[lease.did_key] = _Usage(day, used + 1)
+
+    def _touch(self, lease: Lease) -> None:
+        with self._lock:
+            if not lease.released:
+                lease.last_active = self._monotonic()
 
     def _release(self, lease: Lease) -> None:
         with self._lock:
@@ -182,6 +203,6 @@ class DiagnoseLimiter:
     def _drop_expired(self) -> None:
         deadline = self._monotonic() - self._slot_timeout_s
         for lease in self._leases:
-            if lease.started <= deadline:
+            if lease.last_active <= deadline:
                 lease.released = True
         self._leases = [lease for lease in self._leases if not lease.released]

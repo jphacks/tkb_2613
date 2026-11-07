@@ -15,11 +15,11 @@ from tkb_api.limits import (
     availability,
     next_jst_midnight,
 )
-from tkb_api.routes.diagnose import _release_when_closed
+from tkb_api.routes.diagnose import _release_when_closed, _sse_response
 
 
-def _jst(month: int, day: int, hour: int, minute: int = 0) -> datetime:
-    return datetime(2026, month, day, hour, minute, tzinfo=JST)
+def _jst(month: int, day: int, hour: int, minute: int = 0, second: int = 0) -> datetime:
+    return datetime(2026, month, day, hour, minute, second, tzinfo=JST)
 
 
 # 決定した公開時間帯の一部（docs/aws-migration.md の 6.3）
@@ -294,4 +294,97 @@ async def test_slot_is_released_when_the_stream_fails() -> None:
         async for _ in _release_when_closed(broken(), lease):
             pass
 
+    assert limiter.active == 0
+
+
+# --- レビューの指摘で足したもの ---
+
+
+def test_same_account_cannot_run_two_diagnoses_from_different_sessions() -> None:
+    # 別々にログインして、1アカウントで枠を独り占めできない
+    limiter = _limiter(FakeTime(_jst(11, 16, 20)), concurrent=5)
+    lease = limiter.acquire("s1", "did:plc:alice")
+    with pytest.raises(AlreadyRunningError):
+        limiter.acquire("s2", "did:plc:alice")
+    limiter.acquire("s3", "did:plc:bob")  # 別のアカウントは始められる
+    lease.release()
+    limiter.acquire("s2", "did:plc:alice")
+
+
+def test_daily_limit_cannot_be_exceeded_by_starting_two_at_once() -> None:
+    # 回数を数える前に2つ同時に始めて上限を超えることはできない（同じアカウントは1つずつ）
+    limiter = _limiter(FakeTime(_jst(11, 16, 20)), daily=1, concurrent=5)
+    first = limiter.acquire("s1", "did:plc:alice")
+    with pytest.raises(AlreadyRunningError):
+        limiter.acquire("s2", "did:plc:alice")
+    first.count()
+    first.release()
+    with pytest.raises(DailyLimitError):
+        limiter.acquire("s2", "did:plc:alice")
+
+
+def test_activity_keeps_a_long_diagnosis_from_losing_its_slot() -> None:
+    t = FakeTime(_jst(11, 16, 20))
+    limiter = _limiter(t, concurrent=1, timeout=900)
+    lease = limiter.acquire("s1", "did:plc:a")
+
+    for _ in range(4):  # 15秒ごとの keep-alive のつもりで、合計 2000 秒
+        t.advance(500)
+        lease.touch()
+
+    with pytest.raises(BusyError):
+        limiter.acquire("s2", "did:plc:b")
+    t.advance(900)  # 動きが止まってから 900 秒で空く
+    limiter.acquire("s2", "did:plc:b")
+
+
+def test_count_goes_to_the_day_the_slot_was_taken() -> None:
+    t = FakeTime(_jst(11, 16, 23, 59, 30))
+    limiter = _limiter(t, daily=1)
+    lease = limiter.acquire("s1", "did:plc:alice")
+    t.advance(60)  # 数えるときには日本時間で翌日
+    lease.count()
+    lease.release()
+
+    assert limiter.used_today("did:plc:alice") == 0  # 翌日の分は使っていない
+    limiter.acquire("s1", "did:plc:alice")
+
+
+def test_did_keys_differ_between_processes() -> None:
+    # 鍵はプロセスごと（limiter ごと）なので、公開されている DID から逆算できない
+    t = FakeTime(_jst(11, 16, 20))
+    a, b = _limiter(t), _limiter(t)
+    key_a = a.acquire("s1", "did:plc:alice").did_key
+    key_b = b.acquire("s1", "did:plc:alice").did_key
+    assert key_a != key_b
+    assert "did:plc:alice" not in key_a
+
+
+@pytest.mark.anyio
+async def test_slot_is_released_even_if_the_body_is_never_read() -> None:
+    # 本文を読み始める前に接続が切れると generator の finally は走らない。後始末で返す
+    limiter = _limiter(FakeTime(_jst(11, 16, 20)))
+    lease = limiter.acquire("s1", "did:plc:a")
+    response = _sse_response(_chunks(3), lease)
+
+    assert response.background is not None
+    await response.background()
+
+    assert limiter.active == 0
+
+
+@pytest.mark.anyio
+async def test_each_chunk_extends_the_slot() -> None:
+    t = FakeTime(_jst(11, 16, 20))
+    limiter = _limiter(t, concurrent=1, timeout=10)
+    lease = limiter.acquire("s1", "did:plc:a")
+
+    async def slow() -> AsyncIterator[str]:
+        for i in range(3):
+            t.advance(8)  # 送る間隔は期限より短い
+            yield f"chunk{i}"
+
+    stream = _release_when_closed(slow(), lease)
+    async for _ in stream:
+        assert limiter.active == 1  # 合計 24 秒でも枠を失わない
     assert limiter.active == 0

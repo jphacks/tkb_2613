@@ -36,16 +36,17 @@
 | code | 状態 | 返すところ | ほかの項目 | 意味 |
 | --- | --- | --- | --- | --- |
 | `closed` | 503 | diagnose | `next_open`：次の公開の開始時刻（時差つき ISO 8601）。最後の公開の後は null | 公開時間外（`PUBLIC_WINDOWS`。空なら制限しない） |
-| `already_running` | 409 | diagnose | — | 同じセッションで診断中 |
+| `already_running` | 409 | diagnose | — | 同じセッションか同じアカウント（DID）で診断中。別々にログインしても1アカウント1つまで |
 | `daily_limit` | 429 | diagnose | `limit`、`resets_at`（日本時間の次の 0:00）。`Retry-After` ヘッダー | 1アカウント（DID）1日（日本時間）の回数の上限（`DIAGNOSE_DAILY_LIMIT`） |
 | `busy` | 503 | diagnose | `retry_after`。`Retry-After` ヘッダー | 同時に診断できる数の上限（`MAX_CONCURRENT_DIAGNOSES`）。待たずに断る |
 | `model_unavailable` | 503 | diagnose（`MOCK_MODE=0`） | — | 診断の前に `GET {VLM_BASE_URL}/models` が応答しない（GPU の停止中・起動中） |
 | `bluesky_busy` | 503 | session、diagnose | — | Bluesky が回数制限（429）で断った |
 
-- diagnose の確認の順：ログイン（401）→ 公開時間 → 同じセッション → 1日の回数 → 同時実行の枠 → モデルの応答 → Bluesky からの投稿の取得。どれかで断ったときは、ストリームを始めない
+- diagnose の確認の順：ログイン（401）→ 公開時間 → 同じセッション・同じアカウント → 1日の回数 → 同時実行の枠 → モデルの応答 → Bluesky からの投稿の取得。どれかで断ったときは、ストリームを始めない
 - 1日の回数は、ストリームを始めるときに数える。公開時間外・混雑・モデルや Bluesky の不調で始められなかった分は数えない
 - 同時実行の枠は、SSE の generator が終わる・途中で切れる・失敗するのどれでも返す。返し損ねても `DIAGNOSE_SLOT_TIMEOUT_SECONDS`（既定900秒）で空く
-- 回数と枠はメモリだけに持つ（再起動で消える）。DID はハッシュにして持つ
+- 回数と枠はメモリだけに持つ（再起動で消える）。DID はプロセスごとのランダムな鍵で HMAC にして持つ
+- 枠の期限 `DIAGNOSE_SLOT_TIMEOUT_SECONDS` は、最後に SSE を送った時刻（keep-alive を含む）から数える
 
 ## 共通データ型
 

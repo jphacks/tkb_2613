@@ -284,7 +284,7 @@ describe("diagnose", () => {
   it.each([
     [429, { code: "daily_limit", message: "…", limit: 3 }, "今日の診断は 3 回までです"],
     [503, { code: "busy", message: "混雑しています", retry_after: 30 }, "混雑しています"],
-    [409, { code: "already_running", message: "…" }, "別の画面で診断が進んでいます"],
+    [409, { code: "already_running", message: "…" }, "このアカウントの別の診断が進んでいます"],
     [503, { code: "model_unavailable", message: "…" }, "準備中"],
     [503, { code: "bluesky_busy", message: "…" }, "Bluesky が混雑しています"],
   ])("explains why the diagnosis could not start (%i %j)", async (status, detail, text) => {

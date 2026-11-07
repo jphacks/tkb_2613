@@ -64,7 +64,7 @@ describe("refusalMessage", () => {
     expect(refusalMessage({ code: "daily_limit", limit: 3 })).toContain("今日の診断は 3 回までです");
     expect(refusalMessage({ code: "daily_limit" })).toContain("今日の診断回数の上限に達しました");
     expect(refusalMessage({ code: "busy" })).toContain("混雑しています");
-    expect(refusalMessage({ code: "already_running" })).toContain("別の画面で診断が進んでいます");
+    expect(refusalMessage({ code: "already_running" })).toContain("このアカウントの別の診断が進んでいます");
     expect(refusalMessage({ code: "model_unavailable" })).toContain("準備中");
     expect(refusalMessage({ code: "bluesky_busy" })).toContain("Bluesky が混雑しています");
   });

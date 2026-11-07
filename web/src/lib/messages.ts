@@ -232,7 +232,7 @@ export const messages = {
     dailyLimit: (limit?: number) =>
       `${limit ? `今日の診断は ${limit} 回までです` : "今日の診断回数の上限に達しました"}。明日の 0:00（日本時間）からまた診断できます`,
     busy: "混雑しています。しばらくしてからもう一度お試しください",
-    alreadyRunning: "別の画面で診断が進んでいます。終わってからもう一度お試しください",
+    alreadyRunning: "このアカウントの別の診断が進んでいます。終わってからもう一度お試しください",
     closed: (opensAt: string) => `公開時間外です。次は${opensAt}からです`,
     ended: "公開は終了しました。ありがとうございました",
     modelUnavailable: "ただいま準備中です。しばらくしてからもう一度お試しください",

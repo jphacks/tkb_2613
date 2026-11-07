@@ -125,6 +125,21 @@ def test_second_diagnosis_in_the_same_session_returns_409() -> None:
         assert client.post("/api/diagnose").status_code == 200
 
 
+def test_same_account_from_another_login_returns_409() -> None:
+    with _client(_settings(max_concurrent_diagnoses=5)) as client:
+        _login(client)
+        running = _limiter(client).acquire(
+            "another-login", MOCK_DID
+        )  # 別の端末でログインして診断中
+
+        res = client.post("/api/diagnose")
+
+        assert res.status_code == 409
+        assert _detail(res)["code"] == "already_running"
+        running.release()
+        assert client.post("/api/diagnose").status_code == 200
+
+
 def test_slot_is_returned_after_a_diagnosis_finishes() -> None:
     with _client(_settings(max_concurrent_diagnoses=1)) as client:
         _login(client)
