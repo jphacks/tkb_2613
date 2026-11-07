@@ -1,3 +1,9 @@
+# VPC の既定のセキュリティグループは使わないので、ルールを空にしておく
+resource "aws_default_security_group" "default" {
+  vpc_id = aws_vpc.main.id
+  tags   = { Name = "tkb_2613-default-unused" }
+}
+
 # --- アプリの EC2：内向きは CloudFront の VPC origin から web（3000）だけ ---
 
 resource "aws_security_group" "app" {
@@ -29,19 +35,10 @@ resource "aws_vpc_security_group_ingress_rule" "app_web_from_cloudfront" {
 
 resource "aws_vpc_security_group_egress_rule" "app_https" {
   security_group_id = aws_security_group.app.id
-  description       = "Bluesky, cdn.bsky.app, SSM, Secrets Manager, GitHub, image registries"
+  description       = "Bluesky, cdn.bsky.app, SSM, Secrets Manager, GitHub, dnf, image registries"
   ip_protocol       = "tcp"
   from_port         = 443
   to_port           = 443
-  cidr_ipv4         = "0.0.0.0/0"
-}
-
-resource "aws_vpc_security_group_egress_rule" "app_http" {
-  security_group_id = aws_security_group.app.id
-  description       = "dnf mirrors on first boot"
-  ip_protocol       = "tcp"
-  from_port         = 80
-  to_port           = 80
   cidr_ipv4         = "0.0.0.0/0"
 }
 

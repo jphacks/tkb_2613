@@ -45,7 +45,9 @@ resource "aws_iam_instance_profile" "instance" {
 
 resource "aws_iam_user" "killswitch" {
   name = var.killswitch_user_name
-  # アクセスキーは Terraform で作らない（state に入れない）。README の手順でコンソールから発行して渡す
+  # アクセスキーは Terraform で作らない（state に入れない）。README の手順でコンソールから発行して渡す。
+  # 手で発行したアクセスキーがあっても terraform destroy で消せるようにする
+  force_destroy = true
 }
 
 data "aws_iam_policy_document" "killswitch" {

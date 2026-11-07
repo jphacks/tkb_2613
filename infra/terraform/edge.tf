@@ -3,7 +3,7 @@
 
 resource "aws_cloudfront_vpc_origin" "app" {
   vpc_origin_endpoint_config {
-    name                   = "tkb_2613-app"
+    name                   = "tkb-2613-app"
     arn                    = aws_instance.app.arn
     http_port              = 3000
     https_port             = 443
@@ -24,8 +24,9 @@ data "aws_cloudfront_cache_policy" "optimized" {
   name = "Managed-CachingOptimized"
 }
 
-data "aws_cloudfront_origin_request_policy" "all_viewer_except_host" {
-  name = "Managed-AllViewerExceptHostHeader"
+# Host も含めて転送する（アプリに *.cloudfront.net が届く。内部の名前でリダイレクトを作らせない）
+data "aws_cloudfront_origin_request_policy" "all_viewer" {
+  name = "Managed-AllViewer"
 }
 
 data "aws_cloudfront_response_headers_policy" "security_headers" {
@@ -62,7 +63,7 @@ resource "aws_cloudfront_distribution" "main" {
     allowed_methods            = ["GET", "HEAD", "OPTIONS"]
     cached_methods             = ["GET", "HEAD"]
     cache_policy_id            = data.aws_cloudfront_cache_policy.disabled.id
-    origin_request_policy_id   = data.aws_cloudfront_origin_request_policy.all_viewer_except_host.id
+    origin_request_policy_id   = data.aws_cloudfront_origin_request_policy.all_viewer.id
     response_headers_policy_id = data.aws_cloudfront_response_headers_policy.security_headers.id
     compress                   = true
   }
@@ -75,7 +76,7 @@ resource "aws_cloudfront_distribution" "main" {
     allowed_methods            = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
     cached_methods             = ["GET", "HEAD"]
     cache_policy_id            = data.aws_cloudfront_cache_policy.disabled.id
-    origin_request_policy_id   = data.aws_cloudfront_origin_request_policy.all_viewer_except_host.id
+    origin_request_policy_id   = data.aws_cloudfront_origin_request_policy.all_viewer.id
     response_headers_policy_id = data.aws_cloudfront_response_headers_policy.security_headers.id
     compress                   = false
   }
@@ -111,7 +112,7 @@ resource "aws_cloudfront_distribution" "main" {
 # 手で入れた値を terraform apply が戻さないよう、addresses の変更は無視する
 resource "aws_wafv2_ip_set" "block_all" {
   name               = "tkb_2613-block-all"
-  description        = "Kill switch. Empty normally; 0.0.0.0/1 and 128.0.0.0/1 to block everyone."
+  description        = "Kill switch. Empty normally. Add 0.0.0.0/1 and 128.0.0.0/1 to block everyone."
   scope              = "CLOUDFRONT"
   ip_address_version = "IPV4"
   addresses          = []
@@ -182,6 +183,14 @@ resource "aws_wafv2_web_acl" "main" {
         }
         text_transformation {
           priority = 0
+          type     = "URL_DECODE"
+        }
+        text_transformation {
+          priority = 1
+          type     = "NORMALIZE_PATH"
+        }
+        text_transformation {
+          priority = 2
           type     = "LOWERCASE"
         }
       }
@@ -210,12 +219,21 @@ resource "aws_wafv2_web_acl" "main" {
             statement {
               byte_match_statement {
                 search_string         = "/api/session"
-                positional_constraint = "EXACTLY"
+                positional_constraint = "STARTS_WITH"
                 field_to_match {
                   uri_path {}
                 }
+                # %73ession や //api/session でもすり抜けられないよう、デコードと正規化をしてから比べる
                 text_transformation {
                   priority = 0
+                  type     = "URL_DECODE"
+                }
+                text_transformation {
+                  priority = 1
+                  type     = "NORMALIZE_PATH"
+                }
+                text_transformation {
+                  priority = 2
                   type     = "LOWERCASE"
                 }
               }
@@ -258,12 +276,20 @@ resource "aws_wafv2_web_acl" "main" {
         scope_down_statement {
           byte_match_statement {
             search_string         = "/api/diagnose"
-            positional_constraint = "EXACTLY"
+            positional_constraint = "STARTS_WITH"
             field_to_match {
               uri_path {}
             }
             text_transformation {
               priority = 0
+              type     = "URL_DECODE"
+            }
+            text_transformation {
+              priority = 1
+              type     = "NORMALIZE_PATH"
+            }
+            text_transformation {
+              priority = 2
               type     = "LOWERCASE"
             }
           }
@@ -288,6 +314,25 @@ resource "aws_wafv2_web_acl" "main" {
         limit                 = var.rate_limit_all
         evaluation_window_sec = 300
         aggregate_key_type    = "IP"
+        # Next.js の静的ファイルは数えない（1回ページを開くと数十件になり、会場や大学のように
+        # 1つの IP から大勢が来ると、すぐ上限に届くため）
+        scope_down_statement {
+          not_statement {
+            statement {
+              byte_match_statement {
+                search_string         = "/_next/static/"
+                positional_constraint = "STARTS_WITH"
+                field_to_match {
+                  uri_path {}
+                }
+                text_transformation {
+                  priority = 0
+                  type     = "NONE"
+                }
+              }
+            }
+          }
+        }
       }
     }
     visibility_config {

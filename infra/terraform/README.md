@@ -14,10 +14,10 @@
 | セキュリティグループ | アプリ：CloudFront の VPC origin から 3000 だけ。GPU：アプリから 8000（VLM）・8080（OCR）だけ。外向きは 443（アプリは初回の dnf のため 80 も）。SSH はどちらも開けない |
 | EC2 | アプリ（t3.small、Amazon Linux 2023）、GPU（g6e.xlarge、Deep Learning AMI）。どちらもパブリック IP なし、IMDSv2 必須・hop limit 1、ディスク暗号化 |
 | 入口 | CloudFront（`*.cloudfront.net`、HTTPS へのリダイレクト、`/api/*` はキャッシュも圧縮もしない、IPv6 オフ）、VPC origin |
-| WAF | 全遮断（IP セット）、IP の評判リスト、`/api/detect` の遮断、レート制限（ログイン 10・診断 10・全体 600／5分／IP）。ログは保存しない |
+| WAF | 全遮断（IP セット）、IP の評判リスト、`/api/detect` の遮断、レート制限（ログイン 10・診断 10・全体 600／5分／IP。全体は静的ファイルを数えない）。パスは URL のデコードと正規化をしてから比べる（`/api/%73ession` ですり抜けさせない）。ログは保存しない |
 | 秘密の値 | Secrets Manager の入れ物 `tkb_2613/vlm-api-key`（値は Terraform で扱わない） |
 | IAM | アプリと GPU のロール（SSM ＋ キーの読み取りだけ）、全遮断の予備の担当の IAM ユーザー、Budgets action とスケジュールのロール |
-| 予算 | 月 $100。実績 $50 でメール、予測 $100 でメール、**実績 $80 で GPU を自動で止める** |
+| 予算 | 月 $100。実績 $50 でメール、予測 $100 でメール、**実績 $80 で GPU を自動で止め、スケジュールでの再起動も止める** |
 | スケジュール | 公開日ごとに GPU を起動・停止（下の表） |
 
 ### GPU のスケジュール（日本時間）
@@ -67,9 +67,15 @@ tf init && tf plan -out=review.tfplan
 
 ## apply（承認を得てから）
 
+最初の apply は2回に分ける。アプリの受け入れ元のセキュリティグループ（`CloudFront-VPCOrigins-Service-SG`）は、VPC origin ができたあとに CloudFront が作るので、先に VPC origin まで作る。
+
 ```bash
+terraform apply -target=aws_cloudfront_vpc_origin.app
+terraform plan -out=review.tfplan
 terraform apply review.tfplan
 ```
+
+2回めでも「no matching SecurityGroup」で止まったら、数分待ってもう一度 apply する。それでも見つからなければ、`security.tf` の受け入れ元を VPC の CIDR にする（要確認）。
 
 - **GPU は作った直後から動いて課金が始まる**。初回は重み（約30GB）の取得に時間がかかるので、取得が終わって動作を確かめたら止める（下の「GPU を止める」）。以降はスケジュールで起動・停止する
 - CloudFront の配信と VPC origin は、できるまで15分ほどかかる
@@ -121,6 +127,8 @@ systemctl start tkb-app     # 初回はイメージのビルドで十数分か�
 journalctl -u tkb-app -n 50 --no-pager
 ```
 
+**起動し直すときは、必ず `systemctl restart tkb-app` を使う**。`docker compose up` を手で打つと、キーのファイルがないので、api が空のキーで起動する（モデルにつながらず「準備中」になる）。
+
 推理の表（`data/processed`）は EC2 の上にはない。なくても動く（最寄り駅のルールだけを飛ばす）。入れるときは手元で `make data` してから、SSM で `/opt/tkb_2613/data/processed` に置く（方法は要確認）。
 
 ### 起動したら確かめる
@@ -162,6 +170,17 @@ aws ec2 stop-instances --region us-east-1 --instance-ids "$(terraform output -ra
 
 下の「消す」。
 
+## 予算 $80 で止まったあと
+
+$80 を超えると、Budgets action が GPU を止め、スケジュールのロールに「起動を禁止する」ポリシー（`tkb_2613-deny-gpu-start`）を付ける。このままだと、次の公開時間帯にも GPU は起動しない（画面は「準備中」になる）。続けるかはチームで決める。続けるなら、Budgets のコンソールで action を「リセット」してから、ポリシーを外す。
+
+```bash
+aws iam detach-role-policy --role-name tkb_2613-gpu-scheduler \
+  --policy-arn "$(aws iam list-policies --scope Local --query "Policies[?PolicyName=='tkb_2613-deny-gpu-start'].Arn" --output text)"
+```
+
+NAT・WAF・アプリの EC2 は止まらない（GPU だけを止める）。全部止めるときは「消す」。
+
 ## GPU を手で起動・停止する
 
 ```bash
@@ -184,7 +203,8 @@ terraform destroy
 ```
 
 - Secrets Manager のシークレットは、復元の待ち期間なしで消える
-- 谷口の IAM ユーザーにアクセスキーを発行していたら、destroy の前に IAM のコンソールで削除する（Terraform が作っていないので、残っていると destroy が止まる）
+- 谷口の IAM ユーザーは、手で発行したアクセスキーごと消える（`force_destroy`）
+- VPC origin が VPC の中に作るネットワークインターフェースが残っていると、サブネットや VPC の削除が数分待たされる。止まったら、少し待ってもう一度 `terraform destroy`
 - 終わったら、state のコピー（`~/tkb_2613-tfstate/`）も消してよい
 
 ## 要確認

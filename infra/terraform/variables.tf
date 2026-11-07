@@ -163,7 +163,7 @@ variable "public_windows" {
 # --- WAF（docs/aws-migration.md の 4章） ---
 
 variable "rate_limit_all" {
-  description = "IP ごとの5分あたりの全体のリクエスト数。1回ページを開くと静的ファイルで数十件になるので、計画書の 300 より多めにする"
+  description = "IP ごとの5分あたりの全体のリクエスト数（Next.js の静的ファイルは数えない）。1つの IP から大勢が来る会場や大学を考えて、計画書の 300 より多めにする"
   type        = number
   default     = 600
 }
