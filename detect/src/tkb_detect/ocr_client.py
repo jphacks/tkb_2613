@@ -36,13 +36,17 @@ class OcrConfig:
     base_url: str
     mock_mode: bool = True
     timeout_s: float = DEFAULT_TIMEOUT_S
+    # 送り先の許可リスト。None なら環境変数 MODEL_ALLOWED_HOST_SUFFIXES を読む（guard.py）
+    allowed_hosts: tuple[str, ...] | None = None
 
 
 class OcrClient:
     def __init__(self, config: OcrConfig) -> None:
         self._config = config
         # モックでは接続しないので、接続先の確認もしない
-        self._base_url = "" if config.mock_mode else ensure_team_endpoint(config.base_url)
+        self._base_url = (
+            "" if config.mock_mode else ensure_team_endpoint(config.base_url, config.allowed_hosts)
+        )
 
     async def recognize(self, image: bytes) -> list[OcrLine]:
         if self._config.mock_mode:
@@ -53,7 +57,8 @@ class OcrClient:
 
     async def _post(self, payload: dict[str, Any]) -> Any:
         try:
-            async with httpx.AsyncClient(timeout=self._config.timeout_s) as client:
+            # 環境変数のプロキシ（HTTP_PROXY など）を経由させない。送るのはガードで確認した先だけ
+            async with httpx.AsyncClient(timeout=self._config.timeout_s, trust_env=False) as client:
                 res = await client.post(f"{self._base_url}/ocr", json=payload)
                 res.raise_for_status()
                 return res.json()

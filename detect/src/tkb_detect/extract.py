@@ -9,7 +9,7 @@ import asyncio
 import json
 import logging
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 
 from pydantic import ValidationError
@@ -256,13 +256,29 @@ def build_extractor(
     ocr_base_url: str,
     coordinate_space: CoordinateSpace | None = COORDINATE_SPACE,
     zoom: bool = True,
+    allowed_hosts: Sequence[str] | None = None,
 ) -> Extractor:
-    """設定から作る。OCR は OCR_BASE_URL が空なら使わない。"""
+    """設定から作る。OCR は OCR_BASE_URL が空なら使わない。
+
+    allowed_hosts は VLM と OCR の送り先の許可リスト。None なら環境変数
+    MODEL_ALLOWED_HOST_SUFFIXES を読む（guard.py）。
+    """
+    hosts = tuple(allowed_hosts) if allowed_hosts is not None else None
     vlm = VlmClient(
-        VlmConfig(base_url=vlm_base_url, api_key=vlm_api_key, model=vlm_model, mock_mode=mock_mode)
+        VlmConfig(
+            base_url=vlm_base_url,
+            api_key=vlm_api_key,
+            model=vlm_model,
+            mock_mode=mock_mode,
+            allowed_hosts=hosts,
+        )
     )
     use_ocr = bool(ocr_base_url.strip()) and not mock_mode
-    ocr = OcrClient(OcrConfig(base_url=ocr_base_url, mock_mode=False)) if use_ocr else None
+    ocr = (
+        OcrClient(OcrConfig(base_url=ocr_base_url, mock_mode=False, allowed_hosts=hosts))
+        if use_ocr
+        else None
+    )
     return Extractor(vlm, ocr, coordinate_space, zoom)
 
 

@@ -14,6 +14,10 @@ class Settings(BaseSettings):
     vlm_api_key: SecretStr = SecretStr("")
     vlm_model: str = ""
     ocr_base_url: str = ""
+    # VLM と OCR の送り先の許可リスト（カンマ区切りのホスト名か IP）。
+    # 空なら localhost だけに送れる。
+    # .env からも読めるよう、ここで受けて build_extractor に渡す（detect/src/tkb_detect/guard.py）
+    model_allowed_host_suffixes: str = ""
     cors_origins: list[str] = ["http://localhost:3000"]
     # Bluesky のログイン先
     bsky_service: str = "https://bsky.social"
