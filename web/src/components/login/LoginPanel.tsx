@@ -1,10 +1,12 @@
 "use client";
 
+import Link from "next/link";
 import { useActionState } from "react";
 
 import { BlueskyLogo } from "@/components/brand/BlueskyLogo";
 import { useSession } from "@/components/session/SessionProvider";
 import { ApiError } from "@/lib/api";
+import { REVOKE_APP_PASSWORD } from "@/lib/legal";
 import { messages } from "@/lib/messages";
 import { normalizeHandle } from "@/types/session";
 
@@ -62,6 +64,7 @@ export function LoginPanel() {
         >
           {t.logout}
         </button>
+        <p className="basis-full text-sm text-ink/60">{REVOKE_APP_PASSWORD}</p>
       </section>
     );
   }
@@ -126,6 +129,19 @@ export function LoginPanel() {
           {t.pending}
         </p>
       )}
+      <p className="mt-6 text-sm text-ink/70">
+        {t.consentBefore}
+        <Link href="/terms" className="underline underline-offset-4 hover:text-seeker">
+          {t.consentTerms}
+        </Link>
+        {t.consentAnd}
+        <Link href="/privacy" className="underline underline-offset-4 hover:text-seeker">
+          {t.consentPrivacy}
+        </Link>
+        {t.consentAfter}
+      </p>
+      <p className="mt-2 text-sm text-ink/70">{REVOKE_APP_PASSWORD}</p>
+
       {!isPending && form.error && (
         <p role="alert" className="mt-4 border-l-4 border-seeker bg-seeker/10 px-4 py-3">
           {form.error}
