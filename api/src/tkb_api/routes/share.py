@@ -36,8 +36,9 @@ def create_result_link(
     sessions: Annotated[SessionStore, Depends(get_session_store)],
     session_id: Annotated[str, Depends(current_session_id)],
     gazetteer: Annotated[Gazetteer, Depends(get_gazetteer)],
-    shares: Annotated[ShareStore, Depends(get_share_store)],
+    # ログインの確認（401）を、閲覧リンクの機能のオン・オフ（404）より先にする
     session: Annotated[BlueskySession, Depends(current_session)],
+    shares: Annotated[ShareStore, Depends(get_share_store)],
 ) -> dict[str, str]:
     payload = read_diagnosis(sessions, session_id, gazetteer)
     try:

@@ -1,8 +1,10 @@
 """明示的な閲覧リンクだけが、別ブラウザや API 再起動後に読める。"""
 
+import logging
 import stat
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from tkb_api.config import Settings, get_settings
@@ -139,3 +141,24 @@ def test_links_made_before_turning_it_off_cannot_be_read(tmp_path: Path) -> None
 
     assert res.status_code == 404
     assert res.json()["detail"]["code"] == "share_disabled"
+
+
+def test_login_is_checked_before_the_feature_switch(tmp_path: Path) -> None:
+    settings = _mock_settings(tmp_path / "shares.sqlite3", share_enabled=False)
+    with _client(settings) as client:
+        client.cookies.set("tkb_session", "not-a-real-session")  # 無効・期限切れの Cookie
+        created = client.post("/api/result-link")
+        revoked = client.request("DELETE", "/api/result-link", json={"token": "x" * 43})
+
+    assert created.status_code == 401
+    assert revoked.status_code == 401
+
+
+def test_startup_log_says_whether_result_links_are_on(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO, logger="tkb_api")
+    create_app(_mock_settings(tmp_path / "a.sqlite3", share_enabled=False))
+    create_app(_mock_settings(tmp_path / "b.sqlite3", share_enabled=True))
+    assert "閲覧リンク：オフ（SHARE_ENABLED）" in caplog.text
+    assert "閲覧リンク：オン（SHARE_ENABLED）" in caplog.text

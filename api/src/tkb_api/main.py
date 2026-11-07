@@ -87,7 +87,11 @@ def create_app(
     app.state.sessions = (
         sessions if sessions is not None else SessionStore(settings.session_ttl_minutes * 60)
     )
-    # 閲覧リンクをオフにしたときは、保存先（SQLite のファイル）も作らない
+    # 閲覧リンクをオフにしたときは、保存先（SQLite のファイル）も作らない。
+    # 既定はオンなので、本番で入れ忘れに気づけるよう、起動時にどちらかを出す
+    logging.getLogger("tkb_api").info(
+        "閲覧リンク：%s（SHARE_ENABLED）", "オン" if settings.share_enabled else "オフ"
+    )
     app.state.shares = (
         ShareStore(settings.share_db_path, settings.share_ttl_minutes * 60)
         if settings.share_enabled
