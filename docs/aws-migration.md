@@ -278,7 +278,7 @@ E の GPU の分は、Award Day に約6時間、3晩はそれぞれ起動の15�
 | 5 | `feat/share-toggle` | `SHARE_ENABLED`（既定 1）。0 なら閲覧リンクの API を 404 にし、画面のボタンを出さない | オン・オフ両方 |
 | 6 | `feat/legal-pages` | 利用者向けのページ（9章） | 画面のテスト |
 | 7 | `feat/ocr-region` | OCR で写真の該当箇所の枠と読みの二重チェック（3.5）。11/11 に試し、11/12 までに枠が出なければ入れない | 突き合わせのテスト（モックの OCR 結果） |
-| 8 | `feat/terraform` | `infra/terraform/`（10章）。`terraform plan` まで。apply は別に承認を得てから | `terraform validate`、`plan` |
+| 8 | `feat/terraform` | `infra/terraform/`（10章）。`terraform plan` まで。apply は別に承認を得てから。**VLM のキーをコンテナに渡す方法もここで決める**（10.1） | `terraform validate`、`plan` |
 
 `is_own_post_uri` の rkey 検証は #112 で済んでいるので、新しい PR は要らない。
 
@@ -312,6 +312,20 @@ web に「利用規約」「プライバシーポリシー」「問い合わせ�
 - CloudFront と WAF のログの保存先は作らない
 - 全リソースにタグ（`Project=tkb_2613`）を付ける。消し忘れを Cost Explorer とタグで確かめられるようにする
 - GPU のイメージは AWS Deep Learning AMI（NVIDIA ドライバと Docker 入り）。vLLM は RunPod と同じバージョンのコンテナイメージを固定して使う。OCR も同じインスタンスでコンテナとして動かす
+
+### 10.1 VLM のキーをコンテナに渡す方法（PR 8 で決める）
+
+PR #115 のレビューで見つけた点：compose の api は `env_file`（リポジトリ直下の `.env`）からしか値を受け取らない。起動スクリプトがシェルで `export VLM_API_KEY=...` しても、コンテナには届かない。キーを `.env` に書くと、EC2 のディスクに平文で残る。
+
+候補は次の2つ。PR 8 で比べて決める。
+
+| 案 | 内容 | よい点 | 気をつける点 |
+|---|---|---|---|
+| A | compose の api に `environment: VLM_API_KEY: ${VLM_API_KEY}` を足す。起動スクリプトが Secrets Manager から読んで、`docker compose up` のときだけ環境変数で渡す | api のコードを変えない | `docker inspect` でコンテナの環境変数として見える。起動スクリプトの履歴やログに出さないようにする。キーを変えたらコンテナを作り直す |
+| B | api が起動時に、インスタンスロールで Secrets Manager を直接読む（`VLM_API_KEY_SECRET_ID` を設定） | キーがファイルにも環境変数にも出ない | api に boto3 などの依存が増える。コンテナから IMDS に届かない設定（hop limit 1、3.3）と両立させる必要がある（hop limit を 2 にするか、認証情報を別の方法で渡す） |
+
+- どちらの案でも、キーを `.env`・ユーザーデータ・Terraform の state・ログに入れない（4章の 6）
+- 再検査（13.2）で、`docker inspect`・`/proc/<pid>/environ`・ログにキーが出ないかを確かめる
 
 ## 11. Bluesky の API の回数制限
 
