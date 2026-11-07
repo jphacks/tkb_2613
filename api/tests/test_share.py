@@ -159,6 +159,7 @@ def test_startup_log_says_whether_result_links_are_on(
 ) -> None:
     caplog.set_level(logging.INFO, logger="tkb_api")
     create_app(_mock_settings(tmp_path / "a.sqlite3", share_enabled=False))
-    create_app(_mock_settings(tmp_path / "b.sqlite3", share_enabled=True))
+    app = create_app(_mock_settings(tmp_path / "b.sqlite3", share_enabled=True))
+    app.state.shares.close()  # lifespan を通していないので、ここで閉じる
     assert "閲覧リンク：オフ（SHARE_ENABLED）" in caplog.text
     assert "閲覧リンク：オン（SHARE_ENABLED）" in caplog.text
