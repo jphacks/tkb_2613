@@ -13,7 +13,12 @@ from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 
 from atproto import AsyncClient, models
-from atproto_client.exceptions import AtProtocolError, BadRequestError, UnauthorizedError
+from atproto_client.exceptions import (
+    AtProtocolError,
+    BadRequestError,
+    RateLimitExceededError,
+    UnauthorizedError,
+)
 from pydantic import ValidationError
 
 from tkb_common.schemas import Clue, Post, PostImage
@@ -29,6 +34,14 @@ class LoginFailedError(Exception):
 
 class BlueskyUnavailableError(Exception):
     """Bluesky に接続できない、または想定外の応答。"""
+
+
+class BlueskyRateLimitedError(BlueskyUnavailableError):
+    """Bluesky が回数の制限（429）で断った。deleted は、断られる前に消せた投稿の ID。"""
+
+    def __init__(self, deleted: Sequence[str] = ()) -> None:
+        super().__init__()
+        self.deleted = tuple(deleted)
 
 
 @dataclass(frozen=True)
@@ -48,6 +61,8 @@ async def login(handle: str, password: str, service: str = "https://bsky.social"
         me = await client.login(handle, password)
     except (UnauthorizedError, BadRequestError) as e:
         raise LoginFailedError from e
+    except RateLimitExceededError as e:
+        raise BlueskyRateLimitedError from e
     except (AtProtocolError, Exception) as e:
         raise BlueskyUnavailableError from e
 
@@ -114,6 +129,8 @@ async def fetch_own_posts(client: AsyncClient, did: str, limit: int) -> list[Pos
     for _ in range(MAX_FEED_PAGES):
         try:
             res = await client.get_author_feed(actor=did, cursor=cursor, limit=FEED_PAGE_SIZE)
+        except RateLimitExceededError as e:
+            raise BlueskyRateLimitedError from e
         except AtProtocolError as e:
             raise BlueskyUnavailableError from e
         for item in res.feed:
@@ -153,7 +170,8 @@ async def delete_own_posts(client: AsyncClient, did: str, post_ids: Sequence[str
     """did 本人の投稿を 1 件ずつ消し、消せた投稿の ID を返す。
 
     本人の投稿でない ID は消さない（delete_post は URI の DID のリポジトリを消しに行くため）。
-    消せなかった投稿は飛ばして、残りを続ける。
+    消せなかった投稿は飛ばして、残りを続ける。Bluesky に回数の制限で断られたら、残りは試さずに
+    BlueskyRateLimitedError（それまでに消せた ID つき）を出す。
     """
     deleted: list[str] = []
     for post_id in post_ids:
@@ -161,6 +179,8 @@ async def delete_own_posts(client: AsyncClient, did: str, post_ids: Sequence[str
             continue
         try:
             await client.delete_post(post_id)
+        except RateLimitExceededError as e:
+            raise BlueskyRateLimitedError(deleted) from e
         except AtProtocolError:
             continue
         deleted.append(post_id)

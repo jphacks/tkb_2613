@@ -4,6 +4,8 @@ from pathlib import Path
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from tkb_api.limits import PublicWindow
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", frozen=True)
@@ -41,6 +43,21 @@ class Settings(BaseSettings):
     # 明示的に共有した診断結果の保存先と有効期間。アプリ再起動後も閲覧できるようファイルに置く。
     share_db_path: Path = Path("data/private/shared_results.sqlite3")
     share_ttl_minutes: int = Field(default=120, ge=1, le=1440)
+
+    # --- 乱用対策と公開時間帯（docs/aws-migration.md の 5章）。0 の上限は「制限しない」 ---
+    # 1アカウント（DID）1日（日本時間）の診断回数
+    diagnose_daily_limit: int = Field(default=3, ge=0)
+    # 同時に診断できる数。空きがなければ待たずに 503 を返す
+    max_concurrent_diagnoses: int = Field(default=2, ge=0)
+    # 混雑で断るときに Retry-After で伝える秒数
+    diagnose_busy_retry_after_seconds: int = Field(default=30, ge=1)
+    # 診断の枠を返し損ねても、この秒数たてば空いたものとして扱う（診断の最長時間より長くする）
+    diagnose_slot_timeout_seconds: float = Field(default=900, gt=0)
+    # 公開する時間帯。JSON の配列 [{"start": "2026-11-16T20:00:00+09:00", "end": "…"}]。
+    # 空なら制限しない（ローカル開発用）
+    public_windows: list[PublicWindow] = []
+    # 診断を始める前に、モデルのサーバーが応答するかを確かめる待ち時間（秒）
+    model_probe_timeout_seconds: float = Field(default=3, gt=0)
 
 
 @lru_cache

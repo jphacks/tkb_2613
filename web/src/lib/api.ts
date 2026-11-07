@@ -1,4 +1,5 @@
 import { messages } from "@/lib/messages";
+import { readRefusal, type RefusalCode, refusalMessage } from "@/lib/refusal";
 import { readSse } from "@/lib/sse";
 import { type DetectResponse, isDetectResponse } from "@/types/clue";
 import {
@@ -42,10 +43,19 @@ export class ApiError extends Error {
     readonly kind: ApiErrorKind,
     message: string,
     readonly status?: number,
+    /** api が理由のコードつきで断ったときのコード（web/src/lib/refusal.ts） */
+    readonly code?: RefusalCode,
   ) {
     super(message);
     this.name = "ApiError";
   }
+}
+
+/** 失敗の応答を ApiError にする。理由のコードつきの断りなら、その理由の文言にする */
+async function failure(res: Response): Promise<ApiError> {
+  const refusal = await readRefusal(res);
+  if (refusal) return new ApiError("server", refusalMessage(refusal), res.status, refusal.code);
+  return new ApiError("server", messages.errors.server(res.status), res.status);
 }
 
 interface DetectOptions {
@@ -119,7 +129,7 @@ export async function createSession(
     throw new ApiError("unauthorized", messages.errors.wrongCredentials, 401);
   }
   if (!res.ok) {
-    throw new ApiError("server", messages.errors.server(res.status), res.status);
+    throw await failure(res);
   }
 
   const data: unknown = await res.json().catch(() => undefined);
@@ -263,7 +273,11 @@ export async function* diagnose({
   if (res.status === 401) {
     throw new ApiError("unauthorized", messages.errors.sessionExpired, 401);
   }
-  if (!res.ok || !res.body) {
+  if (!res.ok) {
+    // 公開時間外・1日の上限・混雑・同じセッションで診断中・モデルや Bluesky の不調
+    throw await failure(res);
+  }
+  if (!res.body) {
     throw new ApiError("server", messages.errors.server(res.status), res.status);
   }
 

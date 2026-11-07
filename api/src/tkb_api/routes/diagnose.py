@@ -16,24 +16,40 @@ MOCK_MODE=1 のときは、架空のデモ用アカウントの投稿と手が�
 （Bluesky にもモデルにも接続しない）。
 MOCK_MODE=0 のときは、セッションの DID 本人の投稿を Bluesky から直近 MAX_POSTS 件取り、
 写真を cdn.bsky.app から取って手がかりを取り出し、推理する。
+
+始める前に、公開時間帯・同じセッションでの診断中・1日の回数・同時実行の枠・モデルの応答を
+確かめ、だめならストリームを始めずに理由のコードつきで断る（tkb_api.errors、tkb_api.limits）。
 """
 
 import asyncio
 import json
 import logging
 import time
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from dataclasses import asdict
+from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
+from starlette.background import BackgroundTask
 
 from tkb_api import bluesky
 from tkb_api.bluesky import BlueskySession, Diagnosis, PostsFetcher, SessionStore
 from tkb_api.config import Settings, get_settings
+from tkb_api.errors import BLUESKY_BUSY_MESSAGE, refusal
+from tkb_api.limits import (
+    JST,
+    AlreadyRunningError,
+    BusyError,
+    DailyLimitError,
+    DiagnoseLimiter,
+    Lease,
+    availability,
+    next_jst_midnight,
+)
 from tkb_api.pipeline import (
     diagnose_events,
     load_gazetteer,
@@ -43,6 +59,7 @@ from tkb_api.pipeline import (
 )
 from tkb_api.routes.session import current_session, current_session_id, get_session_store
 from tkb_common.schemas import Clue, Post
+from tkb_detect.batch import PostExtraction
 from tkb_detect.errors import DetectError
 from tkb_detect.extract import Extractor, build_extractor
 from tkb_engine.gazetteer import Gazetteer
@@ -93,6 +110,46 @@ async def _with_keep_alive(source: AsyncIterator[str], interval: float) -> Async
             pending = asyncio.ensure_future(anext(source))
     finally:
         pending.cancel()
+
+
+async def _release_when_closed(source: AsyncIterator[str], lease: Lease) -> AsyncGenerator[str]:
+    """source を流し終えたとき・途中で切れたとき・失敗したときのどれでも、診断の枠を返す。
+
+    送るたびに（keep-alive も）枠の期限を延ばすので、長い診断でも途中で枠を失わない。
+    """
+    try:
+        async for chunk in source:
+            lease.touch()
+            yield chunk
+    finally:
+        lease.release()
+
+
+def _sse_response(source: AsyncIterator[str], lease: Lease) -> StreamingResponse:
+    """診断の SSE の応答。枠は generator の finally と、応答のあとの後始末の両方で返す。
+
+    本文を読み始める前に接続が切れると generator が始まらず、finally が走らない。
+    そのときも後始末（BackgroundTask）で返す。release は何度呼んでもよい。
+    """
+    return StreamingResponse(
+        _release_when_closed(source, lease),
+        media_type="text/event-stream",
+        # 途中の中継（プロキシ）にためこまれず、1 件ずつ届くようにする
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        background=BackgroundTask(lease.release),
+    )
+
+
+Clock = Callable[[], datetime]
+
+
+def get_clock() -> Clock:
+    return lambda: datetime.now(JST)
+
+
+def get_diagnose_limiter(request: Request) -> DiagnoseLimiter:
+    limiter: DiagnoseLimiter = request.app.state.diagnose_limiter
+    return limiter
 
 
 def get_fetch_posts() -> PostsFetcher:
@@ -151,6 +208,10 @@ async def _fetch_own_posts(
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "ログインし直してください")
     try:
         return await fetch_posts(session.client, session.did, settings.max_posts)
+    except bluesky.BlueskyRateLimitedError:
+        raise refusal(
+            status.HTTP_503_SERVICE_UNAVAILABLE, "bluesky_busy", BLUESKY_BUSY_MESSAGE
+        ) from None
     except bluesky.BlueskyUnavailableError:
         raise HTTPException(
             status.HTTP_502_BAD_GATEWAY, "Bluesky から投稿を取得できませんでした"
@@ -176,6 +237,55 @@ def read_diagnosis(
     }
 
 
+def _ensure_open(settings: Settings, now: datetime) -> None:
+    """公開時間外なら、次の公開の開始時刻（なければ null）をつけて断る。"""
+    avail = availability(settings.public_windows, now)
+    if avail.is_open:
+        return
+    next_open = avail.next_open.isoformat() if avail.next_open else None
+    message = "公開時間外です" if next_open else "公開は終了しました"
+    raise refusal(status.HTTP_503_SERVICE_UNAVAILABLE, "closed", message, next_open=next_open)
+
+
+def _acquire(
+    limiter: DiagnoseLimiter, settings: Settings, session_id: str, did: str, now: datetime
+) -> Lease:
+    try:
+        return limiter.acquire(session_id, did)
+    except AlreadyRunningError:
+        raise refusal(
+            status.HTTP_409_CONFLICT, "already_running", "このアカウントの別の診断が進んでいます"
+        ) from None
+    except DailyLimitError:
+        resets_at = next_jst_midnight(now)
+        raise refusal(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            "daily_limit",
+            "今日の診断回数の上限に達しました",
+            headers={"Retry-After": str(max(1, int((resets_at - now).total_seconds())))},
+            limit=settings.diagnose_daily_limit,
+            resets_at=resets_at.isoformat(),
+        ) from None
+    except BusyError:
+        retry_after = settings.diagnose_busy_retry_after_seconds
+        raise refusal(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "busy",
+            "混雑しています",
+            headers={"Retry-After": str(retry_after)},
+            retry_after=retry_after,
+        ) from None
+
+
+async def _ensure_model_reachable(extractor: Extractor, settings: Settings) -> None:
+    if not await extractor.model_reachable(settings.model_probe_timeout_seconds):
+        raise refusal(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "model_unavailable",
+            "画像を読むモデルの準備ができていません",
+        )
+
+
 @router.post("/diagnose")
 async def diagnose(
     session: Annotated[BlueskySession, Depends(current_session)],
@@ -185,27 +295,50 @@ async def diagnose(
     gazetteer: Annotated[Gazetteer, Depends(get_gazetteer)],
     store: Annotated[SessionStore, Depends(get_session_store)],
     session_id: Annotated[str, Depends(current_session_id)],
+    limiter: Annotated[DiagnoseLimiter, Depends(get_diagnose_limiter)],
+    clock: Annotated[Clock, Depends(get_clock)],
 ) -> StreamingResponse:
+    now = clock()
+    _ensure_open(settings, now)
+    lease = _acquire(limiter, settings, session_id, session.did, now)
+    try:
+        events = await _prepare_events(settings, session, fetch_posts, extractor_factory)
+    except BaseException:
+        lease.release()
+        raise
+
+    # ここで診断を本当に始める。今日の回数はここで数える（混雑やモデル・Bluesky の不調で
+    # 始められなかった分は数えない）
+    lease.count()
     store.set_diagnosis(session_id, None)
-    if settings.mock_mode:
-        posts = _load_demo_posts(settings)
-        interval = settings.mock_event_interval_seconds
-        extractions = mock_extractions(settings.demo_fixture_path, posts, interval)
-    else:
-        started = time.monotonic()
-        posts = await _fetch_own_posts(session, settings, fetch_posts)
-        fetched = time.monotonic() - started
-        logger.info("診断の時間：投稿の取得 %.1f 秒（%d 件）", fetched, len(posts))
-        interval = 0
-        extractions = real_extractions(_build_extractor(extractor_factory), posts)
+    posts, extractions, interval = events
 
     def save(clues: list[Clue]) -> None:
         store.set_diagnosis(session_id, Diagnosis(posts=tuple(posts), clues=tuple(clues)))
 
-    events = diagnose_events(posts, extractions, gazetteer, interval, on_finished=save)
-    return StreamingResponse(
-        _with_keep_alive(_stream(events), settings.sse_keepalive_seconds),
-        media_type="text/event-stream",
-        # 途中の中継（プロキシ）にためこまれず、1 件ずつ届くようにする
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
+    stream = diagnose_events(posts, extractions, gazetteer, interval, on_finished=save)
+    return _sse_response(_with_keep_alive(_stream(stream), settings.sse_keepalive_seconds), lease)
+
+
+async def _prepare_events(
+    settings: Settings,
+    session: BlueskySession,
+    fetch_posts: PostsFetcher,
+    extractor_factory: ExtractorFactory,
+) -> tuple[list[Post], AsyncIterator[PostExtraction], float]:
+    """診断に流す投稿と、手がかりを取り出す処理を用意する（モデルの確認と投稿の取得）。"""
+    if settings.mock_mode:
+        posts = _load_demo_posts(settings)
+        interval = settings.mock_event_interval_seconds
+        return posts, mock_extractions(settings.demo_fixture_path, posts, interval), interval
+
+    if session.client is None:
+        # モックでログインしたあとに MOCK_MODE=0 で起動し直した場合など。モデルの確認より先に伝える
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "ログインし直してください")
+    extractor = _build_extractor(extractor_factory)
+    await _ensure_model_reachable(extractor, settings)
+    started = time.monotonic()
+    posts = await _fetch_own_posts(session, settings, fetch_posts)
+    fetched = time.monotonic() - started
+    logger.info("診断の時間：投稿の取得 %.1f 秒（%d 件）", fetched, len(posts))
+    return posts, real_extractions(extractor, posts), 0

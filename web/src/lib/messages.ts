@@ -203,6 +203,8 @@ export const messages = {
     heading: "もういいよ",
     deleted: (count: number) => `${count} 件の投稿を Bluesky から消しました`,
     failed: (count: number) => `${count} 件は消せませんでした。Bluesky のアプリから直接消してください`,
+    blueskyBusy: (count: number) =>
+      `Bluesky が混雑しているため、${count} 件は消せませんでした。少し待ってから消し直すか、Bluesky のアプリから直接消してください`,
     rediagnose: "もう一度「診断する」を押すと、残った投稿で最初から調べ直します",
   },
   hideAndSeek: {
@@ -226,5 +228,14 @@ export const messages = {
     sessionExpired: "ログインし直してください",
     diagnoseInterrupted: "診断の途中で接続が切れました",
     diagnoseFirst: "先に診断してください",
+    // 診断を始められないとき（api が理由のコードつきで断ったとき。web/src/lib/refusal.ts）
+    dailyLimit: (limit?: number) =>
+      `${limit ? `今日の診断は ${limit} 回までです` : "今日の診断回数の上限に達しました"}。明日の 0:00（日本時間）からまた診断できます`,
+    busy: "混雑しています。しばらくしてからもう一度お試しください",
+    alreadyRunning: "このアカウントの別の診断が進んでいます。終わってからもう一度お試しください",
+    closed: (opensAt: string) => `公開時間外です。次は${opensAt}からです`,
+    ended: "公開は終了しました。ありがとうございました",
+    modelUnavailable: "ただいま準備中です。しばらくしてからもう一度お試しください",
+    blueskyBusy: "Bluesky が混雑しています。しばらくしてからもう一度お試しください",
   },
 } as const;
