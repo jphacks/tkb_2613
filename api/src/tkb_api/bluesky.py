@@ -5,6 +5,7 @@
 投稿はセッションの DID のものだけを取る（他人のアカウントは指定できない）。
 """
 
+import re
 import secrets
 import threading
 import time
@@ -131,11 +132,21 @@ async def fetch_own_posts(client: AsyncClient, did: str, limit: int) -> list[Pos
 PostsDeleter = Callable[[AsyncClient, str, Sequence[str]], Awaitable[list[str]]]
 
 
+# AT URI のレコードキー（rkey）に使える文字。`/` や `%`・空白・制御文字は含めない。
+# `.` と `..` の単体は AT URI の仕様で rkey として無効なので別途はじく。
+_RKEY_RE = re.compile(r"^[A-Za-z0-9._~-]+$")
+
+
 def is_own_post_uri(post_id: str, did: str) -> bool:
-    """post_id が did 本人の投稿（at://<did>/app.bsky.feed.post/<rkey>）の AT URI か。"""
+    """post_id が did 本人の投稿（at://<did>/app.bsky.feed.post/<rkey>）の AT URI か。
+
+    rkey は文字種（英数と `.-_~`）で検証し、`.`・`..`、`/` や `%`・改行などを含むものは拒否する。
+    """
     prefix = f"at://{did}/app.bsky.feed.post/"
-    rkey = post_id.removeprefix(prefix)
-    return post_id.startswith(prefix) and bool(rkey) and "/" not in rkey
+    if not post_id.startswith(prefix):
+        return False
+    rkey = post_id[len(prefix) :]
+    return bool(_RKEY_RE.match(rkey)) and rkey not in (".", "..")
 
 
 async def delete_own_posts(client: AsyncClient, did: str, post_ids: Sequence[str]) -> list[str]:
