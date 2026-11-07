@@ -1,0 +1,12 @@
+# コピーして terraform.tfvars を作る（terraform.tfvars はコミットしない）
+#   cp terraform.tfvars.example terraform.tfvars
+
+alert_email = "<Budgets の通知を受けるメールアドレス>"
+
+# 確認用に小さい GPU で立てるとき
+# gpu_instance_type = "g6.xlarge"
+# vlm_model         = "QuantTrio/Qwen3.6-27B-AWQ"
+
+# OCR を同居させるとき（11/11 に試す）
+# ocr_image                   = "<PP-OCRv5 の HTTP サービスのイメージ>"
+# vllm_gpu_memory_utilization = 0.80
