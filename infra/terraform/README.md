@@ -67,12 +67,14 @@ tf init && tf plan -out=review.tfplan
 
 ## apply（承認を得てから）
 
-最初の apply は2回に分ける。アプリの受け入れ元のセキュリティグループ（`CloudFront-VPCOrigins-Service-SG`）は、VPC origin ができたあとに CloudFront が作るので、先に VPC origin まで作る。
+最初の apply は2回に分ける。VPC origin を作るには、VPC に Internet Gateway（IGW）が付いている必要がある。`aws_cloudfront_vpc_origin.app` は IGW に明示的に依存しているため、最初の `-target` でも IGW が先に作られる。アプリの受け入れ元のセキュリティグループ（`CloudFront-VPCOrigins-Service-SG`）は、VPC origin ができたあとに CloudFront が作るので、先に VPC origin まで作る。
 
 ```bash
 terraform apply -target=aws_cloudfront_vpc_origin.app
+# ここで下の「apply のたびに state をリポジトリの外へコピーする」を実施
 terraform plan -out=review.tfplan
 terraform apply review.tfplan
+# ここでも state をコピー
 ```
 
 2回めでも「no matching SecurityGroup」で止まったら、数分待ってもう一度 apply する。それでも見つからなければ、`security.tf` の受け入れ元を VPC の CIDR にする（要確認）。

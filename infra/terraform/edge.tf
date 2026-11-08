@@ -2,6 +2,9 @@
 # アプリの EC2 に AWS の中だけを通ってつなぐ（docs/aws-migration.md の 3.2）
 
 resource "aws_cloudfront_vpc_origin" "app" {
+  # VPC に IGW がアタッチされてから作る（VPC origin の AWS 側の要件）
+  depends_on = [aws_internet_gateway.main]
+
   vpc_origin_endpoint_config {
     name                   = "tkb-2613-app"
     arn                    = aws_instance.app.arn
