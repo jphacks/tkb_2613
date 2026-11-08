@@ -77,9 +77,11 @@ jobs:
       # gitleaks-action は組織のリポジトリでライセンスが要るため、バイナリを直接使う
       - name: gitleaks を取得（チェックサムを検証）
         run: |
+          set -o pipefail
           base="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
           tarball="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
-          curl -fsSLO "${base}/${tarball}"
-          curl -fsSL "${base}/gitleaks_${GITLEAKS_VERSION}_checksums.txt" | grep " ${tarball}$" | sha256sum -c -
+          curl -fSL --retry 5 --retry-all-errors --retry-delay 5 -o "${tarball}" "${base}/${tarball}"
+          curl -fSL --retry 5 --retry-all-errors --retry-delay 5 "${base}/gitleaks_${GITLEAKS_VERSION}_checksums.txt" \
+            | grep " ${tarball}$" | sha256sum -c -
           tar -xzf "${tarball}" gitleaks
       - run: ./gitleaks git --config .gitleaks.toml --redact --verbose .
