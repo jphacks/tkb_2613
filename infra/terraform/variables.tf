@@ -5,9 +5,15 @@ variable "region" {
 }
 
 variable "availability_zone" {
-  description = "サブネットを置く AZ。g6e.xlarge と g6.xlarge の両方が使える AZ（2026-11-07 に確認）"
+  description = "NAT とアプリのサブネットを置く AZ"
   type        = string
   default     = "us-east-1a"
+}
+
+variable "gpu_availability_zone" {
+  description = "GPU のサブネットを置く AZ。容量不足時は別の AZ に変更する（移動時は GPU を作り直す）"
+  type        = string
+  default     = "us-east-1b"
 }
 
 variable "alert_email" {

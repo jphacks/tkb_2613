@@ -1,4 +1,4 @@
-# 1つの AZ に、パブリック（NAT だけ）・アプリ・GPU の3つのサブネットを置く（docs/aws-migration.md の 3章）
+# NAT とアプリは同じ AZ、GPU は容量不足時に別 AZ を選べる（docs/aws-migration.md の 3章）
 
 resource "aws_vpc" "main" {
   cidr_block           = "10.0.0.0/16"
@@ -29,7 +29,7 @@ resource "aws_subnet" "app" {
 resource "aws_subnet" "gpu" {
   vpc_id            = aws_vpc.main.id
   cidr_block        = "10.0.2.0/24"
-  availability_zone = var.availability_zone
+  availability_zone = var.gpu_availability_zone
   tags              = { Name = "tkb_2613-gpu" }
 }
 
