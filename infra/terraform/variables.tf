@@ -13,7 +13,7 @@ variable "availability_zone" {
 variable "gpu_availability_zone" {
   description = "GPU のサブネットを置く AZ。容量不足時は別の AZ に変更する（移動時は GPU を作り直す）"
   type        = string
-  default     = "us-east-1b"
+  default     = "us-east-1c"
 }
 
 variable "alert_email" {

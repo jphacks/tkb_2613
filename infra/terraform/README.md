@@ -67,9 +67,9 @@ tf init && tf plan -out=review.tfplan
 
 ### GPU の AZ を変えるとき
 
-`availability_zone` は NAT とアプリ用（既定 `us-east-1a`）、`gpu_availability_zone` は GPU 用（既定 `us-east-1b`）。GPU の容量不足時は `terraform.tfvars` の `gpu_availability_zone` だけを、`g6e.xlarge` が提供される別の AZ に変える。提供の有無は空き容量の保証ではない。
+`availability_zone` は NAT とアプリ用（既定 `us-east-1a`）、`gpu_availability_zone` は GPU 用（既定 `us-east-1c`）。2026-11-08 に GPU を `us-east-1c` に移した。GPU の容量不足時は `terraform.tfvars` の `gpu_availability_zone` だけを、`g6e.xlarge` が提供される別の AZ に変える。提供の有無は空き容量の保証ではない。
 
-現在の state から `us-east-1b` に変える plan では、GPU のサブネット・ルートテーブル関連付け・EC2 が作り直しになり、新しい GPU の ID を参照するスケジュール、IAM ポリシー、Budgets action が更新される。アプリの EC2、VPC、NAT、CloudFront の作り直しは出ていない。GPU の固定 IP（`10.0.2.10`）は同じだが、今の GPU のルートディスクは終了時に削除されるため、モデルの重みとコンテナイメージは再取得になる。
+GPU の AZ を変える plan では、GPU のサブネット・ルートテーブル関連付け・EC2 が作り直しになり、新しい GPU の ID を参照するスケジュール、IAM ポリシー、Budgets action が更新される。2026-11-08 の plan では、アプリの EC2、VPC、NAT、CloudFront の作り直しは出ていない。GPU の固定 IP（`10.0.2.10`）は同じだが、今の GPU のルートディスクは終了時に削除されるため、モデルの重みとコンテナイメージは再取得になる。
 
 apply 前に plan の差分を確認し、state をリポジトリ外へコピーする。別 AZ でも起動に必要な空き容量は保証されず、GPU と NAT が別 AZ になると AZ 間の通信費がかかる。`terraform apply` は承認後にだけ行う。
 
