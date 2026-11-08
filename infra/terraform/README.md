@@ -65,6 +65,14 @@ alias tf='docker run --rm -it -u "$(id -u):$(id -g)" -e HOME=/tmp -e AWS_REGION=
 tf init && tf plan -out=review.tfplan
 ```
 
+### GPU の AZ を変えるとき
+
+`availability_zone` は NAT とアプリ用（既定 `us-east-1a`）、`gpu_availability_zone` は GPU 用（既定 `us-east-1b`）。GPU の容量不足時は `terraform.tfvars` の `gpu_availability_zone` だけを、`g6e.xlarge` が提供される別の AZ に変える。提供の有無は空き容量の保証ではない。
+
+現在の state から `us-east-1b` に変える plan では、GPU のサブネット・ルートテーブル関連付け・EC2 が作り直しになり、新しい GPU の ID を参照するスケジュール、IAM ポリシー、Budgets action が更新される。アプリの EC2、VPC、NAT、CloudFront の作り直しは出ていない。GPU の固定 IP（`10.0.2.10`）は同じだが、今の GPU のルートディスクは終了時に削除されるため、モデルの重みとコンテナイメージは再取得になる。
+
+apply 前に plan の差分を確認し、state をリポジトリ外へコピーする。別 AZ でも起動に必要な空き容量は保証されず、GPU と NAT が別 AZ になると AZ 間の通信費がかかる。`terraform apply` は承認後にだけ行う。
+
 ## apply（承認を得てから）
 
 最初の apply は2回に分ける。VPC origin を作るには、VPC に Internet Gateway（IGW）が付いている必要がある。`aws_cloudfront_vpc_origin.app` は IGW に明示的に依存しているため、最初の `-target` でも IGW が先に作られる。アプリの受け入れ元のセキュリティグループ（`CloudFront-VPCOrigins-Service-SG`）は、VPC origin ができたあとに CloudFront が作るので、先に VPC origin まで作る。

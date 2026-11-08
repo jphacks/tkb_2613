@@ -3,6 +3,9 @@
 
 alert_email = "<Budgets の通知を受けるメールアドレス>"
 
+# GPU の空き容量に合わせて変更する（NAT とアプリは us-east-1a のまま）
+# gpu_availability_zone = "us-east-1b"
+
 # 確認用に小さい GPU で立てるとき
 # gpu_instance_type = "g6.xlarge"
 # vlm_model         = "QuantTrio/Qwen3.6-27B-AWQ"
