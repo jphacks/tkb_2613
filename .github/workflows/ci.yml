@@ -12,9 +12,6 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  GITLEAKS_VERSION: "8.30.1"
-
 jobs:
   python:
     name: Python（ruff・mypy・pytest）
@@ -74,14 +71,10 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      # gitleaks-action は組織のリポジトリでライセンスが要るため、バイナリを直接使う
-      - name: gitleaks を取得（チェックサムを検証）
+      # gitleaks-action は組織のリポジトリでライセンスが要るため、公式イメージを digest で固定して使う
+      - name: gitleaks で検査
         run: |
-          set -o pipefail
-          base="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
-          tarball="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
-          curl -fSL --retry 5 --retry-all-errors --retry-delay 5 -o "${tarball}" "${base}/${tarball}"
-          curl -fSL --retry 5 --retry-all-errors --retry-delay 5 "${base}/gitleaks_${GITLEAKS_VERSION}_checksums.txt" \
-            | grep " ${tarball}$" | sha256sum -c -
-          tar -xzf "${tarball}" gitleaks
-      - run: ./gitleaks git --config .gitleaks.toml --redact --verbose .
+          docker run --rm --network none --user "$(id -u):$(id -g)" \
+            -v "$PWD:/work:ro" -w /work \
+            ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f \
+            git --config .gitleaks.toml --redact --verbose .
