@@ -80,7 +80,7 @@ variable "gpu_root_volume_gb" {
 # --- モデル ---
 
 variable "vllm_image" {
-  description = "vLLM のコンテナイメージ。RunPod と同じバージョンに固定すること（要確認）"
+  description = "vLLM のコンテナイメージ。初回 apply で動作を確認した版に固定する"
   type        = string
   default     = "vllm/vllm-openai:latest"
 }
