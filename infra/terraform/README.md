@@ -222,7 +222,7 @@ terraform destroy
 
 ## 要確認
 
-- `vllm_image`：既定は `vllm/vllm-openai:latest`。RunPod と同じバージョンに固定する
+- `vllm_image`：RunPod のログで版を確認できる記録が手元にないため、今は `vllm/vllm-openai:latest` のまま。初回の apply で動いた版に固定する
 - `ocr_image`：PP-OCRv5 の HTTP サービスのイメージ。決まるまでは空（OCR を動かさない）
 - VPC origin から届くセキュリティグループの名前（`CloudFront-VPCOrigins-Service-SG`）。apply で見つからなければ、`security.tf` の受け入れ元を VPC の CIDR にする
 - CloudFront の既定の証明書では、TLS の最低バージョンを指定できない（TLS 1.2 以上にしたいときは独自ドメインと ACM が要る）

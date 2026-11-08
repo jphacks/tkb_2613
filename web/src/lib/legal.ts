@@ -6,7 +6,7 @@
  */
 
 export const ISSUES_URL = "https://github.com/jphacks/tkb_2613/issues";
-export const LEGAL_UPDATED = "2026年11月7日";
+export const LEGAL_UPDATED = "2026年11月8日";
 
 /** 段落か箇条書きのどちらか */
 export type LegalBlock = string | readonly string[];
@@ -28,7 +28,7 @@ export const REVOKE_APP_PASSWORD =
 
 /** 公開する期間と時間帯（日本時間）。api の PUBLIC_WINDOWS と合わせる */
 export const PUBLIC_SCHEDULE: readonly string[] = [
-  "11月15日（Award Day 当日。時間は決まりしだい、このページでお知らせします）",
+  "11月15日（Award Day 当日）の 11:00〜16:20",
   "11月16日・17日・18日の 20:00〜22:00",
 ];
 
@@ -115,7 +115,7 @@ export const privacy: LegalDocument = {
     {
       heading: "使い道と送り先",
       blocks: [
-        "投稿の本文と写真は、チームが借りている GPU サーバー（Amazon Web Services の米国バージニア北部リージョン）で読み、推定に使います。準備の都合で、チームが借りている別の GPU サーバー（RunPod）を使う場合があります。",
+        "投稿の本文と写真は、チームが借りている GPU サーバー（Amazon Web Services の米国バージニア北部リージョン）で読み、推定に使います。",
         "OpenAI や Google など、第三者の AI サービスには送りません。",
         "写真は Bluesky の画像配信のサーバーから取ってきて、メモリの上で処理します。",
         "あなたが選んで削除を確定したときだけ、その投稿を消すよう Bluesky に依頼します。",
