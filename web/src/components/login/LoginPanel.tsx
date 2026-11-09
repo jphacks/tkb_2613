@@ -1,11 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState } from "react";
+import { useActionState, useEffect, useState } from "react";
 
 import { BlueskyLogo } from "@/components/brand/BlueskyLogo";
 import { useSession } from "@/components/session/SessionProvider";
-import { ApiError } from "@/lib/api";
+import { ApiError, getFeatures } from "@/lib/api";
 import { REVOKE_APP_PASSWORD } from "@/lib/legal";
 import { messages } from "@/lib/messages";
 import { normalizeHandle } from "@/types/session";
@@ -26,6 +26,36 @@ const INITIAL_STATE: LoginFormState = { error: null, handle: "" };
  */
 export function LoginPanel() {
   const { state: session, login, logout } = useSession();
+  const [authMode, setAuthMode] = useState<"oauth" | "app_password" | null>(null);
+  const [oauthPending, setOauthPending] = useState(false);
+  const [oauthError, setOauthError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    getFeatures({ signal: controller.signal }).then((features) => {
+      if (!controller.signal.aborted) setAuthMode(features.auth_mode ?? "app_password");
+    });
+    return () => controller.abort();
+  }, []);
+
+  async function startOAuth(handle: string) {
+    setOauthPending(true);
+    setOauthError(null);
+    try {
+      const response = await fetch("/auth/start", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ handle }), credentials: "same-origin",
+      });
+      const body: unknown = await response.json();
+      if (!response.ok || typeof body !== "object" || body === null || !("redirectUrl" in body) || typeof body.redirectUrl !== "string") {
+        throw new Error("Bluesky との接続を開始できませんでした");
+      }
+      window.location.assign(body.redirectUrl);
+    } catch {
+      setOauthError("Bluesky との接続を開始できませんでした");
+      setOauthPending(false);
+    }
+  }
 
   const [form, formAction, isPending] = useActionState(
     async (_prev: LoginFormState, formData: FormData): Promise<LoginFormState> => {
@@ -41,7 +71,7 @@ export function LoginPanel() {
     INITIAL_STATE,
   );
 
-  if (session.status === "checking") {
+  if (session.status === "checking" || authMode === null) {
     return (
       <p role="status" className="text-ink/70">
         {t.checking}
@@ -64,18 +94,18 @@ export function LoginPanel() {
         >
           {t.logout}
         </button>
-        <p className="basis-full text-sm text-ink/60">{REVOKE_APP_PASSWORD}</p>
+        {authMode === "app_password" && <p className="basis-full text-sm text-ink/60">{REVOKE_APP_PASSWORD}</p>}
       </section>
     );
   }
 
   return (
-    <form action={formAction} aria-label={t.formLabel} className="max-w-md">
+    <form action={authMode === "oauth" ? (formData) => { void startOAuth(normalizeHandle(String(formData.get("handle") ?? ""))); } : formAction} aria-label={t.formLabel} className="max-w-md">
       <p className="mb-5 flex items-center gap-2.5 font-bold">
         <BlueskyLogo className="size-7" />
         {t.heading}
       </p>
-      <fieldset disabled={isPending} aria-busy={isPending} className="space-y-5 disabled:opacity-60">
+      <fieldset disabled={isPending || oauthPending} aria-busy={isPending || oauthPending} className="space-y-5 disabled:opacity-60">
         <label className="block space-y-1.5">
           <span className="block font-bold">{t.handle}</span>
           <input
@@ -90,7 +120,7 @@ export function LoginPanel() {
           />
         </label>
 
-        <div className="space-y-1.5">
+        {authMode === "app_password" && <div className="space-y-1.5">
           <label htmlFor="password" className="block font-bold">
             {t.password}
           </label>
@@ -107,7 +137,7 @@ export function LoginPanel() {
           <p id="password-hint" className="text-sm text-ink/70">
             {t.passwordHint}
           </p>
-        </div>
+        </div>}
 
         <button
           type="submit"
@@ -119,7 +149,7 @@ export function LoginPanel() {
               className="size-4 animate-spin rounded-full border-2 border-paper border-t-transparent motion-reduce:animate-none"
             />
           )}
-          {t.submit}
+          {authMode === "oauth" ? "Bluesky でログイン" : t.submit}
         </button>
       </fieldset>
 
@@ -140,13 +170,14 @@ export function LoginPanel() {
         </Link>
         {t.consentAfter}
       </p>
-      <p className="mt-2 text-sm text-ink/70">{REVOKE_APP_PASSWORD}</p>
+      {authMode === "app_password" && <p className="mt-2 text-sm text-ink/70">{REVOKE_APP_PASSWORD}</p>}
 
       {!isPending && form.error && (
         <p role="alert" className="mt-4 border-l-4 border-seeker bg-seeker/10 px-4 py-3">
           {form.error}
         </p>
       )}
+      {oauthError && <p role="alert" className="mt-4 border-l-4 border-seeker bg-seeker/10 px-4 py-3">{oauthError}</p>}
     </form>
   );
 }

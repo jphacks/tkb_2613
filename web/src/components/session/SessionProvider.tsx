@@ -7,7 +7,8 @@ import type { SessionResponse } from "@/types/session";
 
 /**
  * ログイン状態。画面に置くのはハンドル名と DID だけで、パスワードやトークンは持たない
- * （トークンは api のメモリにあり、ブラウザには HttpOnly の Cookie しかない）。
+ * （OAuth トークンは Next.js サーバー、旧方式のトークンは api のメモリにあり、
+ * ブラウザには HttpOnly の Cookie しかない）。
  */
 export type SessionState =
   | { status: "checking" }

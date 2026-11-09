@@ -10,5 +10,5 @@ router = APIRouter(prefix="/api")
 
 
 @router.get("/features")
-def read_features(settings: Annotated[Settings, Depends(get_settings)]) -> dict[str, bool]:
-    return {"share_enabled": settings.share_enabled}
+def read_features(settings: Annotated[Settings, Depends(get_settings)]) -> dict[str, bool | str]:
+    return {"share_enabled": settings.share_enabled, "auth_mode": settings.auth_mode}

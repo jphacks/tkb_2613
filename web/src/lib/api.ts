@@ -185,6 +185,7 @@ export async function getDiagnosis({
 /** 画面が出し分ける機能のオン・オフ（GET /api/features）。api/src/tkb_api/routes/features.py と同時に変更する */
 export interface Features {
   readonly share_enabled: boolean;
+  readonly auth_mode?: "oauth" | "app_password";
 }
 
 /**
@@ -198,7 +199,9 @@ export async function getFeatures({ baseUrl = DEFAULT_BASE_URL, signal }: Reques
     if (!res.ok) return off;
     const data: unknown = await res.json();
     if (typeof data === "object" && data !== null && "share_enabled" in data && typeof data.share_enabled === "boolean") {
-      return { share_enabled: data.share_enabled };
+      const mode = "auth_mode" in data && (data.auth_mode === "oauth" || data.auth_mode === "app_password")
+        ? data.auth_mode : undefined;
+      return mode ? { share_enabled: data.share_enabled, auth_mode: mode } : { share_enabled: data.share_enabled };
     }
     return off;
   } catch {

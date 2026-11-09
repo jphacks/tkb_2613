@@ -52,7 +52,7 @@ infra/      Docker Compose、起動手順
 docs/       設計メモ、pre-hackday.md
 ```
 
-Bluesky との通信は `api/` に置き、Python の `atproto` パッケージを使う。web から Bluesky やモデルのサーバーへ直接つながない。
+Bluesky との通常の通信は `api/` に置き、Python の `atproto` パッケージを使う。OAuth の認可・トークン更新・投稿削除だけは公式 Node SDK を使うため、Next.js サーバーに置く。ブラウザから Bluesky やモデルのサーバーへ直接つながない。OAuth の投稿取得は api から公開 AppView を使い、削除前の本人・診断済み投稿の確認は api で行う。
 
 ## データの形式
 
@@ -114,14 +114,14 @@ Python は `common/` の Pydantic モデル（`tkb_common.schemas`）、TypeScri
 
 - 写真を読む言語モデルと本文の読み取りは、どちらも vLLM（OpenAI 互換 API）の同じモデル。接続先は `VLM_BASE_URL`、`VLM_API_KEY`、`VLM_MODEL`
 - OCR は PP-OCRv5 の HTTP サービス。接続先は `OCR_BASE_URL`
-- GPU サーバーは RunPod。公開 URL は `https://<POD_ID>-8000.proxy.runpod.net/v1` で、100秒で切れる。1回の呼び出しの待ち時間は60秒まで
+- 本番の GPU サーバーは AWS のプライベート EC2。接続先は VPC 内の IP を `VLM_BASE_URL` と `OCR_BASE_URL` に設定する。1回の呼び出しの待ち時間は60秒まで
 - 診断する投稿は直近 `MAX_POSTS` 件（既定30）まで。結果は1件ずつ SSE で流す
 - `MOCK_MODE=1` のときは、架空のデモ用アカウントの投稿と手がかりを固定で返し、Bluesky にもモデルにも接続しない。既定はモック
 
 ## セキュリティのルール
 
 - 診断できるのはログインした本人のアカウントだけ。ハンドル名や URL を入力する欄、任意のアカウントを指定できる API は作らない。投稿の取得は必ずセッションの DID で行う
-- ログインは Bluesky のパスワードかアプリパスワードで受け付け、画面ではアプリパスワード（あとで取り消せる）を勧める。余裕があれば OAuth に差し替える。パスワードはログインに使ったら捨て、保存しない。セッション（Bluesky のトークン）はサーバーのメモリだけに置き、ログ・ディスク・Cookie に入れない。パスワードは画面のエラー表示や API のエラー応答にも出さない。Cookie はランダムなセッション番号だけ（HttpOnly、SameSite=Lax）。ログアウトか30分で破棄する
+- `AUTH_MODE=oauth` では Bluesky OAuth を使い、パスワード欄とパスワード API を無効にする。既存の App Password 経路は `AUTH_MODE=app_password` で切り戻せる。OAuth の state とトークンは Next.js サーバーのメモリ、アプリの診断セッションは api のメモリに置く。両方ともログアウトか30分で失効する。ブラウザにはランダムな `tkb_session` Cookie と、認可開始を結び付ける短命 Cookie だけを渡し、トークンは渡さない。App Password はログインに使ったら捨て、保存しない。どちらの方式も認証情報をログやエラー応答に出さない
 - 画像を取りに行く先は `cdn.bsky.app` だけ。それ以外の URL は拒否する
 - 写真と投稿本文を第三者の AI サービス（OpenAI、Gemini などの外部 API）に送らない。送り先はチームのサーバーだけ
 - 写真と本文はメモリ上で処理し、リクエスト本文をログに出さない。診断結果は通常保存しない。本人が診断後に「閲覧リンクを作る」を押した場合だけ、投稿・手がかり・推定を期限付きで保存し、リンクを知る人に閲覧を許す。画像バイト列は保存せず、閲覧画面には削除操作を出さない
@@ -148,6 +148,8 @@ Python は `common/` の Pydantic モデル（`tkb_common.schemas`）、TypeScri
 - `MAX_POSTS`（既定30）
 
 既存：`MOCK_MODE`、`VLM_BASE_URL`、`VLM_API_KEY`、`VLM_MODEL`、`OCR_BASE_URL`。鍵を `NEXT_PUBLIC_` で始まる変数に入れない。
+
+OAuth：`AUTH_MODE`（ローカル既定 `app_password`、本番は採用試験を通れば `oauth`）、`PUBLIC_URL`（公開の HTTPS オリジン）、`OAUTH_WEB_ORIGIN`（api から web への Docker 内部 URL）、`API_INTERNAL_ORIGIN`（web から api への Docker 内部 URL）、`INTERNAL_AUTH_SECRET`（起動時に生成し、両コンテナへ別の一時ファイルで渡す）。
 
 画面は `/api` を api に中継する（`web/next.config.ts` の rewrites）ので、画面と api は同じオリジンになる。中継先は `API_ORIGIN`（ビルド時に読まれる。既定 `http://localhost:8001`）。Vercel に画面を置くときは、公開した api の URL を Vercel の環境変数 `API_ORIGIN` に入れる。api の応答には `Cache-Control: no-store` を付け、診断の SSE はイベントの間が `SSE_KEEPALIVE_SECONDS`（既定15）秒空いたら keep-alive のコメントを送る。
 
