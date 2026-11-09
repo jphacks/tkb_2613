@@ -6,22 +6,34 @@
 
 - api は FastAPI、画面からは同一オリジンの `/api` を使う。Next.js は `API_ORIGIN`（既定 `http://localhost:8001`）へ `/api/:path*` を中継する。
 - api の応答は `Cache-Control: no-store, no-transform`（no-transform は、Next.js の中継が gzip で圧縮して SSE をためこむのを防ぐため）。SSE にはさらに `X-Accel-Buffering: no` が付き、イベント間が設定値 `SSE_KEEPALIVE_SECONDS`（既定15秒）以上空くと `: keep-alive` コメントが流れる。コメントは画面で読み飛ばす。
-- セッション Cookie 名は `tkb_session`。値はランダムなセッションID。Bluesky のセッション情報は api プロセスのメモリ上にあり、既定30分で失効する。
+- セッション Cookie 名は `tkb_session`。値はランダムなセッションID。`AUTH_MODE=app_password` の Bluesky セッションは api プロセスのメモリ、`AUTH_MODE=oauth` のトークンは Next.js サーバーのメモリだけに置く。どちらも既定30分で失効する。
 - `MOCK_MODE=1` が既定。モックログインは架空DIDを使い、Blueskyへ接続しない。モック診断は `eval/fixtures/demo_observations.json` を再生し、モデルにも接続しない。
 - `MOCK_MODE=0` の診断では、セッションの DID の本人投稿だけを新しい順に最大 `MAX_POSTS` 件（既定30、設定上限100）取得する。
 
 ## エンドポイント一覧
 
+### OAuth 経路（`AUTH_MODE=oauth` の場合）
+
+| メソッド・パス | 役割 |
+| --- | --- |
+| `POST /auth/start` | JSON `{"handle":"…"}` を受け取り、認可先URLを返す。SDK の PKCE・PAR・DPoP と、5分間の `tkb_oauth_start` HttpOnly Cookie を使う。 |
+| `GET /auth/callback` | Cookie と SDK の state を照合し、本人 DID を確認して `tkb_session` を発行。コードと state のクエリを含まない `/` へリダイレクトする。 |
+| `GET /oauth-client-metadata.json` | 公開クライアントのメタデータ。`atproto repo:app.bsky.feed.post?action=delete` の権限を公開する。 |
+| `POST /__internal/oauth/complete` | Next.js からのみ使う。共有秘密のヘッダーがない場合は403。確認済み DID と handle で api セッションを作る。 |
+| `POST /__internal/oauth/delete`・`drop` | api からのみ使う。共有秘密のヘッダーがない場合は403。削除前に api は診断済み・本人投稿を確認し、Next.js も DID と AT URI を再確認する。 |
+
+OAuth 時の投稿取得は、セッション DID に限定して公開 AppView の `getAuthorFeed` を使う。Cookie と共有秘密を持つ内部経路は公開しない。ログアウト時は両プロセスのメモリからセッションを消す。
+
 | メソッド・パス | リクエスト | 成功応答 | 実装上の注意 |
 | --- | --- | --- | --- |
 | `GET /health` | なし | `{"status":"ok","mock_mode":true}`（値は設定による） | 認証不要。生存確認用。 |
-| `POST /api/session` | JSON `{"handle":"name.example","password":"…"}` | 200 `{"handle":"…","did":"did:…"}` と `tkb_session` Cookie | `handle` はtrimし先頭の `@` を1つ除去。空handle/passwordは422。実ログイン失敗は401、Bluesky接続失敗は502、Bluesky の回数制限（429）は503 `bluesky_busy`。モック時は入力handleと固定DIDでログイン扱い。 |
+| `POST /api/session` | JSON `{"handle":"name.example","password":"…"}` | 200 `{"handle":"…","did":"did:…"}` と `tkb_session` Cookie | `AUTH_MODE=app_password` のみ。OAuth 時は404。`handle` はtrimし先頭の `@` を1つ除去。空handle/passwordは422。実ログイン失敗は401、Bluesky接続失敗は502、Bluesky の回数制限（429）は503 `bluesky_busy`。モック時は入力handleと固定DIDでログイン扱い。 |
 | `GET /api/session` | `tkb_session` Cookie | 200 `{"handle":"…","did":"did:…"}` | Cookie欠落・無効・期限切れは401 `{"detail":"ログインしてください"}`。 |
 | `DELETE /api/session` | `tkb_session` Cookie | 204、Cookie削除 | セッションがなくても204。 |
 | `POST /api/detect` | 画像バイナリをリクエスト本文に直接送信。許可Content-Type: JPEG/PNG/WebP/HEIC/HEIF | モック時200 `{"clues":[…]}` | 空本文400、未対応形式415、20MiB超413。`MOCK_MODE=0` は現状501「検出はまだ実装されていません」。このルートはログイン必須ではない。 |
 | `POST /api/diagnose` | `tkb_session` Cookie。JSON bodyなし | `text/event-stream` | Cookieなし・無効は401。始められないときはストリームを始めずに理由のコードつきで断る（下の「理由のコードつきのエラー」）。成功時は以下のSSE順序。投稿/手がかり/結論の結果はディスクやログに保存しない。推理まで終わると、投稿と手がかりをそのセッションのメモリにだけ置く（simulate 用。ログアウト・期限切れで消え、次の診断を始めると消える）。 |
 | `GET /api/diagnosis` | `tkb_session` Cookie | 200 `{"posts":[Post],"clues":[Clue],"conclusions":[Conclusion],"plan":Plan}` | 同じセッションで完了済みの直近結果をモデル再解析なしで画面に復元する。Cookieなし・無効は401、結果がなければ404。結果はセッションとともに消える。 |
-| `GET /api/features` | なし | 200 `{"share_enabled":true}` | 認証不要。画面が機能を出し分けるためのオン・オフ。`share_enabled` は設定 `SHARE_ENABLED`（既定1）。読めないとき画面は閲覧リンクを出さない側に倒す。 |
+| `GET /api/features` | なし | 200 `{"share_enabled":true,"auth_mode":"app_password"}` | 認証不要。`auth_mode` は `oauth` または `app_password`。`share_enabled` は設定 `SHARE_ENABLED`（既定1）。 |
 | `POST /api/result-link` | `tkb_session` Cookie | 200 `{"token":"…"}` | 本人が画面で選んだとき、完了済みの結果を2時間の閲覧用スナップショットとして保存する。結果がなければ404。ランダムなトークンを URL のフラグメントに置き、アクセスログに記録しない。`SHARE_ENABLED=0` なら404 `share_disabled`（何も保存しない）。 |
 | `DELETE /api/result-link` | `tkb_session` Cookie、JSON `{"token":"…"}` | 204 | 作成者の DID と一致するリンクだけを無効化する。別人のリンクは消せない。 |
 | `POST /api/shared-result` | JSON `{"token":"…"}` | 200 `{"posts":[Post],"clues":[Clue],"conclusions":[Conclusion],"plan":Plan}` | トークンを知る人はログインなしで閲覧できる。無効・期限切れは404。閲覧側の画面に削除操作はない。結果は設定された `SHARE_DB_PATH` の SQLite に期限付きで保存し、APIプロセスの再起動後も読める。`SHARE_ENABLED=0` なら、オフにする前に作ったリンクも404 `share_disabled`。 |

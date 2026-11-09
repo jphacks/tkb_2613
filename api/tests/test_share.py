@@ -87,7 +87,7 @@ def test_features_tell_the_screen_whether_result_links_are_on(tmp_path: Path) ->
         with _client(settings) as client:
             res = client.get("/api/features")  # ログインなしで読める
             assert res.status_code == 200
-            assert res.json() == {"share_enabled": enabled}
+            assert res.json() == {"share_enabled": enabled, "auth_mode": "app_password"}
             assert res.headers["cache-control"] == "no-store, no-transform"
 
 

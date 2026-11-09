@@ -50,6 +50,7 @@ class LoginResult:
     did: str
     # モックのときは None（外部に一切接続しない）
     client: AsyncClient | None
+    auth_method: str = "app_password"
 
 
 LoginFn = Callable[[str, str], Awaitable[LoginResult]]
@@ -193,6 +194,7 @@ class BlueskySession:
     did: str
     client: AsyncClient | None
     expires_at: float
+    auth_method: str = "app_password"
 
 
 @dataclass(frozen=True)
@@ -220,12 +222,17 @@ class SessionStore:
             if self._closed:
                 raise RuntimeError("セッションストアは終了しています")
             self._purge_expired()
+            if result.auth_method == "oauth":
+                for existing_id, existing in list(self._sessions.items()):
+                    if existing.did == result.did:
+                        self._drop(existing_id)
             session_id = secrets.token_urlsafe(32)
             self._sessions[session_id] = BlueskySession(
                 handle=result.handle,
                 did=result.did,
                 client=result.client,
                 expires_at=self._clock() + self._ttl,
+                auth_method=result.auth_method,
             )
             return session_id
 

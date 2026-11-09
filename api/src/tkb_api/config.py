@@ -1,5 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -23,6 +24,9 @@ class Settings(BaseSettings):
     cors_origins: list[str] = ["http://localhost:3000"]
     # Bluesky のログイン先
     bsky_service: str = "https://bsky.social"
+    auth_mode: Literal["oauth", "app_password"] = "app_password"
+    internal_auth_secret: SecretStr = SecretStr("")
+    oauth_web_origin: str = "http://127.0.0.1:3000"
     # ログインのセッションをメモリに置く時間（分）
     session_ttl_minutes: int = 30
     # HTTPS で公開するときは 1 にする（Cookie を HTTPS だけで送る）

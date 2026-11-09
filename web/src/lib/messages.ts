@@ -76,7 +76,7 @@ export const messages = {
     handlePlaceholder: "alice.bsky.social",
     password: "パスワード",
     passwordHint:
-      "Bluesky のパスワードでログインできます。パスワードは保存しません。アプリパスワード（「設定 → プライバシーとセキュリティ → アプリパスワード」で作れます）を使うと、あとで取り消せるので、より安心です。",
+      "Bluesky の「設定 → プライバシーとセキュリティ → アプリパスワード」で作ったアプリパスワードを入力してください。ログインに使った後は保存しません。",
     submit: "ログイン",
     checking: "ログイン状態を確認しています…",
     pending: "Bluesky にログインしています…",

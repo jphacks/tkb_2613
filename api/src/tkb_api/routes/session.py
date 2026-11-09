@@ -8,6 +8,7 @@ current_session で得たセッションの DID の投稿だけを扱う。
 from functools import partial
 from typing import Annotated
 
+import httpx
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
 
 from tkb_api import bluesky
@@ -60,6 +61,8 @@ async def create_session(
     login: Annotated[LoginFn, Depends(get_login)],
     session_id: Annotated[str | None, Cookie(alias=SESSION_COOKIE)] = None,
 ) -> SessionResponse:
+    if settings.auth_mode == "oauth":
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "このログイン方法は利用できません")
     if settings.mock_mode:
         result = LoginResult(handle=body.handle, did=MOCK_DID, client=None)
     else:
@@ -101,14 +104,27 @@ def read_session(session: Annotated[BlueskySession, Depends(current_session)]) -
 
 
 @router.delete("/session", status_code=status.HTTP_204_NO_CONTENT)
-def delete_session(
+async def delete_session(
     response: Response,
     settings: Annotated[Settings, Depends(get_settings)],
     store: Annotated[SessionStore, Depends(get_session_store)],
     session_id: Annotated[str | None, Cookie(alias=SESSION_COOKIE)] = None,
 ) -> None:
     if session_id:
+        existing = store.get(session_id)
         store.delete(session_id)
+        if existing is not None and existing.auth_method == "oauth":
+            secret = settings.internal_auth_secret.get_secret_value()
+            if secret:
+                try:
+                    async with httpx.AsyncClient(timeout=3) as client:
+                        await client.post(
+                            f"{settings.oauth_web_origin.rstrip('/')}/__internal/oauth/drop",
+                            json={"did": existing.did},
+                            headers={"X-Internal-Auth": secret},
+                        )
+                except httpx.HTTPError:
+                    pass
     response.delete_cookie(
         SESSION_COOKIE,
         path="/",

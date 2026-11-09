@@ -32,6 +32,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Any
 
+from atproto import AsyncClient
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from starlette.background import BackgroundTask
@@ -203,11 +204,14 @@ def get_gazetteer(settings: Annotated[Settings, Depends(get_settings)]) -> Gazet
 async def _fetch_own_posts(
     session: BlueskySession, settings: Settings, fetch_posts: PostsFetcher
 ) -> list[Post]:
-    if session.client is None:
+    client = session.client
+    if session.auth_method == "oauth" and settings.auth_mode == "oauth":
+        client = AsyncClient(base_url="https://public.api.bsky.app/xrpc")
+    if client is None:
         # モックでログインしたあとに MOCK_MODE=0 で起動し直した場合など
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "ログインし直してください")
     try:
-        return await fetch_posts(session.client, session.did, settings.max_posts)
+        return await fetch_posts(client, session.did, settings.max_posts)
     except bluesky.BlueskyRateLimitedError:
         raise refusal(
             status.HTTP_503_SERVICE_UNAVAILABLE, "bluesky_busy", BLUESKY_BUSY_MESSAGE

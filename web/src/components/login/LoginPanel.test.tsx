@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SessionProvider } from "@/components/session/SessionProvider";
-import { ApiError, createSession, deleteSession, getSession } from "@/lib/api";
+import { ApiError, createSession, deleteSession, getFeatures, getSession } from "@/lib/api";
 import { REVOKE_APP_PASSWORD } from "@/lib/legal";
 import { messages } from "@/lib/messages";
 
@@ -10,7 +10,7 @@ import { LoginPanel } from "./LoginPanel";
 
 vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
-  return { ...actual, createSession: vi.fn(), deleteSession: vi.fn(), getSession: vi.fn() };
+  return { ...actual, createSession: vi.fn(), deleteSession: vi.fn(), getSession: vi.fn(), getFeatures: vi.fn() };
 });
 
 const t = messages.login;
@@ -34,15 +34,23 @@ function fill(handle: string, password: string) {
 
 beforeEach(() => {
   vi.mocked(getSession).mockResolvedValue(null);
+  vi.mocked(getFeatures).mockResolvedValue({ share_enabled: false, auth_mode: "app_password" });
 });
 
 afterEach(() => {
   vi.mocked(createSession).mockReset();
   vi.mocked(deleteSession).mockReset();
   vi.mocked(getSession).mockReset();
+  vi.mocked(getFeatures).mockReset();
 });
 
 describe("LoginPanel", () => {
+  it("hides password entry when OAuth is enabled", async () => {
+    vi.mocked(getFeatures).mockResolvedValue({ share_enabled: false, auth_mode: "oauth" });
+    await renderLoggedOut();
+    expect(screen.queryByLabelText(t.password)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Bluesky でログイン" })).toBeInTheDocument();
+  });
   it("shows a status while checking the existing session", () => {
     vi.mocked(getSession).mockReturnValue(new Promise(() => {}));
     render(

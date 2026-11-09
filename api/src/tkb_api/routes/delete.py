@@ -17,6 +17,7 @@ MOCK_MODE=1 のときは Bluesky に接続せず、全部消せたことにす�
 import logging
 from typing import Annotated, Any
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from tkb_api import bluesky
@@ -42,6 +43,28 @@ async def _delete(
 ) -> list[str]:
     if settings.mock_mode:
         return list(post_ids)
+    if session.auth_method == "oauth" and settings.auth_mode == "oauth":
+        secret = settings.internal_auth_secret.get_secret_value()
+        if not secret:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "削除の設定がありません")
+        done: list[str] = []
+        async with httpx.AsyncClient(timeout=20) as client:
+            for post_id in post_ids:
+                if not bluesky.is_own_post_uri(post_id, session.did):
+                    continue
+                try:
+                    reply = await client.post(
+                        f"{settings.oauth_web_origin.rstrip('/')}/__internal/oauth/delete",
+                        json={"did": session.did, "post_id": post_id},
+                        headers={"X-Internal-Auth": secret},
+                    )
+                except httpx.HTTPError:
+                    continue
+                if reply.status_code == 200 and reply.json().get("deleted") is True:
+                    done.append(post_id)
+                elif reply.status_code == 429:
+                    raise bluesky.BlueskyRateLimitedError(done)
+        return done
     if session.client is None:
         # モックでログインしたあとに MOCK_MODE=0 で起動し直した場合など
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "ログインし直してください")

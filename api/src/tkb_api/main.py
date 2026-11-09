@@ -13,7 +13,16 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from tkb_api.bluesky import SessionStore
 from tkb_api.config import Settings, get_settings
 from tkb_api.limits import DiagnoseLimiter
-from tkb_api.routes import delete, detect, diagnose, features, session, share, simulate
+from tkb_api.routes import (
+    delete,
+    detect,
+    diagnose,
+    features,
+    oauth_internal,
+    session,
+    share,
+    simulate,
+)
 from tkb_api.shares import ShareStore
 
 
@@ -114,6 +123,7 @@ def create_app(
     )
     app.include_router(detect.router)
     app.include_router(session.router)
+    app.include_router(oauth_internal.router)
     app.include_router(diagnose.router)
     app.include_router(simulate.router)
     app.include_router(delete.router)
