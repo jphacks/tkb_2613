@@ -25,7 +25,7 @@ services:
       # AWS のアプリの EC2 だけ：起動スクリプト（infra/terraform）が Secrets Manager から読んだ
       # VLM のキーを、メモリ上（/run は tmpfs）に一時的に置く。後に書いたほうが優先されるので、
       # .env の空の VLM_API_KEY を上書きする。手元にはこのファイルがないので、何も変わらない
-      - path: /run/tkb_2613/secrets.env
+      - path: /run/tkb_2613/api-secrets.env
         required: false
     logging: *logging
     # api はホストの外に出さない（web だけが compose のネットワークの中で呼ぶ）
@@ -51,6 +51,13 @@ services:
       args:
         # 画面の /api を、同じネットワークの api コンテナに中継する
         API_ORIGIN: http://api:8001
+    env_file:
+      - path: ../.env
+        required: false
+      - path: /run/tkb_2613/web-secrets.env
+        required: false
+    environment:
+      API_INTERNAL_ORIGIN: http://api:8001
     # 既定は 127.0.0.1 だけに公開する。AWS のアプリの EC2 では WEB_BIND=0.0.0.0 にして、
     # CloudFront の VPC origin から届くようにする（届く先はセキュリティグループで絞る）
     ports:

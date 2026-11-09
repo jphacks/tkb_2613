@@ -4,17 +4,17 @@
 
 - リージョンは us-east-1。CloudFront（＋WAF）→ VPC origin → アプリの EC2（プライベート）→ GPU の EC2（プライベート、固定 IP 10.0.2.10）
 - 全リソースに `Project=tkb_2613` のタグが付く（provider の `default_tags`）
-- **`terraform apply` は承認を得てから行う**。このリポジトリでは plan までしか流していない
+- **`terraform apply` は承認を得てから行う**。OAuth 変更も plan を確認してから反映し、apply のたびに state をリポジトリ外へコピーする
 
-## 作るもの（plan で 58 件）
+## 作るもの
 
 | 種類 | 内容 |
 |---|---|
 | ネットワーク | VPC、パブリック（NAT だけ）・アプリ・GPU のサブネット、NAT Gateway、ルート |
 | セキュリティグループ | アプリ：CloudFront の VPC origin から 3000 だけ。GPU：アプリから 8000（VLM）・8080（OCR）だけ。外向きは 443（アプリは初回の dnf のため 80 も）。SSH はどちらも開けない |
 | EC2 | アプリ（t3.small、Amazon Linux 2023）、GPU（g6e.xlarge、Deep Learning AMI）。どちらもパブリック IP なし、IMDSv2 必須・hop limit 1、ディスク暗号化 |
-| 入口 | CloudFront（`*.cloudfront.net`、HTTPS へのリダイレクト、`/api/*` はキャッシュも圧縮もしない、IPv6 オフ）、VPC origin |
-| WAF | 全遮断（IP セット）、IP の評判リスト、`/api/detect` の遮断、レート制限（ログイン 10・診断 10・全体 600／5分／IP。全体は静的ファイルを数えない）。パスは URL のデコードと正規化をしてから比べる（`/api/%73ession` ですり抜けさせない）。ログは保存しない |
+| 入口 | CloudFront（`*.cloudfront.net`、HTTPS へのリダイレクト、`/api/*` と `/auth/*` はキャッシュも圧縮もしない、IPv6 オフ）、VPC origin |
+| WAF | 全遮断（IP セット）、公開前試験のチーム IP 制限、IP の評判リスト、`/api/detect` の遮断、レート制限（ログイン 10・診断 10・全体 600／5分／IP。全体は静的ファイルを数えない）。パスは URL のデコードと正規化をしてから比べる（`/api/%73ession` ですり抜けさせない）。ログは保存しない |
 | 秘密の値 | Secrets Manager の入れ物 `tkb_2613/vlm-api-key`（値は Terraform で扱わない） |
 | IAM | アプリと GPU のロール（SSM ＋ キーの読み取りだけ）、全遮断の予備の担当の IAM ユーザー、Budgets action とスケジュールのロール |
 | 予算 | 月 $100。**実績が $10, $20, … $100 を超えるたびにメール**（Budget を2つに分ける。下の「予算の通知」）。**実績 $80 で GPU を自動で止め、スケジュールでの再起動も止める** |
@@ -33,7 +33,7 @@
 
 **起動スクリプトが Secrets Manager から読み、メモリ上のファイルでコンテナに渡す**（docs/aws-migration.md の 10.1 の案 A）。
 
-- アプリ：`tkb-app-start`（systemd の `tkb-app.service`）がインスタンスロールでキーを読み、`/run/tkb_2613/secrets.env`（`/run` は tmpfs＝メモリ）に書いて `docker compose up` し、終わったら消す。compose はこのファイルを2つめの `env_file` として読む（`infra/docker-compose.yml`）。後に読むほうが優先されるので、`.env` の空の `VLM_API_KEY` を上書きする。手元にはこのファイルがないので、手元の動きは変わらない
+- アプリ：`tkb-app-start`（systemd の `tkb-app.service`）がインスタンスロールでキーを読み、`/run/tkb_2613/api-secrets.env`（`/run` は tmpfs＝メモリ）に書いて `docker compose up` し、終わったら消す。OAuth 用の内部共有秘密は起動のたびに生成し、api と web に別の一時ファイルで渡す。web には VLM キーを渡さない。後に読むほうが優先されるので、`.env` の空の `VLM_API_KEY` を上書きする
 - GPU：`tkb-vllm.service` が起動のたびに同じようにキーを読み、`VLLM_API_KEY` として vLLM に渡す
 
 案 B（api が IAM ロールで Secrets Manager を直接読む）にしなかった理由：
@@ -132,7 +132,9 @@ vi .env   # <...> を terraform output の値に置き換える
           #   MODEL_ALLOWED_HOST_SUFFIXES=10.0.2.10
           #   CORS_ORIGINS=["https://<配信ID>.cloudfront.net"]
           #   PUBLIC_WINDOWS=（env_for_app.PUBLIC_WINDOWS の値を1行で）
-          # VLM_API_KEY は空のまま（起動スクリプトが渡す）
+# VLM_API_KEY は空のまま（起動スクリプトが渡す）
+# OAuth の場合は AUTH_MODE=oauth、PUBLIC_URL=https://<配信ID>.cloudfront.net、
+# OAUTH_WEB_ORIGIN=http://web:3000。INTERNAL_AUTH_SECRET は .env に書かない
 systemctl start tkb-app     # 初回はイメージのビルドで十数分かかる
 journalctl -u tkb-app -n 50 --no-pager
 ```
@@ -143,11 +145,34 @@ journalctl -u tkb-app -n 50 --no-pager
 
 ### 起動したら確かめる
 
-- `curl -s https://<配信ID>.cloudfront.net/api/features` が `{"share_enabled":false}`（閲覧リンクがオフ）
+- `curl -s https://<配信ID>.cloudfront.net/api/features` が `share_enabled=false` と設定した `auth_mode` を返す
 - アプリの EC2 で `docker logs tkb_2613-api-1 2>&1 | grep 閲覧リンク` が「閲覧リンク：オフ（SHARE_ENABLED）」
 - 公開時間外に診断すると「公開時間外です。次は…からです」
 
 ## 全遮断・停止（docs/aws-migration.md の 7章）
+
+### OAuth の公開前試験と採用判定（11/12 21:00 JST）
+
+1. レビュー済みのコミットを本番に配置する前に、`terraform plan -out=review.tfplan` で CloudFront の `/auth/*` 非キャッシュ設定、WAF の `/auth/start` レート制限、試験用 IP 制限の差分を確認する。承認後に apply し、直後に上記の手順で state をリポジトリ外にコピーする。`user_data` は既存 EC2 では更新されない。
+2. `terraform.tfvars` の `oauth_test_ipv4_cidrs` にチームの現在のグローバル IPv4 アドレスを `/32` で入れ、plan・apply・state バックアップを行う。試験中はメタデータ以外の全経路をチーム IP だけにする。Bluesky の認可サーバーが読む `/oauth-client-metadata.json` は公開のままにする。
+3. SSM セッションでアプリ EC2 に入り、レビュー済みコミットを取得し、`sudo install -m 700 /opt/tkb_2613/infra/tkb-app-start.sh /usr/local/bin/tkb-app-start` を実行する。これは既存の `user_data` からは自動反映されない。`.env` を `infra/aws.env.example` と照合し、`AUTH_MODE=oauth`、`PUBLIC_URL=https://<配信ID>.cloudfront.net`、`OAUTH_WEB_ORIGIN=http://web:3000` にする。`INTERNAL_AUTH_SECRET` は `.env` に書かない。公開前の短い試験時間だけ `PUBLIC_WINDOWS` に試験枠を追加し、`systemctl restart tkb-app` で起動する。
+4. `https://<配信ID>.cloudfront.net/oauth-client-metadata.json` が HTTPS 200・JSON・非キャッシュであること、OAuth コールバック後のブラウザ URL に `code` と `state` が残らないこと、`tkb_session` が HttpOnly・Secure・SameSite=Lax であることを確認する。専用の架空アカウントで OAuth ログイン→本人投稿取得→診断→仮除外→削除してよい1件の実削除→再診断を試す。ログに認可コード、トークン、投稿本文が出ていないこと、WAF が他 IP を遮断すること、再起動後に再ログインできることも確認する。
+5. 試験後は `PUBLIC_WINDOWS` を元に戻し、`oauth_test_ipv4_cidrs=[]` にして plan・apply・state バックアップを行う。**11/12 21:00 JST までに AWS 経由の実削除と CI の全項目が確認できた場合だけ OAuth を採用**する。未確認項目が1つでもあれば `.env` の `AUTH_MODE=app_password` に戻し、`systemctl restart tkb-app` する。切り戻し後は App Password だけを画面で案内する。11/13 の機能凍結後は認証方式を変えない。
+
+既存 EC2 の起動スクリプト更新は、SSM セッション内で次を実行する。`<レビュー済みコミット>` にはマージ後の SHA を入れる。Terraform の `user_data` 変更だけでは既存 EC2 に反映されない。
+
+```bash
+aws ssm start-session --target "$(terraform output -raw app_instance_id)"
+# 以下はアプリ EC2 内
+sudo -i
+cd /opt/tkb_2613
+git fetch origin main
+git checkout <レビュー済みコミット>
+install -m 700 infra/tkb-app-start.sh /usr/local/bin/tkb-app-start
+vi .env  # AUTH_MODE、PUBLIC_URL、OAUTH_WEB_ORIGIN、試験枠の PUBLIC_WINDOWS を確認
+systemctl restart tkb-app
+```
+
 
 第一担当は内藤、予備は谷口。谷口には IAM ユーザー `tkb_2613-killswitch` を渡す（アクセスキーは IAM のコンソールで発行し、チャットに貼らずに直接渡す）。このユーザーができるのは、下の 1 と 2 だけ（ほかには IP セットの一覧と EC2 の一覧を見ることだけ）。
 

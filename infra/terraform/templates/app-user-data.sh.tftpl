@@ -2,7 +2,7 @@
 # アプリの EC2（Amazon Linux 2023）の初回起動。キーの値は出力しない（set -x を使わない）
 set -euo pipefail
 
-dnf install -y docker git make
+dnf install -y docker git make openssl
 # Compose と Buildx のプラグイン。配布元のチェックサムで確かめてから入れる
 dl="$(mktemp -d)"
 compose_url="https://github.com/docker/compose/releases/download/${compose_version}"
@@ -31,26 +31,8 @@ if [ ! -d /opt/tkb_2613 ]; then
   git clone --branch "${repo_ref}" --depth 1 "${repo_url}" /opt/tkb_2613
 fi
 
-# 起動スクリプト：Secrets Manager から VLM のキーを読み、メモリ上（/run は tmpfs）のファイルで
-# compose に渡す（infra/docker-compose.yml の2つめの env_file）。コンテナを作ったら消す
-cat > /usr/local/bin/tkb-app-start <<'SCRIPT'
-#!/bin/bash
-set -euo pipefail
-cd /opt/tkb_2613
-if [ ! -f .env ]; then
-  echo ".env がありません。infra/terraform/README.md の手順で作ってください" >&2
-  exit 1
-fi
-umask 077
-install -d -m 700 /run/tkb_2613
-trap 'rm -f /run/tkb_2613/secrets.env' EXIT
-key="$(aws secretsmanager get-secret-value --region "${region}" --secret-id "${secret_id}" \
-  --query SecretString --output text)"
-printf 'VLM_API_KEY=%s\n' "$key" > /run/tkb_2613/secrets.env
-unset key
-docker compose --env-file .env -f infra/docker-compose.yml up --build -d
-SCRIPT
-chmod 700 /usr/local/bin/tkb-app-start
+# 起動ロジックはリポジトリで管理し、既存 EC2 も SSM 経由で同じものを配置する
+install -m 700 /opt/tkb_2613/infra/tkb-app-start.sh /usr/local/bin/tkb-app-start
 
 cat > /etc/systemd/system/tkb-app.service <<'UNIT'
 [Unit]

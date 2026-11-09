@@ -207,3 +207,8 @@ variable "killswitch_user_name" {
   type        = string
   default     = "tkb_2613-killswitch"
 }
+variable "oauth_test_ipv4_cidrs" {
+  description = "OAuth の公開前通し試験で許可するチームの IPv4 CIDR。空なら制限しない"
+  type        = list(string)
+  default     = []
+}
