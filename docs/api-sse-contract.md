@@ -19,6 +19,7 @@
 | `GET /api/session` | `tkb_session` Cookie | 200 `{"handle":"…","did":"did:…"}` | Cookie欠落・無効・期限切れは401 `{"detail":"ログインしてください"}`。 |
 | `DELETE /api/session` | `tkb_session` Cookie | 204、Cookie削除 | セッションがなくても204。 |
 | `POST /api/detect` | 画像バイナリをリクエスト本文に直接送信。許可Content-Type: JPEG/PNG/WebP/HEIC/HEIF | モック時200 `{"clues":[…]}` | 空本文400、未対応形式415、20MiB超413。`MOCK_MODE=0` は現状501「検出はまだ実装されていません」。このルートはログイン必須ではない。 |
+| `POST /api/draft-check` | Cookie認証。JSON `{"text":"…","photo_base64":string|null,"photo_content_type":string|null}`。写真なしでは両写真フィールドをnullにする | 200 `{"posts_checked":number,"overlaps":[{"clue":Clue,"evidence":[{"post_id":"…","created_at":"…"}]}],"mock_mode":boolean,"notices":[string,…]}` | 認証必須。実モードではセッション本人の投稿だけを取得し、DID外の投稿URIも除外する。下書きと既存投稿を同じ抽出器で観測し、typeとUnicode NFKC・英字大小・連続空白だけを正規化した値が一致する手がかりだけ返す。推理エンジンと投稿時刻ベースの推理は呼ばない。本文最大10,000文字、画像20MiB、ストリーム読込JSON本文30MiB。画像はbase64 JSONで受け、multipartの一時ファイルを避ける。内容とContent-Typeの一致、画像デコード、画素数を確認する。入力・結果を保存/ログ記録しない。`MOCK_MODE=1` は固定の架空投稿を使い、source=textの固定手がかり文字列をNFKC・casefold・空白圧縮後に下書き本文から部分一致で探すだけ。下書きの抽出結果や意味判定を示さず、写真は解析しない旨を `notices` で返す。 |
 | `POST /api/diagnose` | `tkb_session` Cookie。JSON bodyなし | `text/event-stream` | Cookieなし・無効は401。成功時は以下のSSE順序。投稿/手がかり/結論の結果はサーバーに保存しない。 |
 
 バリデーションエラーは422で `{"detail":[{"loc":[…],"msg":"…","type":"…"}]}` を返す。送信値そのものは詳細に含めない。その他のエラー形式は FastAPI のHTTPエラー応答に従う。

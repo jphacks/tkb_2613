@@ -14,3 +14,5 @@ def test_session_types_stay_in_api_only() -> None:
     assert api_schemas.SessionRequest.__module__ == "tkb_api.schemas"
     assert not hasattr(common_schemas, "SessionRequest")
     assert not hasattr(common_schemas, "SessionResponse")
+    assert api_schemas.DraftCheckRequest.__module__ == "tkb_api.schemas"
+    assert api_schemas.DraftCheckResponse.__module__ == "tkb_api.schemas"

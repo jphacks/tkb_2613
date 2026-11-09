@@ -33,9 +33,55 @@ __all__ = [
     # api の入出力
     "SessionRequest",
     "SessionResponse",
+    "DraftCheckRequest",
+    "DraftEvidence",
+    "DraftOverlap",
+    "DraftCheckResponse",
 ]
 
-API_ONLY_NAMES = frozenset({"SessionRequest", "SessionResponse"})
+API_ONLY_NAMES = frozenset(
+    {
+        "SessionRequest",
+        "SessionResponse",
+        "DraftCheckRequest",
+        "DraftEvidence",
+        "DraftOverlap",
+        "DraftCheckResponse",
+    }
+)
+
+
+class DraftCheckRequest(BaseModel):
+    """投稿前確認。画像はbase64で受け取り、multipartの一時ファイルを避ける。"""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    text: str = Field(max_length=10_000)
+    photo_base64: str | None = Field(default=None, max_length=28_000_000)
+    photo_content_type: str | None = None
+
+
+class DraftEvidence(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    post_id: str
+    created_at: str
+
+
+class DraftOverlap(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    clue: Clue
+    evidence: list[DraftEvidence]
+
+
+class DraftCheckResponse(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    posts_checked: int
+    overlaps: list[DraftOverlap]
+    mock_mode: bool
+    notices: list[str]
 
 
 class SessionRequest(BaseModel):

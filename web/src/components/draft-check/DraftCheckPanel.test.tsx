@@ -1,0 +1,81 @@
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+
+import { SessionProvider, useSession } from "@/components/session/SessionProvider";
+import { checkDraft, createSession, deleteSession, getSession } from "@/lib/api";
+import type { DraftCheckResponse } from "@/types/draftCheck";
+
+import { DraftCheckPanel } from "./DraftCheckPanel";
+
+vi.mock("@/lib/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/api")>();
+  return {
+    ...actual,
+    checkDraft: vi.fn(),
+    createSession: vi.fn(),
+    deleteSession: vi.fn(),
+    getSession: vi.fn(),
+  };
+});
+
+const ALICE = { handle: "alice.bsky.social", did: "did:plc:alice" };
+const BOB = { handle: "bob.bsky.social", did: "did:plc:bob" };
+
+function SessionSwitcher() {
+  const { login } = useSession();
+  return <button onClick={() => login("bob.bsky.social", "test")}>別のアカウントへ</button>;
+}
+
+const ALICE_RESULT: DraftCheckResponse = {
+  posts_checked: 1,
+  mock_mode: false,
+  notices: [],
+  overlaps: [
+    {
+      clue: {
+        post_id: "draft:ephemeral",
+        image_index: null,
+        type: "place_text",
+        value: "ALICE-PRIVATE-RESULT",
+        region: null,
+        confidence: 0.8,
+        source: "text",
+      },
+      evidence: [{ post_id: "at://did:plc:alice/app.bsky.feed.post/one", created_at: "2026-10-20T08:00:00Z" }],
+    },
+  ],
+};
+
+describe("DraftCheckPanel", () => {
+  it("clears the previous account draft and ignores its in-flight result after an account switch", async () => {
+    vi.mocked(getSession).mockResolvedValue(ALICE);
+    vi.mocked(createSession).mockResolvedValue(BOB);
+    vi.mocked(deleteSession).mockResolvedValue(undefined);
+    let resolveCheck: (value: DraftCheckResponse) => void = () => {};
+    vi.mocked(checkDraft).mockImplementation(
+      () => new Promise((resolve) => { resolveCheck = resolve; }),
+    );
+
+    render(
+      <SessionProvider>
+        <DraftCheckPanel />
+        <SessionSwitcher />
+      </SessionProvider>,
+    );
+
+    const input = await screen.findByLabelText("本文");
+    fireEvent.change(input, { target: { value: "Alice private draft" } });
+    const photo = new File(["photo"], "draft.png", { type: "image/png" });
+    fireEvent.change(screen.getByLabelText("写真（1枚まで）"), { target: { files: [photo] } });
+    fireEvent.click(screen.getByRole("button", { name: "過去の投稿と照合" }));
+    await waitFor(() => expect(checkDraft).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole("button", { name: "別のアカウントへ" }));
+    await waitFor(() => expect(createSession).toHaveBeenCalled());
+    await waitFor(() => expect(input).toHaveValue(""));
+    expect(screen.getByLabelText("写真（1枚まで）")).toHaveValue("");
+
+    resolveCheck(ALICE_RESULT);
+    await waitFor(() => expect(screen.queryByText("ALICE-PRIVATE-RESULT")).not.toBeInTheDocument());
+  });
+});

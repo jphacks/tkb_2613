@@ -1,4 +1,5 @@
 import { DiagnosePanel } from "@/components/diagnose/DiagnosePanel";
+import { DraftCheckPanel } from "@/components/draft-check/DraftCheckPanel";
 import { LoginPanel } from "@/components/login/LoginPanel";
 import { messages } from "@/lib/messages";
 
@@ -17,6 +18,7 @@ export default function Home() {
       </header>
       <LoginPanel />
       <DiagnosePanel />
+      <DraftCheckPanel />
     </main>
   );
 }
