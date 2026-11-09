@@ -13,3 +13,7 @@ alert_email = "<Budgets の通知を受けるメールアドレス>"
 # OCR を同居させるとき（11/11 に試す）
 # ocr_image                   = "<PP-OCRv5 の HTTP サービスのイメージ>"
 # vllm_gpu_memory_utilization = 0.80
+
+# OAuth の公開前通し試験だけ、チームの現在のグローバル IPv4 /32 を入れる。
+# 終わったら [] に戻して plan・apply し、state をリポジトリ外にバックアップする
+# oauth_test_ipv4_cidrs = ["<チームの IPv4>/32"]

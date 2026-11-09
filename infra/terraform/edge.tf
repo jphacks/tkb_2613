@@ -84,6 +84,19 @@ resource "aws_cloudfront_distribution" "main" {
     compress                   = false
   }
 
+  # OAuth の開始 POST とコールバック GET。認可コードをキャッシュしない
+  ordered_cache_behavior {
+    path_pattern               = "/auth/*"
+    target_origin_id           = local.origin_id
+    viewer_protocol_policy     = "redirect-to-https"
+    allowed_methods            = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
+    cached_methods             = ["GET", "HEAD"]
+    cache_policy_id            = data.aws_cloudfront_cache_policy.disabled.id
+    origin_request_policy_id   = data.aws_cloudfront_origin_request_policy.all_viewer.id
+    response_headers_policy_id = data.aws_cloudfront_response_headers_policy.security_headers.id
+    compress                   = false
+  }
+
   # Next.js の静的ファイル（ファイル名にハッシュが入る）はキャッシュしてよい
   ordered_cache_behavior {
     path_pattern               = "/_next/static/*"
@@ -125,6 +138,14 @@ resource "aws_wafv2_ip_set" "block_all" {
   }
 }
 
+# OAuth 通し試験だけ有効にする。空ならルールを作らない
+resource "aws_wafv2_ip_set" "oauth_test_allow" {
+  name               = "tkb_2613-oauth-test-allow"
+  scope              = "CLOUDFRONT"
+  ip_address_version = "IPV4"
+  addresses          = var.oauth_test_ipv4_cidrs
+}
+
 resource "aws_wafv2_web_acl" "main" {
   name  = "tkb_2613"
   scope = "CLOUDFRONT"
@@ -148,6 +169,61 @@ resource "aws_wafv2_web_acl" "main" {
       cloudwatch_metrics_enabled = true
       metric_name                = "kill-switch"
       sampled_requests_enabled   = true
+    }
+  }
+
+  dynamic "rule" {
+    for_each = length(var.oauth_test_ipv4_cidrs) > 0 ? [1] : []
+    content {
+      name     = "oauth-test-team-only"
+      priority = 6
+      action {
+        block {}
+      }
+      statement {
+        and_statement {
+          statement {
+            not_statement {
+              statement {
+                ip_set_reference_statement {
+                  arn = aws_wafv2_ip_set.oauth_test_allow.arn
+                }
+              }
+            }
+          }
+          # Bluesky の認可サーバーが取得するメタデータだけは公開する
+          statement {
+            not_statement {
+              statement {
+                byte_match_statement {
+                  search_string         = "/oauth-client-metadata.json"
+                  positional_constraint = "EXACTLY"
+                  field_to_match {
+                    uri_path {}
+                  }
+                  text_transformation {
+                    priority = 0
+                    type     = "URL_DECODE"
+                  }
+                  text_transformation {
+                    priority = 1
+                    type     = "NORMALIZE_PATH"
+                  }
+                  text_transformation {
+                    priority = 2
+                    type     = "LOWERCASE"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+      visibility_config {
+        cloudwatch_metrics_enabled = true
+        metric_name                = "oauth-test-team-only"
+        sampled_requests_enabled   = true
+      }
     }
   }
 
@@ -220,24 +296,48 @@ resource "aws_wafv2_web_acl" "main" {
         scope_down_statement {
           and_statement {
             statement {
-              byte_match_statement {
-                search_string         = "/api/session"
-                positional_constraint = "STARTS_WITH"
-                field_to_match {
-                  uri_path {}
+              or_statement {
+                statement {
+                  byte_match_statement {
+                    search_string         = "/api/session"
+                    positional_constraint = "STARTS_WITH"
+                    field_to_match {
+                      uri_path {}
+                    }
+                    text_transformation {
+                      priority = 0
+                      type     = "URL_DECODE"
+                    }
+                    text_transformation {
+                      priority = 1
+                      type     = "NORMALIZE_PATH"
+                    }
+                    text_transformation {
+                      priority = 2
+                      type     = "LOWERCASE"
+                    }
+                  }
                 }
-                # %73ession や //api/session でもすり抜けられないよう、デコードと正規化をしてから比べる
-                text_transformation {
-                  priority = 0
-                  type     = "URL_DECODE"
-                }
-                text_transformation {
-                  priority = 1
-                  type     = "NORMALIZE_PATH"
-                }
-                text_transformation {
-                  priority = 2
-                  type     = "LOWERCASE"
+                statement {
+                  byte_match_statement {
+                    search_string         = "/auth/start"
+                    positional_constraint = "EXACTLY"
+                    field_to_match {
+                      uri_path {}
+                    }
+                    text_transformation {
+                      priority = 0
+                      type     = "URL_DECODE"
+                    }
+                    text_transformation {
+                      priority = 1
+                      type     = "NORMALIZE_PATH"
+                    }
+                    text_transformation {
+                      priority = 2
+                      type     = "LOWERCASE"
+                    }
+                  }
                 }
               }
             }
