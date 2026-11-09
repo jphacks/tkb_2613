@@ -53,6 +53,7 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
+      - run: node scripts/check-oauth-routes.mjs
 
   docker:
     name: Docker イメージのビルド
