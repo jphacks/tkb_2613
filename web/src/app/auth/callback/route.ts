@@ -33,8 +33,8 @@ export async function GET(request: NextRequest) {
     const cookie = completed.headers.get("set-cookie");
     if (!completed.ok || !cookie) throw new Error("Session completion failed");
     const response = NextResponse.redirect(new URL("/", publicUrl()));
-    response.headers.append("Set-Cookie", cookie);
     response.cookies.delete(START_COOKIE);
+    response.headers.append("Set-Cookie", cookie);
     response.headers.set("Cache-Control", "no-store");
     return response;
   } catch {
