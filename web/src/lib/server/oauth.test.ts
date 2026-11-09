@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { POST as deletePost } from "@/app/__internal/oauth/delete/route";
+import { POST as deletePost } from "@/app/%5F%5Finternal/oauth/delete/route";
 import { OAUTH_SCOPE, pendingStateMatches, validInternalSecret } from "@/lib/server/oauth";
 
 const memory = globalThis as typeof globalThis & {
