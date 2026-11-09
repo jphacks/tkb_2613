@@ -90,9 +90,20 @@ class Extractor:
         tasks = [self._extract_image(post.post_id, i, data) for i, data in enumerate(images)]
         if post.text.strip():
             tasks.append(self._extract_text(post.post_id, post.text))
+        tasks.extend(
+            self._extract_text(post.post_id, image.alt, image_index=image.index, source=ClueSource.ALT)
+            for image in post.images
+            if image.alt.strip()
+        )
 
         results = await asyncio.gather(*tasks)
         return _dedupe([clue for clues in results for clue in clues])
+
+    async def extract_profile_text(self, did: str, text: str) -> list[Clue]:
+        """Analyze the authenticated owner's profile description as self-report only."""
+        if not text.strip():
+            return []
+        return await self._extract_text(f"profile:{did}", text, source=ClueSource.PROFILE_TEXT)
 
     async def _extract_image(self, post_id: str, index: int, data: bytes) -> list[Clue]:
         prepared = prepare_image(data)
@@ -171,7 +182,14 @@ class Extractor:
                 clues.append(clue)
         return clues
 
-    async def _extract_text(self, post_id: str, text: str) -> list[Clue]:
+    async def _extract_text(
+        self,
+        post_id: str,
+        text: str,
+        *,
+        image_index: int | None = None,
+        source: ClueSource = ClueSource.TEXT,
+    ) -> list[Clue]:
         raw = await _retry_if_cut_off(
             lambda penalty: self._vlm.complete_text(
                 text_user_prompt(text),
@@ -186,9 +204,9 @@ class Extractor:
             clue = _build_clue(
                 item,
                 post_id=post_id,
-                image_index=None,
+                image_index=image_index,
                 region_box=None,
-                source=ClueSource.TEXT,
+                source=source,
                 to_region=lambda _b: None,
             )
             if clue is not None:

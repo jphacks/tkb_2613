@@ -33,7 +33,7 @@ export const CLUE_TYPES = [
 ] as const;
 
 /** text は本文から、meta は投稿時刻などから */
-export const CLUE_SOURCES = ["ocr", "vlm", "text", "meta"] as const;
+export const CLUE_SOURCES = ["ocr", "vlm", "text", "alt", "profile_text", "meta"] as const;
 const PHOTO_SOURCES: readonly ClueSource[] = ["ocr", "vlm"];
 
 export type ClueType = (typeof CLUE_TYPES)[number];
@@ -82,9 +82,9 @@ function isRegion(value: unknown): value is Region {
 function isConsistent(clue: Clue): boolean {
   const fromPhoto = clue.image_index !== null;
   if (clue.region !== null && !fromPhoto) return false;
-  if (fromPhoto !== PHOTO_SOURCES.includes(clue.source)) return false;
-  if (includes(PHOTO_ONLY_CLUE_TYPES, clue.type) && !fromPhoto) return false;
-  if (includes(TEXT_ONLY_CLUE_TYPES, clue.type) && fromPhoto) return false;
+  if (fromPhoto !== (PHOTO_SOURCES.includes(clue.source) || clue.source === "alt")) return false;
+  if (includes(PHOTO_ONLY_CLUE_TYPES, clue.type) && !PHOTO_SOURCES.includes(clue.source)) return false;
+  if (includes(TEXT_ONLY_CLUE_TYPES, clue.type) && PHOTO_SOURCES.includes(clue.source)) return false;
   return true;
 }
 

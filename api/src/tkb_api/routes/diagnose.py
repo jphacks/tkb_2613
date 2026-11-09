@@ -15,7 +15,7 @@ MOCK_MODE=0 のときは、セッションの DID 本人の投稿を Bluesky か
 
 import asyncio
 import json
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Any
@@ -83,6 +83,13 @@ def get_fetch_posts() -> PostsFetcher:
     return bluesky.fetch_own_posts
 
 
+ProfileTextFetcher = Callable[[Any, str], Awaitable[str]]
+
+
+def get_fetch_profile_text() -> ProfileTextFetcher:
+    return bluesky.fetch_own_profile_text
+
+
 ExtractorFactory = Callable[[], Extractor]
 
 
@@ -145,18 +152,36 @@ async def diagnose(
     session: Annotated[BlueskySession, Depends(current_session)],
     settings: Annotated[Settings, Depends(get_settings)],
     fetch_posts: Annotated[PostsFetcher, Depends(get_fetch_posts)],
+    fetch_profile_text: Annotated[ProfileTextFetcher, Depends(get_fetch_profile_text)],
     extractor_factory: Annotated[ExtractorFactory, Depends(get_extractor_factory)],
     gazetteer: Annotated[Gazetteer, Depends(get_gazetteer)],
 ) -> StreamingResponse:
     if settings.mock_mode:
         posts = _load_demo_posts(settings)
+        owner_profile_text = ""
+        owner_profile_analyzer = None
         interval = settings.mock_event_interval_seconds
         extractions = mock_extractions(settings.demo_fixture_path, posts, interval)
     else:
         posts = await _fetch_own_posts(session, settings, fetch_posts)
+        if session.client is None:
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "ログインし直してください")
+        try:
+            owner_profile_text = await fetch_profile_text(session.client, session.did)
+        except bluesky.BlueskyUnavailableError:
+            raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Bluesky からプロフィールを取得できませんでした") from None
         interval = 0
-        extractions = real_extractions(_build_extractor(extractor_factory), posts)
-    events = diagnose_events(posts, extractions, gazetteer, interval)
+        extractor = _build_extractor(extractor_factory)
+        extractions = real_extractions(extractor, posts)
+        owner_profile_analyzer = lambda text: extractor.extract_profile_text(session.did, text)
+    events = diagnose_events(
+        posts,
+        extractions,
+        gazetteer,
+        interval,
+        owner_profile_text=owner_profile_text,
+        owner_profile_analyzer=owner_profile_analyzer,
+    )
     return StreamingResponse(
         _with_keep_alive(_stream(events), settings.sse_keepalive_seconds),
         media_type="text/event-stream",

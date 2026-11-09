@@ -12,6 +12,7 @@
 
 import { type Clue, isClue } from "./clue";
 import { isPost, type Post } from "./post";
+import { isProfileItem, type ProfileItem } from "./profile";
 
 /** 推理ルールが出した結論 1 つ（engine の Conclusion） */
 export interface Conclusion {
@@ -36,6 +37,9 @@ export type DiagnoseEvent =
       readonly event: "conclusions";
       readonly clues: readonly Clue[];
       readonly conclusions: readonly Conclusion[];
+      readonly profile_claims?: readonly ProfileItem[];
+      readonly owner_profile_text?: string;
+      readonly self_report_clues?: readonly Clue[];
     }
   | { readonly event: "done"; readonly posts_seen: number };
 
@@ -100,8 +104,22 @@ export function toDiagnoseEvent(event: string, data: string): DiagnoseEvent | nu
   if (event === "conclusions" && isRecord(value) && isClueList(value.clues)) {
     const clueCount = value.clues.length;
     const { conclusions } = value;
-    if (Array.isArray(conclusions) && conclusions.every((c) => isConclusion(c, clueCount))) {
-      return { event, clues: value.clues, conclusions: conclusions as Conclusion[] };
+    const profileClaims = value.profile_claims ?? [];
+    const profileText = value.owner_profile_text ?? "";
+    const selfReportClues = value.self_report_clues ?? [];
+    if (
+      Array.isArray(conclusions) && conclusions.every((c) => isConclusion(c, clueCount)) &&
+      Array.isArray(profileClaims) && profileClaims.every(isProfileItem) && typeof profileText === "string" &&
+      isClueList(selfReportClues)
+    ) {
+      return {
+        event,
+        clues: value.clues,
+        conclusions: conclusions as Conclusion[],
+        ...(Object.hasOwn(value, "profile_claims") ? { profile_claims: profileClaims } : {}),
+        ...(Object.hasOwn(value, "owner_profile_text") ? { owner_profile_text: profileText } : {}),
+        ...(Object.hasOwn(value, "self_report_clues") ? { self_report_clues: selfReportClues } : {}),
+      };
     }
   }
   if (

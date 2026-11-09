@@ -20,99 +20,60 @@ export const PROFILE_ATTRIBUTE_CATALOG = {
   facial_appearance: {
     label: "顔貌（自撮り・他撮り・反射）",
     category: "identity_and_face",
-    personalLevel: 5,
-    guessability: "A",
+    personalLevel: null, guessability: null,
   },
   full_name: {
     label: "本名（フルネーム）",
     category: "identity_and_face",
-    personalLevel: 5,
-    guessability: "B",
+    personalLevel: null, guessability: null,
   },
-  given_name_or_nickname: {
-    label: "下の名前 / 呼ばれている名前",
-    category: "identity_and_face",
-    personalLevel: 4,
-    guessability: "A〜B",
-  },
+  given_name: { label: "下の名前", category: "identity_and_face", personalLevel: null, guessability: null },
+  nickname: { label: "呼ばれている名前", category: "identity_and_face", personalLevel: null, guessability: null },
   other_social_account: {
     label: "別SNSのアカウント / 本垢",
     category: "identity_and_face",
-    personalLevel: 4,
-    guessability: "A",
+    personalLevel: null, guessability: null,
   },
   realtime_location: {
     label: "リアルタイムの現在地",
     category: "home_and_location",
-    personalLevel: 5,
-    guessability: "A",
+    personalLevel: null, guessability: null,
   },
-  home_building_or_room: {
-    label: "自宅の建物外観・部屋の位置",
-    category: "home_and_location",
-    personalLevel: 5,
-    guessability: "B",
-  },
-  commute_station_or_line: {
-    label: "最寄り駅 / 日常の利用路線",
-    category: "home_and_location",
-    personalLevel: 4,
-    guessability: "A〜B",
-  },
+  home_building: { label: "自宅の建物候補", category: "home_and_location", personalLevel: null, guessability: null },
+  home_room: { label: "自宅の部屋・階・位置", category: "home_and_location", personalLevel: null, guessability: null },
+  home_nearest_station: { label: "自宅の最寄り駅", category: "home_and_location", personalLevel: null, guessability: null },
+  regular_station: { label: "日常的に利用する駅", category: "home_and_location", personalLevel: null, guessability: null },
+  regular_line: { label: "日常的に利用する路線", category: "home_and_location", personalLevel: null, guessability: null },
   residential_area: {
     label: "居住エリア（市区町村・町域）",
     category: "home_and_location",
-    personalLevel: 4,
-    guessability: "B",
+    personalLevel: null, guessability: null,
   },
-  long_term_home_absence: {
-    label: "自宅の長期不在（旅行・帰省中）",
-    category: "home_and_location",
-    personalLevel: 4,
-    guessability: "A〜B",
-  },
-  workplace: {
-    label: "勤務先（企業名・店舗・ビル）",
-    category: "affiliation_and_work",
-    personalLevel: 4,
-    guessability: "B",
-  },
+  announced_long_absence: { label: "予告された長期不在", category: "home_and_location", personalLevel: null, guessability: null },
+  actual_home_absence: { label: "実際の自宅不在", category: "home_and_location", personalLevel: null, guessability: null },
+  employer_name: { label: "雇用主名の推定", category: "affiliation_and_work", personalLevel: null, guessability: null },
+  workplace_building_candidate: { label: "勤務先建物候補", category: "affiliation_and_work", personalLevel: null, guessability: null },
   workplace_area: {
     label: "勤務先エリア（オフィス街）",
     category: "affiliation_and_work",
-    personalLevel: 4,
-    guessability: "A〜B",
+    personalLevel: null, guessability: null,
   },
   school: {
     label: "通学先（大学・キャンパス・学校）",
     category: "affiliation_and_work",
-    personalLevel: 4,
-    guessability: "B",
+    personalLevel: null, guessability: null,
   },
   frequent_shop: {
     label: "行きつけの店（ジム・美容院・カフェ）",
     category: "activity_and_family",
-    personalLevel: 4,
-    guessability: "B",
+    personalLevel: null, guessability: null,
   },
-  vehicle_model_or_partial_plate: {
-    label: "自家用車の車種・ナンバー（一部）",
-    category: "activity_and_family",
-    personalLevel: 4,
-    guessability: "A〜B",
-  },
-  partner_status_and_attributes: {
-    label: "配偶者・交際相手の有無と属性",
-    category: "activity_and_family",
-    personalLevel: 4,
-    guessability: "B",
-  },
-  children_age_and_school: {
-    label: "子どもの有無・年齢・通園通学先",
-    category: "activity_and_family",
-    personalLevel: 4,
-    guessability: "B",
-  },
+  vehicle_model: { label: "自家用車の車種", category: "activity_and_family", personalLevel: null, guessability: null },
+  partial_plate: { label: "ナンバーの一部", category: "activity_and_family", personalLevel: null, guessability: null },
+  partner_status: { label: "配偶者・交際相手の有無", category: "activity_and_family", personalLevel: null, guessability: null },
+  partner_attributes: { label: "配偶者・交際相手の属性", category: "activity_and_family", personalLevel: null, guessability: null },
+  child_age: { label: "子どもの年齢", category: "activity_and_family", personalLevel: null, guessability: null },
+  child_school: { label: "子どもの通園・通学先", category: "activity_and_family", personalLevel: null, guessability: null },
 } as const;
 
 export type ProfileAttribute = keyof typeof PROFILE_ATTRIBUTE_CATALOG;
@@ -121,9 +82,30 @@ export type Guessability = ProfileAttributeMetadata["guessability"];
 export type ProfileStatus = "found" | "weak" | "unknown";
 
 export interface ProfileEvidence {
-  readonly post_id: string;
-  readonly clue_index: number;
+  readonly post_id: string | null;
+  readonly clue_index: number | null;
   readonly required: boolean;
+  readonly source?: "clue" | "post_text" | "profile_text" | "image_alt";
+  readonly image_index?: number | null;
+  readonly excerpt?: string | null;
+}
+
+export interface ProfileEvidencePath {
+  readonly evidence: readonly ProfileEvidence[];
+  readonly confidence: number;
+}
+
+export interface ClaimAssessment {
+  readonly minimal_scope: "bluesky" | "bluesky_plus_public_web" | "bluesky_plus_offline" | null;
+  readonly offline_subtype: string | null;
+  readonly psychological_resistance: number | null;
+  readonly persona_context: string | null;
+  readonly inference_ease: number | null;
+  readonly inference_ease_basis: "provisional" | "measured" | null;
+  readonly harm_severity: number | null;
+  readonly harm_scenario: string | null;
+  readonly harm_prerequisites: readonly string[];
+  readonly harm_status: "applicable" | "prerequisites_unmet" | "unknown";
 }
 
 /** confidence は 0..1 の値。検出ロジック未実装のため、校正済み確率とは限らない。 */
@@ -131,6 +113,8 @@ interface ProfileItemBase {
   readonly attribute: ProfileAttribute;
   readonly confidence: number;
   readonly evidence: readonly ProfileEvidence[];
+  readonly evidence_paths?: readonly ProfileEvidencePath[];
+  readonly assessment?: ClaimAssessment;
 }
 
 export type ProfileItem =
@@ -142,24 +126,46 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isProfileEvidence(value: unknown): value is ProfileEvidence {
+  if (!isRecord(value)) return false;
+  const source = value.source ?? "clue";
   return (
-    isRecord(value) &&
     Object.keys(value).every((key) =>
-      ["post_id", "clue_index", "required"].includes(key),
+      ["post_id", "clue_index", "required", "source", "image_index", "excerpt"].includes(key),
     ) &&
-    typeof value.post_id === "string" &&
-    value.post_id.length > 0 &&
-    Number.isInteger(value.clue_index) &&
-    (value.clue_index as number) >= 0 &&
-    typeof value.required === "boolean"
+    typeof value.required === "boolean" &&
+    ["clue", "post_text", "profile_text", "image_alt"].includes(source as string) &&
+    ((source === "clue" && typeof value.post_id === "string" && Number.isInteger(value.clue_index) && (value.clue_index as number) >= 0 && (value.image_index === null || value.image_index === undefined)) ||
+      (source === "post_text" && typeof value.post_id === "string" && value.clue_index === null && (value.image_index === null || value.image_index === undefined) && typeof value.excerpt === "string") ||
+      (source === "profile_text" && value.post_id === null && value.clue_index === null && typeof value.excerpt === "string") ||
+      (source === "image_alt" && typeof value.post_id === "string" && value.clue_index === null && Number.isInteger(value.image_index) && typeof value.excerpt === "string"))
   );
+}
+
+function isClaimAssessment(value: unknown): value is ClaimAssessment {
+  if (!isRecord(value)) return false;
+  const rating = (v: unknown) => v === null || (Number.isInteger(v) && (v as number) >= 1 && (v as number) <= 5);
+  const baseValid = ["minimal_scope", "offline_subtype", "psychological_resistance", "persona_context", "inference_ease", "inference_ease_basis", "harm_severity", "harm_scenario", "harm_prerequisites", "harm_status"].every((k) => Object.hasOwn(value, k)) &&
+    (value.minimal_scope === null || ["bluesky", "bluesky_plus_public_web", "bluesky_plus_offline"].includes(value.minimal_scope as string)) &&
+    (value.offline_subtype === null || typeof value.offline_subtype === "string") && rating(value.psychological_resistance) &&
+    (value.persona_context === null || typeof value.persona_context === "string") && rating(value.inference_ease) &&
+    (value.inference_ease_basis === null || ["provisional", "measured"].includes(value.inference_ease_basis as string)) && rating(value.harm_severity) &&
+    (value.harm_scenario === null || typeof value.harm_scenario === "string") && Array.isArray(value.harm_prerequisites) && value.harm_prerequisites.every((v) => typeof v === "string") &&
+    ["applicable", "prerequisites_unmet", "unknown"].includes(value.harm_status as string);
+  if (!baseValid) return false;
+  const prerequisites = value.harm_prerequisites as string[];
+  if (value.minimal_scope === "bluesky_plus_offline" ? typeof value.offline_subtype !== "string" || !value.offline_subtype : value.offline_subtype !== null) return false;
+  if (value.psychological_resistance !== null && typeof value.persona_context !== "string") return false;
+  if ((value.inference_ease === null) !== (value.inference_ease_basis === null)) return false;
+  if (value.harm_status === "applicable") return value.harm_severity !== null && typeof value.harm_scenario === "string" && prerequisites.length > 0;
+  if (value.harm_status === "prerequisites_unmet") return value.harm_severity === null && typeof value.harm_scenario === "string" && prerequisites.length > 0;
+  return value.harm_severity === null;
 }
 
 export function isProfileItem(value: unknown): value is ProfileItem {
   if (!isRecord(value)) return false;
   if (
     !Object.keys(value).every((key) =>
-      ["attribute", "value", "confidence", "status", "evidence"].includes(key),
+      ["attribute", "value", "confidence", "status", "evidence", "evidence_paths", "assessment"].includes(key),
     ) ||
     typeof value.attribute !== "string" ||
     !Object.hasOwn(PROFILE_ATTRIBUTE_CATALOG, value.attribute)
@@ -173,6 +179,8 @@ export function isProfileItem(value: unknown): value is ProfileItem {
     value.confidence > 1 ||
     !Array.isArray(value.evidence) ||
     !value.evidence.every(isProfileEvidence)
+    || (value.evidence_paths !== undefined && (!Array.isArray(value.evidence_paths) || !value.evidence_paths.every((path) => isRecord(path) && typeof path.confidence === "number" && path.confidence >= 0 && path.confidence <= 1 && Array.isArray(path.evidence) && path.evidence.length >= 2 && path.evidence.every(isProfileEvidence))))
+    || (value.assessment !== undefined && !isClaimAssessment(value.assessment))
   ) {
     return false;
   }

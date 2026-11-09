@@ -78,10 +78,10 @@ Python は `common/` の Pydantic モデル（`tkb_common.schemas`）、TypeScri
   - 写真と本文の両方から：name_text（ケーキのプレート、名札、宛名、返信での呼びかけなど）/ org_text（会社・学校・団体の名前やロゴ）/ handle_text（SNSのユーザー名・URL）/ place_text（地名・駅名・店名）
   - 本文から：age_text（「25歳になりました」「誕生日」など）/ routine_text（「夜勤明け」「電車混んでる」「毎週火曜のジム」など生活の決まり）/ relation_text（家族・同居人・ペット）
 - `value`：一部しか読めない文字は、読めた所だけを入れ、読めない桁や文字は x にする（例：郵便番号 `270-01xx`）
-- `image_index`：写真から出た手がかり（source が ocr / vlm）だけに入れる。本文から出たもの（text / meta）は null
+- `image_index`：写真画素からの手がかり（source が ocr / vlm）と画像alt（source が alt）に入れる。本文・プロフィール文は null。altは region を持たない
 - `region`：画像上の矩形 [左上x, 左上y, 右下x, 右下y]（元の画像のピクセル）。写真の手がかりで位置がないもの、本文の手がかりは null
 - `confidence`：0〜1
-- `source`：ocr / vlm / text（本文から）/ meta（投稿時刻などから）
+- `source`：ocr / vlm / alt（画像代替テキスト）/ text（投稿本文）/ profile_text（本人プロフィール文）/ meta（投稿時刻などから）
 
 ### プロフィールの項目（捜査ボードの1行）
 
@@ -90,8 +90,8 @@ Python は `common/` の Pydantic モデル（`tkb_common.schemas`）、TypeScri
  "evidence": [{"post_id": "at://.../3kxxxx", "clue_index": 3, "required": true}]}
 ```
 
-- `attribute`：`facial_appearance` / `full_name` / `given_name_or_nickname` / `other_social_account` / `realtime_location` / `home_building_or_room` / `commute_station_or_line` / `residential_area` / `long_term_home_absence` / `workplace` / `workplace_area` / `school` / `frequent_shop` / `vehicle_model_or_partial_plate` / `partner_status_and_attributes` / `children_age_and_school`
-- 表示名、4つのカテゴリ、パーソナル度、推測しやすさは Python と TypeScript のプロフィール項目カタログで定義する。これらは診断ごとの推定確度ではない
+- `attribute`：`facial_appearance` / `full_name` / `given_name` / `nickname` / `other_social_account` / `realtime_location` / `home_building` / `home_room` / `home_nearest_station` / `regular_station` / `regular_line` / `residential_area` / `announced_long_absence` / `actual_home_absence` / `employer_name` / `workplace_building_candidate` / `workplace_area` / `school` / `frequent_shop` / `vehicle_model` / `partial_plate` / `partner_status` / `partner_attributes` / `child_age` / `child_school`
+- 表示名とカテゴリは Python と TypeScript のプロフィール項目カタログで定義する。旧パーソナル度・推測しやすさは廃止し null。主張ごとの4軸は `ClaimAssessment` に置き、未評価は null にする。定義と現行の限定推論ルールは `docs/profile-classification-v2.md` を参照
 - `value`：具体値を示せない場合は null。`status` が unknown のときは null にする
 - `status`：found（推定できた）/ weak（弱い）/ unknown（不明）
 - `evidence`：根拠の手がかり。`required: true` は、その手がかりが消えるとこの項目が成り立たないもの
@@ -105,8 +105,8 @@ Python は `common/` の Pydantic モデル（`tkb_common.schemas`）、TypeScri
 ## 推定と最小削除の考え方（engine）
 
 - プロフィール推定：手がかりの一覧（文字だけ）を言語モデルに渡し、項目ごとの候補と根拠（手がかりの番号）を出させる。項目の確からしさは、根拠の手がかりの confidence を 1 − ∏(1 − c_i) で合成する。`required` の根拠が1つでも消えたら、その項目は不明にする
-- 駅名は `data-prep` の stations 表で実在を確認する。生活時間帯は今回の16項目に含めない
-- 最小削除：投稿を1件抜いたときの各項目の確からしさを、モデルを呼ばずに計算し直す。16項目に対する重みは実装時に決める。重要な項目を最も多く崩す投稿から貪欲法で選ぶ。最大3件まで
+- 駅名は `data-prep` の stations 表で実在を確認する。生活時間帯は今回の25候補に含めない
+- 最小削除：投稿を1件抜いたときの各項目の確からしさを、モデルを呼ばずに計算し直す。25候補に対する重みは実装時に決める。重要な項目を最も多く崩す投稿から貪欲法で選ぶ。最大3件まで
 - 再診断：抜き出し済みの手がかりから、削除した投稿の分を除いてすぐに計算する
 
 ## モデルの呼び出し

@@ -8,7 +8,7 @@
 import asyncio
 import json
 import logging
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -20,6 +20,7 @@ from tkb_common.schemas import BSKY_CDN_PREFIX, Clue, Post
 from tkb_detect.batch import PostExtraction, extract_posts
 from tkb_detect.extract import Extractor
 from tkb_engine.gazetteer import Gazetteer
+from tkb_engine.cross_post import infer_owner_claims
 from tkb_engine.rules import infer
 
 logger = logging.getLogger(__name__)
@@ -97,6 +98,9 @@ async def diagnose_events(
     extractions: AsyncIterator[PostExtraction],
     gazetteer: Gazetteer,
     interval: float = 0,
+    *,
+    owner_profile_text: str = "",
+    owner_profile_analyzer: Callable[[str], Awaitable[list[Clue]]] | None = None,
 ) -> AsyncIterator[Event]:
     """診断のイベントを順に返す。
 
@@ -113,11 +117,18 @@ async def diagnose_events(
         yield "clues", extraction.model_dump(mode="json")
 
     conclusions = infer(all_clues, list(posts), gazetteer)
+    self_report_clues = await owner_profile_analyzer(owner_profile_text) if owner_profile_text and owner_profile_analyzer else []
+    profile_claims = infer_owner_claims(list(posts), all_clues, owner_profile_text, self_report_clues)
     yield (
         "conclusions",
         {
             "clues": [c.model_dump(mode="json") for c in all_clues],
             "conclusions": [asdict(c) for c in conclusions],
+            "profile_claims": [item.model_dump(mode="json") for item in profile_claims],
+            "self_report_clues": [c.model_dump(mode="json") for c in self_report_clues],
+            # Direct self-report is kept separate from cross-post inference and streamed only
+            # to the authenticated owner; it is never persisted.
+            "owner_profile_text": owner_profile_text,
         },
     )
     yield "done", {"posts_seen": len(posts)}

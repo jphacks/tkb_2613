@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from tkb_api.bluesky import BlueskyUnavailableError, LoginResult, PostsFetcher
 from tkb_api.config import Settings, get_settings
 from tkb_api.main import create_app
-from tkb_api.routes.diagnose import get_extractor_factory, get_fetch_posts, get_gazetteer
+from tkb_api.routes.diagnose import get_extractor_factory, get_fetch_posts, get_fetch_profile_text, get_gazetteer
 from tkb_api.routes.session import get_login
 from tkb_common.schemas import Clue, ClueSource, ClueType, Post
 from tkb_detect.extract import Extractor
@@ -121,6 +121,12 @@ class FakeExtractor(Extractor):
             )
         ]
 
+    async def extract_profile_text(self, did: str, text: str) -> list[Clue]:
+        return [Clue(
+            post_id=f"profile:{did}", image_index=None, type=ClueType.NAME_TEXT,
+            value="本人記載の名前", region=None, confidence=0.9, source=ClueSource.PROFILE_TEXT,
+        )]
+
 
 def _real_client(fetch_posts: PostsFetcher, extractor: Extractor | None = None) -> TestClient:
     """MOCK_MODE=0 の api。ログイン・投稿の取得・手がかりの取り出しを偽物に差し替える。"""
@@ -132,6 +138,10 @@ def _real_client(fetch_posts: PostsFetcher, extractor: Extractor | None = None) 
     overrides = client.app.dependency_overrides  # type: ignore[attr-defined]
     overrides[get_login] = lambda: login
     overrides[get_fetch_posts] = lambda: fetch_posts
+    async def fetch_profile(_client: AsyncClient, did: str) -> str:
+        assert did == REAL_DID
+        return "本人プロフィール文"
+    overrides[get_fetch_profile_text] = lambda: fetch_profile
     fake = extractor or FakeExtractor()
     overrides[get_extractor_factory] = lambda: lambda: fake
     return client
@@ -160,6 +170,9 @@ def test_real_diagnose_extracts_clues_from_the_session_accounts_own_posts() -> N
     assert events[1][1]["post_id"] == post.post_id
     assert events[1][1]["clues"][0]["value"] == post.text
     assert events[2][1]["clues"] == events[1][1]["clues"]
+    assert events[2][1]["owner_profile_text"] == "本人プロフィール文"
+    assert events[2][1]["profile_claims"] == []
+    assert events[2][1]["self_report_clues"][0]["source"] == "profile_text"
     assert events[-1] == ("done", {"posts_seen": 1})
 
 
@@ -177,6 +190,9 @@ def test_real_diagnose_reports_a_missing_or_forbidden_model_endpoint(vlm_base_ur
     with _client(settings) as client:
         client.app.dependency_overrides[get_login] = lambda: login  # type: ignore[attr-defined]
         client.app.dependency_overrides[get_fetch_posts] = lambda: fetch_posts  # type: ignore[attr-defined]
+        async def fetch_profile(_client: AsyncClient, _did: str) -> str:
+            return ""
+        client.app.dependency_overrides[get_fetch_profile_text] = lambda: fetch_profile  # type: ignore[attr-defined]
         _login(client)
         res = client.post("/api/diagnose")
 

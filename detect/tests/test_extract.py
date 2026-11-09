@@ -433,3 +433,22 @@ async def test_keeps_first_reading_when_zoom_request_fails() -> None:
         clues = await Extractor(_vlm_client()).extract_post(_post("", 1), [_png(2560, 1440)])
 
     assert [(c.value, c.confidence) for c in clues] == [("厚生", SMALL_REGION_MAX_CONFIDENCE)]
+
+
+@pytest.mark.anyio
+async def test_extracts_image_alt_separately_from_post_body(monkeypatch: pytest.MonkeyPatch) -> None:
+    original = _post("本文", 1)
+    image = original.images[0].model_copy(update={"alt": "青葉商店街の入口"})
+    post = original.model_copy(update={"images": [image]})
+    extractor = Extractor(_vlm_client())
+
+    async def skip_pixels(_post_id: str, _index: int, _data: bytes) -> list[Any]:
+        return []
+
+    monkeypatch.setattr(extractor, "_extract_image", skip_pixels)
+    with respx.mock as router:
+        router.post(f"{VLM}/chat/completions").mock(side_effect=_router(None, TEXT_REPLY))
+        clues = await extractor.extract_post(post, [b"unused"])
+
+    assert any(c.source is ClueSource.ALT and c.image_index == 0 for c in clues)
+    assert any(c.source is ClueSource.TEXT and c.image_index is None for c in clues)
