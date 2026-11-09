@@ -185,6 +185,50 @@ def test_real_diagnose_extracts_clues_from_the_session_accounts_own_posts() -> N
     assert events[-1] == ("done", {"posts_seen": 1})
 
 
+def test_oauth_diagnose_accepts_a_session_without_a_password_client() -> None:
+    raw = json.loads(FIXTURE.read_text(encoding="utf-8"))["posts"][3]
+    post = Post.model_validate({**raw, "images": []})
+    calls: list[tuple[AsyncClient, str, int]] = []
+
+    class ReadyExtractor(FakeExtractor):
+        async def model_reachable(self, timeout_s: float) -> bool:
+            return True
+
+    async def fetch_posts(client: AsyncClient, did: str, limit: int) -> list[Post]:
+        calls.append((client, did, limit))
+        return [post]
+
+    settings = Settings(
+        mock_mode=False,
+        auth_mode="oauth",
+        internal_auth_secret="test-only-secret",  # noqa: S106
+        max_posts=5,
+    )
+    with _client(settings) as client:
+        overrides = client.app.dependency_overrides  # type: ignore[attr-defined]
+        overrides[get_fetch_posts] = lambda: fetch_posts
+        overrides[get_extractor_factory] = lambda: ReadyExtractor
+        completed = client.post(
+            "/__internal/oauth/complete",
+            json={"did": REAL_DID, "handle": "alice.bsky.social"},
+            headers={"X-Internal-Auth": "test-only-secret"},
+        )
+        assert completed.status_code == 200
+        res = client.post("/api/diagnose")
+
+    assert res.status_code == 200
+    assert len(calls) == 1
+    assert isinstance(calls[0][0], AsyncClient)
+    assert calls[0][1:] == (REAL_DID, 5)
+    assert [name for name, _ in _events(res.text)] == [
+        "post",
+        "clues",
+        "conclusions",
+        "plan",
+        "done",
+    ]
+
+
 @pytest.mark.parametrize("vlm_base_url", ["", "https://api.openai.com/v1"])
 def test_real_diagnose_reports_a_missing_or_forbidden_model_endpoint(vlm_base_url: str) -> None:
     post = Post.model_validate({**json.loads(FIXTURE.read_text(encoding="utf-8"))["posts"][3]})

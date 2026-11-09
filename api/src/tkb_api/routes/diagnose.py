@@ -336,8 +336,10 @@ async def _prepare_events(
         interval = settings.mock_event_interval_seconds
         return posts, mock_extractions(settings.demo_fixture_path, posts, interval), interval
 
-    if session.client is None:
-        # モックでログインしたあとに MOCK_MODE=0 で起動し直した場合など。モデルの確認より先に伝える
+    if session.client is None and not (
+        session.auth_method == "oauth" and settings.auth_mode == "oauth"
+    ):
+        # OAuth は次の _fetch_own_posts で公開 AppView を使う。旧方式の無効なセッションだけ拒否する
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "ログインし直してください")
     extractor = _build_extractor(extractor_factory)
     await _ensure_model_reachable(extractor, settings)
