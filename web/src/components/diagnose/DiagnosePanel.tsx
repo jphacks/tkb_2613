@@ -9,6 +9,7 @@ import { ApiError, diagnose } from "@/lib/api";
 import type { Clue } from "@/types/clue";
 import type { Conclusion } from "@/types/diagnose";
 import type { Post } from "@/types/post";
+import type { ProfileItem } from "@/types/profile";
 
 /**
  * 診断の状態。connecting は押してから最初のイベントが届くまで、reading は投稿が届いている間、
@@ -25,6 +26,9 @@ type Phase =
 interface Result {
   clues: readonly Clue[];
   conclusions: readonly Conclusion[];
+  profileClaims: readonly ProfileItem[];
+  ownerProfileText: string;
+  selfReportClues: readonly Clue[];
 }
 
 function statusText(phase: Phase, postCount: number, searchedCount: number): string | null {
@@ -79,7 +83,7 @@ export function DiagnosePanel() {
             setPhase({ kind: "searching" });
             break;
           case "conclusions":
-            setResult({ clues: event.clues, conclusions: event.conclusions });
+            setResult({ clues: event.clues, conclusions: event.conclusions, profileClaims: event.profile_claims ?? [], ownerProfileText: event.owner_profile_text ?? "", selfReportClues: event.self_report_clues ?? [] });
             break;
           case "done":
             setPhase({ kind: "done", postsSeen: event.posts_seen });
@@ -129,7 +133,7 @@ export function DiagnosePanel() {
         )}
       </div>
 
-      {result && <ConclusionBoard clues={result.clues} conclusions={result.conclusions} />}
+      {result && <ConclusionBoard clues={result.clues} conclusions={result.conclusions} profileClaims={result.profileClaims} ownerProfileText={result.ownerProfileText} selfReportClues={result.selfReportClues} />}
 
       {posts.length > 0 && (
         <ol aria-label="読んだ投稿" className="max-w-2xl space-y-5">

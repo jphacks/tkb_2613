@@ -128,6 +128,16 @@ async def fetch_own_posts(client: AsyncClient, did: str, limit: int) -> list[Pos
     return posts
 
 
+async def fetch_own_profile_text(client: AsyncClient, did: str) -> str:
+    """Fetch only the session owner's public profile description via the session DID."""
+    try:
+        profile = await client.get_profile(actor=did)
+    except AtProtocolError as e:
+        raise BlueskyUnavailableError from e
+    description = getattr(profile, "description", "")
+    return description if isinstance(description, str) else ""
+
+
 @dataclass(frozen=True)
 class BlueskySession:
     handle: str
