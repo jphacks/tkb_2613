@@ -28,7 +28,7 @@ from tkb_api.bluesky import BlueskySession, PostsFetcher
 from tkb_api.config import Settings, get_settings
 from tkb_api.pipeline import diagnose_events, load_gazetteer, mock_extractions, real_extractions
 from tkb_api.routes.session import current_session
-from tkb_common.schemas import Post
+from tkb_common.schemas import Post, WebFact
 from tkb_detect.errors import DetectError
 from tkb_detect.extract import Extractor, build_extractor
 from tkb_engine.gazetteer import Gazetteer
@@ -48,6 +48,16 @@ def _load_demo_posts(settings: Settings) -> list[Post]:
         # pydantic の ValidationError は ValueError の仲間。パスや中身はエラーの文言に入れない
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE, "モック用のデータを読み込めませんでした"
+        ) from None
+
+
+def _load_demo_web_facts(settings: Settings) -> list[WebFact]:
+    try:
+        doc = json.loads(settings.demo_fixture_path.read_text(encoding="utf-8"))
+        return [WebFact.model_validate(fact) for fact in doc.get("web_facts", [])]
+    except (OSError, ValueError, KeyError, TypeError):
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, "モック用の公開Web情報を読み込めませんでした"
         ) from None
 
 
@@ -158,12 +168,16 @@ async def diagnose(
 ) -> StreamingResponse:
     if settings.mock_mode:
         posts = _load_demo_posts(settings)
+        web_facts = _load_demo_web_facts(settings)
+        web_lookup_status = "fixture" if web_facts else "not_run"
         owner_profile_text = ""
         owner_profile_analyzer = None
         interval = settings.mock_event_interval_seconds
         extractions = mock_extractions(settings.demo_fixture_path, posts, interval)
     else:
         posts = await _fetch_own_posts(session, settings, fetch_posts)
+        web_facts = []
+        web_lookup_status = "not_run"
         if session.client is None:
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "ログインし直してください")
         try:
@@ -181,6 +195,8 @@ async def diagnose(
         interval,
         owner_profile_text=owner_profile_text,
         owner_profile_analyzer=owner_profile_analyzer,
+        web_facts=web_facts,
+        web_lookup_status=web_lookup_status,
     )
     return StreamingResponse(
         _with_keep_alive(_stream(events), settings.sse_keepalive_seconds),

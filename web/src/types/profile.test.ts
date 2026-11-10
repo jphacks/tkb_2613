@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { PROFILE_ATTRIBUTE_CATALOG, PROFILE_CATEGORIES, isProfileItem, type ProfileAttribute } from "./profile";
+import { PROFILE_ATTRIBUTE_CATALOG, PROFILE_CATEGORIES, isProfileItem, isWebFact, type ProfileAttribute } from "./profile";
 
 describe("profile metadata catalog", () => {
   it("contains the 25 candidate IDs and labels with unrated legacy fields", () => {
@@ -41,9 +41,28 @@ describe("isProfileItem", () => {
       { post_id: "p2", clue_index: null, required: true, source: "post_text", image_index: null, excerpt: "会社名の研修" },
     ] }] })).toBe(true);
   });
+  it("accepts Web evidence only with a fact ID and no post reference", () => {
+    const webEvidence = { post_id: null, clue_index: null, required: true, source: "public_web", web_fact_id: "official-1" };
+    expect(isProfileItem({ ...base, value: "青空社", status: "weak", evidence: [webEvidence] })).toBe(true);
+    expect(isProfileItem({ ...base, value: "青空社", status: "weak", evidence: [{ ...webEvidence, post_id: "post" }] })).toBe(false);
+  });
   it.each([
     ["unknown with a value", { ...base, value: "会社名", status: "unknown" }],
     ["negative clue index", { ...base, value: "会社名", status: "found", evidence: [{ ...base.evidence[0], clue_index: -1 }] }],
     ["single-item evidence path", { ...base, value: "会社名", status: "found", evidence_paths: [{ evidence: [base.evidence[0]] }] }],
   ])("rejects %s", (_label, item) => expect(isProfileItem(item)).toBe(false));
+});
+
+describe("isWebFact", () => {
+  const fact = {
+    id: "official-1", subject: "青空社", relation: "legal_name_of", object: "株式会社青空",
+    source_url: "https://example.org/company/training", source_title: "架空の公式会社案内",
+    source_kind: "official_organization", excerpt: "青空社の正式名称は株式会社青空です",
+    retrieved_at: "2026-11-10T10:00:00+09:00", verification_status: "verified",
+  };
+  it("accepts a sourced verified fact", () => expect(isWebFact(fact)).toBe(true));
+  it("rejects URL credentials and invalid status", () => {
+    expect(isWebFact({ ...fact, source_url: "https://user:pass@example.org/a" })).toBe(false);
+    expect(isWebFact({ ...fact, verification_status: "guessed" })).toBe(false);
+  });
 });

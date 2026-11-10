@@ -18,6 +18,9 @@ from tkb_common.schemas import (
     ProfileItem,
     ProfileStatus,
     Post,
+    WebFact,
+    WebSourceKind,
+    WebVerificationStatus,
 )
 
 
@@ -148,12 +151,146 @@ def recalculate_after_deletion(item: ProfileItem, deleted_post_ids: set[str]) ->
         "evidence": [e for path in surviving for e in path.evidence],
         "confidence": confidence,
         "status": ProfileStatus.FOUND if confidence >= 0.8 else ProfileStatus.WEAK,
+        "assessment": item.assessment.model_copy(update={"minimal_scope": _minimal_scope(surviving)}),
     })
+
+
+def _minimal_scope(paths: list[ProfileEvidencePath]) -> EvidenceScope:
+    return (
+        EvidenceScope.BLUESKY
+        if any(all(ref.source != "public_web" for ref in path.evidence) for path in paths)
+        else EvidenceScope.BLUESKY_PUBLIC_WEB
+    )
+
+
+def infer_web_employer_claim(
+    posts: list[Post], web_facts: list[WebFact], owner_profile_text: str = "",
+) -> ProfileItem | None:
+    """Infer an employer from explicit employer naming, a second owner post, and a verified legal name.
+
+    The explicit employer anchor identifies the owner relationship; the public source only
+    normalizes that named organization to its legal name.
+    """
+    candidates: dict[str, tuple[str, list[ProfileEvidencePath]]] = {}
+    anchors = [(post.post_id, post.text, "post_text") for post in posts]
+    if owner_profile_text.strip():
+        anchors.append((None, owner_profile_text, "profile_text"))
+    eligible_facts = [
+        fact for fact in web_facts
+        # Only normalize the owner-linked organization itself to its legal name.
+        # A program, event, campus, tenant, or contractor being associated with a
+        # company does not establish that the account owner works there.
+        if fact.relation == "legal_name_of"
+        and fact.verification_status is WebVerificationStatus.VERIFIED
+        and fact.source_kind in {WebSourceKind.OFFICIAL_ORGANIZATION, WebSourceKind.PUBLIC_REGISTRY}
+        and _is_organization_name(fact.object)
+    ]
+    for anchor_post_id, anchor_text, anchor_source in anchors:
+        if _forbidden_context(anchor_text):
+            continue
+        # The Web-backed path requires the post to state that X itself is the
+        # employer/name, not merely something belonging to the company.
+        for match in re.finditer(
+            r"(?:私の勤務先は|私の勤め先は|勤務先は|勤め先は|うちの会社は)(?P<bridge>[^\s、。]+)",
+            anchor_text,
+        ):
+            bridge_text = match.group("bridge").rstrip("ですだにへをがは")
+            if not _is_distinctive_bridge(bridge_text):
+                continue
+            bridge_key = _normalize_bridge(bridge_text)
+            for fact in eligible_facts:
+                if _normalize_bridge(fact.subject) != bridge_key:
+                    continue
+                for supporting_post in posts:
+                    if supporting_post.post_id == anchor_post_id or bridge_text not in supporting_post.text:
+                        continue
+                    if _forbidden_context(supporting_post.text):
+                        continue
+                    # Profile anchors still require two independent posts.
+                    if anchor_post_id is None:
+                        other_posts = [
+                            post for post in posts
+                            if post.post_id != supporting_post.post_id and bridge_text in post.text
+                        ]
+                    else:
+                        other_posts = [next(post for post in posts if post.post_id == anchor_post_id)]
+                    for other_post in other_posts:
+                        evidence = [
+                            ProfileEvidence(
+                                post_id=anchor_post_id,
+                                clue_index=None,
+                                required=True,
+                                source=anchor_source,
+                                excerpt=match.group(0),
+                            ),
+                            ProfileEvidence(
+                                post_id=other_post.post_id if anchor_post_id is None else supporting_post.post_id,
+                                clue_index=None,
+                                required=True,
+                                source="post_text",
+                                excerpt=bridge_text,
+                            ),
+                            ProfileEvidence(
+                                source="public_web", web_fact_id=fact.id, required=True,
+                            ),
+                        ]
+                        if anchor_post_id is None:
+                            evidence.insert(2, ProfileEvidence(
+                                post_id=supporting_post.post_id, clue_index=None, required=True,
+                                source="post_text", excerpt=bridge_text,
+                            ))
+                        key = _normalize_bridge(fact.object)
+                        candidates.setdefault(key, (fact.object, []))[1].append(
+                            ProfileEvidencePath(evidence=evidence, confidence=0.65)
+                        )
+    if len(candidates) != 1:
+        return None
+    value, paths = next(iter(candidates.values()))
+    unique_paths: dict[tuple[tuple[str, str, str], ...], ProfileEvidencePath] = {}
+    for path in paths:
+        key = tuple((ref.source.value, ref.post_id or "", ref.web_fact_id or "") for ref in path.evidence)
+        unique_paths[key] = path
+    paths = list(unique_paths.values())
+    return ProfileItem(
+        attribute=ProfileAttribute.EMPLOYER_NAME,
+        value=value,
+        confidence=0.65,
+        status=ProfileStatus.WEAK,
+        evidence=[ref for path in paths for ref in path.evidence],
+        evidence_paths=paths,
+        assessment=ClaimAssessment(minimal_scope=EvidenceScope.BLUESKY_PUBLIC_WEB),
+    )
+
+
+def infer_owner_claims_with_web(
+    posts: list[Post], clues: list[Clue], web_facts: list[WebFact],
+    owner_profile_text: str = "", self_report_clues: list[Clue] | None = None,
+) -> list[ProfileItem]:
+    """Combine direct and Web-backed paths; reject conflicting employer names."""
+    claims = infer_owner_claims(posts, clues, owner_profile_text, self_report_clues)
+    web_claim = infer_web_employer_claim(posts, web_facts, owner_profile_text)
+    if web_claim is None:
+        return claims
+    direct = next((item for item in claims if item.attribute is ProfileAttribute.EMPLOYER_NAME), None)
+    if direct is None:
+        return [*claims, web_claim]
+    if _normalize_bridge(direct.value or "") != _normalize_bridge(web_claim.value or ""):
+        return [item for item in claims if item.attribute is not ProfileAttribute.EMPLOYER_NAME]
+    paths = [*direct.evidence_paths, *web_claim.evidence_paths]
+    merged = direct.model_copy(update={
+        "evidence_paths": paths,
+        "evidence": [ref for path in paths for ref in path.evidence],
+        "assessment": direct.assessment.model_copy(update={"minimal_scope": _minimal_scope(paths)}),
+    })
+    return [merged if item is direct else item for item in claims]
 
 
 def _forbidden_context(context: str) -> bool:
     value = context.casefold()
-    return any(token in value for token in ("visitor", "logo-only", "visit-only", "guest"))
+    return any(token in value for token in (
+        "visitor", "logo-only", "visit-only", "guest", "訪問", "見学", "遊びに", "客として",
+        "来場", "参加者として", "取引先", "委託", "外注", "派遣先",
+    ))
 
 
 def infer_owner_claims(
@@ -175,6 +312,8 @@ def infer_owner_claims(
     if owner_profile_text.strip():
         anchors.append((None, owner_profile_text, "profile_text"))
     for anchor_post_id, anchor_text, anchor_source in anchors:
+        if _forbidden_context(anchor_text):
+            continue
         for attribute, anchor_pattern, value_pattern, clue_type, validator in (
             (ProfileAttribute.RESIDENTIAL_AREA, r"自宅近くの(?P<bridge>[^\s、。]+)", r"{bridge}(?:は|が)(?P<value>[^\s、。]+)", ClueType.PLACE_TEXT, _is_residential_value),
             (ProfileAttribute.EMPLOYER_NAME, r"うちの会社の(?P<bridge>[^\s、。]+)", r"(?P<value>[^\s、。]+?)の{bridge}", ClueType.ORG_TEXT, _is_organization_name),
@@ -191,6 +330,8 @@ def infer_owner_claims(
                                        bridge_id, True, excerpt=anchor_match.group(0), source=anchor_source))
 
             for supporting_post in posts:
+                if _forbidden_context(supporting_post.text):
+                    continue
                 if supporting_post.post_id != anchor_post_id and bridge_text in supporting_post.text:
                     facts.append(CrossPostFact(supporting_post.post_id, None, FactRole.BRIDGE, bridge_text,
                                                confidence, bridge_id, excerpt=bridge_text))
@@ -264,4 +405,8 @@ def _is_residential_value(value: str) -> bool:
 
 
 def _is_organization_name(value: str) -> bool:
-    return value.endswith(("社", "株式会社", "有限会社", "合同会社", "商事", "銀行", "大学", "法人"))
+    normalized = value.strip()
+    legal_prefixes = ("株式会社", "有限会社", "合同会社", "合資会社", "合名会社")
+    if any(normalized.startswith(prefix) and len(normalized.removeprefix(prefix)) >= 2 for prefix in legal_prefixes):
+        return True
+    return normalized.endswith(("社", "株式会社", "有限会社", "合同会社", "合資会社", "合名会社", "商事", "銀行", "大学", "法人"))

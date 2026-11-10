@@ -32,7 +32,8 @@ Pythonの正は `common/src/tkb_common/schemas.py`、画面側の対応型は `w
 - **Clue**: `post_id, image_index, type, value, region, confidence, source`。`region` は元画像ピクセルの `[x1,y1,x2,y2]` またはnull。本文由来は通常 `image_index/region=null`、`source=text`。画像alt由来は `source=alt` と画像の `image_index` を持ち、矩形はnull。プロフィール文由来の自己申告は `source=profile_text`。確信度は0〜1。許容type/sourceの列挙と整合条件は共通スキーマを参照。
 - **DetectResponse**: `{"clues":[Clue,…]}`。
 - **現在の診断Conclusion**: `rule, attribute, value, clue_indices, note`。`clue_indices` は同じ `conclusions` イベントの `clues` 配列に対する0始まり番号。
-- **ProfileItem**: `attribute, value, confidence, status, evidence, evidence_paths, assessment`。現在は `residential_area` と `employer_name` の限定ルールのみが生成する。評価軸の詳細は `docs/profile-classification-v2.md` を参照。
+- **ProfileItem**: `attribute, value, confidence, status, evidence, evidence_paths, assessment`。現在は `residential_area` と `employer_name` の限定ルールのみが生成する。`ProfileEvidence.source=public_web` のときは `web_fact_id` を参照し、投稿IDは持たない。評価軸の詳細は `docs/profile-classification-v2.md` を参照。
+- **WebFact**: `id, subject, relation, object, source_url, source_title, source_kind, excerpt, retrieved_at, verification_status`。公開対象物についての事実であり、本人との関係そのものは示さない。雇用主名のWeb補強では `relation=legal_name_of` の確認済み公式組織・公的登録情報だけを受け付け、本人投稿で明示された会社名自体を `subject` にする。研修・イベント・施設の主催、運営、開催場所などから雇用主を結び付けない。SSE内の各 `public_web` 根拠は同じイベントの `web_facts[].id` に存在し、ID重複や参照切れはクライアントが不正応答として拒否する。
 
 ## 診断 SSE のイベント
 
@@ -42,7 +43,7 @@ SSEブロックは `event: <name>\ndata: <JSON>\n\n`。JSONはUTF-8で送られ�
 | --- | --- | --- | --- |
 | 1 | `post` | `{"post": Post}` | 診断対象投稿をすべて取得した後、投稿一覧の順に全件送信。各投稿を送るたび手がかり抽出を待つわけではない。 |
 | 2 | `clues` | `{"post_id":"…","clues":[Clue,…],"error":string|null}` | 抽出処理が完了した投稿ごと。抽出処理の完了順。成功時は `error:null`。投稿単位の抽出失敗時は空の `clues` とエラー文字列を送る。 |
-| 3 | `conclusions` | `{"clues":[全Clue,…],"conclusions":[Conclusion,…],"profile_claims":[ProfileItem,…],"owner_profile_text":string,"self_report_clues":[Clue,…]}` | 全投稿の抽出処理の後に1回。cluesは `clues` イベントで得た配列を集めたもの。profile_claims は限定ルールで成立した候補。プロフィール文と自己申告手がかりは別枠で返す。 |
+| 3 | `conclusions` | `{"clues":[全Clue,…],"conclusions":[Conclusion,…],"profile_claims":[ProfileItem,…],"web_facts":[WebFact,…],"web_lookup_status":"not_run"|"fixture","owner_profile_text":string,"self_report_clues":[Clue,…]}` | 全投稿の抽出処理の後に1回。cluesは `clues` イベントで得た配列を集めたもの。profile_claims は限定ルールで成立した候補。プロフィール文と自己申告手がかりは別枠で返す。`fixture` は架空の固定WebFactを使用、`not_run` は公開Web未照合を示す。 |
 | 4 | `done` | `{"posts_seen":number}` | 推理の後、正常完了時に1回。 |
 
 ### 失敗・切断の現状
@@ -57,6 +58,7 @@ SSEブロックは `event: <name>\ndata: <JSON>\n\n`。JSONはUTF-8で送られ�
 ### `profile_claims` の範囲
 
 - 現在の限定推論対象は `residential_area` と `employer_name`。明示的な本人関係、固有名の橋渡し、型付き値がそろった場合だけ候補を返す。単独の住所・駅名、一般名詞、ロゴ、訪問だけでは推定しない。
+- `employer_name` には、別投稿の固有名の橋と確認済みWebFactを結んだ経路も追加できる。Web経路の本人アンカーは「勤務先はX」「勤め先はX」「うちの会社はX」のようにX自体を雇用主として明示する文に限る。「うちの会社のX」は子会社・研修・施設などを指す可能性があるためWeb経路のアンカーにしない。WebFactはX自体の正式名称（`subject=X`, `relation=legal_name_of`, `object=正式名称`）だけを補強し、Xに関連する研修・イベント等の事実から雇用関係を推論しない。本人投稿2件の条件を維持し、訪問・見学文脈、競合する会社名は採用しない。これは推論器と固定データの受け口であり、実モードの公開Web検索接続は未実装。実モードでは `web_facts=[]`, `web_lookup_status=not_run`。
 - 推論パターン確度は暫定値で校正済み確率ではない。0.50未満は出さず、0.80未満を `weak`、0.80以上を `found` とする。
 - `evidence_paths` はAND条件の経路ごとに根拠を列挙し、複数経路はORとして扱う。削除後は削除投稿を含む経路を除いて再計算する。プロフィール文根拠は `source=profile_text` と抜粋で区別する。
 - 四軸評価の未根拠値はnull。条件付き危害はシナリオ・前提条件・状態がそろわない限り現在の被害として示さない。

@@ -16,11 +16,11 @@ from urllib.parse import urlparse
 
 import httpx
 
-from tkb_common.schemas import BSKY_CDN_PREFIX, Clue, Post
+from tkb_common.schemas import BSKY_CDN_PREFIX, Clue, Post, WebFact
 from tkb_detect.batch import PostExtraction, extract_posts
 from tkb_detect.extract import Extractor
 from tkb_engine.gazetteer import Gazetteer
-from tkb_engine.cross_post import infer_owner_claims
+from tkb_engine.cross_post import infer_owner_claims_with_web
 from tkb_engine.rules import infer
 
 logger = logging.getLogger(__name__)
@@ -101,6 +101,8 @@ async def diagnose_events(
     *,
     owner_profile_text: str = "",
     owner_profile_analyzer: Callable[[str], Awaitable[list[Clue]]] | None = None,
+    web_facts: Sequence[WebFact] = (),
+    web_lookup_status: str = "not_run",
 ) -> AsyncIterator[Event]:
     """診断のイベントを順に返す。
 
@@ -118,13 +120,17 @@ async def diagnose_events(
 
     conclusions = infer(all_clues, list(posts), gazetteer)
     self_report_clues = await owner_profile_analyzer(owner_profile_text) if owner_profile_text and owner_profile_analyzer else []
-    profile_claims = infer_owner_claims(list(posts), all_clues, owner_profile_text, self_report_clues)
+    profile_claims = infer_owner_claims_with_web(
+        list(posts), all_clues, list(web_facts), owner_profile_text, self_report_clues,
+    )
     yield (
         "conclusions",
         {
             "clues": [c.model_dump(mode="json") for c in all_clues],
             "conclusions": [asdict(c) for c in conclusions],
             "profile_claims": [item.model_dump(mode="json") for item in profile_claims],
+            "web_facts": [fact.model_dump(mode="json") for fact in web_facts],
+            "web_lookup_status": web_lookup_status,
             "self_report_clues": [c.model_dump(mode="json") for c in self_report_clues],
             # Direct self-report is kept separate from cross-post inference and streamed only
             # to the authenticated owner; it is never persisted.

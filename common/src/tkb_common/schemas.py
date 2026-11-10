@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Annotated, Self
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
 
 NonNegativeInt = Annotated[int, Field(ge=0)]
 PositiveInt = Annotated[int, Field(gt=0)]
@@ -268,6 +268,44 @@ class EvidenceSource(StrEnum):
     POST_TEXT = "post_text"
     PROFILE_TEXT = "profile_text"
     IMAGE_ALT = "image_alt"
+    PUBLIC_WEB = "public_web"
+
+
+class WebSourceKind(StrEnum):
+    OFFICIAL_ORGANIZATION = "official_organization"
+    PUBLIC_REGISTRY = "public_registry"
+    OTHER = "other"
+
+
+class WebVerificationStatus(StrEnum):
+    VERIFIED = "verified"
+    UNVERIFIED = "unverified"
+    CONFLICT = "conflict"
+    STALE = "stale"
+
+
+class WebFact(BaseModel):
+    """A public fact about an entity, never a fact about the account owner."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    id: str = Field(min_length=1, max_length=100)
+    subject: str = Field(min_length=1, max_length=200)
+    relation: str = Field(min_length=1, max_length=100)
+    object: str = Field(min_length=1, max_length=200)
+    source_url: HttpUrl
+    source_title: str = Field(min_length=1, max_length=300)
+    source_kind: WebSourceKind
+    excerpt: str = Field(min_length=1, max_length=500)
+    retrieved_at: AwareDatetime
+    verification_status: WebVerificationStatus
+
+    @field_validator("source_url")
+    @classmethod
+    def _require_public_https(cls, value: HttpUrl) -> HttpUrl:
+        if value.scheme != "https" or value.username is not None or value.password is not None:
+            raise ValueError("WebFact source_url requires HTTPS without credentials")
+        return value
 
 
 class ProfileEvidence(BaseModel):
@@ -279,9 +317,12 @@ class ProfileEvidence(BaseModel):
     source: EvidenceSource = EvidenceSource.CLUE
     image_index: NonNegativeInt | None = None
     excerpt: str | None = None
+    web_fact_id: str | None = Field(default=None, min_length=1)
 
     @model_validator(mode="after")
     def _check_source_reference(self) -> Self:
+        if self.source is not EvidenceSource.PUBLIC_WEB and self.web_fact_id is not None:
+            raise ValueError("only public_web evidence may reference web_fact_id")
         if self.source is EvidenceSource.CLUE:
             if self.post_id is None or self.clue_index is None or self.image_index is not None:
                 raise ValueError("clue evidence requires post_id and clue_index")
@@ -294,6 +335,9 @@ class ProfileEvidence(BaseModel):
         elif self.source is EvidenceSource.IMAGE_ALT:
             if self.post_id is None or self.clue_index is not None or self.image_index is None or self.excerpt is None:
                 raise ValueError("image_alt evidence requires post_id, image_index, and excerpt")
+        elif self.source is EvidenceSource.PUBLIC_WEB:
+            if self.web_fact_id is None or self.post_id is not None or self.clue_index is not None or self.image_index is not None or self.excerpt is not None:
+                raise ValueError("public_web evidence requires only web_fact_id")
         return self
 
 

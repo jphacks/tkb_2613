@@ -12,7 +12,7 @@
 
 import { type Clue, isClue } from "./clue";
 import { isPost, type Post } from "./post";
-import { isProfileItem, type ProfileItem } from "./profile";
+import { isProfileItem, isWebFact, type ProfileItem, type WebFact } from "./profile";
 
 /** 推理ルールが出した結論 1 つ（engine の Conclusion） */
 export interface Conclusion {
@@ -38,6 +38,8 @@ export type DiagnoseEvent =
       readonly clues: readonly Clue[];
       readonly conclusions: readonly Conclusion[];
       readonly profile_claims?: readonly ProfileItem[];
+      readonly web_facts?: readonly WebFact[];
+      readonly web_lookup_status?: "not_run" | "fixture";
       readonly owner_profile_text?: string;
       readonly self_report_clues?: readonly Clue[];
     }
@@ -107,16 +109,32 @@ export function toDiagnoseEvent(event: string, data: string): DiagnoseEvent | nu
     const profileClaims = value.profile_claims ?? [];
     const profileText = value.owner_profile_text ?? "";
     const selfReportClues = value.self_report_clues ?? [];
+    const webFacts = value.web_facts ?? [];
+    const webLookupStatus = value.web_lookup_status ?? "not_run";
+    const webFactIds = Array.isArray(webFacts) && webFacts.every(isWebFact)
+      ? new Set(webFacts.map((fact) => fact.id))
+      : new Set<string>();
+    const claimsReferenceKnownWebFacts = Array.isArray(profileClaims) && profileClaims.every(isProfileItem) && profileClaims.every((claim) =>
+      claim.evidence.every((evidence) => evidence.source !== "public_web" ||
+        (typeof evidence.web_fact_id === "string" && webFactIds.has(evidence.web_fact_id))) &&
+      (claim.evidence_paths ?? []).every((path) => path.evidence.every((evidence) =>
+        evidence.source !== "public_web" ||
+        (typeof evidence.web_fact_id === "string" && webFactIds.has(evidence.web_fact_id)))),
+    );
     if (
       Array.isArray(conclusions) && conclusions.every((c) => isConclusion(c, clueCount)) &&
       Array.isArray(profileClaims) && profileClaims.every(isProfileItem) && typeof profileText === "string" &&
-      isClueList(selfReportClues)
+      isClueList(selfReportClues) && Array.isArray(webFacts) && webFacts.every(isWebFact) &&
+      new Set(webFacts.map((fact) => fact.id)).size === webFacts.length && claimsReferenceKnownWebFacts &&
+      (webLookupStatus === "not_run" || webLookupStatus === "fixture")
     ) {
       return {
         event,
         clues: value.clues,
         conclusions: conclusions as Conclusion[],
         ...(Object.hasOwn(value, "profile_claims") ? { profile_claims: profileClaims } : {}),
+        ...(Object.hasOwn(value, "web_facts") ? { web_facts: webFacts } : {}),
+        ...(Object.hasOwn(value, "web_lookup_status") ? { web_lookup_status: webLookupStatus } : {}),
         ...(Object.hasOwn(value, "owner_profile_text") ? { owner_profile_text: profileText } : {}),
         ...(Object.hasOwn(value, "self_report_clues") ? { self_report_clues: selfReportClues } : {}),
       };

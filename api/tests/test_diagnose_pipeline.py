@@ -14,7 +14,7 @@ from tkb_api.pipeline import (
     fetch_images,
     load_gazetteer,
 )
-from tkb_common.schemas import Clue, ClueSource, ClueType, Post
+from tkb_common.schemas import Clue, ClueSource, ClueType, Post, WebFact
 from tkb_detect.batch import PostExtraction
 from tkb_engine.gazetteer import Gazetteer
 
@@ -130,3 +130,31 @@ async def test_events_keep_failed_posts_and_index_conclusions_into_all_clues() -
     routine = next(c for c in result["conclusions"] if c["attribute"] == "routine")
     assert routine["clue_indices"] == [0]
     assert set(routine) == {"rule", "attribute", "value", "clue_indices", "note"}
+
+
+@pytest.mark.anyio
+async def test_web_employer_evidence_is_streamed_with_its_source() -> None:
+    anchor = _post(0, text="勤務先は青空社")
+    bridge = anchor.model_copy(update={
+        "post_id": "at://did:plc:xxxx/app.bsky.feed.post/2",
+        "text": "青空社の資料を整理",
+    })
+    fact = WebFact.model_validate({
+        "id": "official-1", "subject": "青空社", "relation": "legal_name_of",
+        "object": "株式会社青空", "source_url": "https://example.org/company/training",
+        "source_title": "架空の公式会社案内", "source_kind": "official_organization",
+        "excerpt": "青空社の正式名称は株式会社青空です",
+        "retrieved_at": "2026-11-10T10:00:00+09:00", "verification_status": "verified",
+    })
+    events = [event async for event in diagnose_events(
+        [anchor, bridge],
+        _stream([PostExtraction(post_id=anchor.post_id, clues=[]),
+                 PostExtraction(post_id=bridge.post_id, clues=[])]),
+        Gazetteer(), web_facts=[fact], web_lookup_status="fixture",
+    )]
+    result = next(data for name, data in events if name == "conclusions")
+    assert result["web_lookup_status"] == "fixture"
+    assert result["web_facts"][0]["id"] == "official-1"
+    claim = result["profile_claims"][0]
+    assert claim["value"] == "株式会社青空"
+    assert any(ref["web_fact_id"] == "official-1" for ref in claim["evidence"])

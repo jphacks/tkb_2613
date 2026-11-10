@@ -1,7 +1,7 @@
 import { CLUE_LABELS } from "@/lib/clueLabels";
 import type { Clue } from "@/types/clue";
 import type { Conclusion } from "@/types/diagnose";
-import { PROFILE_ATTRIBUTE_CATALOG, type ProfileItem } from "@/types/profile";
+import { PROFILE_ATTRIBUTE_CATALOG, type ProfileItem, type WebFact } from "@/types/profile";
 
 /** engine の試作の項目名（attribute）の表示名。16項目への対応づけまでのつなぎ */
 const ATTRIBUTE_LABELS: Readonly<Record<string, string>> = {
@@ -15,17 +15,20 @@ interface ConclusionBoardProps {
   clues: readonly Clue[];
   conclusions: readonly Conclusion[];
   profileClaims?: readonly ProfileItem[];
+  webFacts?: readonly WebFact[];
+  webLookupStatus?: "not_run" | "fixture";
   ownerProfileText?: string;
   selfReportClues?: readonly Clue[];
 }
 
 /** 捜査ボード。推理の結論を「推定」として並べ、根拠の手がかりを添える。 */
-export function ConclusionBoard({ clues, conclusions, profileClaims = [], ownerProfileText = "", selfReportClues = [] }: ConclusionBoardProps) {
+export function ConclusionBoard({ clues, conclusions, profileClaims = [], webFacts = [], webLookupStatus = "not_run", ownerProfileText = "", selfReportClues = [] }: ConclusionBoardProps) {
   return (
     <section aria-labelledby="board-heading" className="max-w-2xl space-y-4">
       <h3 id="board-heading" className="font-display text-2xl">
         捜査ボード
       </h3>
+      <p className="text-xs text-ink/60">{webLookupStatus === "fixture" ? "公開Webの情報は架空のデモデータです" : "公開Webの照合はまだ行っていません"}</p>
       {conclusions.length === 0 && profileClaims.length === 0 ? (
         <p className="text-ink/70">投稿からは、あなたについて推定できることは見つかりませんでした</p>
       ) : (
@@ -79,7 +82,7 @@ export function ConclusionBoard({ clues, conclusions, profileClaims = [], ownerP
               <li key={item.attribute} className="border-l-4 border-seeker bg-paper-deep px-4 py-3">
                 <p className="text-xs text-ink/60">{PROFILE_ATTRIBUTE_CATALOG[item.attribute].label} ・{item.status === "weak" ? "弱い推定" : "推定"}・暫定ルール確度 {Math.round(item.confidence * 100)}%</p>
                 <p className="mt-1 text-lg font-bold">{item.value}</p>
-                <p className="text-sm text-ink/70">本人との明示的な関係、固有名の橋渡し、型付きの値から作った暫定候補です。プロフィール文を根拠に使う場合も、橋渡しと値を示す別投稿2件を必要とします。</p>
+                <p className="text-sm text-ink/70">{item.assessment?.minimal_scope === "bluesky_plus_public_web" ? "本人投稿で勤務先名として明示された会社名を、別投稿と公式情報で照合した暫定候補です。プロフィール文を根拠に使う場合も、同じ会社名に触れる別投稿2件を必要とします。" : "本人との明示的な関係、固有名の橋渡し、型付きの値から作った暫定候補です。プロフィール文を根拠に使う場合も、橋渡しと値を示す別投稿2件を必要とします."}</p>
                 <dl className="mt-2 grid grid-cols-2 gap-2 text-xs text-ink/70">
                   <div><dt>必要な情報範囲</dt><dd>{item.assessment?.minimal_scope === "bluesky" ? "Bluesky内のみ" : item.assessment?.minimal_scope === "bluesky_plus_public_web" ? "Bluesky＋公開Web" : item.assessment?.minimal_scope === "bluesky_plus_offline" ? `Bluesky＋オフライン（${item.assessment.offline_subtype ?? "経路未指定"}）` : "未評価"}</dd></div>
                   <div><dt>心理的抵抗感</dt><dd>{item.assessment?.psychological_resistance == null ? "未評価" : `${item.assessment.psychological_resistance}/5 (${item.assessment.persona_context})`}</dd></div>
@@ -90,8 +93,9 @@ export function ConclusionBoard({ clues, conclusions, profileClaims = [], ownerP
                   <ul key={pathIndex} aria-label={`根拠経路 ${pathIndex + 1}`} className="mt-2 flex flex-wrap gap-2">
                     {path.evidence.map((evidence) => {
                       const clue = evidence.clue_index == null ? undefined : clues[evidence.clue_index];
-                      const sourceLabel = evidence.source === "profile_text" ? "プロフィール文" : evidence.source === "post_text" ? "投稿本文" : evidence.source === "image_alt" ? "画像alt" : "投稿手がかり";
-                      return <li key={`${evidence.post_id}:${evidence.clue_index}:${evidence.excerpt}`} className="rounded border border-ink/20 px-2 py-1 text-sm"><span className="block text-[10px] text-ink/60">{sourceLabel}{evidence.post_id ? ` · ${evidence.post_id}` : ""}</span>{clue?.value ?? evidence.excerpt ?? "根拠"}</li>;
+                      const webFact = evidence.web_fact_id ? webFacts.find((fact) => fact.id === evidence.web_fact_id) : undefined;
+                      const sourceLabel = evidence.source === "public_web" ? "公開Web" : evidence.source === "profile_text" ? "プロフィール文" : evidence.source === "post_text" ? "投稿本文" : evidence.source === "image_alt" ? "画像alt" : "投稿手がかり";
+                      return <li key={`${evidence.post_id}:${evidence.clue_index}:${evidence.excerpt}:${evidence.web_fact_id}`} className="rounded border border-ink/20 px-2 py-1 text-sm"><span className="block text-[10px] text-ink/60">{sourceLabel}{evidence.post_id ? ` · ${evidence.post_id}` : ""}</span>{webFact ? <><span>{webFact.excerpt}</span><a href={webFact.source_url} target="_blank" rel="noopener noreferrer" className="mt-1 block underline">出典: {webFact.source_title}</a></> : clue?.value ?? evidence.excerpt ?? "根拠"}</li>;
                     })}
                   </ul>
                 ))}

@@ -81,13 +81,27 @@ export type ProfileAttributeMetadata = (typeof PROFILE_ATTRIBUTE_CATALOG)[Profil
 export type Guessability = ProfileAttributeMetadata["guessability"];
 export type ProfileStatus = "found" | "weak" | "unknown";
 
+export interface WebFact {
+  readonly id: string;
+  readonly subject: string;
+  readonly relation: string;
+  readonly object: string;
+  readonly source_url: string;
+  readonly source_title: string;
+  readonly source_kind: "official_organization" | "public_registry" | "other";
+  readonly excerpt: string;
+  readonly retrieved_at: string;
+  readonly verification_status: "verified" | "unverified" | "conflict" | "stale";
+}
+
 export interface ProfileEvidence {
   readonly post_id: string | null;
   readonly clue_index: number | null;
   readonly required: boolean;
-  readonly source?: "clue" | "post_text" | "profile_text" | "image_alt";
+  readonly source?: "clue" | "post_text" | "profile_text" | "image_alt" | "public_web";
   readonly image_index?: number | null;
   readonly excerpt?: string | null;
+  readonly web_fact_id?: string | null;
 }
 
 export interface ProfileEvidencePath {
@@ -125,19 +139,35 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
+export function isWebFact(value: unknown): value is WebFact {
+  if (!isRecord(value)) return false;
+  const stringFields = ["id", "subject", "relation", "object", "source_url", "source_title", "excerpt", "retrieved_at"];
+  if (!Object.keys(value).every((key) => [...stringFields, "source_kind", "verification_status"].includes(key))) return false;
+  if (!stringFields.every((key) => typeof value[key] === "string" && (value[key] as string).trim().length > 0)) return false;
+  try {
+    const url = new URL(value.source_url as string);
+    if (url.protocol !== "https:" || url.username || url.password) return false;
+  } catch { return false; }
+  return !Number.isNaN(Date.parse(value.retrieved_at as string)) &&
+    ["official_organization", "public_registry", "other"].includes(value.source_kind as string) &&
+    ["verified", "unverified", "conflict", "stale"].includes(value.verification_status as string);
+}
+
 function isProfileEvidence(value: unknown): value is ProfileEvidence {
   if (!isRecord(value)) return false;
   const source = value.source ?? "clue";
   return (
     Object.keys(value).every((key) =>
-      ["post_id", "clue_index", "required", "source", "image_index", "excerpt"].includes(key),
+      ["post_id", "clue_index", "required", "source", "image_index", "excerpt", "web_fact_id"].includes(key),
     ) &&
     typeof value.required === "boolean" &&
-    ["clue", "post_text", "profile_text", "image_alt"].includes(source as string) &&
+    ["clue", "post_text", "profile_text", "image_alt", "public_web"].includes(source as string) &&
+    (source === "public_web" || value.web_fact_id === null || value.web_fact_id === undefined) &&
     ((source === "clue" && typeof value.post_id === "string" && Number.isInteger(value.clue_index) && (value.clue_index as number) >= 0 && (value.image_index === null || value.image_index === undefined)) ||
       (source === "post_text" && typeof value.post_id === "string" && value.clue_index === null && (value.image_index === null || value.image_index === undefined) && typeof value.excerpt === "string") ||
       (source === "profile_text" && value.post_id === null && value.clue_index === null && typeof value.excerpt === "string") ||
-      (source === "image_alt" && typeof value.post_id === "string" && value.clue_index === null && Number.isInteger(value.image_index) && typeof value.excerpt === "string"))
+      (source === "image_alt" && typeof value.post_id === "string" && value.clue_index === null && Number.isInteger(value.image_index) && typeof value.excerpt === "string") ||
+      (source === "public_web" && value.post_id === null && value.clue_index === null && (value.image_index === null || value.image_index === undefined) && (value.excerpt === null || value.excerpt === undefined) && typeof value.web_fact_id === "string" && value.web_fact_id.length > 0))
   );
 }
 
