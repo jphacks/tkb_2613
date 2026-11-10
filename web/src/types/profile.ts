@@ -94,6 +94,47 @@ export interface WebFact {
   readonly verification_status: "verified" | "unverified" | "conflict" | "stale";
 }
 
+export interface ExternalOwnerEvidence {
+  readonly kind: "profile_text" | "post_text";
+  readonly post_id: string | null;
+  readonly excerpt: string;
+}
+
+/** Public search hit. owner_linked means only that the owner's own profile/post links this URL. */
+export interface ExternalProfileResult {
+  readonly id: string;
+  readonly url: string;
+  readonly domain: string;
+  readonly title: string;
+  readonly status: "candidate" | "owner_linked";
+  readonly owner_evidence: ExternalOwnerEvidence | null;
+}
+
+export type ExternalLookupStatus = "not_requested" | "fixture" | "searched" | "no_results" | "unavailable";
+
+export function isExternalProfileResult(value: unknown): value is ExternalProfileResult {
+  if (!isRecord(value)) return false;
+  const keys = ["id", "url", "domain", "title", "status", "owner_evidence"];
+  if (!Object.keys(value).every((key) => keys.includes(key))) return false;
+  if (!["id", "url", "domain", "title"].every((key) => typeof value[key] === "string" && (value[key] as string).length > 0)) return false;
+  let url: URL;
+  try { url = new URL(value.url as string); } catch { return false; }
+  const host = url.hostname.toLowerCase().replace(/\.$/, "");
+  if (
+    url.protocol !== "https:" || url.username || url.password || url.port || host !== (value.domain as string).toLowerCase() ||
+    host.length > 253 || host.split(".").length < 2 || /^\d{1,3}(?:\.\d{1,3}){3}$/.test(host) ||
+    host === "localhost.localdomain" ||
+    [".localhost", ".local", ".localdomain", ".internal", ".test", ".invalid", ".home", ".lan", ".home.arpa"].some((suffix) => host.endsWith(suffix)) ||
+    host.split(".").some((label) => !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label))
+  ) return false;
+  if (value.status === "candidate") return value.owner_evidence === null;
+  if (value.status !== "owner_linked" || !isRecord(value.owner_evidence)) return false;
+  const evidence = value.owner_evidence;
+  if (!Object.keys(evidence).every((key) => ["kind", "post_id", "excerpt"].includes(key)) || typeof evidence.excerpt !== "string" || !evidence.excerpt) return false;
+  return (evidence.kind === "profile_text" && evidence.post_id === null) ||
+    (evidence.kind === "post_text" && typeof evidence.post_id === "string" && evidence.post_id.length > 0);
+}
+
 export interface ProfileEvidence {
   readonly post_id: string | null;
   readonly clue_index: number | null;

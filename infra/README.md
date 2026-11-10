@@ -27,6 +27,7 @@ make down
 
 - web と api だけを動かす。VLM と OCR はチームのサーバーで動かし、`.env` の `VLM_BASE_URL`、`OCR_BASE_URL` で指定する
 - 既定は `MOCK_MODE=1`（外部に一切接続しない）。実際のモデルにつなぐときは `.env` で `MOCK_MODE=0` にする
+- Brave Web Search を実モードで使う場合だけ、api 側の `.env` に `BRAVE_SEARCH_API_KEY` を設定する。診断ごとの画面同意が必要で、送信するのは本人の公開Blueskyハンドルだけ。Braveは有料プランと支払情報が必要で、検索語は最大90日保持される。モックモードは同意状態にかかわらず検索通信を行わない。
 - コンテナのファイルシステムは読み取り専用（写真をディスクに残さないため）。書き込めるのはメモリ上の `/tmp` だけ
 - ポートは `127.0.0.1` にだけ公開する
 - 画面は `/api` を api に中継する（`web/next.config.ts` の rewrites）。中継先の `API_ORIGIN` はビルド時に読まれるので、変えたら `make up` でビルドし直す

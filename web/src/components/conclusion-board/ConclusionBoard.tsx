@@ -1,7 +1,7 @@
 import { CLUE_LABELS } from "@/lib/clueLabels";
 import type { Clue } from "@/types/clue";
 import type { Conclusion } from "@/types/diagnose";
-import { PROFILE_ATTRIBUTE_CATALOG, type ProfileItem, type WebFact } from "@/types/profile";
+import { PROFILE_ATTRIBUTE_CATALOG, type ExternalLookupStatus, type ExternalProfileResult, type ProfileItem, type WebFact } from "@/types/profile";
 import type { Post } from "@/types/post";
 import { ProfileClaimWhatIf } from "./ProfileClaimWhatIf";
 
@@ -19,6 +19,8 @@ interface ConclusionBoardProps {
   profileClaims?: readonly ProfileItem[];
   webFacts?: readonly WebFact[];
   webLookupStatus?: "not_run" | "fixture";
+  externalLookupStatus?: ExternalLookupStatus;
+  externalProfileResults?: readonly ExternalProfileResult[];
   ownerProfileText?: string;
   selfReportClues?: readonly Clue[];
   posts?: readonly Post[];
@@ -26,13 +28,31 @@ interface ConclusionBoardProps {
 }
 
 /** 捜査ボード。限定ルールのプロフィール推定を主表示し、旧試作ルールは別枠に置く。 */
-export function ConclusionBoard({ clues, conclusions, profileClaims = [], webFacts = [], webLookupStatus = "not_run", ownerProfileText = "", selfReportClues = [], posts = [], profileClaimSuggestions = [] }: ConclusionBoardProps) {
+export function ConclusionBoard({ clues, conclusions, profileClaims = [], webFacts = [], webLookupStatus = "not_run", externalLookupStatus = "not_requested", externalProfileResults = [], ownerProfileText = "", selfReportClues = [], posts = [], profileClaimSuggestions = [] }: ConclusionBoardProps) {
   return (
     <section aria-labelledby="board-heading" className="max-w-2xl space-y-4">
       <h3 id="board-heading" className="font-display text-2xl">
         捜査ボード
       </h3>
-      <p className="text-xs text-ink/60">{webLookupStatus === "fixture" ? "公開Webの情報は架空のデモデータです" : "公開Webの照合はまだ行っていません"}</p>
+      <p className="text-xs text-ink/60">{webLookupStatus === "fixture" ? "勤務先名の公開Web情報は架空のデモデータです" : "勤務先名の公的情報照合はまだ行っていません"}</p>
+      <section aria-labelledby="external-profile-heading" className="space-y-2">
+        <h4 id="external-profile-heading" className="font-display text-xl">外部SNS・ブログ・記事の候補</h4>
+        <p role="status" className="text-sm text-ink/70">{externalLookupStatus === "fixture" ? "モック用の架空候補です（外部通信なし）" : externalLookupStatus === "searched" ? "検索結果です。検索順位やハンドル一致だけでは同一人物と判断していません。" : externalLookupStatus === "no_results" ? "検索結果はありませんでした。安全の確認を意味しません。" : externalLookupStatus === "unavailable" ? "公開Web検索を利用できませんでした。安全の確認を意味しません。" : "公開Web検索は行っていません。"}</p>
+        {externalProfileResults.length > 0 && (
+          <ul className="space-y-2">
+            {externalProfileResults.map((result) => (
+              <li key={result.id} className="break-words rounded-sm border border-ink/20 px-4 py-3">
+                <p className="text-xs font-bold">{result.status === "owner_linked" ? "本人のプロフィール/投稿に掲載されたURLと一致" : "検索候補（同一人物未確認）"}</p>
+                <p className="mt-1 font-bold">{result.title}</p>
+                <p className="text-xs text-ink/70">{result.domain}</p>
+                <a href={result.url} target="_blank" rel="noopener noreferrer" className="mt-1 block break-all text-sm underline">{result.url}</a>
+                {result.owner_evidence && <p className="mt-2 text-xs text-ink/70">本人側のリンク根拠（{result.owner_evidence.kind === "profile_text" ? "Blueskyプロフィール文" : "本人の投稿"}）: {result.owner_evidence.excerpt}</p>}
+                {result.status === "owner_linked" && <p className="mt-1 text-xs text-ink/70">本人がこのURLを掲載したことの確認です。外部ページの運営者、記事著者、実世界の同一人物を確認したものではありません。</p>}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
       <section aria-labelledby="profile-claims-heading" className="space-y-3">
         <h4 id="profile-claims-heading" className="font-display text-xl">投稿を横断した推定</h4>
         {profileClaims.length === 0 ? (

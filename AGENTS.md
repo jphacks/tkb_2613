@@ -137,6 +137,7 @@ Python は `common/` の Pydantic モデル（`tkb_common.schemas`）、TypeScri
 - `BSKY_SERVICE`（ログイン先。既定 `https://bsky.social`）
 - `SESSION_TTL_MINUTES`（既定30）
 - `MAX_POSTS`（既定30）
+- `BRAVE_SEARCH_API_KEY`（任意。診断ごとの明示同意後、公開Webの外部SNS/ブログ/記事候補を検索するときのみAPIサーバーで使用。送信値は本人の公開Blueskyハンドルのみ。Brave有料プラン・支払情報が必要で、検索語は最大90日保持。モックは通信しない）
 
 既存：`MOCK_MODE`、`VLM_BASE_URL`、`VLM_API_KEY`、`VLM_MODEL`、`OCR_BASE_URL`。鍵を `NEXT_PUBLIC_` で始まる変数に入れない。
 

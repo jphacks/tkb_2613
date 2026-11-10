@@ -5,6 +5,7 @@
   event: clues        data: {"post_id", "clues": [手がかり], "error"} 手がかりの取り出しが終わった順
   event: conclusions  data: {"clues": [全手がかり], "conclusions": [{"rule", "attribute",
                              "value", "clue_indices", "note"}]}      最後に1回。番号は clues の並び
+                             profile_claims / external_profile_results も含む
   event: done         data: {"posts_seen": 件数}
 
 MOCK_MODE=1 のときは、架空のデモ用アカウントの投稿と手がかりを流す
@@ -20,15 +21,21 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, ConfigDict, StrictBool
 
 from tkb_api import bluesky
 from tkb_api.bluesky import BlueskySession, PostsFetcher
 from tkb_api.config import Settings, get_settings
 from tkb_api.pipeline import diagnose_events, load_gazetteer, mock_extractions, real_extractions
+from tkb_api.public_web_identity import (
+    ExternalLookupResult,
+    mark_owner_linked,
+    search_external_profiles,
+)
 from tkb_api.routes.session import current_session
-from tkb_common.schemas import Clue, Post, WebFact
+from tkb_common.schemas import Clue, ExternalLookupStatus, ExternalProfileResult, Post, WebFact
 from tkb_detect.errors import DetectError
 from tkb_detect.extract import Extractor, build_extractor
 from tkb_engine.gazetteer import Gazetteer
@@ -58,6 +65,29 @@ def _load_demo_web_facts(settings: Settings) -> list[WebFact]:
     except (OSError, ValueError, KeyError, TypeError):
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE, "モック用の公開Web情報を読み込めませんでした"
+        ) from None
+
+
+def _load_demo_external_lookup(settings: Settings) -> tuple[str, list[ExternalProfileResult]]:
+    try:
+        doc = json.loads(settings.demo_fixture_path.read_text(encoding="utf-8"))
+        fixture = doc.get("external_lookup_fixture", {})
+        profile_text = fixture.get("owner_profile_text", "")
+        results = [
+            ExternalProfileResult(
+                id=f"mock-{index}",
+                url=item["url"],
+                domain=item["domain"],
+                title=item["title"],
+                status="candidate",
+                owner_evidence=None,
+            )
+            for index, item in enumerate(fixture.get("results", []))
+        ]
+        return profile_text if isinstance(profile_text, str) else "", results
+    except (OSError, ValueError, KeyError, TypeError):
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, "モック用の公開Web候補を読み込めませんでした"
         ) from None
 
 
@@ -94,10 +124,26 @@ def get_fetch_posts() -> PostsFetcher:
 
 
 ProfileTextFetcher = Callable[[Any, str], Awaitable[str]]
+ExternalProfileSearcher = Callable[[str], Awaitable[ExternalLookupResult]]
+
+
+class DiagnoseRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    public_web_lookup_consent: StrictBool = False
 
 
 def get_fetch_profile_text() -> ProfileTextFetcher:
     return bluesky.fetch_own_profile_text
+
+
+def get_external_profile_searcher(
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> ExternalProfileSearcher:
+    async def search(handle: str) -> ExternalLookupResult:
+        return await search_external_profiles(handle, settings.brave_search_api_key)
+
+    return search
 
 
 @lru_cache(maxsize=4)
@@ -167,12 +213,24 @@ async def diagnose(
     fetch_profile_text: Annotated[ProfileTextFetcher, Depends(get_fetch_profile_text)],
     extractor_factory: Annotated[ExtractorFactory, Depends(get_extractor_factory)],
     gazetteer: Annotated[Gazetteer, Depends(get_gazetteer)],
+    external_searcher: Annotated[ExternalProfileSearcher, Depends(get_external_profile_searcher)],
+    payload: Annotated[DiagnoseRequest | None, Body()] = None,
 ) -> StreamingResponse:
+    public_web_lookup_consent = payload.public_web_lookup_consent if payload is not None else False
+    external_profile_results: list[ExternalProfileResult] = []
+    external_lookup_status = ExternalLookupStatus.NOT_REQUESTED
+    external_lookup: Callable[[], Awaitable[ExternalLookupResult]] | None = None
     if settings.mock_mode:
         posts = _load_demo_posts(settings)
         web_facts = _load_demo_web_facts(settings)
         web_lookup_status = "fixture" if web_facts else "not_run"
         owner_profile_text = ""
+        if public_web_lookup_consent:
+            owner_profile_text, demo_results = _load_demo_external_lookup(settings)
+            external_profile_results = list(
+                mark_owner_linked(posts, owner_profile_text, demo_results)
+            )
+            external_lookup_status = ExternalLookupStatus.FIXTURE
         owner_profile_analyzer = None
         interval = settings.mock_event_interval_seconds
         extractions = mock_extractions(settings.demo_fixture_path, posts, interval)
@@ -188,6 +246,16 @@ async def diagnose(
             raise HTTPException(
                 status.HTTP_502_BAD_GATEWAY, "Bluesky からプロフィールを取得できませんでした"
             ) from None
+        if public_web_lookup_consent:
+
+            async def lookup_external() -> ExternalLookupResult:
+                lookup = await external_searcher(session.handle)
+                return ExternalLookupResult(
+                    lookup.status,
+                    mark_owner_linked(posts, owner_profile_text, lookup.results),
+                )
+
+            external_lookup = lookup_external
         interval = 0
         extractor = _build_extractor(extractor_factory)
         extractions = real_extractions(extractor, posts)
@@ -204,6 +272,9 @@ async def diagnose(
         owner_profile_analyzer=owner_profile_analyzer,
         web_facts=web_facts,
         web_lookup_status=web_lookup_status,
+        external_profile_results=external_profile_results,
+        external_lookup_status=external_lookup_status,
+        external_lookup=external_lookup,
     )
     return StreamingResponse(
         _with_keep_alive(_stream(events), settings.sse_keepalive_seconds),

@@ -168,7 +168,7 @@ describe("DiagnosePanel", () => {
     stream.release();
 
     expect(await screen.findByText("ジムおわり")).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("2 件の投稿を読みました");
+    expect(screen.getByText("2 件の投稿を読みました")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "診断する" })).toBeEnabled();
     const items = screen.getAllByRole("listitem");
     expect(items.map((li) => li.textContent)).toEqual([
@@ -258,7 +258,39 @@ describe("DiagnosePanel", () => {
     expect(within(prototype.closest("details")!).getByText(/R1〜R3の試作ルールによる候補です/)).toBeInTheDocument();
     expect(screen.getByRole("list", { name: "この投稿の手がかり" })).toHaveTextContent("毎週火曜はジム");
     expect(screen.getByText("手がかりを探せませんでした（写真を取得できませんでした）")).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("2 件の投稿を読みました");
+    expect(screen.getByText("2 件の投稿を読みました")).toBeInTheDocument();
+  });
+
+  it("requires per-run opt-in and distinguishes search candidates from owner-linked URLs", async () => {
+    vi.mocked(diagnose).mockImplementation(async function* () {
+      yield {
+        event: "conclusions",
+        clues: [],
+        conclusions: [],
+        external_lookup_status: "fixture",
+        external_profile_results: [
+          { id: "fixture-linked", url: "https://example.com/blog", domain: "example.com", title: "架空ブログ", status: "owner_linked", owner_evidence: { kind: "profile_text", post_id: null, excerpt: "ブログ: https://example.com/blog" } },
+          { id: "fixture-candidate", url: "https://sample.org/notes", domain: "sample.org", title: "架空メモ", status: "candidate", owner_evidence: null },
+        ],
+      };
+      yield { event: "done", posts_seen: 0 };
+    });
+
+    const diagnoseButton = await renderLoggedIn();
+    const consent = screen.getByRole("checkbox", { name: /公開Webで外部SNS・ブログ・記事の候補を検索する/ });
+    expect(consent).not.toBeChecked();
+    fireEvent.click(diagnoseButton);
+    await screen.findByRole("region", { name: "捜査ボード" });
+    expect(diagnose).toHaveBeenLastCalledWith(expect.objectContaining({ publicWebLookupConsent: false }));
+
+    fireEvent.click(consent);
+    fireEvent.click(diagnoseButton);
+    const board = await screen.findByRole("region", { name: "捜査ボード" });
+    expect(diagnose).toHaveBeenLastCalledWith(expect.objectContaining({ publicWebLookupConsent: true }));
+    expect(within(board).getByText("本人のプロフィール/投稿に掲載されたURLと一致")).toBeInTheDocument();
+    expect(within(board).getByText("検索候補（同一人物未確認）")).toBeInTheDocument();
+    expect(within(board).getByText(/実世界の同一人物を確認したものではありません/)).toBeInTheDocument();
+    expect(consent).not.toBeChecked();
   });
 
   it("states that no claim was established under current rules without implying safety", async () => {

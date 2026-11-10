@@ -419,5 +419,20 @@
         14
       ]
     }
-  ]
+  ],
+  "external_lookup_fixture": {
+    "owner_profile_text": "架空の個人ブログ: https://example.com/haruki-blog",
+    "results": [
+      {
+        "url": "https://example.com/haruki-blog",
+        "domain": "example.com",
+        "title": "架空の個人ブログ"
+      },
+      {
+        "url": "https://sample.org/haruki-notes",
+        "domain": "sample.org",
+        "title": "架空の公開メモ"
+      }
+    ]
+  }
 }

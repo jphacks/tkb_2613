@@ -211,10 +211,17 @@ export async function deleteSession({ baseUrl = DEFAULT_BASE_URL, signal }: Requ
 export async function* diagnose({
   baseUrl = DEFAULT_BASE_URL,
   signal,
-}: RequestOptions = {}): AsyncGenerator<DiagnoseEvent> {
+  publicWebLookupConsent = false,
+}: RequestOptions & { publicWebLookupConsent?: boolean } = {}): AsyncGenerator<DiagnoseEvent> {
   let res: Response;
   try {
-    res = await fetch(`${baseUrl}/api/diagnose`, { method: "POST", credentials: "include", signal });
+    res = await fetch(`${baseUrl}/api/diagnose`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ public_web_lookup_consent: publicWebLookupConsent }),
+      signal,
+    });
   } catch {
     throw new ApiError("network", "サーバーに接続できませんでした");
   }
