@@ -52,7 +52,7 @@ OAuth 時の投稿取得は、セッション DID に限定して公開 AppView 
 | `already_running` | 409 | diagnose | — | 同じセッションか同じアカウント（DID）で診断中。別々にログインしても1アカウント1つまで |
 | `daily_limit` | 429 | diagnose | `limit`、`resets_at`（日本時間の次の 0:00）。`Retry-After` ヘッダー | 1アカウント（DID）1日（日本時間）の回数の上限（`DIAGNOSE_DAILY_LIMIT`） |
 | `busy` | 503 | diagnose | `retry_after`。`Retry-After` ヘッダー | 同時に診断できる数の上限（`MAX_CONCURRENT_DIAGNOSES`）。待たずに断る |
-| `model_unavailable` | 503 | diagnose（`MOCK_MODE=0`） | — | 診断の前に VLM の `/models`、または `TEXT_BACKEND=ollama` で Ollama の `/api/tags` が応答せず指定モデルがない |
+| `model_unavailable` | 503 | diagnose（`MOCK_MODE=0`） | — | 診断の前に VLM の `/models`、または `TEXT_BACKEND=ollama` で Ollama の `/api/tags` が応答せず指定モデルがない。OCR を使う設定で写真も読むときは、`GET {OCR_BASE_URL}/health` が 5xx か接続できない場合も（GPU の停止中・起動中）。回数は数えない |
 | `bluesky_busy` | 503 | session、diagnose | — | Bluesky が回数制限（429）で断った |
 | `share_disabled` | 404 | result-link（作成・無効化）、shared-result | — | 閲覧リンクの機能がオフ（`SHARE_ENABLED=0`）。保存先も作らない。作成と無効化は、ログインしていなければ先に401 |
 

@@ -517,3 +517,41 @@ def test_build_extractor_accepts_vlm_and_ocr_on_the_allowed_host() -> None:
         allowed_hosts=["10.0.2.15"],
     )
     assert extractor.uses_ocr
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("vlm_ok", "ocr_ok", "expected"),
+    [(True, True, True), (True, False, False), (False, True, False)],
+)
+async def test_model_reachable_needs_both_vlm_and_ocr(
+    vlm_ok: bool, ocr_ok: bool, expected: bool
+) -> None:
+    # OCR だけ落ちていても診断を始めない（始めると、写真の投稿がすべて失敗したまま1回と数えられる）
+    ocr = OcrClient(OcrConfig(base_url=OCR, mock_mode=False))
+    with respx.mock as router:
+        router.get(f"{VLM}/models").respond(200 if vlm_ok else 503)
+        router.get(f"{OCR}/health").respond(200 if ocr_ok else 503)
+
+        assert await Extractor(_vlm_client(), ocr).model_reachable(1) is expected
+
+
+@pytest.mark.anyio
+async def test_model_reachable_skips_ocr_when_not_used() -> None:
+    with respx.mock as router:
+        router.get(f"{VLM}/models").respond(200)
+
+        assert await Extractor(_vlm_client()).model_reachable(1) is True
+
+
+@pytest.mark.anyio
+async def test_model_reachable_skips_ocr_when_photos_are_not_read() -> None:
+    # 本文だけを読む設定では、OCR が落ちていても診断は始められる
+    ocr = OcrClient(OcrConfig(base_url=OCR, mock_mode=False))
+    with respx.mock(assert_all_called=False) as router:
+        router.get(f"{VLM}/models").respond(200)
+        health = router.get(f"{OCR}/health").respond(503)
+
+        assert await Extractor(_vlm_client(), ocr, image_enabled=False).model_reachable(1) is True
+
+    assert health.call_count == 0

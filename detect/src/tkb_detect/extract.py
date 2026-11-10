@@ -115,10 +115,21 @@ class Extractor:
         return self._ocr is not None
 
     async def model_reachable(self, timeout_s: float) -> bool:
-        """画像を読むモデルのサーバーが応答するか（診断を始める前の確認）。"""
+        """モデルと OCR のサーバーが応答するか（診断を始める前の確認）。
+
+        モデルは画像を読むモデル。Ollama のときは本文のモデル。
+
+        OCR を使う設定で OCR だけ落ちていると、写真の投稿がすべて失敗したまま1回と数えられるので、
+        写真も読むときは OCR も確かめる。
+        """
         if self._text_client is not None:
-            return await self._text_client.is_reachable(timeout_s)
-        return await self._vlm.is_reachable(timeout_s)
+            model_task = self._text_client.is_reachable(timeout_s)
+        else:
+            model_task = self._vlm.is_reachable(timeout_s)
+        if self._ocr is None or not self.image_enabled:
+            return await model_task
+        model_ok, ocr_ok = await asyncio.gather(model_task, self._ocr.is_reachable(timeout_s))
+        return model_ok and ocr_ok
 
     async def extract_post(self, post: Post, images: list[bytes]) -> list[Clue]:
         """投稿1件の手がかり。images は post.images と同じ順の画像のバイト列。"""

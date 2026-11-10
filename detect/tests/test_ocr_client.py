@@ -99,3 +99,41 @@ async def test_raises_detect_error_on_unexpected_response(payload: object) -> No
 def test_refuses_third_party_endpoint_outside_mock_mode() -> None:
     with pytest.raises(ForbiddenEndpointError):
         OcrClient(OcrConfig(base_url="https://generativelanguage.googleapis.com", mock_mode=False))
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("status", [200, 404, 405])
+async def test_is_reachable_when_the_server_answers(status: int) -> None:
+    # 待ち受けていれば、/health が無い版（404・405）でも動いているとみなす
+    with respx.mock as router:
+        route = router.get(f"{BASE}/health").respond(status)
+
+        assert await OcrClient(OcrConfig(base_url=BASE, mock_mode=False)).is_reachable(1) is True
+
+    assert route.calls.last.request.content == b""  # 写真を送らない
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "response",
+    [
+        httpx.Response(503),  # 起動中
+        httpx.ConnectError("refused"),  # 止まっている
+        httpx.ConnectTimeout("timeout"),
+    ],
+)
+async def test_is_reachable_is_false_when_the_server_does_not_answer(
+    response: httpx.Response | Exception,
+) -> None:
+    with respx.mock as router:
+        router.get(f"{BASE}/health").mock(side_effect=[response])
+
+        assert await OcrClient(OcrConfig(base_url=BASE, mock_mode=False)).is_reachable(1) is False
+
+
+@pytest.mark.anyio
+async def test_is_reachable_is_true_in_mock_mode_without_network() -> None:
+    with respx.mock(assert_all_called=False) as router:
+        assert await OcrClient(OcrConfig(base_url="", mock_mode=True)).is_reachable(1) is True
+
+    assert router.calls.call_count == 0
