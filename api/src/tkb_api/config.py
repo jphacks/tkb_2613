@@ -69,6 +69,19 @@ class Settings(BaseSettings):
     # 診断を始める前に、モデルのサーバーが応答するかを確かめる待ち時間（秒）
     model_probe_timeout_seconds: float = Field(default=3, gt=0)
 
+    # X 専用。X の用途承認と有料 API の予算承認を得るまでは実接続しない。
+    x_client_id: str = ""
+    x_client_secret: SecretStr = SecretStr("")
+    x_callback_url: str = "http://localhost:3000/api/x/callback"
+    x_public_origin: str = "http://localhost:3000"
+    x_use_case_approved: bool = False
+    x_paid_reads_approved: bool = False
+    x_query_logs_redacted: bool = False
+    x_mock_mode: bool = True
+    # 架空のX投稿だけを既存VLMへ送る実験経路。実X投稿は常にOllama経路のまま。
+    x_gpu_demo_enabled: bool = False
+    x_max_posts: int = Field(default=30, ge=1, le=30)
+
 
 @lru_cache
 def get_settings() -> Settings:
