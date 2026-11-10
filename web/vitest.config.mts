@@ -8,6 +8,7 @@ export default defineConfig({
     alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
   },
   test: {
+    include: ["src/**/*.test.{ts,tsx}", "*.test.ts"],
     environment: "jsdom",
     setupFiles: ["./vitest.setup.ts"],
     coverage: {

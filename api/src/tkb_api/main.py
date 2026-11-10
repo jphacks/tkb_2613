@@ -22,6 +22,7 @@ from tkb_api.routes import (
     session,
     share,
     simulate,
+    x,
 )
 from tkb_api.shares import ShareStore
 
@@ -73,6 +74,9 @@ def _configure_logging() -> None:
         handler.setFormatter(logging.Formatter("%(levelname)s:     %(name)s: %(message)s"))
         app_logger.addHandler(handler)
         app_logger.setLevel(logging.INFO)
+    access_logger = logging.getLogger("uvicorn.access")
+    if not any(isinstance(item, x.XCallbackAccessFilter) for item in access_logger.filters):
+        access_logger.addFilter(x.XCallbackAccessFilter())
 
 
 def create_app(
@@ -129,6 +133,9 @@ def create_app(
     app.include_router(delete.router)
     app.include_router(share.router)
     app.include_router(features.router)
+    app.include_router(x.router)
+    app.state.x_sessions = x.XSessionStore(settings.session_ttl_minutes * 60)
+    app.state.x_settings = settings
 
     @app.get("/health")
     def health() -> dict[str, str | bool]:
