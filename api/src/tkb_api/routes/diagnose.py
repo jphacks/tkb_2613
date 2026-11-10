@@ -177,6 +177,9 @@ def get_extractor_factory(
             vlm_model=settings.vlm_model,
             ocr_base_url=settings.ocr_base_url,
             allowed_hosts=settings.model_allowed_host_suffixes.split(","),
+            text_backend=settings.text_backend,
+            ollama_base_url=settings.ollama_base_url,
+            ollama_model=settings.ollama_model,
         )
 
     return build
@@ -286,7 +289,7 @@ async def _ensure_model_reachable(extractor: Extractor, settings: Settings) -> N
         raise refusal(
             status.HTTP_503_SERVICE_UNAVAILABLE,
             "model_unavailable",
-            "画像を読むモデルの準備ができていません",
+            "診断モデルの準備ができていません",
         )
 
 

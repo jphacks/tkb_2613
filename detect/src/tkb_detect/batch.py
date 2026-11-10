@@ -72,7 +72,7 @@ async def _extract_one(
 ) -> PostExtraction:
     fetch_started = time.monotonic()
     try:
-        images = await fetch_images(post) if post.images else []
+        images = await fetch_images(post) if post.images and extractor.image_enabled else []
     except Exception:
         # 取得の失敗の中身（URL など）は返さない
         return PostExtraction(post_id=post.post_id, clues=[], error=FETCH_FAILED_MESSAGE)

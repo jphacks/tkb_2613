@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     vlm_base_url: str = ""
     vlm_api_key: SecretStr = SecretStr("")
     vlm_model: str = ""
+    text_backend: Literal["vlm", "ollama"] = "vlm"
+    ollama_base_url: str = "http://localhost:11434"
+    ollama_model: str = "qwen3:4b-instruct"
     ocr_base_url: str = ""
     # VLM と OCR の送り先の許可リスト（カンマ区切りのホスト名か IP）。
     # 空なら localhost だけに送れる。

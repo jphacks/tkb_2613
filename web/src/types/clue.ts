@@ -60,6 +60,8 @@ export interface Clue {
   readonly region: Region | null;
   readonly confidence: number;
   readonly source: ClueSource;
+  /** 本文抽出で検証した原文引用。従来データでは省略または null */
+  readonly quote?: string | null;
 }
 
 export interface DetectResponse {
@@ -108,7 +110,9 @@ export function isClue(value: unknown): value is Clue {
     value.confidence >= 0 &&
     value.confidence <= 1 &&
     includes(CLUE_SOURCES, value.source);
-  return shapeOk && isConsistent(value as unknown as Clue);
+  const quoteOk = value.quote === undefined || value.quote === null ||
+    (typeof value.quote === "string" && value.quote.length > 0);
+  return shapeOk && quoteOk && isConsistent(value as unknown as Clue);
 }
 
 export function isDetectResponse(value: unknown): value is DetectResponse {
