@@ -234,7 +234,11 @@ describe("diagnose", () => {
 
   it("sends explicit per-run public lookup consent", async () => {
     const fetchFn = mockFetch(sse('event: done\ndata: {"posts_seen":0}\n\n'));
-    for await (const _event of diagnose({ baseUrl: "http://api.test", publicWebLookupConsent: true })) { /* consume */ }
+    const received: string[] = [];
+    for await (const event of diagnose({ baseUrl: "http://api.test", publicWebLookupConsent: true })) {
+      received.push(event.event);
+    }
+    expect(received).toEqual(["done"]);
     const [, init] = fetchFn.mock.calls[0];
     expect(init?.body).toBe(JSON.stringify({ public_web_lookup_consent: true }));
   });
