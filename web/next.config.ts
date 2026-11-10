@@ -1,6 +1,15 @@
 import type { NextConfig } from "next";
 
+// 画面の多層防御。Next.js がインラインのスクリプトを使うので script-src は縛らず、壊れない範囲だけ入れる
+// （ほかに必要な見出しは CloudFront の管理ポリシーが付ける）
+export const CONTENT_SECURITY_POLICY = "frame-ancestors 'none'; object-src 'none'; base-uri 'none'";
+
 const nextConfig: NextConfig = {
+  // 応答に x-powered-by: Next.js を付けない（使っている仕組みを外に出さない）
+  poweredByHeader: false,
+  async headers() {
+    return [{ source: "/:path*", headers: [{ key: "Content-Security-Policy", value: CONTENT_SECURITY_POLICY }] }];
+  },
   // Docker イメージを小さくするため、必要なファイルだけを .next/standalone に出力する
   output: "standalone",
   // /api を api（FastAPI）に中継し、画面と api の入口を 1 つにする（セッションの Cookie を同じオリジンで使うため）。
