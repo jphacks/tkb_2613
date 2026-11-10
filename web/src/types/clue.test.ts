@@ -33,6 +33,11 @@ describe("isDetectResponse", () => {
     expect(isDetectResponse({ clues: [] })).toBe(true);
   });
 
+  it("accepts a verified text quote and rejects an invalid quote type", () => {
+    expect(isDetectResponse({ clues: [{ ...TEXT_CLUE, quote: "夜勤明け" }] })).toBe(true);
+    expect(isDetectResponse({ clues: [{ ...TEXT_CLUE, quote: 42 }] })).toBe(false);
+  });
+
   it("accepts a photo clue without a region", () => {
     expect(isDetectResponse({ clues: [{ ...PHOTO_CLUE, type: "uniform", region: null }] })).toBe(true);
   });

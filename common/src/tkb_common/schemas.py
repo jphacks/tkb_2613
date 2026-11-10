@@ -126,6 +126,8 @@ class Clue(BaseModel):
     region: Region | None
     confidence: float = Field(ge=0.0, le=1.0)
     source: ClueSource
+    # Ollama 本文抽出時の原文根拠。従来の手がかりでは None。
+    quote: str | None = Field(default=None, exclude_if=lambda value: value is None)
 
     @model_validator(mode="after")
     def _check_consistency(self) -> Self:

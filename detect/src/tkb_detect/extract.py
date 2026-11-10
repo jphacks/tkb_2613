@@ -10,7 +10,7 @@ import json
 import logging
 import time
 from collections.abc import Awaitable, Callable, Sequence
-from typing import Any
+from typing import Any, Protocol
 
 from pydantic import ValidationError
 
@@ -22,10 +22,14 @@ from tkb_detect.errors import DetectError, OutputCutOffError
 from tkb_detect.image import PreparedImage, crop_and_enlarge, prepare_image
 from tkb_detect.ocr_client import OcrClient, OcrConfig
 from tkb_detect.ocr_merge import merge_ocr
+from tkb_detect.ollama_client import OllamaClient, OllamaConfig
 from tkb_detect.prompts import (
+    OLLAMA_TEXT_PROMPT,
+    OLLAMA_TEXT_SCHEMA,
     PHOTO_SCHEMA,
     PHOTO_SYSTEM_PROMPT,
     PHOTO_USER_PROMPT,
+    TEXT_CLUE_TYPES,
     TEXT_SCHEMA,
     TEXT_SYSTEM_PROMPT,
     ZOOM_SCHEMA,
@@ -81,6 +85,14 @@ RETRY_REPETITION_PENALTY = 1.05
 ZOOM_MAX_TOKENS = 256
 
 
+class TextClient(Protocol):
+    async def is_reachable(self, timeout_s: float) -> bool: ...
+
+    async def complete_text(
+        self, prompt: str, *, system: str, json_schema: dict[str, Any]
+    ) -> str: ...
+
+
 class Extractor:
     def __init__(
         self,
@@ -88,11 +100,15 @@ class Extractor:
         ocr: OcrClient | None = None,
         coordinate_space: CoordinateSpace | None = COORDINATE_SPACE,
         zoom: bool = True,
+        text_client: TextClient | None = None,
+        image_enabled: bool = True,
     ) -> None:
         self._vlm = vlm
         self._ocr = ocr
         self._coordinate_space = coordinate_space
         self._zoom = zoom
+        self._text_client = text_client
+        self.image_enabled = image_enabled
 
     @property
     def uses_ocr(self) -> bool:
@@ -100,18 +116,31 @@ class Extractor:
 
     async def model_reachable(self, timeout_s: float) -> bool:
         """画像を読むモデルのサーバーが応答するか（診断を始める前の確認）。"""
+        if self._text_client is not None:
+            return await self._text_client.is_reachable(timeout_s)
         return await self._vlm.is_reachable(timeout_s)
 
     async def extract_post(self, post: Post, images: list[bytes]) -> list[Clue]:
         """投稿1件の手がかり。images は post.images と同じ順の画像のバイト列。"""
-        if len(images) != len(post.images):
+        if self.image_enabled and len(images) != len(post.images):
             raise DetectError("画像の数が投稿の写真の数と合いません")
 
-        tasks = [self._extract_image(post.post_id, i, data) for i, data in enumerate(images)]
+        tasks = (
+            [self._extract_image(post.post_id, i, data) for i, data in enumerate(images)]
+            if self.image_enabled
+            else []
+        )
         if post.text.strip():
             tasks.append(self._extract_text(post.post_id, post.text))
 
-        results = await asyncio.gather(*tasks)
+        if self._text_client is not None and self.image_enabled:
+            # 画像VLMの停止時も、本文から得た手がかりは残す。
+            settled = await asyncio.gather(*tasks, return_exceptions=True)
+            results = [r for r in settled if isinstance(r, list)]
+            if not results and settled:
+                raise DetectError("手がかりを取り出せませんでした")
+        else:
+            results = await asyncio.gather(*tasks)
         return _dedupe(
             [
                 clue
@@ -219,6 +248,8 @@ class Extractor:
         return clues
 
     async def _extract_text(self, post_id: str, text: str) -> list[Clue]:
+        if self._text_client is not None:
+            return await self._extract_ollama_text(post_id, text)
         raw = await _timed(
             "本文VLM",
             _retry_if_cut_off(
@@ -245,6 +276,56 @@ class Extractor:
                 clues.append(clue)
         return clues
 
+    async def _extract_ollama_text(self, post_id: str, text: str) -> list[Clue]:
+        if self._text_client is None:
+            raise DetectError("Ollama の設定がありません")
+        raw = await _timed(
+            "本文Ollama",
+            self._text_client.complete_text(
+                text_user_prompt(text), system=OLLAMA_TEXT_PROMPT, json_schema=OLLAMA_TEXT_SCHEMA
+            ),
+        )
+        try:
+            data = json.loads(raw)
+            items = data["clues"]
+            if not isinstance(items, list):
+                raise TypeError
+        except (ValueError, KeyError, TypeError):
+            raise DetectError("Ollama の応答形式が不正です") from None
+        clues: list[Clue] = []
+        for item in items:
+            if not isinstance(item, dict) or set(item) != {"type", "value", "quote", "confidence"}:
+                raise DetectError("Ollama の手がかり形式が不正です")
+            quote, value = item["quote"], item["value"]
+            if (
+                not isinstance(quote, str)
+                or not isinstance(value, str)
+                or not quote
+                or quote not in text
+                or not value
+                or value not in quote
+            ):
+                raise DetectError("Ollama の根拠が投稿本文と一致しません")
+            confidence = item["confidence"]
+            if (
+                not isinstance(confidence, int | float)
+                or isinstance(confidence, bool)
+                or not 0 <= confidence <= 1
+            ):
+                raise DetectError("Ollama の確信度が不正です")
+            clue = _build_clue(
+                item,
+                post_id=post_id,
+                image_index=None,
+                region_box=None,
+                source=ClueSource.TEXT,
+                to_region=lambda _b: None,
+            )
+            if clue is None or clue.type not in TEXT_CLUE_TYPES:
+                raise DetectError("Ollama の手がかり型が不正です")
+            clues.append(clue.model_copy(update={"quote": quote}))
+        return _dedupe(clues)
+
     def _require_space(self) -> CoordinateSpace:
         if self._coordinate_space is None:
             raise DetectError("VLM の座標の単位がまだ決まっていません（coords.COORDINATE_SPACE）")
@@ -261,6 +342,9 @@ def build_extractor(
     coordinate_space: CoordinateSpace | None = COORDINATE_SPACE,
     zoom: bool = True,
     allowed_hosts: Sequence[str] | None = None,
+    text_backend: str = "vlm",
+    ollama_base_url: str = "http://localhost:11434",
+    ollama_model: str = "qwen3:4b-instruct",
 ) -> Extractor:
     """設定から作る。OCR は OCR_BASE_URL が空なら使わない。
 
@@ -268,22 +352,37 @@ def build_extractor(
     MODEL_ALLOWED_HOST_SUFFIXES を読む（guard.py）。
     """
     hosts = tuple(allowed_hosts) if allowed_hosts is not None else None
+    if text_backend not in {"vlm", "ollama"}:
+        raise DetectError("本文のモデル設定が不正です")
+    image_enabled = bool(vlm_base_url.strip()) or text_backend == "vlm"
     vlm = VlmClient(
         VlmConfig(
             base_url=vlm_base_url,
             api_key=vlm_api_key,
             model=vlm_model,
-            mock_mode=mock_mode,
+            mock_mode=mock_mode or not image_enabled,
             allowed_hosts=hosts,
         )
     )
-    use_ocr = bool(ocr_base_url.strip()) and not mock_mode
+    use_ocr = image_enabled and bool(ocr_base_url.strip()) and not mock_mode
     ocr = (
         OcrClient(OcrConfig(base_url=ocr_base_url, mock_mode=False, allowed_hosts=hosts))
         if use_ocr
         else None
     )
-    return Extractor(vlm, ocr, coordinate_space, zoom)
+    text_client = (
+        OllamaClient(OllamaConfig(ollama_base_url, ollama_model, hosts))
+        if text_backend == "ollama" and not mock_mode
+        else None
+    )
+    return Extractor(
+        vlm,
+        ocr if image_enabled else None,
+        coordinate_space,
+        zoom,
+        text_client=text_client,
+        image_enabled=image_enabled,
+    )
 
 
 def _read_codes_safely(data: bytes, post_id: str, index: int) -> list[Clue]:
