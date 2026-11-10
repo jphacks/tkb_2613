@@ -130,10 +130,17 @@ class FakeExtractor(Extractor):
         ]
 
     async def extract_profile_text(self, did: str, text: str) -> list[Clue]:
-        return [Clue(
-            post_id=f"profile:{did}", image_index=None, type=ClueType.NAME_TEXT,
-            value="本人記載の名前", region=None, confidence=0.9, source=ClueSource.PROFILE_TEXT,
-        )]
+        return [
+            Clue(
+                post_id=f"profile:{did}",
+                image_index=None,
+                type=ClueType.NAME_TEXT,
+                value="本人記載の名前",
+                region=None,
+                confidence=0.9,
+                source=ClueSource.PROFILE_TEXT,
+            )
+        ]
 
 
 def _real_client(fetch_posts: PostsFetcher, extractor: Extractor | None = None) -> TestClient:
@@ -146,9 +153,11 @@ def _real_client(fetch_posts: PostsFetcher, extractor: Extractor | None = None) 
     overrides = client.app.dependency_overrides  # type: ignore[attr-defined]
     overrides[get_login] = lambda: login
     overrides[get_fetch_posts] = lambda: fetch_posts
+
     async def fetch_profile(_client: AsyncClient, did: str) -> str:
         assert did == REAL_DID
         return "本人プロフィール文"
+
     overrides[get_fetch_profile_text] = lambda: fetch_profile
     fake = extractor or FakeExtractor()
     overrides[get_extractor_factory] = lambda: lambda: fake
@@ -198,8 +207,10 @@ def test_real_diagnose_reports_a_missing_or_forbidden_model_endpoint(vlm_base_ur
     with _client(settings) as client:
         client.app.dependency_overrides[get_login] = lambda: login  # type: ignore[attr-defined]
         client.app.dependency_overrides[get_fetch_posts] = lambda: fetch_posts  # type: ignore[attr-defined]
+
         async def fetch_profile(_client: AsyncClient, _did: str) -> str:
             return ""
+
         client.app.dependency_overrides[get_fetch_profile_text] = lambda: fetch_profile  # type: ignore[attr-defined]
         _login(client)
         res = client.post("/api/diagnose")

@@ -4,10 +4,10 @@ import pytest
 from pydantic import ValidationError
 
 from tkb_common.schemas import (
-    ClaimAssessment,
-    EvidenceScope,
     PROFILE_ATTRIBUTE_CATALOG,
     PROFILE_CATEGORY_LABELS,
+    ClaimAssessment,
+    EvidenceScope,
     ProfileAttribute,
     ProfileEvidence,
     ProfileItem,
@@ -22,7 +22,10 @@ def test_profile_catalog_has_all_25_candidate_ids_and_metadata() -> None:
     assert set(PROFILE_ATTRIBUTE_CATALOG) == set(ProfileAttribute)
     assert len(PROFILE_CATEGORY_LABELS) == 4
     assert all(item.label for item in PROFILE_ATTRIBUTE_CATALOG.values())
-    assert all(item.personal_level is None and item.guessability is None for item in PROFILE_ATTRIBUTE_CATALOG.values())
+    assert all(
+        item.personal_level is None and item.guessability is None
+        for item in PROFILE_ATTRIBUTE_CATALOG.values()
+    )
     assert {key.value: item.label for key, item in PROFILE_ATTRIBUTE_CATALOG.items()} == {
         "facial_appearance": "顔貌（自撮り・他撮り・反射）",
         "full_name": "本名（フルネーム）",

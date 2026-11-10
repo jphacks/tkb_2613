@@ -93,7 +93,9 @@ class Extractor:
         if post.text.strip():
             tasks.append(self._extract_text(post.post_id, post.text))
         tasks.extend(
-            self._extract_text(post.post_id, image.alt, image_index=image.index, source=ClueSource.ALT)
+            self._extract_text(
+                post.post_id, image.alt, image_index=image.index, source=ClueSource.ALT
+            )
             for image in post.images
             if image.alt.strip()
         )

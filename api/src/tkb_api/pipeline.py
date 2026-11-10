@@ -121,9 +121,17 @@ async def diagnose_events(
         yield "clues", extraction.model_dump(mode="json")
 
     conclusions = infer(all_clues, list(posts), gazetteer)
-    self_report_clues = await owner_profile_analyzer(owner_profile_text) if owner_profile_text and owner_profile_analyzer else []
+    self_report_clues = (
+        await owner_profile_analyzer(owner_profile_text)
+        if owner_profile_text and owner_profile_analyzer
+        else []
+    )
     profile_claims = infer_owner_claims_with_web(
-        list(posts), all_clues, list(web_facts), owner_profile_text, self_report_clues,
+        list(posts),
+        all_clues,
+        list(web_facts),
+        owner_profile_text,
+        self_report_clues,
         gazetteer=gazetteer,
         diagnosis_date=diagnosis_date,
     )

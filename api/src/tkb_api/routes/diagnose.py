@@ -28,7 +28,7 @@ from tkb_api.bluesky import BlueskySession, PostsFetcher
 from tkb_api.config import Settings, get_settings
 from tkb_api.pipeline import diagnose_events, load_gazetteer, mock_extractions, real_extractions
 from tkb_api.routes.session import current_session
-from tkb_common.schemas import Post, WebFact
+from tkb_common.schemas import Clue, Post, WebFact
 from tkb_detect.errors import DetectError
 from tkb_detect.extract import Extractor, build_extractor
 from tkb_engine.gazetteer import Gazetteer
@@ -185,11 +185,16 @@ async def diagnose(
         try:
             owner_profile_text = await fetch_profile_text(session.client, session.did)
         except bluesky.BlueskyUnavailableError:
-            raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Bluesky からプロフィールを取得できませんでした") from None
+            raise HTTPException(
+                status.HTTP_502_BAD_GATEWAY, "Bluesky からプロフィールを取得できませんでした"
+            ) from None
         interval = 0
         extractor = _build_extractor(extractor_factory)
         extractions = real_extractions(extractor, posts)
-        owner_profile_analyzer = lambda text: extractor.extract_profile_text(session.did, text)
+
+        def owner_profile_analyzer(text: str) -> Awaitable[list[Clue]]:
+            return extractor.extract_profile_text(session.did, text)
+
     events = diagnose_events(
         posts,
         extractions,

@@ -14,7 +14,9 @@ from tkb_detect.ocr_client import OcrLine
 POSTAL_RE = re.compile(r"(?<!\d)(\d{3})-?(\d{4})(?!\d)")
 PHONE_RE = re.compile(r"(?<!\d)(0\d{1,4})-(\d{1,4})-(\d{3,4})(?!\d)")
 # Deliberately narrow: only literal company/bridge text is emitted as an organization clue.
-ORG_BRIDGE_RE = re.compile(r"^(?P<company>(?:株式会社[\w\u3040-\u30ff\u3400-\u9fff]{2,}|[\w\u3040-\u30ff\u3400-\u9fff]{2,}社))の(?P<bridge>[\w\u3040-\u30ff\u3400-\u9fff]{2,})$")
+ORG_BRIDGE_RE = re.compile(
+    r"^(?P<company>(?:株式会社[\w\u3040-\u30ff\u3400-\u9fff]{2,}|[\w\u3040-\u30ff\u3400-\u9fff]{2,}社))の(?P<bridge>[\w\u3040-\u30ff\u3400-\u9fff]{2,})$"
+)
 
 
 def _normalize(text: str) -> str:
@@ -93,16 +95,25 @@ def _regex_clues(post_id: str, image_index: int, lines: list[OcrLine]) -> list[C
         # show precisely what was read; threshold confidence to limit OCR noise.
         org_match = ORG_BRIDGE_RE.fullmatch(literal_text)
         if org_match and line.score >= 0.8:
-            clues.append(Clue(
-                post_id=post_id, image_index=image_index, type=ClueType.ORG_TEXT,
-                value=line.text, region=line.box,
-                confidence=min(max(line.score, 0.0), 1.0), source=ClueSource.OCR,
-            ))
+            clues.append(
+                Clue(
+                    post_id=post_id,
+                    image_index=image_index,
+                    type=ClueType.ORG_TEXT,
+                    value=line.text,
+                    region=line.box,
+                    confidence=min(max(line.score, 0.0), 1.0),
+                    source=ClueSource.OCR,
+                )
+            )
     return clues
 
 
 def merge_ocr(
-    post_id: str, image_index: int, vlm_clues: list[Clue], lines: list[OcrLine],
+    post_id: str,
+    image_index: int,
+    vlm_clues: list[Clue],
+    lines: list[OcrLine],
     station_names: set[str] | frozenset[str] = frozenset(),
 ) -> list[Clue]:
     station_names = {_normalize(name).removesuffix("駅") for name in station_names}
@@ -119,7 +130,7 @@ def merge_ocr(
             merged.append(clue)
     for line in lines:
         value = _normalize(line.text).removesuffix("駅")
-        if (value not in station_names or line.score < 0.8 or not _has_area(line.box)):
+        if value not in station_names or line.score < 0.8 or not _has_area(line.box):
             continue
         # OCR proves the literal string, but it cannot tell whether that string
         # is a station sign, an ad, or a route map. Require same-image VLM sign
@@ -136,8 +147,12 @@ def merge_ocr(
         if not matching_vlm_sign:
             continue
         clue = Clue(
-            post_id=post_id, image_index=image_index, type=ClueType.STATION_SIGN,
-            value=value, region=line.box, confidence=min(max(line.score, 0.0), 1.0),
+            post_id=post_id,
+            image_index=image_index,
+            type=ClueType.STATION_SIGN,
+            value=value,
+            region=line.box,
+            confidence=min(max(line.score, 0.0), 1.0),
             source=ClueSource.OCR,
         )
         key = _dedupe_key(clue)
