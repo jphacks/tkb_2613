@@ -35,7 +35,7 @@ from tkb_api.public_web_identity import (
     search_external_profiles,
 )
 from tkb_api.routes.session import current_session
-from tkb_common.schemas import ExternalLookupStatus, ExternalProfileResult, Post, WebFact
+from tkb_common.schemas import Clue, ExternalLookupStatus, ExternalProfileResult, Post, WebFact
 from tkb_detect.errors import DetectError
 from tkb_detect.extract import Extractor, build_extractor
 from tkb_engine.gazetteer import Gazetteer
@@ -260,10 +260,9 @@ async def diagnose(
         extractor = _build_extractor(extractor_factory)
         extractions = real_extractions(extractor, posts)
 
-        async def analyze_owner_profile(text: str) -> list[Any]:
-            return await extractor.extract_profile_text(session.did, text)
+        def owner_profile_analyzer(text: str) -> Awaitable[list[Clue]]:
+            return extractor.extract_profile_text(session.did, text)
 
-        owner_profile_analyzer = analyze_owner_profile
     events = diagnose_events(
         posts,
         extractions,

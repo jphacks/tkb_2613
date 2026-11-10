@@ -4,7 +4,7 @@ import base64
 import binascii
 import json
 import unicodedata
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from io import BytesIO
 from typing import Annotated, Any
 
@@ -17,9 +17,9 @@ from tkb_api.config import Settings, get_settings
 from tkb_api.pipeline import demo_extractions, fetch_images
 from tkb_api.routes.diagnose import (
     ExtractorFactory,
-    _load_demo_posts,
     _build_extractor,
     _fetch_own_posts,
+    _load_demo_posts,
     get_extractor_factory,
     get_fetch_posts,
 )
@@ -54,20 +54,26 @@ def _parse_request(raw: bytes) -> DraftCheckRequest:
         parsed: Any = json.loads(raw)
         return DraftCheckRequest.model_validate(parsed)
     except (ValueError, ValidationError, TypeError, RecursionError):
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "下書きの形式を確認してください") from None
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "下書きの形式を確認してください"
+        ) from None
 
 
 def _decode_photo(body: DraftCheckRequest) -> bytes | None:
     if body.photo_base64 is None:
         if body.photo_content_type is not None:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "下書きの形式を確認してください")
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT, "下書きの形式を確認してください"
+            )
         return None
     if body.photo_content_type not in ALLOWED_CONTENT_TYPES:
         raise HTTPException(status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, "対応していない写真形式です")
     try:
         photo = base64.b64decode(body.photo_base64, validate=True)
     except (binascii.Error, ValueError):
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "下書きの形式を確認してください") from None
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "下書きの形式を確認してください"
+        ) from None
     if not photo:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "写真が空です")
     if len(photo) > MAX_IMAGE_BYTES:
@@ -78,7 +84,9 @@ def _decode_photo(body: DraftCheckRequest) -> bytes | None:
         # Pillowの画像デコーダーが形式・内容を検証し、ピクセル数上限も適用する。
         prepare_image(photo)
     except (OSError, DetectError, Image.DecompressionBombError):
-        raise HTTPException(status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, "写真を読み取れません") from None
+        raise HTTPException(
+            status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, "写真を読み取れません"
+        ) from None
     if actual_type != body.photo_content_type:
         raise HTTPException(status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, "写真の形式が一致しません")
     return photo
@@ -118,7 +126,9 @@ def _mock_draft_check(
             continue
         overlaps.append(
             DraftOverlap(
-                clue=source_clue.model_copy(update={"post_id": "draft:ephemeral", "confidence": 1.0}),
+                clue=source_clue.model_copy(
+                    update={"post_id": "draft:ephemeral", "confidence": 1.0}
+                ),
                 evidence=list(evidence.values()),
             )
         )
@@ -153,7 +163,8 @@ async def check_draft(
     if not body.text.strip() and photo is None:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "本文か写真を入れてください")
     if settings.mock_mode:
-        # canned mock の観測を下書きの抽出結果と誤認させないよう、本文の正規化文字列を部分照合するだけにする。
+        # canned mock と下書きの抽出結果を混同しないよう、本文の正規化文字列だけを
+        # 部分照合する。
         posts = _load_demo_posts(settings)
         return _mock_draft_check(body.text, photo is not None, posts, settings)
     posts = [
@@ -178,7 +189,7 @@ async def check_draft(
     draft = Post(
         post_id="draft:ephemeral",
         text=body.text,
-        created_at=datetime.now(timezone.utc),  # 抽出器入力の必須項目。推理には渡さない。
+        created_at=datetime.now(UTC),  # 抽出器入力の必須項目。推理には渡さない。
         images=draft_images,
     )
     try:
@@ -211,4 +222,6 @@ async def check_draft(
             continue
         seen.add(key)
         overlaps.append(DraftOverlap(clue=clue, evidence=list(found.values())))
-    return DraftCheckResponse(posts_checked=len(posts), overlaps=overlaps, mock_mode=False, notices=[])
+    return DraftCheckResponse(
+        posts_checked=len(posts), overlaps=overlaps, mock_mode=False, notices=[]
+    )

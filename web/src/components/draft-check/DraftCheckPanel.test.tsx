@@ -72,7 +72,7 @@ describe("DraftCheckPanel", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "別のアカウントへ" }));
     await waitFor(() => expect(createSession).toHaveBeenCalled());
-    await waitFor(() => expect(input).toHaveValue(""));
+    await waitFor(() => expect(screen.getByLabelText("本文")).toHaveValue(""));
     expect(screen.getByLabelText("写真（1枚まで）")).toHaveValue("");
 
     resolveCheck(ALICE_RESULT);

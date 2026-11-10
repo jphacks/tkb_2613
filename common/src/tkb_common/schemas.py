@@ -212,6 +212,7 @@ class ProfileAttributeMetadata:
     personal_level: None = None  # deprecated
     guessability: None = None  # deprecated
 
+
 # 静的な表示カタログ。ここにあることは、実際に推定できるという意味ではない。
 PROFILE_ATTRIBUTE_CATALOG: dict[ProfileAttribute, ProfileAttributeMetadata] = {
     ProfileAttribute.FACIAL_APPEARANCE: ProfileAttributeMetadata(
@@ -222,8 +223,12 @@ PROFILE_ATTRIBUTE_CATALOG: dict[ProfileAttribute, ProfileAttributeMetadata] = {
         "本名（フルネーム）",
         ProfileCategory.IDENTITY_AND_FACE,
     ),
-    ProfileAttribute.GIVEN_NAME: ProfileAttributeMetadata("下の名前", ProfileCategory.IDENTITY_AND_FACE),
-    ProfileAttribute.NICKNAME: ProfileAttributeMetadata("呼ばれている名前", ProfileCategory.IDENTITY_AND_FACE),
+    ProfileAttribute.GIVEN_NAME: ProfileAttributeMetadata(
+        "下の名前", ProfileCategory.IDENTITY_AND_FACE
+    ),
+    ProfileAttribute.NICKNAME: ProfileAttributeMetadata(
+        "呼ばれている名前", ProfileCategory.IDENTITY_AND_FACE
+    ),
     ProfileAttribute.OTHER_SOCIAL_ACCOUNT: ProfileAttributeMetadata(
         "別SNSのアカウント / 本垢",
         ProfileCategory.IDENTITY_AND_FACE,
@@ -232,19 +237,37 @@ PROFILE_ATTRIBUTE_CATALOG: dict[ProfileAttribute, ProfileAttributeMetadata] = {
         "リアルタイムの現在地",
         ProfileCategory.HOME_AND_LOCATION,
     ),
-    ProfileAttribute.HOME_BUILDING: ProfileAttributeMetadata("自宅の建物候補", ProfileCategory.HOME_AND_LOCATION),
-    ProfileAttribute.HOME_ROOM: ProfileAttributeMetadata("自宅の部屋・階・位置", ProfileCategory.HOME_AND_LOCATION),
-    ProfileAttribute.HOME_NEAREST_STATION: ProfileAttributeMetadata("自宅の最寄り駅", ProfileCategory.HOME_AND_LOCATION),
-    ProfileAttribute.REGULAR_STATION: ProfileAttributeMetadata("日常的に利用する駅", ProfileCategory.HOME_AND_LOCATION),
-    ProfileAttribute.REGULAR_LINE: ProfileAttributeMetadata("日常的に利用する路線", ProfileCategory.HOME_AND_LOCATION),
+    ProfileAttribute.HOME_BUILDING: ProfileAttributeMetadata(
+        "自宅の建物候補", ProfileCategory.HOME_AND_LOCATION
+    ),
+    ProfileAttribute.HOME_ROOM: ProfileAttributeMetadata(
+        "自宅の部屋・階・位置", ProfileCategory.HOME_AND_LOCATION
+    ),
+    ProfileAttribute.HOME_NEAREST_STATION: ProfileAttributeMetadata(
+        "自宅の最寄り駅", ProfileCategory.HOME_AND_LOCATION
+    ),
+    ProfileAttribute.REGULAR_STATION: ProfileAttributeMetadata(
+        "日常的に利用する駅", ProfileCategory.HOME_AND_LOCATION
+    ),
+    ProfileAttribute.REGULAR_LINE: ProfileAttributeMetadata(
+        "日常的に利用する路線", ProfileCategory.HOME_AND_LOCATION
+    ),
     ProfileAttribute.RESIDENTIAL_AREA: ProfileAttributeMetadata(
         "居住エリア（市区町村・町域）",
         ProfileCategory.HOME_AND_LOCATION,
     ),
-    ProfileAttribute.ANNOUNCED_LONG_ABSENCE: ProfileAttributeMetadata("予告された長期不在", ProfileCategory.HOME_AND_LOCATION),
-    ProfileAttribute.ACTUAL_HOME_ABSENCE: ProfileAttributeMetadata("実際の自宅不在", ProfileCategory.HOME_AND_LOCATION),
-    ProfileAttribute.EMPLOYER_NAME: ProfileAttributeMetadata("雇用主名の推定", ProfileCategory.AFFILIATION_AND_WORK),
-    ProfileAttribute.WORKPLACE_BUILDING_CANDIDATE: ProfileAttributeMetadata("勤務先建物候補", ProfileCategory.AFFILIATION_AND_WORK),
+    ProfileAttribute.ANNOUNCED_LONG_ABSENCE: ProfileAttributeMetadata(
+        "予告された長期不在", ProfileCategory.HOME_AND_LOCATION
+    ),
+    ProfileAttribute.ACTUAL_HOME_ABSENCE: ProfileAttributeMetadata(
+        "実際の自宅不在", ProfileCategory.HOME_AND_LOCATION
+    ),
+    ProfileAttribute.EMPLOYER_NAME: ProfileAttributeMetadata(
+        "雇用主名の推定", ProfileCategory.AFFILIATION_AND_WORK
+    ),
+    ProfileAttribute.WORKPLACE_BUILDING_CANDIDATE: ProfileAttributeMetadata(
+        "勤務先建物候補", ProfileCategory.AFFILIATION_AND_WORK
+    ),
     ProfileAttribute.WORKPLACE_AREA: ProfileAttributeMetadata(
         "勤務先エリア（オフィス街）",
         ProfileCategory.AFFILIATION_AND_WORK,
@@ -257,12 +280,24 @@ PROFILE_ATTRIBUTE_CATALOG: dict[ProfileAttribute, ProfileAttributeMetadata] = {
         "行きつけの店（ジム・美容院・カフェ）",
         ProfileCategory.ACTIVITY_AND_FAMILY,
     ),
-    ProfileAttribute.VEHICLE_MODEL: ProfileAttributeMetadata("自家用車の車種", ProfileCategory.ACTIVITY_AND_FAMILY),
-    ProfileAttribute.PARTIAL_PLATE: ProfileAttributeMetadata("ナンバーの一部", ProfileCategory.ACTIVITY_AND_FAMILY),
-    ProfileAttribute.PARTNER_STATUS: ProfileAttributeMetadata("配偶者・交際相手の有無", ProfileCategory.ACTIVITY_AND_FAMILY),
-    ProfileAttribute.PARTNER_ATTRIBUTES: ProfileAttributeMetadata("配偶者・交際相手の属性", ProfileCategory.ACTIVITY_AND_FAMILY),
-    ProfileAttribute.CHILD_AGE: ProfileAttributeMetadata("子どもの年齢", ProfileCategory.ACTIVITY_AND_FAMILY),
-    ProfileAttribute.CHILD_SCHOOL: ProfileAttributeMetadata("子どもの通園・通学先", ProfileCategory.ACTIVITY_AND_FAMILY),
+    ProfileAttribute.VEHICLE_MODEL: ProfileAttributeMetadata(
+        "自家用車の車種", ProfileCategory.ACTIVITY_AND_FAMILY
+    ),
+    ProfileAttribute.PARTIAL_PLATE: ProfileAttributeMetadata(
+        "ナンバーの一部", ProfileCategory.ACTIVITY_AND_FAMILY
+    ),
+    ProfileAttribute.PARTNER_STATUS: ProfileAttributeMetadata(
+        "配偶者・交際相手の有無", ProfileCategory.ACTIVITY_AND_FAMILY
+    ),
+    ProfileAttribute.PARTNER_ATTRIBUTES: ProfileAttributeMetadata(
+        "配偶者・交際相手の属性", ProfileCategory.ACTIVITY_AND_FAMILY
+    ),
+    ProfileAttribute.CHILD_AGE: ProfileAttributeMetadata(
+        "子どもの年齢", ProfileCategory.ACTIVITY_AND_FAMILY
+    ),
+    ProfileAttribute.CHILD_SCHOOL: ProfileAttributeMetadata(
+        "子どもの通園・通学先", ProfileCategory.ACTIVITY_AND_FAMILY
+    ),
 }
 
 
@@ -374,8 +409,7 @@ class ExternalProfileResult(BaseModel):
             )
             or len(labels) < 2
             or any(
-                not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", label)
-                for label in labels
+                not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", label) for label in labels
             )
         ):
             raise ValueError("external profile URL must use a public hostname")
@@ -431,17 +465,32 @@ class ProfileEvidence(BaseModel):
             if self.post_id is None or self.clue_index is None or self.image_index is not None:
                 raise ValueError("clue evidence requires post_id and clue_index")
         elif self.source is EvidenceSource.POST_TEXT:
-            if self.post_id is None or self.clue_index is not None or self.image_index is not None or self.excerpt is None:
+            if (
+                self.post_id is None
+                or self.clue_index is not None
+                or self.image_index is not None
+                or self.excerpt is None
+            ):
                 raise ValueError("post_text evidence requires post_id and excerpt")
         elif self.source is EvidenceSource.PROFILE_TEXT:
             if self.post_id is not None or self.clue_index is not None or self.excerpt is None:
                 raise ValueError("profile_text evidence requires excerpt only")
         elif self.source is EvidenceSource.IMAGE_ALT:
-            if self.post_id is None or self.clue_index is not None or self.image_index is None or self.excerpt is None:
+            if (
+                self.post_id is None
+                or self.clue_index is not None
+                or self.image_index is None
+                or self.excerpt is None
+            ):
                 raise ValueError("image_alt evidence requires post_id, image_index, and excerpt")
-        elif self.source is EvidenceSource.PUBLIC_WEB:
-            if self.web_fact_id is None or self.post_id is not None or self.clue_index is not None or self.image_index is not None or self.excerpt is not None:
-                raise ValueError("public_web evidence requires only web_fact_id")
+        elif self.source is EvidenceSource.PUBLIC_WEB and (
+            self.web_fact_id is None
+            or self.post_id is not None
+            or self.clue_index is not None
+            or self.image_index is not None
+            or self.excerpt is not None
+        ):
+            raise ValueError("public_web evidence requires only web_fact_id")
         return self
 
 
@@ -502,8 +551,14 @@ class ClaimAssessment(BaseModel):
             if self.harm_severity is None or not self.harm_scenario or not self.harm_prerequisites:
                 raise ValueError("applicable harm requires severity, scenario, and prerequisites")
         elif self.harm_status is HarmStatus.PREREQUISITES_UNMET:
-            if not self.harm_scenario or not self.harm_prerequisites or self.harm_severity is not None:
-                raise ValueError("unmet harm requires scenario and prerequisites, without asserting severity")
+            if (
+                not self.harm_scenario
+                or not self.harm_prerequisites
+                or self.harm_severity is not None
+            ):
+                raise ValueError(
+                    "unmet harm requires scenario and prerequisites, without asserting severity"
+                )
         elif self.harm_severity is not None:
             raise ValueError("harm severity is only set when prerequisites are applicable")
         return self

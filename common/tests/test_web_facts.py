@@ -34,6 +34,8 @@ def test_web_fact_rejects_non_public_https(url: str) -> None:
 
 def test_web_evidence_cannot_point_at_post_and_non_web_cannot_point_at_fact() -> None:
     with pytest.raises(ValidationError):
-        ProfileEvidence(source="public_web", web_fact_id="official-1", post_id="post", required=True)
+        ProfileEvidence(
+            source="public_web", web_fact_id="official-1", post_id="post", required=True
+        )
     with pytest.raises(ValidationError):
         ProfileEvidence(post_id="post", clue_index=0, web_fact_id="official-1", required=True)

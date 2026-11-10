@@ -1,7 +1,6 @@
 import base64
 import json
-from collections.abc import Iterator
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
 from typing import cast
@@ -66,7 +65,7 @@ def _post(post_id: str, text: str) -> Post:
     return Post(
         post_id=post_id,
         text=text,
-        created_at=datetime(2026, 10, 20, tzinfo=timezone.utc),
+        created_at=datetime(2026, 10, 20, tzinfo=UTC),
         images=[],
     )
 
@@ -132,7 +131,9 @@ def test_mock_draft_check_matches_fixture_clue_text_without_extractor_or_network
     match = next(overlap for overlap in data["overlaps"] if overlap["clue"]["value"] == "夜勤明け")
     assert len(match["evidence"]) == 2
     assert any(
-        "架空投稿" in notice and "文字列どうしの部分一致" in notice and "意味は判定しません" in notice
+        "架空投稿" in notice
+        and "文字列どうしの部分一致" in notice
+        and "意味は判定しません" in notice
         for notice in data["notices"]
     )
 
@@ -227,7 +228,7 @@ def test_draft_check_matches_photo_without_text(monkeypatch: pytest.MonkeyPatch)
     post = Post(
         post_id=f"at://{ME}/app.bsky.feed.post/one",
         text="",
-        created_at=datetime(2026, 10, 20, tzinfo=timezone.utc),
+        created_at=datetime(2026, 10, 20, tzinfo=UTC),
         images=[
             PostImage(
                 index=0,

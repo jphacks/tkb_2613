@@ -11,6 +11,11 @@ const SOURCE_LABELS = { ocr: "OCR", vlm: "写真の読み取り", alt: "画像al
 
 export function DraftCheckPanel() {
   const { state: session } = useSession();
+  if (session.status !== "authenticated") return null;
+  return <AuthenticatedDraftCheckPanel key={session.session.did} />;
+}
+
+function AuthenticatedDraftCheckPanel() {
   const [text, setText] = useState("");
   const [photo, setPhoto] = useState<File | undefined>();
   const [result, setResult] = useState<DraftCheckResponse | null>(null);
@@ -18,27 +23,12 @@ export function DraftCheckPanel() {
   const [busy, setBusy] = useState(false);
   const controller = useRef<AbortController | null>(null);
   const photoInput = useRef<HTMLInputElement>(null);
-  const sessionKey = session.status === "authenticated" ? session.session.did : null;
-  const latestSessionKey = useRef(sessionKey);
-  latestSessionKey.current = sessionKey;
-
   useEffect(() => {
-    controller.current?.abort();
-    controller.current = null;
-    setText("");
-    setPhoto(undefined);
-    if (photoInput.current) photoInput.current.value = "";
-    setResult(null);
-    setError(null);
-    setBusy(false);
     return () => controller.current?.abort();
-  }, [sessionKey]);
-
-  if (session.status !== "authenticated") return null;
+  }, []);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const checkedFor = sessionKey;
     controller.current?.abort();
     const current = new AbortController();
     controller.current = current;
@@ -47,13 +37,13 @@ export function DraftCheckPanel() {
     setBusy(true);
     try {
       const response = await checkDraft(text, photo, { signal: current.signal });
-      if (!current.signal.aborted && latestSessionKey.current === checkedFor) setResult(response);
+      if (!current.signal.aborted) setResult(response);
     } catch (cause) {
-      if (!current.signal.aborted && latestSessionKey.current === checkedFor) {
+      if (!current.signal.aborted) {
         setError(cause instanceof ApiError ? cause.message : "下書きを確認できませんでした");
       }
     } finally {
-      if (!current.signal.aborted && latestSessionKey.current === checkedFor) setBusy(false);
+      if (!current.signal.aborted) setBusy(false);
     }
   }
 

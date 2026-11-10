@@ -17,8 +17,8 @@ from tkb_detect.extract import (
     SMALL_REGION_MAX_CONFIDENCE,
     TEXT_MAX_TOKENS,
     Extractor,
-    build_extractor,
     _dedupe,
+    build_extractor,
 )
 from tkb_detect.ocr_client import OcrClient, OcrConfig
 from tkb_detect.prompts import POST_CLOSE, TEXT_SYSTEM_PROMPT, ZOOM_USER_PROMPT
@@ -261,8 +261,15 @@ async def test_merges_ocr_when_configured() -> None:
 
 
 def test_dedupe_preserves_ocr_station_evidence_next_to_vlm_duplicate() -> None:
-    vlm = Clue(post_id="post", image_index=0, type=ClueType.STATION_SIGN, value="根津",
-               region=(1, 2, 80, 30), confidence=0.9, source=ClueSource.VLM)
+    vlm = Clue(
+        post_id="post",
+        image_index=0,
+        type=ClueType.STATION_SIGN,
+        value="根津",
+        region=(1, 2, 80, 30),
+        confidence=0.9,
+        source=ClueSource.VLM,
+    )
     ocr = vlm.model_copy(update={"source": ClueSource.OCR, "confidence": 0.95})
 
     assert {clue.source for clue in _dedupe([vlm, ocr])} == {ClueSource.VLM, ClueSource.OCR}
@@ -445,7 +452,9 @@ async def test_keeps_first_reading_when_zoom_request_fails() -> None:
 
 
 @pytest.mark.anyio
-async def test_extracts_image_alt_separately_from_post_body(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_extracts_image_alt_separately_from_post_body(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     original = _post("本文", 1)
     image = original.images[0].model_copy(update={"alt": "青葉商店街の入口"})
     post = original.model_copy(update={"images": [image]})

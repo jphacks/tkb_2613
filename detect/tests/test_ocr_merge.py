@@ -85,12 +85,15 @@ def test_emits_high_confidence_literal_company_bridge_with_original_region() -> 
     assert clue.region == line.box
 
 
-@pytest.mark.parametrize("text,score", [
-    ("株式会社青空の青空物流センター", 0.79),
-    ("ロゴ 株式会社青空の青空物流センター", 0.99),
-    ("青空の青空物流センター", 0.99),
-    ("合同会社青空の青空物流センター", 0.99),
-])
+@pytest.mark.parametrize(
+    "text,score",
+    [
+        ("株式会社青空の青空物流センター", 0.79),
+        ("ロゴ 株式会社青空の青空物流センター", 0.99),
+        ("青空の青空物流センター", 0.99),
+        ("合同会社青空の青空物流センター", 0.99),
+    ],
+)
 def test_rejects_weak_or_nonliteral_company_bridge_lines(text: str, score: float) -> None:
     assert merge_ocr(POST_ID, 0, [], [OcrLine(text, score, (10, 10, 300, 50))]) == []
 
@@ -108,10 +111,24 @@ def test_ocr_station_text_requires_same_name_vlm_sign_context() -> None:
     assert merge_ocr(POST_ID, 1, [], lines, station_names={"根津", "湯島", "千駄木"}) == []
 
     vlm = [
-        Clue(post_id=POST_ID, image_index=1, type=ClueType.STATION_SIGN, value="根津",
-             region=(25, 35, 175, 65), confidence=0.9, source=ClueSource.VLM),
-        Clue(post_id=POST_ID, image_index=1, type=ClueType.STATION_SIGN, value="湯島",
-             region=(25, 85, 175, 115), confidence=0.9, source=ClueSource.VLM),
+        Clue(
+            post_id=POST_ID,
+            image_index=1,
+            type=ClueType.STATION_SIGN,
+            value="根津",
+            region=(25, 35, 175, 65),
+            confidence=0.9,
+            source=ClueSource.VLM,
+        ),
+        Clue(
+            post_id=POST_ID,
+            image_index=1,
+            type=ClueType.STATION_SIGN,
+            value="湯島",
+            region=(25, 85, 175, 115),
+            confidence=0.9,
+            source=ClueSource.VLM,
+        ),
     ]
     clues = merge_ocr(POST_ID, 1, vlm, lines, station_names={"根津", "湯島", "千駄木"})
 
@@ -125,37 +142,63 @@ def test_ocr_station_text_requires_same_name_vlm_sign_context() -> None:
 
 
 def test_station_name_suffix_is_removed_before_exact_match_with_vlm_context() -> None:
-    vlm = Clue(post_id=POST_ID, image_index=0, type=ClueType.STATION_SIGN,
-               value="根津駅", region=(1, 2, 80, 30), confidence=0.9, source=ClueSource.VLM)
-    clue = merge_ocr(
-        POST_ID, 0, [vlm], [OcrLine(text="根津駅", score=0.9, box=(1, 2, 80, 30))],
+    vlm = Clue(
+        post_id=POST_ID,
+        image_index=0,
+        type=ClueType.STATION_SIGN,
+        value="根津駅",
+        region=(1, 2, 80, 30),
+        confidence=0.9,
+        source=ClueSource.VLM,
+    )
+    merged_clues = merge_ocr(
+        POST_ID,
+        0,
+        [vlm],
+        [OcrLine(text="根津駅", score=0.9, box=(1, 2, 80, 30))],
         station_names={"根津"},
     )
 
-    clue = next(clue for clue in clue if clue.source is ClueSource.OCR)
-    assert clue.value == "根津"
-    assert clue.region == (1, 2, 80, 30)
+    ocr_clue = next(clue for clue in merged_clues if clue.source is ClueSource.OCR)
+    assert ocr_clue.value == "根津"
+    assert ocr_clue.region == (1, 2, 80, 30)
 
 
 def test_station_ocr_rejects_mismatched_or_nonoverlapping_vlm_context() -> None:
     line = [OcrLine("根津", 0.95, (1, 2, 80, 30))]
-    for value, region in (("湯島", (1, 2, 80, 30)), ("根津", (100, 100, 180, 140)),
-                          ("根津", None)):
-        vlm = Clue(post_id=POST_ID, image_index=0, type=ClueType.STATION_SIGN,
-                   value=value, region=region, confidence=0.9, source=ClueSource.VLM)
+    for value, region in (("湯島", (1, 2, 80, 30)), ("根津", (100, 100, 180, 140)), ("根津", None)):
+        vlm = Clue(
+            post_id=POST_ID,
+            image_index=0,
+            type=ClueType.STATION_SIGN,
+            value=value,
+            region=region,
+            confidence=0.9,
+            source=ClueSource.VLM,
+        )
         merged = merge_ocr(POST_ID, 0, [vlm], line, station_names={"根津", "湯島"})
         assert all(clue.source is not ClueSource.OCR for clue in merged)
 
 
-
-
 def test_station_ocr_clue_survives_same_value_vlm_clue() -> None:
-    vlm = Clue(post_id=POST_ID, image_index=0, type=ClueType.STATION_SIGN,
-               value="根津", region=(1, 2, 80, 30), confidence=0.9, source=ClueSource.VLM)
+    vlm = Clue(
+        post_id=POST_ID,
+        image_index=0,
+        type=ClueType.STATION_SIGN,
+        value="根津",
+        region=(1, 2, 80, 30),
+        confidence=0.9,
+        source=ClueSource.VLM,
+    )
     merged = merge_ocr(
-        POST_ID, 0, [vlm], [OcrLine("根津", 0.95, (1, 2, 80, 30))], station_names={"根津"},
+        POST_ID,
+        0,
+        [vlm],
+        [OcrLine("根津", 0.95, (1, 2, 80, 30))],
+        station_names={"根津"},
     )
 
     assert {clue.source for clue in merged if clue.type is ClueType.STATION_SIGN} == {
-        ClueSource.VLM, ClueSource.OCR,
+        ClueSource.VLM,
+        ClueSource.OCR,
     }

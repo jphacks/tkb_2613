@@ -136,23 +136,41 @@ async def test_events_keep_failed_posts_and_index_conclusions_into_all_clues() -
 @pytest.mark.anyio
 async def test_web_employer_evidence_is_streamed_with_its_source() -> None:
     anchor = _post(0, text="勤務先は青空社")
-    bridge = anchor.model_copy(update={
-        "post_id": "at://did:plc:xxxx/app.bsky.feed.post/2",
-        "text": "青空社の資料を整理",
-    })
-    fact = WebFact.model_validate({
-        "id": "official-1", "subject": "青空社", "relation": "legal_name_of",
-        "object": "株式会社青空", "source_url": "https://example.org/company/training",
-        "source_title": "架空の公式会社案内", "source_kind": "official_organization",
-        "excerpt": "青空社の正式名称は株式会社青空です",
-        "retrieved_at": "2026-11-10T10:00:00+09:00", "verification_status": "verified",
-    })
-    events = [event async for event in diagnose_events(
-        [anchor, bridge],
-        _stream([PostExtraction(post_id=anchor.post_id, clues=[]),
-                 PostExtraction(post_id=bridge.post_id, clues=[])]),
-        Gazetteer(), web_facts=[fact], web_lookup_status="fixture",
-    )]
+    bridge = anchor.model_copy(
+        update={
+            "post_id": "at://did:plc:xxxx/app.bsky.feed.post/2",
+            "text": "青空社の資料を整理",
+        }
+    )
+    fact = WebFact.model_validate(
+        {
+            "id": "official-1",
+            "subject": "青空社",
+            "relation": "legal_name_of",
+            "object": "株式会社青空",
+            "source_url": "https://example.org/company/training",
+            "source_title": "架空の公式会社案内",
+            "source_kind": "official_organization",
+            "excerpt": "青空社の正式名称は株式会社青空です",
+            "retrieved_at": "2026-11-10T10:00:00+09:00",
+            "verification_status": "verified",
+        }
+    )
+    events = [
+        event
+        async for event in diagnose_events(
+            [anchor, bridge],
+            _stream(
+                [
+                    PostExtraction(post_id=anchor.post_id, clues=[]),
+                    PostExtraction(post_id=bridge.post_id, clues=[]),
+                ]
+            ),
+            Gazetteer(),
+            web_facts=[fact],
+            web_lookup_status="fixture",
+        )
+    ]
     result = next(data for name, data in events if name == "conclusions")
     assert result["web_lookup_status"] == "fixture"
     assert result["web_facts"][0]["id"] == "official-1"
@@ -166,52 +184,90 @@ async def test_regular_station_claim_and_ocr_clue_are_streamed_with_global_index
     habit = _post(0, text="毎朝いつもの通勤駅を使う")
     photo = Post(
         post_id="at://did:plc:xxxx/app.bsky.feed.post/2",
-        text="いつもの通勤駅から出勤", created_at=habit.created_at,
+        text="いつもの通勤駅から出勤",
+        created_at=habit.created_at,
         images=[PostImage(index=0, url=f"{CDN}/0@jpeg", alt="", width=640, height=480)],
     )
     routine = Clue(
-        post_id=habit.post_id, image_index=None, type=ClueType.ROUTINE_TEXT,
-        value="毎朝いつもの通勤駅を使う", region=None, confidence=0.9, source=ClueSource.TEXT,
+        post_id=habit.post_id,
+        image_index=None,
+        type=ClueType.ROUTINE_TEXT,
+        value="毎朝いつもの通勤駅を使う",
+        region=None,
+        confidence=0.9,
+        source=ClueSource.TEXT,
     )
     station = Clue(
-        post_id=photo.post_id, image_index=0, type=ClueType.STATION_SIGN,
-        value="根津", region=(10, 20, 180, 60), confidence=0.94, source=ClueSource.OCR,
+        post_id=photo.post_id,
+        image_index=0,
+        type=ClueType.STATION_SIGN,
+        value="根津",
+        region=(10, 20, 180, 60),
+        confidence=0.94,
+        source=ClueSource.OCR,
     )
     station_context = Clue(
-        post_id=photo.post_id, image_index=0, type=ClueType.STATION_SIGN,
-        value="根津", region=(12, 22, 178, 58), confidence=0.91, source=ClueSource.VLM,
+        post_id=photo.post_id,
+        image_index=0,
+        type=ClueType.STATION_SIGN,
+        value="根津",
+        region=(12, 22, 178, 58),
+        confidence=0.91,
+        source=ClueSource.VLM,
     )
     gazetteer = Gazetteer(stations=[{"station_name": "根津", "mesh_1km": "m1"}])
-    events = [event async for event in diagnose_events(
-        [habit, photo],
-        _stream([PostExtraction(post_id=habit.post_id, clues=[routine]),
-                 PostExtraction(post_id=photo.post_id, clues=[station, station_context])]),
-        gazetteer,
-    )]
+    events = [
+        event
+        async for event in diagnose_events(
+            [habit, photo],
+            _stream(
+                [
+                    PostExtraction(post_id=habit.post_id, clues=[routine]),
+                    PostExtraction(post_id=photo.post_id, clues=[station, station_context]),
+                ]
+            ),
+            gazetteer,
+        )
+    ]
 
     result = next(data for name, data in events if name == "conclusions")
-    claim = next(item for item in result["profile_claims"] if item["attribute"] == "regular_station")
+    claim = next(
+        item for item in result["profile_claims"] if item["attribute"] == "regular_station"
+    )
     assert claim["value"] == "根津駅"
     assert result["clues"][1]["source"] == "ocr"
     assert result["clues"][1]["region"] == [10, 20, 180, 60]
-    assert {ref["clue_index"] for ref in claim["evidence"] if ref["clue_index"] is not None} == {0, 1, 2}
+    assert {ref["clue_index"] for ref in claim["evidence"] if ref["clue_index"] is not None} == {
+        0,
+        1,
+        2,
+    }
 
 
 @pytest.mark.anyio
 async def test_child_age_claim_streams_both_required_owner_posts() -> None:
     birth = _post(0, text="息子のたろうは2019年生まれ")
-    birthday = birth.model_copy(update={
-        "post_id": "at://did:plc:xxxx/app.bsky.feed.post/2",
-        "text": "息子のたろう、今日は誕生日",
-        "created_at": datetime.fromisoformat("2025-10-20T08:31:00+09:00"),
-    })
-    events = [event async for event in diagnose_events(
-        [birth, birthday],
-        _stream([PostExtraction(post_id=birth.post_id, clues=[]),
-                 PostExtraction(post_id=birthday.post_id, clues=[])]),
-        Gazetteer(),
-        diagnosis_date=date(2026, 11, 10),
-    )]
+    birthday = birth.model_copy(
+        update={
+            "post_id": "at://did:plc:xxxx/app.bsky.feed.post/2",
+            "text": "息子のたろう、今日は誕生日",
+            "created_at": datetime.fromisoformat("2025-10-20T08:31:00+09:00"),
+        }
+    )
+    events = [
+        event
+        async for event in diagnose_events(
+            [birth, birthday],
+            _stream(
+                [
+                    PostExtraction(post_id=birth.post_id, clues=[]),
+                    PostExtraction(post_id=birthday.post_id, clues=[]),
+                ]
+            ),
+            Gazetteer(),
+            diagnosis_date=date(2026, 11, 10),
+        )
+    ]
 
     result = next(data for name, data in events if name == "conclusions")
     claim = next(item for item in result["profile_claims"] if item["attribute"] == "child_age")
@@ -219,5 +275,6 @@ async def test_child_age_claim_streams_both_required_owner_posts() -> None:
     assert claim["value"] == "7歳"
     assert len(claim["evidence_paths"]) == 1
     assert {ref["post_id"] for ref in claim["evidence_paths"][0]["evidence"]} == {
-        birth.post_id, birthday.post_id,
+        birth.post_id,
+        birthday.post_id,
     }
