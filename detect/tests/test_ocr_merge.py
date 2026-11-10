@@ -117,6 +117,8 @@ def test_ocr_station_text_requires_same_name_vlm_sign_context() -> None:
 
     station_clues = [clue for clue in clues if clue.type is ClueType.STATION_SIGN]
     assert [(clue.value, clue.source, clue.image_index, clue.region) for clue in station_clues] == [
+        ("根津", ClueSource.VLM, 1, (20, 30, 180, 70)),
+        ("湯島", ClueSource.VLM, 1, (20, 80, 180, 120)),
         ("根津", ClueSource.OCR, 1, (20, 30, 180, 70)),
         ("湯島", ClueSource.OCR, 1, (20, 80, 180, 120)),
     ]

@@ -157,8 +157,8 @@ def test_mock_draft_check_discloses_that_photo_is_not_analyzed() -> None:
 
 def test_draft_check_returns_only_exact_observation_matches_for_own_posts() -> None:
     posts = [
-        _post("at://did:plc:me/app.bsky.feed.post/one", "  根津駅  "),
-        _post("at://did:plc:me/app.bsky.feed.post/two", "根津駅"),
+        _post(f"at://{ME}/app.bsky.feed.post/one", "  根津駅  "),
+        _post(f"at://{ME}/app.bsky.feed.post/two", "根津駅"),
         _post("at://did:plc:other/app.bsky.feed.post/three", "unrelated"),
     ]
     extractor = RecordingExtractor()
@@ -174,8 +174,8 @@ def test_draft_check_returns_only_exact_observation_matches_for_own_posts() -> N
     assert len(data["overlaps"]) == 1
     assert data["overlaps"][0]["clue"]["value"] == "根津駅"
     assert {item["post_id"] for item in data["overlaps"][0]["evidence"]} == {
-        "at://did:plc:me/app.bsky.feed.post/one",
-        "at://did:plc:me/app.bsky.feed.post/two",
+        f"at://{ME}/app.bsky.feed.post/one",
+        f"at://{ME}/app.bsky.feed.post/two",
     }
     assert all("other" not in post_id for post_id, _, _ in extractor.seen)
     assert extractor.seen[0][0] == "draft:ephemeral"
@@ -223,7 +223,7 @@ def test_draft_check_matches_photo_without_text(monkeypatch: pytest.MonkeyPatch)
     photo = png.getvalue()
     extractor = RecordingExtractor()
     post = Post(
-        post_id="at://did:plc:me/app.bsky.feed.post/one",
+        post_id=f"at://{ME}/app.bsky.feed.post/one",
         text="",
         created_at=datetime(2026, 10, 20, tzinfo=timezone.utc),
         images=[

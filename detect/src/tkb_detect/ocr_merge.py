@@ -64,6 +64,9 @@ def _regex_clues(post_id: str, image_index: int, lines: list[OcrLine]) -> list[C
     clues: list[Clue] = []
     for line in lines:
         text = _normalize(line.text)
+        # Keep literal company names intact: _normalize rewrites long-vowel marks
+        # for phone/postal matching, which must not change names such as センター.
+        literal_text = re.sub(r"\s+", "", unicodedata.normalize("NFKC", line.text))
         # 電話番号を先に拾い、その一部（047-000-0000 の 000-0000 など）を郵便番号にしない
         phones = list(PHONE_RE.finditer(text))
         found: list[tuple[ClueType, str]] = [
@@ -88,14 +91,13 @@ def _regex_clues(post_id: str, image_index: int, lines: list[OcrLine]) -> list[C
             )
         # OCR-only literal relation. Keep the original line's box so the UI can
         # show precisely what was read; threshold confidence to limit OCR noise.
-        org_match = ORG_BRIDGE_RE.fullmatch(text)
+        org_match = ORG_BRIDGE_RE.fullmatch(literal_text)
         if org_match and line.score >= 0.8:
-            if _has_area(line.box):
-                clues.append(Clue(
-                    post_id=post_id, image_index=image_index, type=ClueType.ORG_TEXT,
-                    value=text, region=line.box,
-                    confidence=min(max(line.score, 0.0), 1.0), source=ClueSource.OCR,
-                ))
+            clues.append(Clue(
+                post_id=post_id, image_index=image_index, type=ClueType.ORG_TEXT,
+                value=line.text, region=line.box,
+                confidence=min(max(line.score, 0.0), 1.0), source=ClueSource.OCR,
+            ))
     return clues
 
 

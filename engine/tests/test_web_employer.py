@@ -79,11 +79,28 @@ def test_web_employer_path_remains_when_possessive_path_is_rejected() -> None:
     claims = infer_owner_claims_with_web(posts, [clue], [web_fact(company="株式会社青空")])
     item = next(claim for claim in claims if claim.attribute.value == "employer_name")
     assert infer_owner_claims(posts, [clue]) == []
-    assert len(item.evidence_paths) == 1
+    expected_post_sets = {
+        frozenset({web_anchor.post_id, support.post_id})
+        for support in (anchor, bridge, web_support)
+    }
+    actual_post_sets = {
+        frozenset(ref.post_id for ref in path.evidence if ref.post_id is not None)
+        for path in item.evidence_paths
+    }
+    assert actual_post_sets == expected_post_sets
+    assert all(
+        all(ref.required for ref in path.evidence)
+        and sum(ref.source.value == "public_web" for ref in path.evidence) == 1
+        for path in item.evidence_paths
+    )
     assert item.assessment.minimal_scope == "bluesky_plus_public_web"
     surviving = recalculate_after_deletion(item, {bridge.post_id})
     assert surviving is not None
     assert surviving.assessment.minimal_scope == "bluesky_plus_public_web"
+    assert len(surviving.evidence_paths) == 2
+    assert all(bridge.post_id not in {ref.post_id for ref in path.evidence}
+               for path in surviving.evidence_paths)
+    assert recalculate_after_deletion(item, {web_anchor.post_id}) is None
     assert any(ref.web_fact_id for ref in item.evidence_paths[0].evidence)
     different_legal_name = infer_owner_claims_with_web(posts, [clue], [web_fact(company="別会社社")])
     assert different_legal_name[0].value == "別会社社"

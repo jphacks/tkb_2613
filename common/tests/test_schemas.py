@@ -70,7 +70,7 @@ def test_covers_all_documented_types_and_sources() -> None:
         "name_text", "org_text", "handle_text", "place_text",
         "age_text", "routine_text", "relation_text",
     }  # fmt: skip
-    assert {s.value for s in ClueSource} == {"ocr", "vlm", "text", "meta"}
+    assert {s.value for s in ClueSource} == {"ocr", "vlm", "text", "meta", "alt", "profile_text"}
 
 
 @pytest.mark.parametrize("confidence", [-0.01, 1.01])

@@ -153,7 +153,8 @@ def test_child_age_uses_japan_calendar_date_for_birthday_post() -> None:
     claim = infer_child_age_claim([birth, birthday], diagnosis_date=date(2026, 1, 2))
 
     assert claim is not None
-    assert claim.value == "6歳"
+    # The child's JST birthday is January 1, so the 2026 anniversary has passed.
+    assert claim.value == "7歳"
 
 
 def test_child_age_rejects_third_party_quotes_ambiguity_and_implausible_dates() -> None:
