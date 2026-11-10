@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { PROFILE_ATTRIBUTE_CATALOG, PROFILE_CATEGORIES, isProfileItem, isWebFact, profileClaimAfterDeletion, type ProfileAttribute, type ProfileItem } from "./profile";
+import { PROFILE_ATTRIBUTE_CATALOG, PROFILE_CATEGORIES, isExternalProfileResult, isProfileItem, isWebFact, profileClaimAfterDeletion, type ProfileAttribute, type ProfileItem } from "./profile";
 
 describe("profile metadata catalog", () => {
   it("contains the 25 candidate IDs and labels with unrated legacy fields", () => {
@@ -82,6 +82,64 @@ describe("isProfileItem", () => {
     ["negative clue index", { ...base, value: "会社名", status: "found", evidence: [{ ...base.evidence[0], clue_index: -1 }] }],
     ["single-item evidence path", { ...base, value: "会社名", status: "found", evidence_paths: [{ evidence: [base.evidence[0]] }] }],
   ])("rejects %s", (_label, item) => expect(isProfileItem(item)).toBe(false));
+
+  it("validates the optional four-axis assessment fields and conditional requirements", () => {
+    const assessment = {
+      minimal_scope: "bluesky",
+      offline_subtype: null,
+      psychological_resistance: 2,
+      persona_context: "架空の利用者",
+      inference_ease: 3,
+      inference_ease_basis: "provisional",
+      harm_severity: 2,
+      harm_scenario: "架空の被害例",
+      harm_prerequisites: ["追加条件"],
+      harm_status: "applicable",
+    };
+    const withAssessment = (value: unknown) => ({
+      ...base,
+      value: "会社名",
+      status: "found",
+      assessment: value,
+    });
+
+    expect(isProfileItem(withAssessment(assessment))).toBe(true);
+    expect(isProfileItem(withAssessment({
+      ...assessment,
+      harm_severity: null,
+      harm_scenario: null,
+      harm_prerequisites: [],
+      harm_status: "unknown",
+      psychological_resistance: null,
+      persona_context: null,
+      inference_ease: null,
+      inference_ease_basis: null,
+    }))).toBe(true);
+    expect(isProfileItem(withAssessment({
+      ...assessment,
+      minimal_scope: "bluesky_plus_offline",
+      offline_subtype: "public_registry",
+      harm_severity: null,
+      harm_status: "prerequisites_unmet",
+    }))).toBe(true);
+
+    const invalidAssessments = [
+      { ...assessment, minimal_scope: "other" },
+      { ...assessment, psychological_resistance: 6 },
+      { ...assessment, persona_context: null },
+      { ...assessment, inference_ease_basis: "estimated" },
+      { ...assessment, inference_ease: null },
+      { ...assessment, harm_prerequisites: [1] },
+      { ...assessment, harm_status: "unknown", harm_severity: 1 },
+      { ...assessment, harm_status: "prerequisites_unmet", harm_severity: 2 },
+      { ...assessment, harm_status: "prerequisites_unmet", harm_prerequisites: [] },
+      { ...assessment, minimal_scope: "bluesky_plus_offline", offline_subtype: null },
+      { ...assessment, minimal_scope: "bluesky_plus_public_web", offline_subtype: "registry" },
+    ];
+    for (const invalid of invalidAssessments) {
+      expect(isProfileItem(withAssessment(invalid))).toBe(false);
+    }
+  });
 });
 
 describe("isWebFact", () => {
@@ -95,5 +153,53 @@ describe("isWebFact", () => {
   it("rejects URL credentials and invalid status", () => {
     expect(isWebFact({ ...fact, source_url: "https://user:pass@example.org/a" })).toBe(false);
     expect(isWebFact({ ...fact, verification_status: "guessed" })).toBe(false);
+  });
+});
+
+describe("isExternalProfileResult", () => {
+  const candidate = {
+    id: "candidate-1",
+    url: "https://example.net/blog",
+    domain: "example.net",
+    title: "架空のブログ",
+    status: "candidate",
+    owner_evidence: null,
+  };
+
+  it("accepts public HTTPS candidates and owner-linked profile or post URLs", () => {
+    expect(isExternalProfileResult(candidate)).toBe(true);
+    expect(isExternalProfileResult({
+      ...candidate,
+      status: "owner_linked",
+      owner_evidence: { kind: "profile_text", post_id: null, excerpt: "ブログ https://example.net/blog" },
+    })).toBe(true);
+    expect(isExternalProfileResult({
+      ...candidate,
+      status: "owner_linked",
+      owner_evidence: { kind: "post_text", post_id: "at://did:plc:test/app.bsky.feed.post/a", excerpt: "私の記事 https://example.net/blog" },
+    })).toBe(true);
+  });
+
+  it.each([
+    ["unknown fields", { extra: true }],
+    ["empty title", { title: "" }],
+    ["non-HTTPS URL", { url: "http://example.net/blog" }],
+    ["URL credentials", { url: "https://user:pass@example.net/blog" }],
+    ["explicit port", { url: "https://example.net:8443/blog" }],
+    ["domain mismatch", { domain: "elsewhere.net" }],
+    ["single-label host", { url: "https://intranet/blog", domain: "intranet" }],
+    ["IPv4 address", { url: "https://192.0.2.1/blog", domain: "192.0.2.1" }],
+    ["localhost host", { url: "https://localhost/blog", domain: "localhost" }],
+    ["internal suffix", { url: "https://service.internal/blog", domain: "service.internal" }],
+    ["malformed host label", { url: "https://-invalid.example/blog", domain: "-invalid.example" }],
+    ["bad status", { status: "verified" }],
+    ["candidate with owner evidence", { owner_evidence: { kind: "profile_text", post_id: null, excerpt: "link" } }],
+    ["owner-linked without evidence", { status: "owner_linked" }],
+    ["empty excerpt", { status: "owner_linked", owner_evidence: { kind: "profile_text", post_id: null, excerpt: "" } }],
+    ["profile evidence with a post ID", { status: "owner_linked", owner_evidence: { kind: "profile_text", post_id: "post", excerpt: "link" } }],
+    ["post evidence without a post ID", { status: "owner_linked", owner_evidence: { kind: "post_text", post_id: null, excerpt: "link" } }],
+    ["unknown evidence kind", { status: "owner_linked", owner_evidence: { kind: "search_result", post_id: null, excerpt: "link" } }],
+  ])("rejects %s", (_name, change) => {
+    expect(isExternalProfileResult({ ...candidate, ...change })).toBe(false);
   });
 });
