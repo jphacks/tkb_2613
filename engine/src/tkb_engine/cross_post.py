@@ -1,6 +1,7 @@
-"""Conservative claim paths for residential-area and employer inference."""
+"""Conservative claim paths for residential area, commute station, and employer evidence."""
 
 from dataclasses import dataclass
+from datetime import date, datetime, timedelta, timezone
 from enum import StrEnum
 import re
 import unicodedata
@@ -22,6 +23,7 @@ from tkb_common.schemas import (
     WebSourceKind,
     WebVerificationStatus,
 )
+from tkb_engine.gazetteer import Gazetteer
 
 
 class FactRole(StrEnum):
@@ -57,9 +59,12 @@ def infer_cross_post_claim(
     different posts, joined by the same explicit bridge. Any competing value invalidates the
     claim instead of choosing one. Confidence is the weakest fact on the AND path.
     """
-    if attribute not in {ProfileAttribute.RESIDENTIAL_AREA, ProfileAttribute.EMPLOYER_NAME}:
-        raise ValueError("cross-post gate is only defined for residential_area and employer_name")
-    expected_bridge = "home:" if attribute is ProfileAttribute.RESIDENTIAL_AREA else "employer:"
+    if attribute not in {ProfileAttribute.RESIDENTIAL_AREA, ProfileAttribute.REGULAR_STATION}:
+        raise ValueError("cross-post gate is only defined for residential_area and regular_station")
+    expected_bridge = {
+        ProfileAttribute.RESIDENTIAL_AREA: "home:",
+        ProfileAttribute.REGULAR_STATION: "regular_station:",
+    }[attribute]
     eligible = [
         f for f in facts
         if f.value.strip() and f.bridge_id and f.bridge_id.startswith(expected_bridge) and not _forbidden_context(f.context)
@@ -265,9 +270,12 @@ def infer_web_employer_claim(
 def infer_owner_claims_with_web(
     posts: list[Post], clues: list[Clue], web_facts: list[WebFact],
     owner_profile_text: str = "", self_report_clues: list[Clue] | None = None,
+    gazetteer: Gazetteer | None = None,
+    *, diagnosis_date: date | None = None,
 ) -> list[ProfileItem]:
     """Combine direct and Web-backed paths; reject conflicting employer names."""
-    claims = infer_owner_claims(posts, clues, owner_profile_text, self_report_clues)
+    claims = infer_owner_claims(posts, clues, owner_profile_text, self_report_clues, gazetteer,
+                                diagnosis_date=diagnosis_date)
     web_claim = infer_web_employer_claim(posts, web_facts, owner_profile_text)
     if web_claim is None:
         return claims
@@ -298,12 +306,15 @@ def infer_owner_claims(
     clues: list[Clue],
     owner_profile_text: str = "",
     self_report_clues: list[Clue] | None = None,
+    gazetteer: Gazetteer | None = None,
+    *, diagnosis_date: date | None = None,
 ) -> list[ProfileItem]:
-    """Parse narrow explicit Japanese bridges; ambiguous or unsupported text yields no claim.
+    """Infer only limited claims with explicit owner/context evidence.
 
     Residential pattern: an owner post names ``自宅近くのX`` and a different post says
-    ``XはY``. Employer pattern: an owner post says ``うちの会社のX`` and a different
-    post says ``YのX``. Image-only logos, station signs, and visit statements are not inputs.
+    ``XはY``. Regular-station claims require an explicit commute-habit post and a separate
+    post tying an OCR station sign to the owner's usual commute station. Employer inference
+    from possessive phrases is intentionally disabled.
     """
     facts: list[CrossPostFact] = []
     self_report_clues = self_report_clues or []
@@ -316,7 +327,6 @@ def infer_owner_claims(
             continue
         for attribute, anchor_pattern, value_pattern, clue_type, validator in (
             (ProfileAttribute.RESIDENTIAL_AREA, r"自宅近くの(?P<bridge>[^\s、。]+)", r"{bridge}(?:は|が)(?P<value>[^\s、。]+)", ClueType.PLACE_TEXT, _is_residential_value),
-            (ProfileAttribute.EMPLOYER_NAME, r"うちの会社の(?P<bridge>[^\s、。]+)", r"(?P<value>[^\s、。]+?)の{bridge}", ClueType.ORG_TEXT, _is_organization_name),
         ):
             anchor_match = re.search(anchor_pattern, anchor_text)
             if not anchor_match:
@@ -325,7 +335,7 @@ def infer_owner_claims(
             bridge = _normalize_bridge(bridge_text)
             if not _is_distinctive_bridge(bridge_text):
                 continue
-            bridge_id = f"home:{bridge}" if attribute is ProfileAttribute.RESIDENTIAL_AREA else f"employer:{bridge}"
+            bridge_id = f"home:{bridge}"
             facts.append(CrossPostFact(anchor_post_id, None, FactRole.OWNER_RELATION, bridge_text, confidence,
                                        bridge_id, True, excerpt=anchor_match.group(0), source=anchor_source))
 
@@ -363,10 +373,258 @@ def infer_owner_claims(
                         facts.append(CrossPostFact(None, None, FactRole.SPECIFIC_VALUE, value, typed.confidence,
                             bridge_id, excerpt=match.group(0), source="profile_text"))
 
-    return [
-        item for attribute in (ProfileAttribute.RESIDENTIAL_AREA, ProfileAttribute.EMPLOYER_NAME)
-        if (item := infer_cross_post_claim(attribute, facts)) is not None
-    ]
+    claims = [item for item in [infer_cross_post_claim(ProfileAttribute.RESIDENTIAL_AREA, facts)] if item is not None]
+    child_age = infer_child_age_claim(posts, diagnosis_date=diagnosis_date)
+    if child_age is not None:
+        claims.append(child_age)
+    if gazetteer is not None:
+        regular_station = infer_regular_station_claim(posts, clues, gazetteer)
+        if regular_station is not None:
+            claims.append(regular_station)
+    return claims
+
+
+_CHILD_BIRTH_YEAR_RE = re.compile(
+    r"(?P<relation>息子|娘|子ども|子供)の(?P<name>[\wぁ-んァ-ヶ一-龠]{2,12})(?:は|が|、|\s)"
+    r"(?P<year>20\d{2})年生まれ"
+)
+_CHILD_BIRTHDAY_RE = re.compile(
+    r"(?P<relation>息子|娘|子ども|子供)の(?P<name>[\wぁ-んァ-ヶ一-龠]{2,12})(?:は|が|、|\s)"
+    r"(?:今日は|本日は|今日|本日)(?:誕生日|お誕生日)"
+)
+_CHILD_EXPLICIT_AGE_RE = re.compile(
+    r"(?:息子|娘|子ども|子供)[^。！？\n]{0,30}?(?P<age>\d{1,2})歳"
+)
+_CHILD_AGE_EXCLUDED_RE = re.compile(
+    r"(?:甥|姪|友達|友人|知人|親戚|親族|同僚|他人|架空|創作|小説|アニメ|キャラ|想像|もしも|引用|リポスト|RT|引用投稿|"
+    r"元夫|元妻|元旦那|元嫁|元パートナー|離婚|別居|亡くな|死去|生まれていない|"
+    r"誕生日ではない|誕生日じゃない|誕生日ではありません|誕生日じゃありません)"
+)
+
+JAPAN_TZ = timezone(timedelta(hours=9))
+
+
+def infer_child_age_claim(posts: list[Post], diagnosis_date: date | None = None) -> ProfileItem | None:
+    """Infer an exact current child age only from two independent, owner-authored posts.
+
+    One post links a distinctive child name to a birth year; a different post links
+    the same child to a birthday on the post's local calendar date. Requiring both
+    prevents either post alone from disclosing the exact current age.
+    """
+    today = diagnosis_date or datetime.now(JAPAN_TZ).date()
+    birth_year_posts: dict[tuple[str, str, int], list[tuple[Post, str]]] = {}
+    birthday_posts: dict[tuple[str, str], list[tuple[Post, date, str]]] = {}
+    explicitly_disclosed_child_age = False
+    for post in posts:
+        text = unicodedata.normalize("NFKC", post.text)
+        if _CHILD_AGE_EXCLUDED_RE.search(text) or _has_quoted_or_fiction_context(text):
+            continue
+        explicitly_disclosed_child_age |= bool(_CHILD_EXPLICIT_AGE_RE.search(text))
+        for match in _CHILD_BIRTH_YEAR_RE.finditer(text):
+            name = _normalize_bridge(match.group("name"))
+            year = int(match.group("year"))
+            if _distinctive_child_name(name) and year <= today.year:
+                birth_year_posts.setdefault((match.group("relation"), name, year), []).append((post, match.group(0)))
+        for match in _CHILD_BIRTHDAY_RE.finditer(text):
+            name = _normalize_bridge(match.group("name"))
+            if _distinctive_child_name(name):
+                birthday_posts.setdefault((match.group("relation"), name), []).append(
+                    (post, post.created_at.astimezone(JAPAN_TZ).date(), match.group(0)))
+
+    candidates: list[tuple[int, Post, str, Post, str]] = []
+    for (relation, name, birth_year), birth_records in birth_year_posts.items():
+        if explicitly_disclosed_child_age:
+            continue
+        for birthday_post, birthday, birthday_excerpt in birthday_posts.get((relation, name), []):
+            if birthday > today or birthday.year <= birth_year:
+                continue
+            if birthday.month == 2 and birthday.day == 29:
+                # Leap-day birthdays have differing anniversary conventions; do not guess.
+                continue
+            age = today.year - birth_year - ((today.month, today.day) < (birthday.month, birthday.day))
+            if not 0 <= age <= 17:
+                continue
+            distinct_birth_records = [(post, excerpt) for post, excerpt in birth_records
+                                      if post.post_id != birthday_post.post_id]
+            for birth_post, birth_excerpt in distinct_birth_records:
+                candidates.append((age, birth_post, birth_excerpt, birthday_post, birthday_excerpt))
+
+    # Reject any ambiguity, including multiple eligible children or competing
+    # birth-year/birthday posts. Do not silently select one pair.
+    if len(candidates) != 1:
+        return None
+    age, birth_post, birth_excerpt, birthday_post, birthday_excerpt = candidates[0]
+    confidence = 0.55  # provisional rule strength; not a calibrated probability
+    path = ProfileEvidencePath(evidence=[
+        ProfileEvidence(post_id=birth_post.post_id, required=True, source="post_text", excerpt=birth_excerpt),
+        ProfileEvidence(post_id=birthday_post.post_id, required=True, source="post_text", excerpt=birthday_excerpt),
+    ], confidence=confidence)
+    return ProfileItem(
+        attribute=ProfileAttribute.CHILD_AGE,
+        value=f"{age}歳",
+        confidence=confidence,
+        status=ProfileStatus.WEAK,
+        evidence=path.evidence,
+        evidence_paths=[path],
+        assessment=ClaimAssessment(
+            minimal_scope=EvidenceScope.BLUESKY,
+            harm_status="prerequisites_unmet",
+            harm_scenario="子どもの年齢と識別情報が組み合わさると、保護者や子どもを狙うなりすまし・詐欺の説得材料になりうる",
+            harm_prerequisites=["子どもを識別できる情報が別途得られる", "攻撃者がその情報を悪用する"],
+        ),
+    )
+
+
+def _distinctive_child_name(name: str) -> bool:
+    return len(name) >= 2 and name not in {
+        "子ども", "こども", "子供", "むすこ", "むすめ", "長男", "次男", "三男",
+        "長女", "次女", "三女",
+    }
+
+
+def _has_quoted_or_fiction_context(text: str) -> bool:
+    return any(mark in text for mark in ("「", "『", "“", "”", "『", "引用"))
+
+
+REGULAR_STATION_MIN_OCR_CONFIDENCE = 0.8
+REGULAR_STATION_ANCHOR_CONFIDENCE = 0.65
+REGULAR_STATION_REFERENCE_RE = re.compile(
+    r"(?:いつもの通勤駅(?:を使|を利用|から通勤)|いつも使う通勤駅|いつも利用する通勤駅|"
+    r"通勤でいつも使う駅|通勤でいつも利用する駅|"
+    r"(?:毎日|毎朝|平日は|普段)(?:の)?通勤で使う駅|通勤で(?:毎日|毎朝|平日は|普段)使う駅)"
+)
+REGULAR_STATION_CONTEXT_RE = re.compile(
+    r"(?:いつもの通勤駅|いつも使う通勤駅|いつも利用する通勤駅|通勤でいつも使う駅|"
+    r"通勤でいつも利用する駅|(?:毎日|毎朝|平日は|普段)(?:の)?通勤で使う駅|"
+    r"通勤で(?:毎日|毎朝|平日は|普段)使う駅)(?:から|で|を使|を利用)"
+)
+REGULAR_STATION_BRIDGE_ID = "regular_station:usual_commute"
+
+
+def infer_regular_station_claim(
+    posts: list[Post], clues: list[Clue], gazetteer: Gazetteer,
+) -> ProfileItem | None:
+    """Infer a commute station only from a habit post plus a linked OCR sign post."""
+    known_names = {
+        unicodedata.normalize("NFKC", row["station_name"]).strip()
+        for row in gazetteer.stations
+        if isinstance(row.get("station_name"), str) and row["station_name"].strip()
+    }
+    if not known_names:
+        return None
+
+    facts: list[CrossPostFact] = []
+    for post in posts:
+        normalized_text = unicodedata.normalize("NFKC", post.text)
+        if (not _has_regular_commute_habit(normalized_text)
+                or _forbidden_context(normalized_text)
+                or any(_mentions_station_name(normalized_text, name) for name in known_names)):
+            continue
+        routine_clues = [
+            (index, clue) for index, clue in enumerate(clues)
+            if clue.post_id == post.post_id and clue.type is ClueType.ROUTINE_TEXT
+            and clue.source is ClueSource.TEXT
+            and _has_regular_commute_habit(clue.value)
+            and not any(_mentions_station_name(clue.value, name) for name in known_names)
+            and unicodedata.normalize("NFKC", clue.value).strip() in normalized_text
+        ]
+        fact = CrossPostFact(
+            post_id=post.post_id, clue_index=None, role=FactRole.OWNER_RELATION,
+            value="いつもの通勤駅", confidence=REGULAR_STATION_ANCHOR_CONFIDENCE,
+            bridge_id=REGULAR_STATION_BRIDGE_ID, owner_relation_explicit=True,
+            excerpt=normalized_text, source="post_text",
+            related_evidence=tuple(ProfileEvidence(
+                post_id=post.post_id, clue_index=index, required=True,
+            ) for index, _ in routine_clues),
+        )
+        facts.append(fact)
+
+    for post in posts:
+        if not REGULAR_STATION_CONTEXT_RE.search(post.text) or _forbidden_context(post.text):
+            continue
+        post_station_clues = [
+            clue for clue in clues
+            if clue.post_id == post.post_id and clue.type is ClueType.STATION_SIGN
+        ]
+        if any("x" in clue.value.casefold() for clue in post_station_clues):
+            continue
+        observed_values = {
+            unicodedata.normalize("NFKC", clue.value).removesuffix("駅").strip()
+            for clue in post_station_clues if clue.value.strip()
+        }
+        # Station signs often contain the adjacent stations. Any distinct value
+        # makes the photographed sign ambiguous, even if one clue is OCR-derived.
+        if len(observed_values) != 1:
+            continue
+        station = next(iter(observed_values))
+        ocr_matches = [
+            (index, clue) for index, clue in enumerate(clues)
+            if clue.post_id == post.post_id
+            and clue.type is ClueType.STATION_SIGN
+            and clue.source is ClueSource.OCR
+            and clue.image_index is not None
+            and clue.image_index < len(post.images)
+            and clue.region is not None
+            and clue.confidence >= REGULAR_STATION_MIN_OCR_CONFIDENCE
+            and "x" not in clue.value.casefold()
+            and unicodedata.normalize("NFKC", clue.value).removesuffix("駅").strip() == station
+            and station in known_names
+        ]
+        if not ocr_matches:
+            continue
+        if any(_mentions_station_name(post.text, name) for name in known_names):
+            continue
+        corroborated = []
+        for ocr_index, ocr_clue in ocr_matches:
+            for vlm_index, vlm_clue in enumerate(clues):
+                if (vlm_clue.post_id != post.post_id
+                        or vlm_clue.type is not ClueType.STATION_SIGN
+                        or vlm_clue.source is not ClueSource.VLM
+                        or vlm_clue.image_index != ocr_clue.image_index
+                        or ocr_clue.region is None
+                        or vlm_clue.region is None
+                        or vlm_clue.confidence < REGULAR_STATION_MIN_OCR_CONFIDENCE
+                        or unicodedata.normalize("NFKC", vlm_clue.value).removesuffix("駅").strip() != station
+                        or not _regions_overlap(ocr_clue.region, vlm_clue.region)):
+                    continue
+                corroborated.append((ocr_index, ocr_clue, vlm_index))
+        if not corroborated:
+            continue
+        clue_index, clue, vlm_index = corroborated[0]
+        context = REGULAR_STATION_CONTEXT_RE.search(post.text)
+        facts.append(CrossPostFact(
+            post_id=post.post_id, clue_index=clue_index, role=FactRole.SPECIFIC_VALUE,
+            value=station, confidence=min(clue.confidence, REGULAR_STATION_ANCHOR_CONFIDENCE),
+            bridge_id=REGULAR_STATION_BRIDGE_ID, excerpt=clue.value, source="clue",
+            related_evidence=(
+                ProfileEvidence(post_id=post.post_id, clue_index=vlm_index, required=True),
+                ProfileEvidence(
+                    post_id=post.post_id, clue_index=None, required=True,
+                    source="post_text", excerpt=context.group(0) if context else post.text,
+                ),
+            ),
+        ))
+
+    claim = infer_cross_post_claim(ProfileAttribute.REGULAR_STATION, facts)
+    if claim is None:
+        return None
+    return claim.model_copy(update={"value": f"{claim.value}駅"})
+
+
+def _has_regular_commute_habit(text: str) -> bool:
+    """Require a habitual/deictic commute-station phrase, not generic station use."""
+    normalized = unicodedata.normalize("NFKC", text)
+    sentences = re.split(r"[。！？!?\n]", normalized)
+    return any(REGULAR_STATION_REFERENCE_RE.search(sentence) for sentence in sentences)
+
+
+def _mentions_station_name(text: str, station: str) -> bool:
+    """Treat a station name followed by 駅 as already disclosed in the text."""
+    return f"{station}駅" in unicodedata.normalize("NFKC", text)
+
+
+def _regions_overlap(left: tuple[int, int, int, int], right: tuple[int, int, int, int]) -> bool:
+    return left[0] < right[2] and right[0] < left[2] and left[1] < right[3] and right[1] < left[3]
 
 
 def _normalize_bridge(value: str) -> str:

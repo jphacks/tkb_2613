@@ -203,21 +203,17 @@ describe("DiagnosePanel", () => {
     stream.release();
 
     const board = await screen.findByRole("region", { name: "捜査ボード" });
-    const [item] = within(within(board).getByRole("list", { name: "推定できたこと" })).getAllByRole(
-      "listitem",
-    );
-    expect(item).toHaveTextContent("決まった外出");
-    expect(item).toHaveTextContent("推定");
-    expect(item).toHaveTextContent("毎週火曜 20時ごろに出かけている");
-    expect(within(item).getByRole("list", { name: "根拠の手がかり" })).toHaveTextContent(
-      "生活の決まり 毎週火曜はジム",
-    );
+    expect(within(board).getByText("現在の限定ルールでは、根拠のあるプロフィール推定は成立しませんでした。これは安全の確認を意味しません。")).toBeInTheDocument();
+    const prototype = within(board).getByText("検証前の候補（試作ルール）");
+    expect(prototype.closest("details")).toBeInTheDocument();
+    expect(prototype.closest("details")).not.toHaveAttribute("open");
+    expect(within(prototype.closest("details")!).getByText(/R1〜R3の試作ルールによる候補です/)).toBeInTheDocument();
     expect(screen.getByRole("list", { name: "この投稿の手がかり" })).toHaveTextContent("毎週火曜はジム");
     expect(screen.getByText("手がかりを探せませんでした（写真を取得できませんでした）")).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("2 件の投稿を読みました");
   });
 
-  it("says when nothing could be inferred", async () => {
+  it("states that no claim was established under current rules without implying safety", async () => {
     vi.mocked(diagnose).mockImplementation(async function* () {
       yield { event: "conclusions", clues: [], conclusions: [] };
       yield { event: "done", posts_seen: 0 };
@@ -226,7 +222,38 @@ describe("DiagnosePanel", () => {
     fireEvent.click(await renderLoggedIn());
 
     expect(
-      await screen.findByText("投稿からは、あなたについて推定できることは見つかりませんでした"),
+      await screen.findByText("現在の限定ルールでは、根拠のあるプロフィール推定は成立しませんでした。これは安全の確認を意味しません。"),
     ).toBeInTheDocument();
+  });
+
+  it("shows a primary profile claim before the collapsed prototype candidates", async () => {
+    vi.mocked(diagnose).mockImplementation(async function* () {
+      yield {
+        event: "conclusions",
+        clues: [],
+        conclusions: [
+          { rule: "R1", attribute: "home_area", value: "投稿記載の町域", clue_indices: [], note: "試作" },
+        ],
+        profile_claims: [
+          {
+            attribute: "residential_area",
+            value: "東京都渋谷区",
+            confidence: 0.82,
+            status: "found",
+            evidence: [
+              { post_id: post(1, "").post_id, clue_index: null, required: true, source: "post_text", excerpt: "渋谷区に住んでいる" },
+            ],
+          },
+        ],
+      };
+      yield { event: "done", posts_seen: 1 };
+    });
+
+    fireEvent.click(await renderLoggedIn());
+
+    const claim = await screen.findByText("東京都渋谷区");
+    const prototypeSummary = screen.getByText("検証前の候補（試作ルール）");
+    expect(claim.compareDocumentPosition(prototypeSummary) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(prototypeSummary.closest("details")).not.toHaveAttribute("open");
   });
 });

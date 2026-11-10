@@ -8,6 +8,7 @@
 import asyncio
 import json
 import logging
+from datetime import date
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import asdict
 from pathlib import Path
@@ -103,6 +104,7 @@ async def diagnose_events(
     owner_profile_analyzer: Callable[[str], Awaitable[list[Clue]]] | None = None,
     web_facts: Sequence[WebFact] = (),
     web_lookup_status: str = "not_run",
+    diagnosis_date: date | None = None,
 ) -> AsyncIterator[Event]:
     """診断のイベントを順に返す。
 
@@ -122,6 +124,8 @@ async def diagnose_events(
     self_report_clues = await owner_profile_analyzer(owner_profile_text) if owner_profile_text and owner_profile_analyzer else []
     profile_claims = infer_owner_claims_with_web(
         list(posts), all_clues, list(web_facts), owner_profile_text, self_report_clues,
+        gazetteer=gazetteer,
+        diagnosis_date=diagnosis_date,
     )
     yield (
         "conclusions",

@@ -2,6 +2,7 @@
 
 - VLM の手がかりの文字が OCR の行に含まれていれば、位置は OCR の箱（元の画像のピクセル）を使う
 - OCR の行から郵便番号と電話番号を正規表現で拾い、VLM が出していなければ足す
+- Gazetteer の完全一致駅名は、同名かつ重なるregion付きのVLM station_signがある場合だけOCR clueにする
 """
 
 import re
@@ -12,6 +13,8 @@ from tkb_detect.ocr_client import OcrLine
 
 POSTAL_RE = re.compile(r"(?<!\d)(\d{3})-?(\d{4})(?!\d)")
 PHONE_RE = re.compile(r"(?<!\d)(0\d{1,4})-(\d{1,4})-(\d{3,4})(?!\d)")
+# Deliberately narrow: only literal company/bridge text is emitted as an organization clue.
+ORG_BRIDGE_RE = re.compile(r"^(?P<company>(?:株式会社[\w\u3040-\u30ff\u3400-\u9fff]{2,}|[\w\u3040-\u30ff\u3400-\u9fff]{2,}社))の(?P<bridge>[\w\u3040-\u30ff\u3400-\u9fff]{2,})$")
 
 
 def _normalize(text: str) -> str:
@@ -22,6 +25,16 @@ def _normalize(text: str) -> str:
 
 def _digits(text: str) -> str:
     return re.sub(r"\D", "", text)
+
+
+def _dedupe_key(clue: Clue) -> tuple[ClueType, str, ClueSource | None]:
+    if clue.type is ClueType.STATION_SIGN:
+        # Station names contain no digits. Keep OCR and VLM variants separately so
+        # an OCR-supported clue cannot disappear behind a VLM-only duplicate.
+        return clue.type, unicodedata.normalize("NFKC", clue.value).casefold(), clue.source
+    if clue.type is ClueType.ORG_TEXT:
+        return clue.type, unicodedata.normalize("NFKC", clue.value).casefold(), clue.source
+    return clue.type, _digits(clue.value), None
 
 
 def _has_area(box: Region) -> bool:
@@ -73,20 +86,59 @@ def _regex_clues(post_id: str, image_index: int, lines: list[OcrLine]) -> list[C
                     source=ClueSource.OCR,
                 )
             )
+        # OCR-only literal relation. Keep the original line's box so the UI can
+        # show precisely what was read; threshold confidence to limit OCR noise.
+        org_match = ORG_BRIDGE_RE.fullmatch(text)
+        if org_match and line.score >= 0.8:
+            if _has_area(line.box):
+                clues.append(Clue(
+                    post_id=post_id, image_index=image_index, type=ClueType.ORG_TEXT,
+                    value=text, region=line.box,
+                    confidence=min(max(line.score, 0.0), 1.0), source=ClueSource.OCR,
+                ))
     return clues
 
 
 def merge_ocr(
-    post_id: str, image_index: int, vlm_clues: list[Clue], lines: list[OcrLine]
+    post_id: str, image_index: int, vlm_clues: list[Clue], lines: list[OcrLine],
+    station_names: set[str] | frozenset[str] = frozenset(),
 ) -> list[Clue]:
+    station_names = {_normalize(name).removesuffix("駅") for name in station_names}
     merged = []
     for clue in vlm_clues:
         box = _matching_box(clue, lines)
         merged.append(clue if box is None else clue.model_copy(update={"region": box}))
 
-    taken = {(c.type, _digits(c.value)) for c in merged}
+    taken = {_dedupe_key(c) for c in merged}
     for clue in _regex_clues(post_id, image_index, lines):
-        key = (clue.type, _digits(clue.value))
+        key = _dedupe_key(clue)
+        if key not in taken:
+            taken.add(key)
+            merged.append(clue)
+    for line in lines:
+        value = _normalize(line.text).removesuffix("駅")
+        if (value not in station_names or line.score < 0.8 or not _has_area(line.box)):
+            continue
+        # OCR proves the literal string, but it cannot tell whether that string
+        # is a station sign, an ad, or a route map. Require same-image VLM sign
+        # context for the observation itself, with an overlapping original-pixel
+        # region. The engine repeats this gate before making a profile claim.
+        matching_vlm_sign = any(
+            clue.type is ClueType.STATION_SIGN
+            and clue.source is ClueSource.VLM
+            and _normalize(clue.value).removesuffix("駅") == value
+            and clue.region is not None
+            and _overlaps(clue.region, line.box)
+            for clue in vlm_clues
+        )
+        if not matching_vlm_sign:
+            continue
+        clue = Clue(
+            post_id=post_id, image_index=image_index, type=ClueType.STATION_SIGN,
+            value=value, region=line.box, confidence=min(max(line.score, 0.0), 1.0),
+            source=ClueSource.OCR,
+        )
+        key = _dedupe_key(clue)
         if key not in taken:
             taken.add(key)
             merged.append(clue)

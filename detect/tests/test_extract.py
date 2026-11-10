@@ -8,7 +8,7 @@ import pytest
 import respx
 from PIL import Image
 
-from tkb_common.schemas import ClueSource, ClueType, Post
+from tkb_common.schemas import Clue, ClueSource, ClueType, Post
 from tkb_detect.coords import CoordinateSpace
 from tkb_detect.errors import DetectError
 from tkb_detect.extract import (
@@ -18,6 +18,7 @@ from tkb_detect.extract import (
     TEXT_MAX_TOKENS,
     Extractor,
     build_extractor,
+    _dedupe,
 )
 from tkb_detect.ocr_client import OcrClient, OcrConfig
 from tkb_detect.prompts import POST_CLOSE, TEXT_SYSTEM_PROMPT, ZOOM_USER_PROMPT
@@ -257,6 +258,14 @@ async def test_merges_ocr_when_configured() -> None:
     assert [(c.type, c.value, c.region, c.source) for c in clues] == [
         (ClueType.POSTAL_CODE, "273-0031", (10, 20, 400, 80), ClueSource.OCR)
     ]
+
+
+def test_dedupe_preserves_ocr_station_evidence_next_to_vlm_duplicate() -> None:
+    vlm = Clue(post_id="post", image_index=0, type=ClueType.STATION_SIGN, value="根津",
+               region=(1, 2, 80, 30), confidence=0.9, source=ClueSource.VLM)
+    ocr = vlm.model_copy(update={"source": ClueSource.OCR, "confidence": 0.95})
+
+    assert {clue.source for clue in _dedupe([vlm, ocr])} == {ClueSource.VLM, ClueSource.OCR}
 
 
 def test_build_extractor_skips_ocr_when_url_is_empty_or_mock() -> None:

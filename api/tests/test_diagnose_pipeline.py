@@ -1,4 +1,5 @@
 from collections.abc import AsyncIterator
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -14,7 +15,7 @@ from tkb_api.pipeline import (
     fetch_images,
     load_gazetteer,
 )
-from tkb_common.schemas import Clue, ClueSource, ClueType, Post, WebFact
+from tkb_common.schemas import Clue, ClueSource, ClueType, Post, PostImage, WebFact
 from tkb_detect.batch import PostExtraction
 from tkb_engine.gazetteer import Gazetteer
 
@@ -158,3 +159,65 @@ async def test_web_employer_evidence_is_streamed_with_its_source() -> None:
     claim = result["profile_claims"][0]
     assert claim["value"] == "株式会社青空"
     assert any(ref["web_fact_id"] == "official-1" for ref in claim["evidence"])
+
+
+@pytest.mark.anyio
+async def test_regular_station_claim_and_ocr_clue_are_streamed_with_global_index() -> None:
+    habit = _post(0, text="毎朝いつもの通勤駅を使う")
+    photo = Post(
+        post_id="at://did:plc:xxxx/app.bsky.feed.post/2",
+        text="いつもの通勤駅から出勤", created_at=habit.created_at,
+        images=[PostImage(index=0, url=f"{CDN}/0@jpeg", alt="", width=640, height=480)],
+    )
+    routine = Clue(
+        post_id=habit.post_id, image_index=None, type=ClueType.ROUTINE_TEXT,
+        value="毎朝いつもの通勤駅を使う", region=None, confidence=0.9, source=ClueSource.TEXT,
+    )
+    station = Clue(
+        post_id=photo.post_id, image_index=0, type=ClueType.STATION_SIGN,
+        value="根津", region=(10, 20, 180, 60), confidence=0.94, source=ClueSource.OCR,
+    )
+    station_context = Clue(
+        post_id=photo.post_id, image_index=0, type=ClueType.STATION_SIGN,
+        value="根津", region=(12, 22, 178, 58), confidence=0.91, source=ClueSource.VLM,
+    )
+    gazetteer = Gazetteer(stations=[{"station_name": "根津", "mesh_1km": "m1"}])
+    events = [event async for event in diagnose_events(
+        [habit, photo],
+        _stream([PostExtraction(post_id=habit.post_id, clues=[routine]),
+                 PostExtraction(post_id=photo.post_id, clues=[station, station_context])]),
+        gazetteer,
+    )]
+
+    result = next(data for name, data in events if name == "conclusions")
+    claim = next(item for item in result["profile_claims"] if item["attribute"] == "regular_station")
+    assert claim["value"] == "根津駅"
+    assert result["clues"][1]["source"] == "ocr"
+    assert result["clues"][1]["region"] == [10, 20, 180, 60]
+    assert {ref["clue_index"] for ref in claim["evidence"] if ref["clue_index"] is not None} == {0, 1, 2}
+
+
+@pytest.mark.anyio
+async def test_child_age_claim_streams_both_required_owner_posts() -> None:
+    birth = _post(0, text="息子のたろうは2019年生まれ")
+    birthday = birth.model_copy(update={
+        "post_id": "at://did:plc:xxxx/app.bsky.feed.post/2",
+        "text": "息子のたろう、今日は誕生日",
+        "created_at": datetime.fromisoformat("2025-10-20T08:31:00+09:00"),
+    })
+    events = [event async for event in diagnose_events(
+        [birth, birthday],
+        _stream([PostExtraction(post_id=birth.post_id, clues=[]),
+                 PostExtraction(post_id=birthday.post_id, clues=[])]),
+        Gazetteer(),
+        diagnosis_date=date(2026, 11, 10),
+    )]
+
+    result = next(data for name, data in events if name == "conclusions")
+    claim = next(item for item in result["profile_claims"] if item["attribute"] == "child_age")
+    assert claim["status"] == "weak"
+    assert claim["value"] == "7歳"
+    assert len(claim["evidence_paths"]) == 1
+    assert {ref["post_id"] for ref in claim["evidence_paths"][0]["evidence"]} == {
+        birth.post_id, birthday.post_id,
+    }

@@ -72,11 +72,13 @@ class Extractor:
         ocr: OcrClient | None = None,
         coordinate_space: CoordinateSpace | None = COORDINATE_SPACE,
         zoom: bool = True,
+        station_names: set[str] | frozenset[str] = frozenset(),
     ) -> None:
         self._vlm = vlm
         self._ocr = ocr
         self._coordinate_space = coordinate_space
         self._zoom = zoom
+        self._station_names = frozenset(station_names)
 
     @property
     def uses_ocr(self) -> bool:
@@ -125,7 +127,7 @@ class Extractor:
         # OCR は元の画像を読み、元の画像のピクセルで箱を返す
         raw, lines = await asyncio.gather(vlm_task, self._ocr.recognize(data))
         clues = await self._reread_small(data, self._photo_clues(post_id, index, raw, prepared))
-        return merge_ocr(post_id, index, clues, lines)
+        return merge_ocr(post_id, index, clues, lines, station_names=self._station_names)
 
     async def _reread_small(self, data: bytes, clues: list[Clue]) -> list[Clue]:
         """小さい文字や映り込みを拡大して読み直し、小ささによる confidence の上限をかける。"""
@@ -228,6 +230,7 @@ def build_extractor(
     ocr_base_url: str,
     coordinate_space: CoordinateSpace | None = COORDINATE_SPACE,
     zoom: bool = True,
+    station_names: set[str] | frozenset[str] = frozenset(),
 ) -> Extractor:
     """設定から作る。OCR は OCR_BASE_URL が空なら使わない。"""
     vlm = VlmClient(
@@ -235,7 +238,7 @@ def build_extractor(
     )
     use_ocr = bool(ocr_base_url.strip()) and not mock_mode
     ocr = OcrClient(OcrConfig(base_url=ocr_base_url, mock_mode=False)) if use_ocr else None
-    return Extractor(vlm, ocr, coordinate_space, zoom)
+    return Extractor(vlm, ocr, coordinate_space, zoom, station_names)
 
 
 async def _retry_if_cut_off(call: Callable[[float | None], Awaitable[str]]) -> str:
@@ -297,10 +300,13 @@ def _build_clue(
 
 
 def _dedupe(clues: list[Clue]) -> list[Clue]:
-    seen: set[tuple[int | None, ClueType, str]] = set()
+    seen: set[tuple[int | None, ClueType, str, ClueSource | None]] = set()
     unique = []
     for clue in clues:
-        key = (clue.image_index, clue.type, clue.value)
+        # Preserve an OCR station-sign clue alongside an identical VLM clue. The
+        # regular-station rule is deliberately gated on OCR evidence.
+        source = clue.source if clue.type is ClueType.STATION_SIGN else None
+        key = (clue.image_index, clue.type, clue.value, source)
         if key not in seen:
             seen.add(key)
             unique.append(clue)

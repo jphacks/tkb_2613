@@ -66,7 +66,7 @@ def test_web_employer_profile_anchor_still_needs_two_posts() -> None:
     assert infer_web_employer_claim([first], [web_fact(company="株式会社青空")], "勤務先は青空社") is None
 
 
-def test_direct_and_web_employer_paths_merge_and_conflicts_reject() -> None:
+def test_web_employer_path_remains_when_possessive_path_is_rejected() -> None:
     anchor = post("a", "うちの会社の青空社")
     bridge = post("b", "株式会社青空の青空社")
     web_anchor = post("c", "勤務先は青空社")
@@ -76,14 +76,17 @@ def test_direct_and_web_employer_paths_merge_and_conflicts_reject() -> None:
         value="株式会社青空", region=None, confidence=0.9, source=ClueSource.TEXT,
     )
     posts = [anchor, bridge, web_anchor, web_support]
-    item = infer_owner_claims_with_web(posts, [clue], [web_fact(company="株式会社青空")])[0]
-    assert len(item.evidence_paths) >= 2
-    assert item.assessment.minimal_scope == "bluesky"
+    claims = infer_owner_claims_with_web(posts, [clue], [web_fact(company="株式会社青空")])
+    item = next(claim for claim in claims if claim.attribute.value == "employer_name")
+    assert infer_owner_claims(posts, [clue]) == []
+    assert len(item.evidence_paths) == 1
+    assert item.assessment.minimal_scope == "bluesky_plus_public_web"
     surviving = recalculate_after_deletion(item, {bridge.post_id})
     assert surviving is not None
     assert surviving.assessment.minimal_scope == "bluesky_plus_public_web"
-    assert all(ref.web_fact_id is None for ref in item.evidence_paths[0].evidence)
-    assert infer_owner_claims_with_web(posts, [clue], [web_fact(company="別会社社")]) == []
+    assert any(ref.web_fact_id for ref in item.evidence_paths[0].evidence)
+    different_legal_name = infer_owner_claims_with_web(posts, [clue], [web_fact(company="別会社社")])
+    assert different_legal_name[0].value == "別会社社"
 
 
 def test_web_employer_rejects_program_or_visit_relations_and_japanese_visit_context() -> None:
@@ -106,7 +109,7 @@ def test_web_employer_rejects_program_or_visit_relations_and_japanese_visit_cont
     assert infer_owner_claims([ordinary_anchor, visiting_support], [clue]) == []
 
 
-def test_web_path_survives_deletion_of_separate_direct_support_post() -> None:
+def test_web_path_survives_deletion_of_rejected_possessive_support_post() -> None:
     direct_anchor = post("direct-anchor", "うちの会社の青空社")
     direct_support = post("direct-support", "株式会社青空の青空社")
     web_anchor = post("web-anchor", "勤務先は青空社")
@@ -119,7 +122,6 @@ def test_web_path_survives_deletion_of_separate_direct_support_post() -> None:
         [direct_anchor, direct_support, web_anchor, web_support], [clue],
         [web_fact(company="株式会社青空")],
     )[0]
-    assert any(all(ref.source != "public_web" for ref in path.evidence) for path in item.evidence_paths)
     assert any(any(ref.source == "public_web" for ref in path.evidence) for path in item.evidence_paths)
 
     surviving = recalculate_after_deletion(item, {direct_support.post_id})
@@ -130,3 +132,15 @@ def test_web_path_survives_deletion_of_separate_direct_support_post() -> None:
         direct_support.post_id not in {ref.post_id for ref in path.evidence}
         for path in surviving.evidence_paths
     )
+
+
+def test_company_possessive_bridge_does_not_establish_owner_employment() -> None:
+    anchor = post("anchor", "うちの会社の青空物流センター")
+    photo = post("photo", "")
+    ocr = Clue(
+        post_id=photo.post_id, image_index=0, type=ClueType.ORG_TEXT,
+        value="株式会社青空の青空物流センター", region=(12, 24, 360, 72),
+        confidence=0.95, source=ClueSource.OCR,
+    )
+
+    assert infer_owner_claims([anchor, photo], [ocr]) == []

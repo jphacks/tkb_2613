@@ -100,11 +100,21 @@ def get_fetch_profile_text() -> ProfileTextFetcher:
     return bluesky.fetch_own_profile_text
 
 
+@lru_cache(maxsize=4)
+def _cached_gazetteer(data_dir: Path) -> Gazetteer:
+    return load_gazetteer(data_dir)
+
+
+def get_gazetteer(settings: Annotated[Settings, Depends(get_settings)]) -> Gazetteer:
+    return _cached_gazetteer(settings.gazetteer_dir)
+
+
 ExtractorFactory = Callable[[], Extractor]
 
 
 def get_extractor_factory(
     settings: Annotated[Settings, Depends(get_settings)],
+    gazetteer: Annotated[Gazetteer, Depends(get_gazetteer)],
 ) -> ExtractorFactory:
     """手がかりを取り出す部品は、本番の診断で使うときに作る。
 
@@ -119,6 +129,7 @@ def get_extractor_factory(
             vlm_api_key=settings.vlm_api_key.get_secret_value(),
             vlm_model=settings.vlm_model,
             ocr_base_url=settings.ocr_base_url,
+            station_names={row["station_name"] for row in gazetteer.stations},
         )
 
     return build
@@ -132,15 +143,6 @@ def _build_extractor(factory: ExtractorFactory) -> Extractor:
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE, "画像を読むモデルの接続先が設定されていません"
         ) from None
-
-
-@lru_cache(maxsize=4)
-def _cached_gazetteer(data_dir: Path) -> Gazetteer:
-    return load_gazetteer(data_dir)
-
-
-def get_gazetteer(settings: Annotated[Settings, Depends(get_settings)]) -> Gazetteer:
-    return _cached_gazetteer(settings.gazetteer_dir)
 
 
 async def _fetch_own_posts(
