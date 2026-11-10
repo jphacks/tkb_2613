@@ -1,8 +1,8 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { SessionProvider } from "@/components/session/SessionProvider";
-import { ApiError, diagnose, getSession } from "@/lib/api";
+import { SessionProvider, useSession } from "@/components/session/SessionProvider";
+import { ApiError, createSession, deleteSession, diagnose, getSession } from "@/lib/api";
 import type { Clue } from "@/types/clue";
 import type { DiagnoseEvent } from "@/types/diagnose";
 import type { Post } from "@/types/post";
@@ -11,10 +11,18 @@ import { DiagnosePanel } from "./DiagnosePanel";
 
 vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
-  return { ...actual, diagnose: vi.fn(), getSession: vi.fn() };
+  return { ...actual, createSession: vi.fn(), deleteSession: vi.fn(), diagnose: vi.fn(), getSession: vi.fn() };
 });
 
 const ALICE = { handle: "alice.bsky.social", did: "did:plc:abc" };
+const BOB = { handle: "bob.bsky.social", did: "did:plc:other" };
+
+function SessionControls() {
+  const { state, login, logout } = useSession();
+  return state.status === "authenticated"
+    ? <button type="button" onClick={() => void logout()}>ログアウトして切替</button>
+    : <button type="button" onClick={() => void login("bob.bsky.social", "test-password")}>別アカウントでログイン</button>;
+}
 
 function post(n: number, text: string): Post {
   return {
@@ -61,6 +69,8 @@ async function renderLoggedIn() {
 }
 
 afterEach(() => {
+  vi.mocked(createSession).mockReset();
+  vi.mocked(deleteSession).mockReset();
   vi.mocked(diagnose).mockReset();
   vi.mocked(getSession).mockReset();
 });
@@ -76,6 +86,44 @@ describe("DiagnosePanel", () => {
 
     await vi.waitFor(() => expect(getSession).toHaveBeenCalled());
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it("clears diagnosis data and aborts its request when the authenticated owner changes", async () => {
+    let signal: AbortSignal | undefined;
+    vi.mocked(getSession).mockResolvedValue(ALICE);
+    vi.mocked(deleteSession).mockResolvedValue(undefined);
+    vi.mocked(createSession).mockResolvedValue(BOB);
+    vi.mocked(diagnose).mockImplementation(async function* (options) {
+      signal = options?.signal;
+      yield { event: "post", post: post(1, "Alice only post") };
+      yield { event: "conclusions", clues: [], conclusions: [], profile_claims: [
+        {
+          attribute: "residential_area", value: "Alice only claim", confidence: 0.65, status: "weak",
+          evidence: [{ post_id: post(1, "").post_id, clue_index: null, required: true, source: "post_text", excerpt: "Alice only" }],
+        },
+      ] };
+      yield { event: "done", posts_seen: 1 };
+    });
+
+    render(
+      <SessionProvider>
+        <SessionControls />
+        <DiagnosePanel />
+      </SessionProvider>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "診断する" }));
+    expect(await screen.findByText("Alice only claim")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "ログアウトして切替" }));
+    await screen.findByRole("button", { name: "別アカウントでログイン" });
+    expect(signal?.aborted).toBe(true);
+    expect(screen.queryByText("Alice only claim")).not.toBeInTheDocument();
+    expect(screen.queryByText("Alice only post")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "別アカウントでログイン" }));
+    expect(await screen.findByRole("button", { name: "診断する" })).toBeInTheDocument();
+    expect(screen.queryByText("Alice only claim")).not.toBeInTheDocument();
+    expect(screen.queryByText("Alice only post")).not.toBeInTheDocument();
   });
 
   it("shows that it is fetching posts before the first event arrives", async () => {

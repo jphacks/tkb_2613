@@ -4,7 +4,8 @@
  *
  *   event: post         data: {"post": 投稿}                             投稿を 1 件取得するたびに
  *   event: clues        data: {"post_id", "clues": [手がかり], "error"}  手がかりの取り出しが終わった順
- *   event: conclusions  data: {"clues": [全手がかり], "conclusions": [推理]}  最後に 1 回
+ *   event: conclusions  data: {"clues": [全手がかり], "conclusions": [推理],
+ *                             "profile_claim_suggestions": [最大3件の投稿ID]} 最後に 1 回
  *   event: done         data: {"posts_seen": 件数}                       最後に 1 回
  *
  * 推理の clue_indices は、同じ conclusions イベントの clues の並びでの番号。
@@ -38,6 +39,8 @@ export type DiagnoseEvent =
       readonly clues: readonly Clue[];
       readonly conclusions: readonly Conclusion[];
       readonly profile_claims?: readonly ProfileItem[];
+      /** Up to three diagnosis-order-stable post IDs selected by exact claim-path removal. */
+      readonly profile_claim_suggestions?: readonly string[];
       readonly web_facts?: readonly WebFact[];
       readonly web_lookup_status?: "not_run" | "fixture";
       readonly owner_profile_text?: string;
@@ -107,6 +110,9 @@ export function toDiagnoseEvent(event: string, data: string): DiagnoseEvent | nu
     const clueCount = value.clues.length;
     const { conclusions } = value;
     const profileClaims = value.profile_claims ?? [];
+    const profileClaimSuggestions = Object.hasOwn(value, "profile_claim_suggestions")
+      ? value.profile_claim_suggestions
+      : [];
     const profileText = value.owner_profile_text ?? "";
     const selfReportClues = value.self_report_clues ?? [];
     const webFacts = value.web_facts ?? [];
@@ -124,6 +130,12 @@ export function toDiagnoseEvent(event: string, data: string): DiagnoseEvent | nu
     if (
       Array.isArray(conclusions) && conclusions.every((c) => isConclusion(c, clueCount)) &&
       Array.isArray(profileClaims) && profileClaims.every(isProfileItem) && typeof profileText === "string" &&
+      Array.isArray(profileClaimSuggestions) && profileClaimSuggestions.length <= 3 &&
+      profileClaimSuggestions.every((postId) => typeof postId === "string" && postId.length > 0) &&
+      new Set(profileClaimSuggestions).size === profileClaimSuggestions.length &&
+      profileClaimSuggestions.every((postId) => profileClaims.some((claim) =>
+        (claim.evidence_paths ?? []).some((path) => path.evidence.some((evidence) => evidence.post_id === postId)),
+      )) &&
       isClueList(selfReportClues) && Array.isArray(webFacts) && webFacts.every(isWebFact) &&
       new Set(webFacts.map((fact) => fact.id)).size === webFacts.length && claimsReferenceKnownWebFacts &&
       (webLookupStatus === "not_run" || webLookupStatus === "fixture")
@@ -133,6 +145,7 @@ export function toDiagnoseEvent(event: string, data: string): DiagnoseEvent | nu
         clues: value.clues,
         conclusions: conclusions as Conclusion[],
         ...(Object.hasOwn(value, "profile_claims") ? { profile_claims: profileClaims } : {}),
+        ...(Object.hasOwn(value, "profile_claim_suggestions") ? { profile_claim_suggestions: profileClaimSuggestions } : {}),
         ...(Object.hasOwn(value, "web_facts") ? { web_facts: webFacts } : {}),
         ...(Object.hasOwn(value, "web_lookup_status") ? { web_lookup_status: webLookupStatus } : {}),
         ...(Object.hasOwn(value, "owner_profile_text") ? { owner_profile_text: profileText } : {}),

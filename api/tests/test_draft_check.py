@@ -1,14 +1,15 @@
 import base64
+import json
 from collections.abc import Iterator
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
 from typing import cast
 
+import pytest
 from atproto import AsyncClient
 from fastapi.testclient import TestClient
 from PIL import Image
-import pytest
 
 from tkb_api.bluesky import LoginResult, PostsFetcher
 from tkb_api.config import Settings, get_settings
@@ -24,6 +25,7 @@ ME = "did:plc:draftchecktest0000000000"
 CLIENT = cast(AsyncClient, object())
 PASSWORD = "draft-check-test-password"  # noqa: S105
 FIXTURE = Path(__file__).resolve().parents[2] / "eval" / "fixtures" / "demo_observations.json"
+DEMO_POST_COUNT = len(json.loads(FIXTURE.read_text(encoding="utf-8"))["posts"])
 
 
 class RecordingExtractor(Extractor):
@@ -125,7 +127,7 @@ def test_mock_draft_check_matches_fixture_clue_text_without_extractor_or_network
     assert response.status_code == 200
     data = response.json()
     assert data["mock_mode"] is True
-    assert data["posts_checked"] == 10
+    assert data["posts_checked"] == DEMO_POST_COUNT
     assert any(overlap["clue"]["value"] == "夜勤明け" for overlap in data["overlaps"])
     match = next(overlap for overlap in data["overlaps"] if overlap["clue"]["value"] == "夜勤明け")
     assert len(match["evidence"]) == 2

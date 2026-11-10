@@ -43,6 +43,31 @@ describe("toDiagnoseEvent", () => {
     expect(toDiagnoseEvent("conclusions", JSON.stringify(data))).toEqual({ event: "conclusions", ...data });
   });
 
+  it("reads up to three claim-plan post IDs only when they point to known evidence paths", () => {
+    const postA = { ...POST, post_id: "at://did:plc:xxxx/app.bsky.feed.post/a" };
+    const postB = { ...POST, post_id: "at://did:plc:xxxx/app.bsky.feed.post/b" };
+    const postC = { ...POST, post_id: "at://did:plc:xxxx/app.bsky.feed.post/c" };
+    const postD = { ...POST, post_id: "at://did:plc:xxxx/app.bsky.feed.post/d" };
+    const claim = {
+      attribute: "residential_area", value: "架空の区", confidence: 0.65, status: "weak",
+      evidence: [postA, postB, postC, postD].map((post, index) => ({
+        post_id: post.post_id, clue_index: null, required: true, source: "post_text", excerpt: `根拠${index}`,
+      })),
+      evidence_paths: [{ confidence: 0.65, evidence: [postA, postB, postC, postD].map((post, index) => ({
+        post_id: post.post_id, clue_index: null, required: true, source: "post_text", excerpt: `根拠${index}`,
+      })) }],
+    };
+    const suggestions = [postA.post_id, postB.post_id];
+    const data = { clues: [], conclusions: [], profile_claims: [claim], profile_claim_suggestions: suggestions };
+    expect(toDiagnoseEvent("conclusions", JSON.stringify(data))).toEqual({ event: "conclusions", ...data });
+    expect(() => toDiagnoseEvent("conclusions", JSON.stringify({ ...data, profile_claim_suggestions: ["unknown"] }))).toThrow();
+    expect(() => toDiagnoseEvent("conclusions", JSON.stringify({
+      ...data,
+      profile_claim_suggestions: [postA.post_id, postB.post_id, postC.post_id, postD.post_id],
+    }))).toThrow();
+    expect(() => toDiagnoseEvent("conclusions", JSON.stringify({ ...data, profile_claim_suggestions: null }))).toThrow();
+  });
+
   it("reads sourced Web facts in a conclusions event", () => {
     const fact = {
       id: "official-1", subject: "青空社", relation: "legal_name_of", object: "株式会社青空",

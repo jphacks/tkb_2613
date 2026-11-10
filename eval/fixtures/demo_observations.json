@@ -120,6 +120,18 @@
           "height": 1200
         }
       ]
+    },
+    {
+      "post_id": "at://did:plc:demo00000000000000000000/app.bsky.feed.post/3demo0000011",
+      "text": "自宅近くの根津駅。買い出しに行った",
+      "created_at": "2026-10-24T17:10:00+09:00",
+      "images": []
+    },
+    {
+      "post_id": "at://did:plc:demo00000000000000000000/app.bsky.feed.post/3demo0000012",
+      "text": "根津駅は文京区。",
+      "created_at": "2026-10-25T10:05:00+09:00",
+      "images": []
     }
   ],
   "clues": [
@@ -352,6 +364,15 @@
       ],
       "confidence": 0.4,
       "source": "vlm"
+    },
+    {
+      "post_id": "at://did:plc:demo00000000000000000000/app.bsky.feed.post/3demo0000012",
+      "image_index": null,
+      "type": "place_text",
+      "value": "文京区",
+      "region": null,
+      "confidence": 0.92,
+      "source": "text"
     }
   ],
   "expected": [

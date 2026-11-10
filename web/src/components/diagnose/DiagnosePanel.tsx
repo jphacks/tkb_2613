@@ -27,6 +27,7 @@ interface Result {
   clues: readonly Clue[];
   conclusions: readonly Conclusion[];
   profileClaims: readonly ProfileItem[];
+  profileClaimSuggestions: readonly string[];
   webFacts: readonly WebFact[];
   webLookupStatus: "not_run" | "fixture";
   ownerProfileText: string;
@@ -54,6 +55,12 @@ function statusText(phase: Phase, postCount: number, searchedCount: number): str
  */
 export function DiagnosePanel() {
   const { state: session } = useSession();
+  if (session.status !== "authenticated") return null;
+  const sessionKey = `${session.session.did}:${session.session.handle}`;
+  return <AuthenticatedDiagnosePanel key={sessionKey} />;
+}
+
+function AuthenticatedDiagnosePanel() {
   const [posts, setPosts] = useState<readonly Post[]>([]);
   const [found, setFound] = useState<Readonly<Record<string, PostClues>>>({});
   const [result, setResult] = useState<Result | null>(null);
@@ -62,8 +69,6 @@ export function DiagnosePanel() {
 
   // 画面を離れたら、読み込み中の診断を止める
   useEffect(() => () => controller.current?.abort(), []);
-
-  if (session.status !== "authenticated") return null;
 
   async function start() {
     controller.current?.abort();
@@ -85,7 +90,7 @@ export function DiagnosePanel() {
             setPhase({ kind: "searching" });
             break;
           case "conclusions":
-            setResult({ clues: event.clues, conclusions: event.conclusions, profileClaims: event.profile_claims ?? [], webFacts: event.web_facts ?? [], webLookupStatus: event.web_lookup_status ?? "not_run", ownerProfileText: event.owner_profile_text ?? "", selfReportClues: event.self_report_clues ?? [] });
+            setResult({ clues: event.clues, conclusions: event.conclusions, profileClaims: event.profile_claims ?? [], profileClaimSuggestions: event.profile_claim_suggestions ?? [], webFacts: event.web_facts ?? [], webLookupStatus: event.web_lookup_status ?? "not_run", ownerProfileText: event.owner_profile_text ?? "", selfReportClues: event.self_report_clues ?? [] });
             break;
           case "done":
             setPhase({ kind: "done", postsSeen: event.posts_seen });
@@ -135,7 +140,7 @@ export function DiagnosePanel() {
         )}
       </div>
 
-      {result && <ConclusionBoard clues={result.clues} conclusions={result.conclusions} profileClaims={result.profileClaims} webFacts={result.webFacts} webLookupStatus={result.webLookupStatus} ownerProfileText={result.ownerProfileText} selfReportClues={result.selfReportClues} />}
+      {result && <ConclusionBoard clues={result.clues} conclusions={result.conclusions} profileClaims={result.profileClaims} profileClaimSuggestions={result.profileClaimSuggestions} posts={posts} webFacts={result.webFacts} webLookupStatus={result.webLookupStatus} ownerProfileText={result.ownerProfileText} selfReportClues={result.selfReportClues} />}
 
       {posts.length > 0 && (
         <ol aria-label="読んだ投稿" className="max-w-2xl space-y-5">

@@ -1,8 +1,23 @@
-from datetime import datetime
-from datetime import date
+from datetime import date, datetime
 
-from tkb_common.schemas import Clue, ClueSource, ClueType, Post, PostImage, ProfileAttribute, ProfileStatus
-from tkb_engine.cross_post import infer_child_age_claim, infer_owner_claims, recalculate_after_deletion
+from tkb_common.schemas import (
+    Clue,
+    ClueSource,
+    ClueType,
+    Post,
+    PostImage,
+    ProfileAttribute,
+    ProfileEvidence,
+    ProfileEvidencePath,
+    ProfileItem,
+    ProfileStatus,
+)
+from tkb_engine.cross_post import (
+    infer_child_age_claim,
+    infer_owner_claims,
+    plan_profile_claim_deletion,
+    recalculate_after_deletion,
+)
 from tkb_engine.gazetteer import Gazetteer
 
 
@@ -128,6 +143,74 @@ def test_alternative_evidence_paths_survive_partial_deletion_only() -> None:
     after_one = recalculate_after_deletion(item, {b.post_id})
     assert after_one is not None and len(after_one.evidence_paths) == 1
     assert recalculate_after_deletion(item, {anchor.post_id}) is None
+
+
+def _claim_with_paths(
+    attribute: ProfileAttribute,
+    paths: list[list[Post]],
+    confidences: list[float] | None = None,
+) -> ProfileItem:
+    confidences = confidences or [0.65] * len(paths)
+    evidence_paths = [
+        ProfileEvidencePath(
+            evidence=[
+                ProfileEvidence(
+                    post_id=post.post_id,
+                    clue_index=None,
+                    required=True,
+                    source="post_text",
+                    excerpt=f"根拠 {post.post_id}",
+                )
+                for post in path
+            ],
+            confidence=confidence,
+        )
+        for path, confidence in zip(paths, confidences, strict=True)
+    ]
+    return ProfileItem(
+        attribute=attribute,
+        value="架空の候補",
+        confidence=max(confidences),
+        status=ProfileStatus.WEAK,
+        evidence=[reference for path in evidence_paths for reference in path.evidence],
+        evidence_paths=evidence_paths,
+    )
+
+
+def test_profile_plan_finds_combination_that_breaks_alternative_paths() -> None:
+    a, b, c, d = [post(key, "架空の根拠") for key in "abcd"]
+    claim = _claim_with_paths(ProfileAttribute.RESIDENTIAL_AREA, [[a, b], [c, d]])
+
+    # No single post breaks the OR of two AND paths. The stable first 2-post set does.
+    assert plan_profile_claim_deletion([claim], [a, b, c, d]) == [a.post_id, c.post_id]
+
+
+def test_profile_plan_maximizes_lost_claims_then_minimizes_and_stably_orders_posts() -> None:
+    a, b, c, d, e = [post(key, "架空の根拠") for key in "abcde"]
+    alternate = _claim_with_paths(ProfileAttribute.RESIDENTIAL_AREA, [[a, b], [c, d]])
+    direct = _claim_with_paths(ProfileAttribute.EMPLOYER_NAME, [[a, c]])
+    independent = _claim_with_paths(ProfileAttribute.CHILD_AGE, [[d, e]])
+
+    # A+D breaks all three claims. No severity weights are used.
+    assert plan_profile_claim_deletion(
+        [alternate, direct, independent], [a, b, c, d, e]
+    ) == [a.post_id, d.post_id]
+
+
+def test_profile_plan_uses_only_confidence_supported_paths_and_caps_at_three() -> None:
+    posts = [post(str(index), "架空の根拠") for index in range(8)]
+    weak_only = _claim_with_paths(
+        ProfileAttribute.RESIDENTIAL_AREA,
+        [[posts[0], posts[1]], [posts[2], posts[3]]],
+        [0.4, 0.65],
+    )
+    assert plan_profile_claim_deletion([weak_only], posts) == [posts[2].post_id]
+
+    four_path_claim = _claim_with_paths(
+        ProfileAttribute.RESIDENTIAL_AREA,
+        [[posts[0], posts[1]], [posts[2], posts[3]], [posts[4], posts[5]], [posts[6], posts[7]]],
+    )
+    assert plan_profile_claim_deletion([four_path_claim], posts) == []
 
 
 def test_child_age_requires_two_posts_and_either_deletion_breaks_exact_claim() -> None:

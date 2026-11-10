@@ -8,9 +8,9 @@
 import asyncio
 import json
 import logging
-from datetime import date
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import asdict
+from datetime import date
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -20,8 +20,8 @@ import httpx
 from tkb_common.schemas import BSKY_CDN_PREFIX, Clue, Post, WebFact
 from tkb_detect.batch import PostExtraction, extract_posts
 from tkb_detect.extract import Extractor
+from tkb_engine.cross_post import infer_owner_claims_with_web, plan_profile_claim_deletion
 from tkb_engine.gazetteer import Gazetteer
-from tkb_engine.cross_post import infer_owner_claims_with_web
 from tkb_engine.rules import infer
 
 logger = logging.getLogger(__name__)
@@ -127,12 +127,14 @@ async def diagnose_events(
         gazetteer=gazetteer,
         diagnosis_date=diagnosis_date,
     )
+    profile_claim_suggestions = plan_profile_claim_deletion(profile_claims, posts)
     yield (
         "conclusions",
         {
             "clues": [c.model_dump(mode="json") for c in all_clues],
             "conclusions": [asdict(c) for c in conclusions],
             "profile_claims": [item.model_dump(mode="json") for item in profile_claims],
+            "profile_claim_suggestions": profile_claim_suggestions,
             "web_facts": [fact.model_dump(mode="json") for fact in web_facts],
             "web_lookup_status": web_lookup_status,
             "self_report_clues": [c.model_dump(mode="json") for c in self_report_clues],

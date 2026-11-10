@@ -2,6 +2,8 @@ import { CLUE_LABELS } from "@/lib/clueLabels";
 import type { Clue } from "@/types/clue";
 import type { Conclusion } from "@/types/diagnose";
 import { PROFILE_ATTRIBUTE_CATALOG, type ProfileItem, type WebFact } from "@/types/profile";
+import type { Post } from "@/types/post";
+import { ProfileClaimWhatIf } from "./ProfileClaimWhatIf";
 
 /** engine の試作の項目名（attribute）の表示名。16項目への対応づけまでのつなぎ */
 const ATTRIBUTE_LABELS: Readonly<Record<string, string>> = {
@@ -19,10 +21,12 @@ interface ConclusionBoardProps {
   webLookupStatus?: "not_run" | "fixture";
   ownerProfileText?: string;
   selfReportClues?: readonly Clue[];
+  posts?: readonly Post[];
+  profileClaimSuggestions?: readonly string[];
 }
 
 /** 捜査ボード。限定ルールのプロフィール推定を主表示し、旧試作ルールは別枠に置く。 */
-export function ConclusionBoard({ clues, conclusions, profileClaims = [], webFacts = [], webLookupStatus = "not_run", ownerProfileText = "", selfReportClues = [] }: ConclusionBoardProps) {
+export function ConclusionBoard({ clues, conclusions, profileClaims = [], webFacts = [], webLookupStatus = "not_run", ownerProfileText = "", selfReportClues = [], posts = [], profileClaimSuggestions = [] }: ConclusionBoardProps) {
   return (
     <section aria-labelledby="board-heading" className="max-w-2xl space-y-4">
       <h3 id="board-heading" className="font-display text-2xl">
@@ -63,6 +67,7 @@ export function ConclusionBoard({ clues, conclusions, profileClaims = [], webFac
           </ul>
         )}
       </section>
+      <ProfileClaimWhatIf claims={profileClaims} clues={clues} posts={posts} suggestions={profileClaimSuggestions} webFacts={webFacts} />
       {ownerProfileText && (
         <details className="rounded-sm border border-ink/20 px-4 py-3">
           <summary className="cursor-pointer font-bold">プロフィール文（本人の自己申告）</summary>

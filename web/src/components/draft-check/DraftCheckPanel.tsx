@@ -7,7 +7,7 @@ import { ApiError, checkDraft, MAX_IMAGE_BYTES } from "@/lib/api";
 import { CLUE_LABELS } from "@/lib/clueLabels";
 import type { DraftCheckResponse } from "@/types/draftCheck";
 
-const SOURCE_LABELS = { ocr: "OCR", vlm: "写真の読み取り", text: "本文の読み取り", meta: "投稿情報" } as const;
+const SOURCE_LABELS = { ocr: "OCR", vlm: "写真の読み取り", alt: "画像alt", text: "本文の読み取り", profile_text: "プロフィール文", meta: "投稿情報" } as const;
 
 export function DraftCheckPanel() {
   const { state: session } = useSession();
@@ -77,17 +77,20 @@ export function DraftCheckPanel() {
             className="w-full rounded-sm border-2 border-ink bg-paper-deep px-3 py-2 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-seeker"
           />
         </label>
-        <label className="block space-y-2">
-          <span className="block font-bold">写真（1枚まで）</span>
-          <input
-            ref={photoInput}
-            type="file"
-            accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
-            onChange={(event) => { setPhoto(event.target.files?.[0]); setResult(null); }}
-            className="block max-w-full text-sm"
-          />
-          <span className="block text-xs text-ink/60">20MBまで。写真は確認中だけメモリ上で扱います。</span>
-        </label>
+        <div className="block space-y-2">
+          <label className="block space-y-2">
+            <span className="block font-bold">写真（1枚まで）</span>
+            <input
+              ref={photoInput}
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
+              aria-describedby="draft-photo-help"
+              onChange={(event) => { setPhoto(event.target.files?.[0]); setResult(null); }}
+              className="block max-w-full text-sm"
+            />
+          </label>
+          <span id="draft-photo-help" className="block text-xs text-ink/60">20MBまで。写真は確認中だけメモリ上で扱います。</span>
+        </div>
         <button
           type="submit"
           disabled={busy || (!text.trim() && !photo) || (photo?.size ?? 0) > MAX_IMAGE_BYTES}

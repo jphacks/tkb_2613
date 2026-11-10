@@ -10,7 +10,12 @@ from fastapi.testclient import TestClient
 from tkb_api.bluesky import BlueskyUnavailableError, LoginResult, PostsFetcher
 from tkb_api.config import Settings, get_settings
 from tkb_api.main import create_app
-from tkb_api.routes.diagnose import get_extractor_factory, get_fetch_posts, get_fetch_profile_text, get_gazetteer
+from tkb_api.routes.diagnose import (
+    get_extractor_factory,
+    get_fetch_posts,
+    get_fetch_profile_text,
+    get_gazetteer,
+)
 from tkb_api.routes.session import get_login
 from tkb_common.schemas import Clue, ClueSource, ClueType, Post
 from tkb_detect.extract import Extractor
@@ -77,7 +82,7 @@ def test_mock_diagnose_streams_posts_clues_conclusions_then_done(client: TestCli
     posts, clues = doc["posts"], doc["clues"]
     events = _events(res.text)
     names = [name for name, _ in events]
-    assert names == ["post"] * 10 + ["clues"] * 10 + ["conclusions", "done"]
+    assert names == ["post"] * 12 + ["clues"] * 12 + ["conclusions", "done"]
     assert [data for name, data in events if name == "post"] == [{"post": p} for p in posts]
 
     # 手がかりはデモ用データのものを、投稿ごとにまとめて流す
@@ -93,6 +98,9 @@ def test_mock_diagnose_streams_posts_clues_conclusions_then_done(client: TestCli
     assert station["value"] == "根津駅"
     assert {result["clues"][i]["value"] for i in station["clue_indices"]} >= {"根x"}
     assert by_attribute["routine"]["value"].startswith("毎週火曜 20時ごろ")
+    claim_by_attribute = {item["attribute"]: item for item in result["profile_claims"]}
+    assert claim_by_attribute["residential_area"]["value"] == "文京区"
+    assert result["profile_claim_suggestions"] == [posts[10]["post_id"]]
     assert events[-1] == ("done", {"posts_seen": len(posts)})
 
 
@@ -265,4 +273,4 @@ def test_diagnose_sends_keep_alive_comments_while_waiting_between_events() -> No
     blocks = [b for b in res.text.split("\n\n") if b]
     assert ": keep-alive" in blocks
     events = [b for b in blocks if not b.startswith(":")]
-    assert _events("\n\n".join(events) + "\n\n")[-1] == ("done", {"posts_seen": 10})
+    assert _events("\n\n".join(events) + "\n\n")[-1] == ("done", {"posts_seen": 12})

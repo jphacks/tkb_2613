@@ -1,10 +1,11 @@
 """Conservative claim paths for residential area, commute station, and employer evidence."""
 
+import re
+import unicodedata
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from enum import StrEnum
-import re
-import unicodedata
 from itertools import combinations
 
 from tkb_common.schemas import (
@@ -13,12 +14,12 @@ from tkb_common.schemas import (
     ClueSource,
     ClueType,
     EvidenceScope,
+    Post,
     ProfileAttribute,
     ProfileEvidence,
     ProfileEvidencePath,
     ProfileItem,
     ProfileStatus,
-    Post,
     WebFact,
     WebSourceKind,
     WebVerificationStatus,
@@ -158,6 +159,73 @@ def recalculate_after_deletion(item: ProfileItem, deleted_post_ids: set[str]) ->
         "status": ProfileStatus.FOUND if confidence >= 0.8 else ProfileStatus.WEAK,
         "assessment": item.assessment.model_copy(update={"minimal_scope": _minimal_scope(surviving)}),
     })
+
+
+PROFILE_PLAN_MAX_POSTS = 3
+
+
+def plan_profile_claim_deletion(claims: Sequence[ProfileItem], posts: Sequence[Post]) -> list[str]:
+    """Choose up to max_posts that remove the most currently supported claims.
+
+    Evidence within a path is AND and paths are OR. A claim is lost only when every
+    path has at least one deleted post. Exact combinations are checked because a claim
+    with alternative paths may have no single post that weakens it immediately.
+    Ties prefer fewer posts and then the original diagnosed post order.
+    """
+    if not claims or not posts:
+        return []
+
+    post_order = list(dict.fromkeys(post.post_id for post in posts))
+    post_indexes = {post_id: index for index, post_id in enumerate(post_order)}
+    candidate_indexes = sorted({
+        post_indexes[reference.post_id]
+        for claim in claims
+        for path in claim.evidence_paths
+        for reference in path.evidence
+        if reference.post_id in post_indexes
+    })
+    if not candidate_indexes:
+        return []
+
+    # For each claim, map each diagnosed post to the evidence paths that mention it.
+    # A claim is broken when the selected posts collectively invalidate every
+    # sufficiently confident path. This keeps subset scoring to at most 3 lookups.
+    path_masks_by_claim: list[tuple[int, dict[int, int]]] = []
+    for claim in claims:
+        eligible_paths = [path for path in claim.evidence_paths if path.confidence >= 0.5]
+        if not eligible_paths:
+            continue
+        all_path_bits = (1 << len(eligible_paths)) - 1
+        paths_by_post: dict[int, int] = {}
+        for path_index, path in enumerate(eligible_paths):
+            path_bit = 1 << path_index
+            for reference in path.evidence:
+                if reference.post_id in post_indexes:
+                    post_index = post_indexes[reference.post_id]
+                    paths_by_post[post_index] = paths_by_post.get(post_index, 0) | path_bit
+        path_masks_by_claim.append((all_path_bits, paths_by_post))
+    if not path_masks_by_claim:
+        return []
+
+    limit = min(PROFILE_PLAN_MAX_POSTS, len(candidate_indexes))
+    best_score: tuple[int, int, tuple[int, ...]] | None = None
+    best_indexes: tuple[int, ...] = ()
+    for count in range(1, limit + 1):
+        for selected_indexes in combinations(candidate_indexes, count):
+            broken_count = 0
+            for all_path_bits, paths_by_post in path_masks_by_claim:
+                broken_path_bits = 0
+                for index in selected_indexes:
+                    broken_path_bits |= paths_by_post.get(index, 0)
+                broken_count += broken_path_bits == all_path_bits
+                if broken_count == len(path_masks_by_claim):
+                    break
+            if not broken_count:
+                continue
+            score = (-broken_count, count, selected_indexes)
+            if best_score is None or score < best_score:
+                best_score, best_indexes = score, selected_indexes
+    return [post_order[index] for index in best_indexes]
 
 
 def _minimal_scope(paths: list[ProfileEvidencePath]) -> EvidenceScope:

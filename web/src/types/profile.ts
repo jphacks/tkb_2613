@@ -135,6 +135,32 @@ export type ProfileItem =
   | (ProfileItemBase & { readonly value: string; readonly status: "found" | "weak" })
   | (ProfileItemBase & { readonly value: null; readonly status: "unknown" });
 
+/** Recalculate a known claim from its existing OR-of-AND paths only. */
+export function profileClaimAfterDeletion(item: ProfileItem, deletedPostIds: ReadonlySet<string>): ProfileItem | null | undefined {
+  if (!item.evidence_paths?.length) return undefined;
+  const survivingPaths = item.evidence_paths.filter((path) =>
+    !path.evidence.some((reference) => reference.post_id !== null && deletedPostIds.has(reference.post_id)),
+  );
+  if (survivingPaths.length === 0) return null;
+  const confidence = Math.max(...survivingPaths.map((path) => path.confidence));
+  if (confidence < 0.5) return null;
+  if (item.status === "unknown") return undefined;
+  const hasBlueskyOnlyPath = survivingPaths.some((path) => path.evidence.every((reference) => reference.source !== "public_web"));
+  return {
+    ...item,
+    evidence_paths: survivingPaths,
+    evidence: survivingPaths.flatMap((path) => path.evidence),
+    confidence,
+    status: confidence >= 0.8 ? "found" : "weak",
+    ...(item.assessment ? {
+      assessment: {
+        ...item.assessment,
+        minimal_scope: hasBlueskyOnlyPath ? "bluesky" : "bluesky_plus_public_web",
+      },
+    } : {}),
+  };
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }

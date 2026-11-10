@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { PROFILE_ATTRIBUTE_CATALOG, PROFILE_CATEGORIES, isProfileItem, isWebFact, type ProfileAttribute } from "./profile";
+import { PROFILE_ATTRIBUTE_CATALOG, PROFILE_CATEGORIES, isProfileItem, isWebFact, profileClaimAfterDeletion, type ProfileAttribute, type ProfileItem } from "./profile";
 
 describe("profile metadata catalog", () => {
   it("contains the 25 candidate IDs and labels with unrated legacy fields", () => {
@@ -23,6 +23,37 @@ describe("profile metadata catalog", () => {
       expect(item.personalLevel).toBeNull();
       expect(item.guessability).toBeNull();
     }
+  });
+});
+
+describe("profileClaimAfterDeletion", () => {
+  const a = "at://did:plc:test/app.bsky.feed.post/a";
+  const b = "at://did:plc:test/app.bsky.feed.post/b";
+  const c = "at://did:plc:test/app.bsky.feed.post/c";
+  const d = "at://did:plc:test/app.bsky.feed.post/d";
+  const ref = (post_id: string, excerpt: string) => ({ post_id, clue_index: null, required: true, source: "post_text" as const, excerpt });
+  const item: ProfileItem = {
+    attribute: "residential_area", value: "架空の区", confidence: 0.8, status: "found",
+    evidence: [ref(a, "A"), ref(b, "B"), ref(c, "C"), ref(d, "D")],
+    evidence_paths: [
+      { evidence: [ref(a, "A"), ref(b, "B")], confidence: 0.8 },
+      { evidence: [ref(c, "C"), ref(d, "D")], confidence: 0.6 },
+    ],
+  };
+
+  it("keeps only complete alternative paths that survive and uses their confidence", () => {
+    const after = profileClaimAfterDeletion(item, new Set([a]));
+    expect(after).not.toBeNull();
+    expect(after?.evidence_paths).toEqual([item.evidence_paths?.[1]]);
+    expect(after?.evidence).toEqual([ref(c, "C"), ref(d, "D")]);
+    expect(after?.confidence).toBe(0.6);
+    expect(after?.status).toBe("weak");
+  });
+
+  it("returns null when every known path is removed and undefined when paths are unavailable", () => {
+    expect(profileClaimAfterDeletion(item, new Set([a, c]))).toBeNull();
+    const legacy: ProfileItem = { ...item, evidence_paths: undefined };
+    expect(profileClaimAfterDeletion(legacy, new Set([a]))).toBeUndefined();
   });
 });
 
