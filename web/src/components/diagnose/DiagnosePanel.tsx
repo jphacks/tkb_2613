@@ -9,7 +9,7 @@ import { ApiError, diagnose } from "@/lib/api";
 import type { Clue } from "@/types/clue";
 import type { Conclusion } from "@/types/diagnose";
 import type { Post } from "@/types/post";
-import type { ProfileItem, WebFact } from "@/types/profile";
+import type { ExternalLookupStatus, ExternalProfileResult, ProfileItem, WebFact } from "@/types/profile";
 
 /**
  * 診断の状態。connecting は押してから最初のイベントが届くまで、reading は投稿が届いている間、
@@ -30,6 +30,8 @@ interface Result {
   profileClaimSuggestions: readonly string[];
   webFacts: readonly WebFact[];
   webLookupStatus: "not_run" | "fixture";
+  externalLookupStatus: ExternalLookupStatus;
+  externalProfileResults: readonly ExternalProfileResult[];
   ownerProfileText: string;
   selfReportClues: readonly Clue[];
 }
@@ -65,12 +67,15 @@ function AuthenticatedDiagnosePanel() {
   const [found, setFound] = useState<Readonly<Record<string, PostClues>>>({});
   const [result, setResult] = useState<Result | null>(null);
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
+  const [publicWebLookupConsent, setPublicWebLookupConsent] = useState(false);
   const controller = useRef<AbortController | null>(null);
 
   // 画面を離れたら、読み込み中の診断を止める
   useEffect(() => () => controller.current?.abort(), []);
 
   async function start() {
+    const consentForThisRun = publicWebLookupConsent;
+    setPublicWebLookupConsent(false);
     controller.current?.abort();
     const current = new AbortController();
     controller.current = current;
@@ -79,7 +84,7 @@ function AuthenticatedDiagnosePanel() {
     setResult(null);
     setPhase({ kind: "connecting" });
     try {
-      for await (const event of diagnose({ signal: current.signal })) {
+      for await (const event of diagnose({ signal: current.signal, publicWebLookupConsent: consentForThisRun })) {
         switch (event.event) {
           case "post":
             setPosts((prev) => [...prev, event.post]);
@@ -90,7 +95,7 @@ function AuthenticatedDiagnosePanel() {
             setPhase({ kind: "searching" });
             break;
           case "conclusions":
-            setResult({ clues: event.clues, conclusions: event.conclusions, profileClaims: event.profile_claims ?? [], profileClaimSuggestions: event.profile_claim_suggestions ?? [], webFacts: event.web_facts ?? [], webLookupStatus: event.web_lookup_status ?? "not_run", ownerProfileText: event.owner_profile_text ?? "", selfReportClues: event.self_report_clues ?? [] });
+            setResult({ clues: event.clues, conclusions: event.conclusions, profileClaims: event.profile_claims ?? [], profileClaimSuggestions: event.profile_claim_suggestions ?? [], webFacts: event.web_facts ?? [], webLookupStatus: event.web_lookup_status ?? "not_run", externalLookupStatus: event.external_lookup_status ?? "not_requested", externalProfileResults: event.external_profile_results ?? [], ownerProfileText: event.owner_profile_text ?? "", selfReportClues: event.self_report_clues ?? [] });
             break;
           case "done":
             setPhase({ kind: "done", postsSeen: event.posts_seen });
@@ -113,6 +118,19 @@ function AuthenticatedDiagnosePanel() {
         <h2 id="diagnose-heading" className="sr-only">
           診断
         </h2>
+        <label className="mb-4 flex max-w-2xl items-start gap-3 rounded-sm border border-ink/20 px-4 py-3 text-sm">
+          <input
+            type="checkbox"
+            checked={publicWebLookupConsent}
+            onChange={(event) => setPublicWebLookupConsent(event.currentTarget.checked)}
+            disabled={busy}
+            className="mt-1 size-4 shrink-0 accent-seeker"
+          />
+          <span>
+            <span className="block font-bold">公開Webで外部SNS・ブログ・記事の候補を検索する（この診断のみ）</span>
+            <span className="mt-1 block text-xs text-ink/70">同意すると、実モードではログイン中の公開BlueskyハンドルだけをBraveへ送ります。検索語は最大90日保持され、利用には有料プランと支払情報の登録が必要です。投稿文・プロフィール文・写真は送りません。候補だけでは同一人物と判断しません。モックモードは固定の架空結果を使い、外部通信しません。</span>
+          </span>
+        </label>
         <button
           type="button"
           onClick={start}
@@ -140,7 +158,7 @@ function AuthenticatedDiagnosePanel() {
         )}
       </div>
 
-      {result && <ConclusionBoard clues={result.clues} conclusions={result.conclusions} profileClaims={result.profileClaims} profileClaimSuggestions={result.profileClaimSuggestions} posts={posts} webFacts={result.webFacts} webLookupStatus={result.webLookupStatus} ownerProfileText={result.ownerProfileText} selfReportClues={result.selfReportClues} />}
+      {result && <ConclusionBoard clues={result.clues} conclusions={result.conclusions} profileClaims={result.profileClaims} profileClaimSuggestions={result.profileClaimSuggestions} posts={posts} webFacts={result.webFacts} webLookupStatus={result.webLookupStatus} externalLookupStatus={result.externalLookupStatus} externalProfileResults={result.externalProfileResults} ownerProfileText={result.ownerProfileText} selfReportClues={result.selfReportClues} />}
 
       {posts.length > 0 && (
         <ol aria-label="読んだ投稿" className="max-w-2xl space-y-5">

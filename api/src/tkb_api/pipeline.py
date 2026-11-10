@@ -17,7 +17,15 @@ from urllib.parse import urlparse
 
 import httpx
 
-from tkb_common.schemas import BSKY_CDN_PREFIX, Clue, Post, WebFact
+from tkb_api.public_web_identity import ExternalLookupResult
+from tkb_common.schemas import (
+    BSKY_CDN_PREFIX,
+    Clue,
+    ExternalLookupStatus,
+    ExternalProfileResult,
+    Post,
+    WebFact,
+)
 from tkb_detect.batch import PostExtraction, extract_posts
 from tkb_detect.extract import Extractor
 from tkb_engine.cross_post import infer_owner_claims_with_web, plan_profile_claim_deletion
@@ -104,6 +112,9 @@ async def diagnose_events(
     owner_profile_analyzer: Callable[[str], Awaitable[list[Clue]]] | None = None,
     web_facts: Sequence[WebFact] = (),
     web_lookup_status: str = "not_run",
+    external_profile_results: Sequence[ExternalProfileResult] = (),
+    external_lookup_status: ExternalLookupStatus = ExternalLookupStatus.NOT_REQUESTED,
+    external_lookup: Callable[[], Awaitable[ExternalLookupResult]] | None = None,
     diagnosis_date: date | None = None,
 ) -> AsyncIterator[Event]:
     """診断のイベントを順に返す。
@@ -120,10 +131,28 @@ async def diagnose_events(
         all_clues.extend(extraction.clues)
         yield "clues", extraction.model_dump(mode="json")
 
+    if external_lookup is not None:
+        try:
+            lookup_result = await external_lookup()
+            external_lookup_status = lookup_result.status
+            external_profile_results = lookup_result.results
+        except Exception:
+            # 外部検索の失敗で診断全体を止めず、例外内容をログ/SSEへ出さない。
+            external_lookup_status = ExternalLookupStatus.UNAVAILABLE
+            external_profile_results = ()
+
     conclusions = infer(all_clues, list(posts), gazetteer)
-    self_report_clues = await owner_profile_analyzer(owner_profile_text) if owner_profile_text and owner_profile_analyzer else []
+    self_report_clues = (
+        await owner_profile_analyzer(owner_profile_text)
+        if owner_profile_text and owner_profile_analyzer
+        else []
+    )
     profile_claims = infer_owner_claims_with_web(
-        list(posts), all_clues, list(web_facts), owner_profile_text, self_report_clues,
+        list(posts),
+        all_clues,
+        list(web_facts),
+        owner_profile_text,
+        self_report_clues,
         gazetteer=gazetteer,
         diagnosis_date=diagnosis_date,
     )
@@ -137,6 +166,10 @@ async def diagnose_events(
             "profile_claim_suggestions": profile_claim_suggestions,
             "web_facts": [fact.model_dump(mode="json") for fact in web_facts],
             "web_lookup_status": web_lookup_status,
+            "external_profile_results": [
+                result.model_dump(mode="json") for result in external_profile_results
+            ],
+            "external_lookup_status": external_lookup_status.value,
             "self_report_clues": [c.model_dump(mode="json") for c in self_report_clues],
             # Direct self-report is kept separate from cross-post inference and streamed only
             # to the authenticated owner; it is never persisted.

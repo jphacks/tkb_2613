@@ -13,7 +13,7 @@
 
 import { type Clue, isClue } from "./clue";
 import { isPost, type Post } from "./post";
-import { isProfileItem, isWebFact, type ProfileItem, type WebFact } from "./profile";
+import { isExternalProfileResult, isProfileItem, isWebFact, type ExternalLookupStatus, type ExternalProfileResult, type ProfileItem, type WebFact } from "./profile";
 
 /** 推理ルールが出した結論 1 つ（engine の Conclusion） */
 export interface Conclusion {
@@ -43,6 +43,8 @@ export type DiagnoseEvent =
       readonly profile_claim_suggestions?: readonly string[];
       readonly web_facts?: readonly WebFact[];
       readonly web_lookup_status?: "not_run" | "fixture";
+      readonly external_lookup_status?: ExternalLookupStatus;
+      readonly external_profile_results?: readonly ExternalProfileResult[];
       readonly owner_profile_text?: string;
       readonly self_report_clues?: readonly Clue[];
     }
@@ -72,6 +74,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isClueList(value: unknown): value is readonly Clue[] {
   return Array.isArray(value) && value.every(isClue);
+}
+
+function isExternalLookupStatus(value: unknown): value is ExternalLookupStatus {
+  return ["not_requested", "fixture", "searched", "no_results", "unavailable"].includes(value as string);
 }
 
 function isConclusion(value: unknown, clueCount: number): value is Conclusion {
@@ -117,6 +123,8 @@ export function toDiagnoseEvent(event: string, data: string): DiagnoseEvent | nu
     const selfReportClues = value.self_report_clues ?? [];
     const webFacts = value.web_facts ?? [];
     const webLookupStatus = value.web_lookup_status ?? "not_run";
+    const externalLookupStatus = value.external_lookup_status ?? "not_requested";
+    const externalProfileResults = value.external_profile_results ?? [];
     const webFactIds = Array.isArray(webFacts) && webFacts.every(isWebFact)
       ? new Set(webFacts.map((fact) => fact.id))
       : new Set<string>();
@@ -138,7 +146,10 @@ export function toDiagnoseEvent(event: string, data: string): DiagnoseEvent | nu
       )) &&
       isClueList(selfReportClues) && Array.isArray(webFacts) && webFacts.every(isWebFact) &&
       new Set(webFacts.map((fact) => fact.id)).size === webFacts.length && claimsReferenceKnownWebFacts &&
-      (webLookupStatus === "not_run" || webLookupStatus === "fixture")
+      (webLookupStatus === "not_run" || webLookupStatus === "fixture") &&
+      isExternalLookupStatus(externalLookupStatus) &&
+      Array.isArray(externalProfileResults) && externalProfileResults.length <= 5 && externalProfileResults.every(isExternalProfileResult) &&
+      new Set(externalProfileResults.map((result) => result.id)).size === externalProfileResults.length
     ) {
       return {
         event,
@@ -148,6 +159,8 @@ export function toDiagnoseEvent(event: string, data: string): DiagnoseEvent | nu
         ...(Object.hasOwn(value, "profile_claim_suggestions") ? { profile_claim_suggestions: profileClaimSuggestions } : {}),
         ...(Object.hasOwn(value, "web_facts") ? { web_facts: webFacts } : {}),
         ...(Object.hasOwn(value, "web_lookup_status") ? { web_lookup_status: webLookupStatus } : {}),
+        ...(Object.hasOwn(value, "external_lookup_status") ? { external_lookup_status: externalLookupStatus } : {}),
+        ...(Object.hasOwn(value, "external_profile_results") ? { external_profile_results: externalProfileResults } : {}),
         ...(Object.hasOwn(value, "owner_profile_text") ? { owner_profile_text: profileText } : {}),
         ...(Object.hasOwn(value, "self_report_clues") ? { self_report_clues: selfReportClues } : {}),
       };

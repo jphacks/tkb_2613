@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     vlm_api_key: SecretStr = SecretStr("")
     vlm_model: str = ""
     ocr_base_url: str = ""
+    # 公開Web検索の秘密鍵。明示的な診断同意がある場合のみ使用し、クライアントへ返さない。
+    brave_search_api_key: SecretStr = SecretStr("")
     cors_origins: list[str] = ["http://localhost:3000"]
     # Bluesky のログイン先
     bsky_service: str = "https://bsky.social"

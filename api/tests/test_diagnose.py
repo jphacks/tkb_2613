@@ -10,14 +10,24 @@ from fastapi.testclient import TestClient
 from tkb_api.bluesky import BlueskyUnavailableError, LoginResult, PostsFetcher
 from tkb_api.config import Settings, get_settings
 from tkb_api.main import create_app
+from tkb_api.public_web_identity import ExternalLookupResult
 from tkb_api.routes.diagnose import (
+    get_external_profile_searcher,
     get_extractor_factory,
     get_fetch_posts,
     get_fetch_profile_text,
     get_gazetteer,
 )
 from tkb_api.routes.session import get_login
-from tkb_common.schemas import Clue, ClueSource, ClueType, Post
+from tkb_common.schemas import (
+    Clue,
+    ClueSource,
+    ClueType,
+    ExternalLookupStatus,
+    ExternalProfileResult,
+    ExternalProfileStatus,
+    Post,
+)
 from tkb_detect.extract import Extractor
 from tkb_detect.vlm_client import VlmClient, VlmConfig
 from tkb_engine.gazetteer import Gazetteer
@@ -71,6 +81,19 @@ def test_diagnose_requires_login(client: TestClient) -> None:
     assert client.post("/api/diagnose").status_code == 401
 
 
+def test_public_lookup_consent_requires_json_boolean_and_absent_body_defaults_off(
+    client: TestClient,
+) -> None:
+    _login(client)
+    invalid = client.post("/api/diagnose", json={"public_web_lookup_consent": "yes"})
+    assert invalid.status_code == 422
+    absent = client.post("/api/diagnose")
+    assert absent.status_code == 200
+    event = next(data for name, data in _events(absent.text) if name == "conclusions")
+    assert event["external_lookup_status"] == "not_requested"
+    assert event["external_profile_results"] == []
+
+
 def test_mock_diagnose_streams_posts_clues_conclusions_then_done(client: TestClient) -> None:
     _login(client)
 
@@ -101,7 +124,27 @@ def test_mock_diagnose_streams_posts_clues_conclusions_then_done(client: TestCli
     claim_by_attribute = {item["attribute"]: item for item in result["profile_claims"]}
     assert claim_by_attribute["residential_area"]["value"] == "文京区"
     assert result["profile_claim_suggestions"] == [posts[10]["post_id"]]
+    assert result["external_lookup_status"] == "not_requested"
+    assert result["external_profile_results"] == []
     assert events[-1] == ("done", {"posts_seen": len(posts)})
+
+
+def test_mock_external_lookup_uses_fictional_fixture_without_network(client: TestClient) -> None:
+    async def must_not_call(_handle: str) -> ExternalLookupResult:
+        raise AssertionError("MOCK_MODE must not call the search provider")
+
+    client.app.dependency_overrides[get_external_profile_searcher] = lambda: must_not_call  # type: ignore[attr-defined]
+    _login(client)
+    response = client.post("/api/diagnose", json={"public_web_lookup_consent": True})
+    assert response.status_code == 200
+    event = next(data for name, data in _events(response.text) if name == "conclusions")
+    assert event["external_lookup_status"] == "fixture"
+    linked, candidate = event["external_profile_results"]
+    assert linked["status"] == "owner_linked"
+    assert linked["owner_evidence"]["kind"] == "profile_text"
+    assert linked["url"] == "https://example.com/haruki-blog"
+    assert candidate["status"] == "candidate"
+    assert candidate["owner_evidence"] is None
 
 
 REAL_DID = "did:plc:me00000000000000000000"
@@ -130,10 +173,17 @@ class FakeExtractor(Extractor):
         ]
 
     async def extract_profile_text(self, did: str, text: str) -> list[Clue]:
-        return [Clue(
-            post_id=f"profile:{did}", image_index=None, type=ClueType.NAME_TEXT,
-            value="本人記載の名前", region=None, confidence=0.9, source=ClueSource.PROFILE_TEXT,
-        )]
+        return [
+            Clue(
+                post_id=f"profile:{did}",
+                image_index=None,
+                type=ClueType.NAME_TEXT,
+                value="本人記載の名前",
+                region=None,
+                confidence=0.9,
+                source=ClueSource.PROFILE_TEXT,
+            )
+        ]
 
 
 def _real_client(fetch_posts: PostsFetcher, extractor: Extractor | None = None) -> TestClient:
@@ -146,9 +196,11 @@ def _real_client(fetch_posts: PostsFetcher, extractor: Extractor | None = None) 
     overrides = client.app.dependency_overrides  # type: ignore[attr-defined]
     overrides[get_login] = lambda: login
     overrides[get_fetch_posts] = lambda: fetch_posts
+
     async def fetch_profile(_client: AsyncClient, did: str) -> str:
         assert did == REAL_DID
         return "本人プロフィール文"
+
     overrides[get_fetch_profile_text] = lambda: fetch_profile
     fake = extractor or FakeExtractor()
     overrides[get_extractor_factory] = lambda: lambda: fake
@@ -184,6 +236,62 @@ def test_real_diagnose_extracts_clues_from_the_session_accounts_own_posts() -> N
     assert events[-1] == ("done", {"posts_seen": 1})
 
 
+def test_real_public_search_is_per_run_opt_in_and_marks_only_owner_published_urls() -> None:
+    post = Post.model_validate(
+        {
+            "post_id": "at://did:plc:me00000000000000000000/app.bsky.feed.post/external1",
+            "text": "通常の投稿",
+            "created_at": "2026-11-10T08:00:00+09:00",
+            "images": [],
+        }
+    )
+    calls: list[str] = []
+    search_result = ExternalProfileResult(
+        id="candidate-id",
+        url="https://example.net/blog",
+        domain="example.net",
+        title="架空ブログ",
+        status=ExternalProfileStatus.CANDIDATE,
+        owner_evidence=None,
+    )
+
+    async def fetch_posts(_client: AsyncClient, _did: str, _limit: int) -> list[Post]:
+        return [post]
+
+    async def fetch_profile(_client: AsyncClient, did: str) -> str:
+        assert did == REAL_DID
+        return "私のブログ: https://example.net/blog"
+
+    async def search(handle: str) -> ExternalLookupResult:
+        calls.append(handle)
+        return ExternalLookupResult(ExternalLookupStatus.SEARCHED, (search_result,))
+
+    with _real_client(fetch_posts) as client:
+        overrides = client.app.dependency_overrides  # type: ignore[attr-defined]
+        overrides[get_fetch_profile_text] = lambda: fetch_profile
+        overrides[get_external_profile_searcher] = lambda: search
+        _login(client)
+
+        opted_out = client.post("/api/diagnose")
+        opted_out_event = next(
+            data for name, data in _events(opted_out.text) if name == "conclusions"
+        )
+        assert opted_out_event["external_lookup_status"] == "not_requested"
+        assert opted_out_event["external_profile_results"] == []
+        assert calls == []
+
+        opted_in = client.post("/api/diagnose", json={"public_web_lookup_consent": True})
+
+    assert opted_in.status_code == 200
+    assert calls == ["alice.bsky.social"]
+    event = next(data for name, data in _events(opted_in.text) if name == "conclusions")
+    assert event["external_lookup_status"] == "searched"
+    linked = event["external_profile_results"][0]
+    assert linked["status"] == "owner_linked"
+    assert linked["owner_evidence"]["kind"] == "profile_text"
+    assert str(linked["url"]) == "https://example.net/blog"
+
+
 @pytest.mark.parametrize("vlm_base_url", ["", "https://api.openai.com/v1"])
 def test_real_diagnose_reports_a_missing_or_forbidden_model_endpoint(vlm_base_url: str) -> None:
     post = Post.model_validate({**json.loads(FIXTURE.read_text(encoding="utf-8"))["posts"][3]})
@@ -198,8 +306,10 @@ def test_real_diagnose_reports_a_missing_or_forbidden_model_endpoint(vlm_base_ur
     with _client(settings) as client:
         client.app.dependency_overrides[get_login] = lambda: login  # type: ignore[attr-defined]
         client.app.dependency_overrides[get_fetch_posts] = lambda: fetch_posts  # type: ignore[attr-defined]
+
         async def fetch_profile(_client: AsyncClient, _did: str) -> str:
             return ""
+
         client.app.dependency_overrides[get_fetch_profile_text] = lambda: fetch_profile  # type: ignore[attr-defined]
         _login(client)
         res = client.post("/api/diagnose")

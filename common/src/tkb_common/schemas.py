@@ -3,11 +3,20 @@
 投稿・手がかり・プロフィールの型は web/src/types/ の対応ファイルと同時に変更すること。
 """
 
+import re
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Annotated, Self
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    HttpUrl,
+    field_validator,
+    model_validator,
+)
 
 NonNegativeInt = Annotated[int, Field(ge=0)]
 PositiveInt = Annotated[int, Field(gt=0)]
@@ -282,6 +291,101 @@ class WebVerificationStatus(StrEnum):
     UNVERIFIED = "unverified"
     CONFLICT = "conflict"
     STALE = "stale"
+
+
+class ExternalLookupStatus(StrEnum):
+    NOT_REQUESTED = "not_requested"
+    FIXTURE = "fixture"
+    SEARCHED = "searched"
+    NO_RESULTS = "no_results"
+    UNAVAILABLE = "unavailable"
+
+
+class ExternalProfileStatus(StrEnum):
+    CANDIDATE = "candidate"
+    OWNER_LINKED = "owner_linked"
+
+
+class ExternalOwnerEvidenceKind(StrEnum):
+    PROFILE_TEXT = "profile_text"
+    POST_TEXT = "post_text"
+
+
+class ExternalOwnerEvidence(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: ExternalOwnerEvidenceKind
+    post_id: str | None = Field(default=None, min_length=1)
+    excerpt: str = Field(min_length=1, max_length=500)
+
+    @model_validator(mode="after")
+    def _check_owner_evidence(self) -> Self:
+        if self.kind is ExternalOwnerEvidenceKind.PROFILE_TEXT and self.post_id is not None:
+            raise ValueError("profile evidence cannot reference a post")
+        if self.kind is ExternalOwnerEvidenceKind.POST_TEXT and self.post_id is None:
+            raise ValueError("post evidence requires post_id")
+        return self
+
+
+class ExternalProfileResult(BaseModel):
+    """A search candidate or a page linked from the owner's own Bluesky profile/post."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    id: str = Field(min_length=1, max_length=100)
+    url: HttpUrl
+    domain: str = Field(min_length=1, max_length=253)
+    title: str = Field(min_length=1, max_length=300)
+    status: ExternalProfileStatus
+    owner_evidence: ExternalOwnerEvidence | None = None
+
+    @model_validator(mode="after")
+    def _check_result(self) -> Self:
+        from ipaddress import ip_address
+        from urllib.parse import urlsplit
+
+        parts = urlsplit(str(self.url))
+        host = (parts.hostname or "").lower().rstrip(".")
+        labels = host.split(".")
+        if parts.scheme != "https" or parts.username is not None or parts.password is not None:
+            raise ValueError("external profile URLs require public HTTPS")
+        if parts.port not in {None, 443}:
+            raise ValueError("external profile URLs require the default HTTPS port")
+        try:
+            ip_address(host)
+        except ValueError:
+            pass
+        else:
+            raise ValueError("external profile URLs cannot use IP literals")
+        if (
+            host in {"localhost", "localhost.localdomain"}
+            or host.endswith(
+                (
+                    ".localhost",
+                    ".local",
+                    ".localdomain",
+                    ".internal",
+                    ".test",
+                    ".invalid",
+                    ".home",
+                    ".lan",
+                    ".home.arpa",
+                )
+            )
+            or len(labels) < 2
+            or any(
+                not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", label)
+                for label in labels
+            )
+        ):
+            raise ValueError("external profile URL must use a public hostname")
+        if host != self.domain.lower().rstrip("."):
+            raise ValueError("external profile domain must match URL host")
+        if (self.status is ExternalProfileStatus.OWNER_LINKED) != (self.owner_evidence is not None):
+            raise ValueError(
+                "owner_linked results require owner evidence; candidates must not have it"
+            )
+        return self
 
 
 class WebFact(BaseModel):

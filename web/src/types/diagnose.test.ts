@@ -85,6 +85,23 @@ describe("toDiagnoseEvent", () => {
     expect(() => toDiagnoseEvent("conclusions", JSON.stringify({ ...data, web_facts: [fact, fact] }))).toThrow();
   });
 
+  it("keeps external search candidates separate from owner-published links", () => {
+    const candidates = [
+      { id: "c1", url: "https://example.net/profile", domain: "example.net", title: "外部候補", status: "candidate", owner_evidence: null },
+      {
+        id: "c2", url: "https://sample.org/blog", domain: "sample.org", title: "本人がリンクしたブログ", status: "owner_linked",
+        owner_evidence: { kind: "profile_text", post_id: null, excerpt: "ブログ: https://sample.org/blog" },
+      },
+    ];
+    const data = { clues: [], conclusions: [], external_lookup_status: "searched", external_profile_results: candidates };
+    expect(toDiagnoseEvent("conclusions", JSON.stringify(data))).toEqual({ event: "conclusions", ...data });
+    expect(() => toDiagnoseEvent("conclusions", JSON.stringify({
+      ...data,
+      external_profile_results: [{ ...candidates[0], status: "owner_linked", owner_evidence: null }],
+    }))).toThrow();
+    expect(() => toDiagnoseEvent("conclusions", JSON.stringify({ ...data, external_lookup_status: "verified_identity" }))).toThrow();
+  });
+
   it("reads a post event", () => {
     expect(toDiagnoseEvent("post", JSON.stringify({ post: POST }))).toEqual({ event: "post", post: POST });
   });
