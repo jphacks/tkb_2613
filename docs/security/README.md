@@ -19,6 +19,8 @@
 | 10 | 認証不要エンドポイント・サイズ上限 | 実施済み・脆弱性なし | [10-dos-detect-sse.md](10-dos-detect-sse.md) |
 | 11 | プロンプトインジェクション（本文はデータか） | 実施済み・脆弱性なし（画像経路は未） | [11-prompt-injection.md](11-prompt-injection.md) |
 | 12 | SSE 契約・耐性（ヘッダ・keep-alive・途中切断） | 実施済み・脆弱性なし | [12-sse.md](12-sse.md) |
+| 13 | 本番環境（CloudFront 経由）の途中報告 2026-11-10 | 途中・Medium1件・Low3件・未検証あり | [13-prod-interim-2026-11-10.md](13-prod-interim-2026-11-10.md) |
+| 14 | 本番環境の AWS 構成（公開 IP・IMDS・SG・実行ユーザー・ログ） | 実施済み・要修正なし（情報2件・未検証2件） | [14-prod-aws-2026-11-10.md](14-prod-aws-2026-11-10.md) |
 
 補足: 依存パッケージの既知脆弱性（`pip-audit` / `pnpm audit`）と git履歴の秘密情報も確認し、いずれも検出なし。Web画面のXSS面（生HTML挿入なし・React自動エスケープ・画像URLは`cdn.bsky.app`限定）、画像のデコード爆弾対策（`MAX_PIXELS`＋`DecompressionBombError`捕捉）も確認済み。
 
