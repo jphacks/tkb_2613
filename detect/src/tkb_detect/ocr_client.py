@@ -55,6 +55,22 @@ class OcrClient:
         payload = {"file": base64.b64encode(image).decode(), "fileType": PADDLEX_FILE_TYPE_IMAGE}
         return _parse_lines(await self._post(payload))
 
+    async def is_reachable(self, timeout_s: float) -> bool:
+        """OCR のサーバーが待ち受けているか（GET {OCR_BASE_URL}/health）。
+
+        診断を始める前に、短い待ち時間で確かめる。写真は送らない。/health が無い版でも
+        404・405 は待ち受けている証拠なので True にし、5xx（起動中など）と接続できないときは False。
+        モックでは常に True。
+        """
+        if self._config.mock_mode:
+            return True
+        try:
+            async with httpx.AsyncClient(timeout=timeout_s, trust_env=False) as client:
+                res = await client.get(f"{self._base_url}/health")
+        except httpx.HTTPError:
+            return False
+        return res.status_code < 500
+
     async def _post(self, payload: dict[str, Any]) -> Any:
         try:
             # 環境変数のプロキシ（HTTP_PROXY など）を経由させない。送るのはガードで確認した先だけ
