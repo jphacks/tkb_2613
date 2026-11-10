@@ -27,7 +27,9 @@
 | 11/15（Award Day） | 10:15 | 11:00〜16:20 | 16:30 |
 | 11/16・17・18 | 19:45 | 20:00〜22:00 | 22:00 |
 
-変えるときは `terraform.tfvars` の `public_windows` を書いて apply し、出力の `env_for_app.PUBLIC_WINDOWS` を `.env` に入れ直す（利用規約の公開日時 `web/src/lib/legal.ts` の `PUBLIC_SCHEDULE` も合わせる）。
+変えるときは `terraform.tfvars` の `public_windows` を書いて apply する（利用規約の時間帯 `web/src/lib/legal.ts` の `PUBLIC_SCHEDULE` も合わせる）。
+
+アプリの `PUBLIC_WINDOWS` は空（`[]`）にし、公開時間で診断を断らない（2026-11-10 決定）。診断できるのは GPU が動いている間だけで、止まっていれば画面は「準備中」になる。**GPU を手で起動すると、その間は誰でも診断できる**。
 
 ## VLM のキーの渡し方（決定）
 
@@ -115,7 +117,7 @@ GPU のプライベート IP などは `terraform output` で出る。キーは 
 
 ```bash
 terraform output gpu_private_ip      # 10.0.2.10
-terraform output -json env_for_app   # .env に入れる値（CORS_ORIGINS・VLM_BASE_URL・OCR_BASE_URL・MODEL_ALLOWED_HOST_SUFFIXES・PUBLIC_WINDOWS）
+terraform output -json env_for_app   # .env に入れる値（CORS_ORIGINS・VLM_BASE_URL・OCR_BASE_URL・MODEL_ALLOWED_HOST_SUFFIXES・PUBLIC_WINDOWS=[]）
 ```
 
 SSM でアプリの EC2 に入り、見本から `.env` を作って起動する。
@@ -131,7 +133,7 @@ vi .env   # <...> を terraform output の値に置き換える
           #   OCR_BASE_URL=http://10.0.2.10:8080（OCR を動かさないなら空）
           #   MODEL_ALLOWED_HOST_SUFFIXES=10.0.2.10
           #   CORS_ORIGINS=["https://<配信ID>.cloudfront.net"]
-          #   PUBLIC_WINDOWS=（env_for_app.PUBLIC_WINDOWS の値を1行で）
+          #   PUBLIC_WINDOWS=[]（公開時間では制限しない）
 # VLM_API_KEY は空のまま（起動スクリプトが渡す）
 # OAuth の場合は AUTH_MODE=oauth、PUBLIC_URL=https://<配信ID>.cloudfront.net、
 # OAUTH_WEB_ORIGIN=http://web:3000。INTERNAL_AUTH_SECRET は .env に書かない
@@ -147,7 +149,7 @@ journalctl -u tkb-app -n 50 --no-pager
 
 - `curl -s https://<配信ID>.cloudfront.net/api/features` が `share_enabled=false` と設定した `auth_mode` を返す
 - アプリの EC2 で `docker logs tkb_2613-api-1 2>&1 | grep 閲覧リンク` が「閲覧リンク：オフ（SHARE_ENABLED）」
-- 公開時間外に診断すると「公開時間外です。次は…からです」
+- GPU を止めた状態で診断すると「ただいま準備中です」
 
 ## 全遮断・停止（docs/aws-migration.md の 7章）
 
@@ -155,9 +157,9 @@ journalctl -u tkb-app -n 50 --no-pager
 
 1. レビュー済みのコミットを本番に配置する前に、`terraform plan -out=review.tfplan` で CloudFront の `/auth/*` 非キャッシュ設定、WAF の `/auth/start` レート制限、試験用 IP 制限の差分を確認する。承認後に apply し、直後に上記の手順で state をリポジトリ外にコピーする。`user_data` は既存 EC2 では更新されない。
 2. `terraform.tfvars` の `oauth_test_ipv4_cidrs` にチームの現在のグローバル IPv4 アドレスを `/32` で入れ、plan・apply・state バックアップを行う。試験中はメタデータ以外の全経路をチーム IP だけにする。Bluesky の認可サーバーが読む `/oauth-client-metadata.json` は公開のままにする。
-3. SSM セッションでアプリ EC2 に入り、レビュー済みコミットを取得し、`sudo install -m 700 /opt/tkb_2613/infra/tkb-app-start.sh /usr/local/bin/tkb-app-start` を実行する。これは既存の `user_data` からは自動反映されない。`.env` を `infra/aws.env.example` と照合し、`AUTH_MODE=oauth`、`PUBLIC_URL=https://<配信ID>.cloudfront.net`、`OAUTH_WEB_ORIGIN=http://web:3000` にする。`INTERNAL_AUTH_SECRET` は `.env` に書かない。公開前の短い試験時間だけ `PUBLIC_WINDOWS` に試験枠を追加し、`systemctl restart tkb-app` で起動する。
+3. SSM セッションでアプリ EC2 に入り、レビュー済みコミットを取得し、`sudo install -m 700 /opt/tkb_2613/infra/tkb-app-start.sh /usr/local/bin/tkb-app-start` を実行する。これは既存の `user_data` からは自動反映されない。`.env` を `infra/aws.env.example` と照合し、`AUTH_MODE=oauth`、`PUBLIC_URL=https://<配信ID>.cloudfront.net`、`OAUTH_WEB_ORIGIN=http://web:3000` にする。`INTERNAL_AUTH_SECRET` は `.env` に書かない。`PUBLIC_WINDOWS=[]` を確認し、`systemctl restart tkb-app` で起動する。
 4. `https://<配信ID>.cloudfront.net/oauth-client-metadata.json` が HTTPS 200・JSON・非キャッシュであること、OAuth コールバック後のブラウザ URL に `code` と `state` が残らないこと、`tkb_session` が HttpOnly・Secure・SameSite=Lax であることを確認する。専用の架空アカウントで OAuth ログイン→本人投稿取得→診断→仮除外→削除してよい1件の実削除→再診断を試す。ログに認可コード、トークン、投稿本文が出ていないこと、WAF が他 IP を遮断すること、再起動後に再ログインできることも確認する。
-5. 試験後は `PUBLIC_WINDOWS` を元に戻し、`oauth_test_ipv4_cidrs=[]` にして plan・apply・state バックアップを行う。**11/12 21:00 JST までに AWS 経由の実削除と CI の全項目が確認できた場合だけ OAuth を採用**する。未確認項目が1つでもあれば `.env` の `AUTH_MODE=app_password` に戻し、`systemctl restart tkb-app` する。切り戻し後は App Password だけを画面で案内する。11/13 の機能凍結後は認証方式を変えない。
+5. 試験後は `oauth_test_ipv4_cidrs=[]` にして plan・apply・state バックアップを行う。**11/12 21:00 JST までに AWS 経由の実削除と CI の全項目が確認できた場合だけ OAuth を採用**する。未確認項目が1つでもあれば `.env` の `AUTH_MODE=app_password` に戻し、`systemctl restart tkb-app` する。切り戻し後は App Password だけを画面で案内する。11/13 の機能凍結後は認証方式を変えない。
 
 既存 EC2 の起動スクリプト更新は、SSM セッション内で次を実行する。`<レビュー済みコミット>` にはマージ後の SHA を入れる。Terraform の `user_data` 変更だけでは既存 EC2 に反映されない。
 
@@ -169,7 +171,7 @@ cd /opt/tkb_2613
 git fetch origin main
 git checkout <レビュー済みコミット>
 install -m 700 infra/tkb-app-start.sh /usr/local/bin/tkb-app-start
-vi .env  # AUTH_MODE、PUBLIC_URL、OAUTH_WEB_ORIGIN、試験枠の PUBLIC_WINDOWS を確認
+vi .env  # AUTH_MODE、PUBLIC_URL、OAUTH_WEB_ORIGIN、PUBLIC_WINDOWS=[] を確認
 systemctl restart tkb-app
 ```
 

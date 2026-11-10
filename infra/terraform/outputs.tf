@@ -42,11 +42,7 @@ output "env_for_app" {
     VLM_MODEL                   = var.vlm_served_name
     OCR_BASE_URL                = var.ocr_image != "" ? "http://${aws_instance.gpu.private_ip}:8080" : ""
     MODEL_ALLOWED_HOST_SUFFIXES = aws_instance.gpu.private_ip
-    PUBLIC_WINDOWS = jsonencode([
-      for w in var.public_windows : {
-        start = "${w.date}T${w.open}:00+09:00"
-        end   = "${w.date}T${w.close}:00+09:00"
-      }
-    ])
+    # 2026-11-10 決定：アプリでは公開時間を制限しない。診断できる時間は GPU のスケジュールで決まる
+    PUBLIC_WINDOWS = "[]"
   }
 }
