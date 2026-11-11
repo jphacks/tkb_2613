@@ -98,6 +98,7 @@ def create_app(
             shares.close()
 
     app = FastAPI(title="tkb_2613 API", lifespan=lifespan)
+    app.state.settings = settings
     app.state.sessions = (
         sessions if sessions is not None else SessionStore(settings.session_ttl_minutes * 60)
     )

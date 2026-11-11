@@ -1,6 +1,7 @@
 "use client";
 
 import { messages } from "@/lib/messages";
+import { postImageSrc } from "@/lib/post-image";
 import { cropStyle, type FacePhoto } from "@/lib/reveal";
 import { useLoadedSize } from "@/lib/useLoadedSize";
 import type { Conclusion } from "@/types/diagnose";
@@ -52,7 +53,8 @@ const FACE_MARGIN = 0.35;
  * 写真が読めるまでと、顔がないときは人影を出す。顔は見せるだけで、照合や推定には使わない。
  */
 function PhotoFrame({ face }: { face: FacePhoto | null }) {
-  const size = useLoadedSize(face?.image.url ?? null);
+  const imageUrl = face ? postImageSrc(face.image) : null;
+  const size = useLoadedSize(imageUrl);
   const crop = face?.clue.region && size ? cropStyle(face.clue.region, size, FACE_MARGIN) : null;
   return (
     <div className="relative mx-auto aspect-[6/7] w-40 overflow-hidden border border-ink/20 bg-paper sm:w-full">
@@ -62,7 +64,7 @@ function PhotoFrame({ face }: { face: FacePhoto | null }) {
             {/* Bluesky の CDN の画像をそのまま表示するので next/image は使わない。読み込み済みなのですぐ出る */}
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src={face.image.url}
+              src={postImageSrc(face.image)}
               alt={t.faceAlt}
               referrerPolicy="no-referrer"
               className="absolute max-w-none"

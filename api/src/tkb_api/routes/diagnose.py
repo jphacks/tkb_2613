@@ -34,7 +34,7 @@ from typing import Annotated, Any
 
 from atproto import AsyncClient
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, StrictBool
 from starlette.background import BackgroundTask
 
@@ -89,12 +89,65 @@ def _sse(event: str, data: dict[str, Any]) -> str:
 def _load_demo_posts(settings: Settings) -> list[Post]:
     try:
         doc = json.loads(settings.demo_fixture_path.read_text(encoding="utf-8"))
-        return [Post.model_validate(p) for p in doc["posts"]]
+        posts: list[Post] = []
+        for raw_post in doc["posts"]:
+            post = dict(raw_post)
+            images = []
+            for raw_image in post.get("images", []):
+                image = dict(raw_image)
+                local_file = image.pop("local_file", None)
+                if local_file is not None:
+                    if not isinstance(local_file, str) or Path(local_file).name != local_file:
+                        raise ValueError("invalid local fixture image")
+                    image["mock_asset"] = local_file
+                images.append(image)
+            post["images"] = images
+            posts.append(Post.model_validate(post))
+        return posts
     except (OSError, ValueError, KeyError, TypeError):
         # pydantic の ValidationError は ValueError の仲間。パスや中身はエラーの文言に入れない
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE, "モック用のデータを読み込めませんでした"
         ) from None
+
+
+@router.get("/mock-assets/{asset_name}")
+def mock_asset(asset_name: str, request: Request) -> FileResponse:
+    """Serve fixture images from the fixture's sibling images directory in mock mode only."""
+    settings = request.app.state.settings
+    if (
+        not settings.mock_mode
+        or not settings.mock_local_assets_enabled
+        or Path(asset_name).name != asset_name
+    ):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "画像が見つかりません")
+    referenced_assets = {
+        image.mock_asset
+        for post in _load_demo_posts(settings)
+        for image in post.images
+        if image.mock_asset is not None
+    }
+    if asset_name not in referenced_assets:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "画像が見つかりません")
+    image_root = (settings.demo_fixture_path.parent / "images").resolve()
+    image_path = (image_root / asset_name).resolve()
+    if image_path.parent != image_root or not image_path.is_file():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "画像が見つかりません")
+    media_type = {
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".webp": "image/webp",
+        ".heic": "image/heic",
+        ".heif": "image/heif",
+    }.get(image_path.suffix.lower())
+    if media_type is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "画像が見つかりません")
+    return FileResponse(
+        image_path,
+        media_type=media_type,
+        headers={"X-Content-Type-Options": "nosniff"},
+    )
 
 
 async def _stream(events: AsyncIterator[tuple[str, dict[str, Any]]]) -> AsyncIterator[str]:

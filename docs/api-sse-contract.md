@@ -27,6 +27,7 @@ OAuth 時の投稿取得は、セッション DID に限定して公開 AppView 
 | メソッド・パス | リクエスト | 成功応答 | 実装上の注意 |
 | --- | --- | --- | --- |
 | `GET /health` | なし | `{"status":"ok","mock_mode":true}`（値は設定による） | 認証不要。生存確認用。 |
+| `GET /api/mock-assets/{asset_name}` | ファイル名 | 200 画像バイナリ | `MOCK_MODE=1` かつ `MOCK_LOCAL_ASSETS_ENABLED=1` のときだけ、fixtureで参照されるファイルを同じディレクトリの `images/` から配信する。既定では無効。ファイル名のみ許可し、拡張子を画像形式に限定する。実モードでは404。キャッシュしない。 |
 | `POST /api/session` | JSON `{"handle":"name.example","password":"…"}` | 200 `{"handle":"…","did":"did:…"}` と `tkb_session` Cookie | `AUTH_MODE=app_password` のみ。OAuth 時は404。`handle` はtrimし先頭の `@` を1つ除去。空handle/passwordは422。実ログイン失敗は401、Bluesky接続失敗は502、Bluesky の回数制限（429）は503 `bluesky_busy`。モック時は入力handleと固定DIDでログイン扱い。 |
 | `GET /api/session` | `tkb_session` Cookie | 200 `{"handle":"…","did":"did:…"}` | Cookie欠落・無効・期限切れは401 `{"detail":"ログインしてください"}`。 |
 | `DELETE /api/session` | `tkb_session` Cookie | 204、Cookie削除 | セッションがなくても204。 |
@@ -67,7 +68,7 @@ OAuth 時の投稿取得は、セッション DID に限定して公開 AppView 
 
 Pythonの正は `common/src/tkb_common/schemas.py`、画面側の対応型は `web/src/types/`。
 
-- **Post**: `post_id`（AT URI）、`text`、時差付き `created_at`、`images`。画像は `index, url, alt, width, height`。URLは `https://cdn.bsky.app/` のみ、画像は最大4枚。
+- **Post**: `post_id`（AT URI）、`text`、時差付き `created_at`、`images`。画像は `index, url, alt, width, height` と任意の `mock_asset`。通常の `url` は `https://cdn.bsky.app/` のみ、画像は最大4枚。`mock_asset` はローカルfixture画像のファイル名で、モック画面表示だけに使う。実モードの画像取得は従来どおりCDN URLだけを使う。
 - **Clue**: `post_id, image_index, type, value, region, confidence, source`。`region` は元画像ピクセルの `[x1,y1,x2,y2]` またはnull。本文由来は通常 `image_index/region=null`、`source=text`。画像alt由来は `source=alt` と画像の `image_index` を持ち、矩形はnull。プロフィール文由来の自己申告は `source=profile_text`。確信度は0〜1。許容type/sourceの列挙と写真/本文の整合条件は共通スキーマを参照。
 - `TEXT_BACKEND=ollama` の本文手がかりには任意の `quote` が付く。これはモデルの出力を投稿本文の連続部分文字列として検証した原文引用で、`value` もその引用内の連続部分文字列に限定する。従来データは `quote=null` または省略可。既存の `post_id` とともに原文根拠を保持する。
 - `TEXT_BACKEND` の既定は `vlm`。`ollama` では本文だけを Ollama に送る。`VLM_BASE_URL` が空なら画像を取得・抽出しない。設定されている場合は画像の従来VLM経路を使う。画像経路が失敗しても本文の成功結果を残す。

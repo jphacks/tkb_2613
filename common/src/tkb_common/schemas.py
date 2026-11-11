@@ -36,12 +36,23 @@ class PostImage(BaseModel):
     alt: str
     width: PositiveInt
     height: PositiveInt
+    # ローカルモック画像の表示用。実モードの画像取得には使わない。
+    mock_asset: str | None = Field(default=None, exclude_if=lambda value: value is None)
 
     @field_validator("url")
     @classmethod
     def _check_cdn(cls, value: str) -> str:
         if not value.startswith(BSKY_CDN_PREFIX):
             raise ValueError(f"画像の URL は {BSKY_CDN_PREFIX} で始まること")
+        return value
+
+    @field_validator("mock_asset")
+    @classmethod
+    def _check_mock_asset(cls, value: str | None) -> str | None:
+        if value is not None and (
+            not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", value) or value in {".", ".."}
+        ):
+            raise ValueError("mock_asset は安全なファイル名であること")
         return value
 
 

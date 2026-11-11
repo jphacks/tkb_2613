@@ -1,6 +1,7 @@
 "use client";
 
 import { messages } from "@/lib/messages";
+import { postImageSrc } from "@/lib/post-image";
 import { identityName, pickFace, pickSpotlight, type RevealItem } from "@/lib/reveal";
 import { toPercentBox } from "@/lib/region";
 import { useLoadedSize } from "@/lib/useLoadedSize";
@@ -27,14 +28,15 @@ function tilt(i: number): string {
 /** 写真全体に手がかりの位置を示す。 */
 function PhotoEvidence({ item, label }: { item: RevealItem; label: string }) {
   const { image, clue } = item;
-  const loaded = useLoadedSize(image && clue.region ? image.url : null);
+  const imageUrl = image ? postImageSrc(image) : null;
+  const loaded = useLoadedSize(image && clue.region ? imageUrl : null);
   if (!image || !clue.region || !loaded) return <TextEvidence item={item} label={label} />;
   return (
     <figure className="space-y-4">
       <p className="text-xs tracking-widest text-ink/60">{t.originalPhoto}</p>
       <div className="relative mx-auto w-full max-w-xl overflow-hidden bg-paper" style={{ aspectRatio: `${loaded.width} / ${loaded.height}` }}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={image.url} alt={t.photoAlt(label, clue.value)} referrerPolicy="no-referrer" className="absolute inset-0 size-full" />
+        <img src={postImageSrc(image)} alt={t.photoAlt(label, clue.value)} referrerPolicy="no-referrer" className="absolute inset-0 size-full" />
         <span aria-hidden="true" className="reveal-mark" style={toPercentBox(clue.region, loaded)} />
       </div>
       <figcaption>
