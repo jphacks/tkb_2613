@@ -70,6 +70,15 @@ class Settings(BaseSettings):
     model_probe_timeout_seconds: float = Field(default=3, gt=0)
 
     # X 専用。X の用途承認と有料 API の予算承認を得るまでは実接続しない。
+    threads_client_id: str = ""
+    threads_client_secret: SecretStr = SecretStr("")
+    threads_callback_url: str = ""
+    threads_public_origin: str = "http://localhost:3000"
+    threads_enabled: bool = False
+    threads_query_logs_redacted: bool = False
+    threads_mock_mode: bool = True
+    threads_gpu_demo_enabled: bool = False
+    threads_max_posts: int = Field(default=30, ge=1, le=30)
     x_client_id: str = ""
     x_client_secret: SecretStr = SecretStr("")
     x_callback_url: str = "http://localhost:3000/api/x/callback"

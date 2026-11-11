@@ -139,3 +139,7 @@ Bluesky の `/api/session`・`/api/diagnose`・`/api/simulate` とは独立し�
 | `POST /api/x/rediagnose` | 同上 | 除外後の `posts, clues, conclusions, plan, mock` を再計算。X API・モデルは再呼出ししない。 |
 
 X の状態変更 API は同一オリジンの `Origin` ヘッダーを要求する。投稿IDは `x:<numeric id>`、画像は空配列。`clues` と `conclusions` の根拠番号は既存の形を再利用する。429は503と `Retry-After` を返す。詳細な設定・規約・費用は [x-poc.md](x-poc.md)。
+
+### Threads 読み取り専用経路（実認証は既定無効）
+
+`/api/threads/config`、`/start`、`/callback`、`/session`、`/diagnose`、`/diagnosis`、`/simulate`、`/rediagnose`、`/mock/session` は X と同じ応答形式を使う。専用 Cookie とメモリ内セッションを使い、本文と日時だけを取得する。投稿 ID は `threads:` で始まり、画像と実削除には対応しない。操作 API は同一 Origin を要求する。OAuth は `threads_basic` のみで、HTTPS callback、短命 Cookie と一回限りの state、本人 ID の照合を使う。期限は最大30分で、期限・ログアウト時に結果とトークンを破棄する。実認証には `THREADS_ENABLED`、`THREADS_QUERY_LOGS_REDACTED`、安全な Cookie、アプリ ID・secret が必要。診断は現状ローカル Ollama を使う。実環境の経路のログ保護と Meta 側設定の確認は別途必要。
