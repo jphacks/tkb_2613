@@ -93,7 +93,8 @@ describe("DiagnosePanel", () => {
     render(<SessionProvider><DiagnosePanel /></SessionProvider>);
 
     expect(await screen.findByRole("region", { name: b.heading })).toBeInTheDocument();
-    expect(screen.getAllByText("保存済みの投稿")).toHaveLength(2);
+    // 削除候補・推理の流れ（捜査ボード）・投稿一覧の3か所
+    expect(screen.getAllByText("保存済みの投稿")).toHaveLength(3);
     expect(screen.getByRole("list", { name: messages.risky.listLabel })).toBeInTheDocument();
     expect(diagnose).not.toHaveBeenCalled();
   });

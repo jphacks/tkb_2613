@@ -150,6 +150,16 @@ export const messages = {
     attributeLabels: ATTRIBUTE_LABELS,
     reasons: (count: number) => `根拠（${count} 件）`,
     reasonsLabel: "根拠の手がかり",
+    /** 推理の連鎖（この投稿 → この手がかり → この推定） */
+    chain: {
+      summary: "推理の流れをたどる",
+      label: "推理の流れ",
+      post: "投稿",
+      clue: "手がかり",
+      conclusion: "推定",
+      photo: (n: number) => `写真 ${n} 枚目`,
+      noText: "（本文なし）",
+    },
     empty: "投稿からは、あなたについて推定できることは見つかりませんでした",
     /** 消したらどうなるかで、推定できなくなった項目 */
     unknown: "不明",
