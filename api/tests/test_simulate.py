@@ -13,6 +13,9 @@ from tkb_api.routes.diagnose import get_gazetteer
 from tkb_common.schemas import Clue, Post
 from tkb_engine.gazetteer import Gazetteer
 
+# ブラウザは POST・DELETE に Origin を付ける（元に戻せない操作は Origin を確かめる）
+BROWSER_ORIGIN = {"Origin": "http://localhost:3000"}
+
 PASSWORD = "correct horse battery staple"  # noqa: S105  テスト用の架空の値
 FIXTURE = Path(__file__).resolve().parents[2] / "eval" / "fixtures" / "demo_observations.json"
 DOC = json.loads(FIXTURE.read_text(encoding="utf-8"))
@@ -40,7 +43,7 @@ def client() -> Iterator[TestClient]:
     app = create_app(settings)
     app.dependency_overrides[get_settings] = lambda: settings
     app.dependency_overrides[get_gazetteer] = lambda: MINI_GAZETTEER
-    with TestClient(app) as c:
+    with TestClient(app, headers=BROWSER_ORIGIN) as c:
         yield c
 
 

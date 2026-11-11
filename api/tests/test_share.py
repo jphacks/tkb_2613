@@ -13,6 +13,9 @@ from tkb_api.routes.diagnose import get_gazetteer
 from tkb_api.shares import ShareStore
 from tkb_engine.gazetteer import Gazetteer
 
+# ブラウザは POST・DELETE に Origin を付ける（元に戻せない操作は Origin を確かめる）
+BROWSER_ORIGIN = {"Origin": "http://localhost:3000"}
+
 FIXTURE = Path(__file__).resolve().parents[2] / "eval" / "fixtures" / "demo_observations.json"
 PASSWORD = "test password"  # noqa: S105  架空のテスト値
 
@@ -21,7 +24,7 @@ def _client(settings: Settings) -> TestClient:
     app = create_app(settings)
     app.dependency_overrides[get_settings] = lambda: settings
     app.dependency_overrides[get_gazetteer] = lambda: Gazetteer()
-    return TestClient(app)
+    return TestClient(app, headers=BROWSER_ORIGIN)
 
 
 def test_result_link_requires_the_owners_finished_diagnosis_and_is_read_only(

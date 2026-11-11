@@ -18,6 +18,9 @@ from tkb_api.routes.session import SESSION_COOKIE, get_login
 from tkb_common.schemas import Clue, Post
 from tkb_engine.gazetteer import Gazetteer
 
+# ブラウザは POST・DELETE に Origin を付ける（元に戻せない操作は Origin を確かめる）
+BROWSER_ORIGIN = {"Origin": "http://localhost:3000"}
+
 PASSWORD = "correct horse battery staple"  # noqa: S105  テスト用の架空の値
 FIXTURE = Path(__file__).resolve().parents[2] / "eval" / "fixtures" / "demo_observations.json"
 DOC = json.loads(FIXTURE.read_text(encoding="utf-8"))
@@ -47,7 +50,7 @@ def _client(settings: Settings) -> TestClient:
     app.dependency_overrides[get_settings] = lambda: settings
     app.dependency_overrides[get_gazetteer] = lambda: MINI_GAZETTEER
     app.dependency_overrides[get_delete_posts] = lambda: _must_not_delete
-    return TestClient(app)
+    return TestClient(app, headers=BROWSER_ORIGIN)
 
 
 @pytest.fixture
