@@ -12,6 +12,7 @@ import {
   type Simulation,
   toDiagnoseEvent,
 } from "@/types/diagnose";
+import { isDraftCheckResponse, type DraftCheckResponse } from "@/types/draftCheck";
 import { isSessionResponse, type SessionResponse } from "@/types/session";
 
 /** api/src/tkb_api/routes/detect.py の上限とそろえる */
@@ -23,6 +24,53 @@ export const ACCEPTED_IMAGE_TYPES = [
   "image/heic",
   "image/heif",
 ] as const;
+
+/** 下書き確認は同じ画像制限を使う。 */
+export async function checkDraft(
+  text: string,
+  photo?: File,
+  { baseUrl = DEFAULT_BASE_URL, signal }: RequestOptions = {},
+): Promise<DraftCheckResponse> {
+  if (photo && !(ACCEPTED_IMAGE_TYPES as readonly string[]).includes(photo.type)) {
+    throw new ApiError("unsupported_type", "JPEG・PNG・WebP・HEIC の写真を選んでください");
+  }
+  if (photo && photo.size > MAX_IMAGE_BYTES) {
+    throw new ApiError("too_large", "写真が大きすぎます（20MB まで）");
+  }
+  let photoBase64: string | null = null;
+  if (photo) {
+    const bytes = new Uint8Array(await photo.arrayBuffer());
+    let binary = "";
+    for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+      binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+    }
+    photoBase64 = btoa(binary);
+  }
+  let res: Response;
+  try {
+    res = await fetch(`${baseUrl}/api/draft-check`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ text, photo_base64: photoBase64, photo_content_type: photo?.type ?? null }),
+      signal,
+    });
+  } catch {
+    throw new ApiError("network", "サーバーに接続できませんでした");
+  }
+  if (res.status === 401) throw new ApiError("unauthorized", "ログインし直してください", 401);
+  if (!res.ok) {
+    const message = res.status === 503
+      ? "モックモードでは下書き確認を使えません。実アカウントの診断環境でお試しください。"
+      : `下書きを確認できませんでした（${res.status}）`;
+    throw new ApiError("server", message, res.status);
+  }
+  const data: unknown = await res.json().catch(() => undefined);
+  if (!isDraftCheckResponse(data)) {
+    throw new ApiError("invalid_response", "サーバーの応答を読み取れませんでした");
+  }
+  return data;
+}
 
 /**
  * 既定は同じオリジン（相対パス）。/api は next.config.ts の rewrites で api に中継するので、
@@ -289,10 +337,17 @@ export async function deleteSession({ baseUrl = DEFAULT_BASE_URL, signal }: Requ
 export async function* diagnose({
   baseUrl = DEFAULT_BASE_URL,
   signal,
-}: RequestOptions = {}): AsyncGenerator<DiagnoseEvent> {
+  publicWebLookupConsent = false,
+}: RequestOptions & { publicWebLookupConsent?: boolean } = {}): AsyncGenerator<DiagnoseEvent> {
   let res: Response;
   try {
-    res = await fetch(`${baseUrl}/api/diagnose`, { method: "POST", credentials: "include", signal });
+    res = await fetch(`${baseUrl}/api/diagnose`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ public_web_lookup_consent: publicWebLookupConsent }),
+      signal,
+    });
   } catch {
     throw new ApiError("network", messages.errors.network);
   }

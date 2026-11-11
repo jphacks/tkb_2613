@@ -5,6 +5,9 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { messages } from "@/lib/messages";
 import type { Clue } from "@/types/clue";
 import type { Conclusion } from "@/types/diagnose";
+import { PROFILE_ATTRIBUTE_CATALOG, type ExternalLookupStatus, type ExternalProfileResult, type ProfileItem, type WebFact } from "@/types/profile";
+import type { Post } from "@/types/post";
+import { ProfileClaimWhatIf } from "./ProfileClaimWhatIf";
 
 const t = messages.board;
 
@@ -16,6 +19,14 @@ interface ConclusionBoardProps {
   conclusions: readonly Conclusion[];
   /** 消したらどうなるかで推定できなくなった項目（attribute）。「不明」のカードで出す */
   unknown?: readonly string[];
+  profileClaims?: readonly ProfileItem[];
+  profileClaimSuggestions?: readonly string[];
+  posts?: readonly Post[];
+  webFacts?: readonly WebFact[];
+  externalLookupStatus?: ExternalLookupStatus;
+  externalProfileResults?: readonly ExternalProfileResult[];
+  ownerProfileText?: string;
+  selfReportClues?: readonly Clue[];
 }
 
 interface RedString {
@@ -56,7 +67,10 @@ function layoutStrings(
  * 捜査ボード。推定に使われた手がかりを「証拠」として留め、推定へ赤い糸を張る。
  * 推定には根拠の手がかりも文字で添える（糸は飾りなので読み上げない）。
  */
-export function ConclusionBoard({ clues, conclusions, unknown = [] }: ConclusionBoardProps) {
+export function ConclusionBoard({
+  clues, conclusions, unknown = [], profileClaims = [], profileClaimSuggestions = [], posts = [],
+  webFacts = [], externalLookupStatus = "not_requested", externalProfileResults = [], ownerProfileText = "", selfReportClues = [],
+}: ConclusionBoardProps) {
   const boardRef = useRef<HTMLDivElement>(null);
   const pinRefs = useRef(new Map<number, HTMLElement>());
   const cardRefs = useRef(new Map<number, HTMLElement>());
@@ -78,6 +92,7 @@ export function ConclusionBoard({ clues, conclusions, unknown = [] }: Conclusion
   }, [conclusions]);
 
   return (
+    <>
     <section aria-labelledby="board-heading" className="max-w-2xl space-y-4">
       {/* 表示された瞬間に 1 回だけ演出が走る。何も推定できなかったときは出さない */}
       {found && (
@@ -170,5 +185,29 @@ export function ConclusionBoard({ clues, conclusions, unknown = [] }: Conclusion
         </div>
       )}
     </section>
+    {(profileClaims.length > 0 || ownerProfileText || externalProfileResults.length > 0 || externalLookupStatus !== "not_requested") && (
+      <section aria-labelledby="profile-claims-heading" className="mt-8 max-w-2xl space-y-4">
+        <h3 id="profile-claims-heading" className="font-display text-2xl">投稿を横断したプロフィール推定</h3>
+        {profileClaims.length === 0 ? <p className="text-ink/70">現行ルールで候補が成立しませんでした。</p> : (
+          <ul className="space-y-3">
+            {profileClaims.map((claim) => (
+              <li key={claim.attribute} className="border-l-4 border-seeker bg-paper-deep px-4 py-3">
+                <p className="text-xs tracking-widest text-ink/60">{PROFILE_ATTRIBUTE_CATALOG[claim.attribute].label} ・{claim.status === "found" ? "推定" : "弱い推定"}</p>
+                <p className="mt-1 text-xl font-bold">{claim.value}</p>
+                <p className="mt-1 text-sm text-ink/70">確からしさ {Math.round(claim.confidence * 100)}%</p>
+              </li>
+            ))}
+          </ul>
+        )}
+        <ProfileClaimWhatIf claims={profileClaims} clues={clues} posts={posts} suggestions={profileClaimSuggestions} webFacts={webFacts} />
+        {ownerProfileText && <details><summary className="cursor-pointer font-bold">本人プロフィール文と自己申告の手がかり</summary><p className="mt-2 whitespace-pre-wrap text-sm">{ownerProfileText}</p><ul className="mt-2 list-disc pl-5 text-sm">{selfReportClues.map((clue, index) => <li key={`${clue.post_id}:${index}`}>{clue.value}</li>)}</ul></details>}
+        {externalLookupStatus !== "not_requested" && <div className="rounded border border-ink/20 p-3">
+          <h4 className="font-bold">公開Web上の外部ページ候補</h4>
+          <p className="mt-1 text-xs text-ink/70">検索結果は候補です。本人との同一性や記事の執筆者は確認していません。</p>
+          {externalProfileResults.length === 0 ? <p className="mt-2 text-sm">{externalLookupStatus === "unavailable" ? "検索サービスを利用できませんでした。" : "候補はありませんでした。"}</p> : <ul className="mt-2 space-y-2">{externalProfileResults.map((result) => <li key={result.id} className="text-sm"><a className="underline" href={result.url} target="_blank" rel="noreferrer">{result.title || result.domain}</a><span className="ml-2 text-xs text-ink/60">{result.status === "owner_linked" ? "本人の公開投稿にURLあり" : "検索候補"}</span></li>)}</ul>}
+        </div>}
+      </section>
+    )}
+    </>
   );
 }

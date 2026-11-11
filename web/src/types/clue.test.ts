@@ -85,6 +85,6 @@ describe("clue enums", () => {
         "age_text", "routine_text", "relation_text",
       ].sort(),
     );
-    expect([...CLUE_SOURCES].sort()).toEqual(["meta", "ocr", "text", "vlm"]);
+    expect([...CLUE_SOURCES].sort()).toEqual(["alt", "meta", "ocr", "profile_text", "text", "vlm"]);
   });
 });

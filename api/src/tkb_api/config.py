@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     # 空なら localhost だけに送れる。
     # .env からも読めるよう、ここで受けて build_extractor に渡す（detect/src/tkb_detect/guard.py）
     model_allowed_host_suffixes: str = ""
+    # 公開Web検索の秘密鍵。明示的な診断同意がある場合のみ使用し、クライアントへ返さない。
+    brave_search_api_key: SecretStr = SecretStr("")
     cors_origins: list[str] = ["http://localhost:3000"]
     # Bluesky のログイン先
     bsky_service: str = "https://bsky.social"

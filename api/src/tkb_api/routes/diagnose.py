@@ -25,7 +25,7 @@ import asyncio
 import json
 import logging
 import time
-from collections.abc import AsyncGenerator, AsyncIterator, Callable
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
 from dataclasses import asdict
 from datetime import datetime
 from functools import lru_cache
@@ -33,8 +33,9 @@ from pathlib import Path
 from typing import Annotated, Any
 
 from atproto import AsyncClient
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, ConfigDict, StrictBool
 from starlette.background import BackgroundTask
 
 from tkb_api import bluesky
@@ -58,8 +59,19 @@ from tkb_api.pipeline import (
     plan_json,
     real_extractions,
 )
+from tkb_api.public_web_identity import (
+    ExternalLookupResult,
+    mark_owner_linked,
+    search_external_profiles,
+)
 from tkb_api.routes.session import current_session, current_session_id, get_session_store
-from tkb_common.schemas import Clue, Post
+from tkb_common.schemas import (
+    Clue,
+    ExternalLookupStatus,
+    ExternalProfileResult,
+    Post,
+    WebFact,
+)
 from tkb_detect.batch import PostExtraction
 from tkb_detect.errors import DetectError
 from tkb_detect.extract import Extractor, build_extractor
@@ -157,11 +169,77 @@ def get_fetch_posts() -> PostsFetcher:
     return bluesky.fetch_own_posts
 
 
+ProfileTextFetcher = Callable[[Any, str], Awaitable[str]]
+ExternalProfileSearcher = Callable[[str], Awaitable[ExternalLookupResult]]
+
+
+class DiagnoseRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    public_web_lookup_consent: StrictBool = False
+
+
+def get_fetch_profile_text() -> ProfileTextFetcher:
+    return bluesky.fetch_own_profile_text
+
+
+def get_external_profile_searcher(
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> ExternalProfileSearcher:
+    async def search(handle: str) -> ExternalLookupResult:
+        return await search_external_profiles(handle, settings.brave_search_api_key)
+
+    return search
+
+
+def _load_demo_web_facts(settings: Settings) -> list[WebFact]:
+    try:
+        doc = json.loads(settings.demo_fixture_path.read_text(encoding="utf-8"))
+        return [WebFact.model_validate(fact) for fact in doc.get("web_facts", [])]
+    except (OSError, ValueError, KeyError, TypeError):
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, "モック用の公開Web情報を読み込めませんでした"
+        ) from None
+
+
+def _load_demo_external_lookup(settings: Settings) -> tuple[str, list[ExternalProfileResult]]:
+    try:
+        doc = json.loads(settings.demo_fixture_path.read_text(encoding="utf-8"))
+        fixture = doc.get("external_lookup_fixture", {})
+        profile_text = fixture.get("owner_profile_text", "")
+        results = [
+            ExternalProfileResult(
+                id=f"mock-{index}",
+                url=item["url"],
+                domain=item["domain"],
+                title=item["title"],
+                status="candidate",
+                owner_evidence=None,
+            )
+            for index, item in enumerate(fixture.get("results", []))
+        ]
+        return profile_text if isinstance(profile_text, str) else "", results
+    except (OSError, ValueError, KeyError, TypeError):
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, "モック用の公開Web候補を読み込めませんでした"
+        ) from None
+
+
+@lru_cache(maxsize=4)
+def _cached_gazetteer(data_dir: Path) -> Gazetteer:
+    return load_gazetteer(data_dir)
+
+
+def get_gazetteer(settings: Annotated[Settings, Depends(get_settings)]) -> Gazetteer:
+    return _cached_gazetteer(settings.gazetteer_dir)
+
+
 ExtractorFactory = Callable[[], Extractor]
 
 
 def get_extractor_factory(
     settings: Annotated[Settings, Depends(get_settings)],
+    gazetteer: Annotated[Gazetteer, Depends(get_gazetteer)],
 ) -> ExtractorFactory:
     """手がかりを取り出す部品は、本番の診断で使うときに作る。
 
@@ -180,6 +258,7 @@ def get_extractor_factory(
             text_backend=settings.text_backend,
             ollama_base_url=settings.ollama_base_url,
             ollama_model=settings.ollama_model,
+            station_names={row["station_name"] for row in gazetteer.stations},
         )
 
     return build
@@ -193,15 +272,6 @@ def _build_extractor(factory: ExtractorFactory) -> Extractor:
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE, "画像を読むモデルの接続先が設定されていません"
         ) from None
-
-
-@lru_cache(maxsize=4)
-def _cached_gazetteer(data_dir: Path) -> Gazetteer:
-    return load_gazetteer(data_dir)
-
-
-def get_gazetteer(settings: Annotated[Settings, Depends(get_settings)]) -> Gazetteer:
-    return _cached_gazetteer(settings.gazetteer_dir)
 
 
 async def _fetch_own_posts(
@@ -241,6 +311,16 @@ def read_diagnosis(
         "clues": [clue.model_dump(mode="json") for clue in clues],
         "conclusions": [asdict(conclusion) for conclusion in infer(clues, posts, gazetteer)],
         "plan": plan_json(clues, posts, gazetteer),
+        "profile_claims": [claim.model_dump(mode="json") for claim in diagnosis.profile_claims],
+        "profile_claim_suggestions": list(diagnosis.profile_claim_suggestions),
+        "web_facts": [fact.model_dump(mode="json") for fact in diagnosis.web_facts],
+        "web_lookup_status": diagnosis.web_lookup_status,
+        "external_profile_results": [
+            result.model_dump(mode="json") for result in diagnosis.external_profile_results
+        ],
+        "external_lookup_status": diagnosis.external_lookup_status.value,
+        "owner_profile_text": diagnosis.owner_profile_text,
+        "self_report_clues": [clue.model_dump(mode="json") for clue in diagnosis.self_report_clues],
     }
 
 
@@ -298,13 +378,17 @@ async def diagnose(
     session: Annotated[BlueskySession, Depends(current_session)],
     settings: Annotated[Settings, Depends(get_settings)],
     fetch_posts: Annotated[PostsFetcher, Depends(get_fetch_posts)],
+    fetch_profile_text: Annotated[ProfileTextFetcher, Depends(get_fetch_profile_text)],
     extractor_factory: Annotated[ExtractorFactory, Depends(get_extractor_factory)],
     gazetteer: Annotated[Gazetteer, Depends(get_gazetteer)],
+    external_searcher: Annotated[ExternalProfileSearcher, Depends(get_external_profile_searcher)],
     store: Annotated[SessionStore, Depends(get_session_store)],
     session_id: Annotated[str, Depends(current_session_id)],
     limiter: Annotated[DiagnoseLimiter, Depends(get_diagnose_limiter)],
     clock: Annotated[Clock, Depends(get_clock)],
+    payload: Annotated[DiagnoseRequest | None, Body()] = None,
 ) -> StreamingResponse:
+    public_web_lookup_consent = payload.public_web_lookup_consent if payload is not None else False
     now = clock()
     _ensure_open(settings, now)
     lease = _acquire(limiter, settings, session_id, session.did, now)
@@ -320,10 +404,85 @@ async def diagnose(
     store.set_diagnosis(session_id, None)
     posts, extractions, interval = events
 
-    def save(clues: list[Clue]) -> None:
-        store.set_diagnosis(session_id, Diagnosis(posts=tuple(posts), clues=tuple(clues)))
+    web_facts: list[WebFact] = []
+    web_lookup_status = "not_run"
+    owner_profile_text = ""
+    owner_profile_analyzer: Callable[[str], Awaitable[list[Clue]]] | None = None
+    external_profile_results: list[ExternalProfileResult] = []
+    external_lookup_status = ExternalLookupStatus.NOT_REQUESTED
+    external_lookup: Callable[[], Awaitable[ExternalLookupResult]] | None = None
+    if settings.mock_mode:
+        web_facts = _load_demo_web_facts(settings)
+        web_lookup_status = "fixture" if web_facts else "not_run"
+        if public_web_lookup_consent:
+            owner_profile_text, demo_results = _load_demo_external_lookup(settings)
+            external_profile_results = list(mark_owner_linked(posts, owner_profile_text, demo_results))
+            external_lookup_status = ExternalLookupStatus.FIXTURE
+    else:
+        try:
+            if session.client is not None:
+                owner_profile_text = await fetch_profile_text(session.client, session.did)
+            elif session.auth_method == "oauth" and settings.auth_mode == "oauth":
+                async with AsyncClient(base_url="https://public.api.bsky.app/xrpc") as profile_client:
+                    owner_profile_text = await fetch_profile_text(profile_client, session.did)
+        except bluesky.BlueskyUnavailableError:
+            raise HTTPException(
+                status.HTTP_502_BAD_GATEWAY, "Bluesky からプロフィールを取得できませんでした"
+            ) from None
+        if owner_profile_text:
+            profile_extractor = _build_extractor(extractor_factory)
 
-    stream = diagnose_events(posts, extractions, gazetteer, interval, on_finished=save)
+            def analyze_profile(text: str) -> Awaitable[list[Clue]]:
+                return profile_extractor.extract_profile_text(session.did, text)
+
+            owner_profile_analyzer = analyze_profile
+        if public_web_lookup_consent:
+
+            async def lookup_external() -> ExternalLookupResult:
+                lookup = await external_searcher(session.handle)
+                return ExternalLookupResult(
+                    lookup.status, mark_owner_linked(posts, owner_profile_text, lookup.results)
+                )
+
+            external_lookup = lookup_external
+
+    profile_result: dict[str, Any] = {}
+
+    def save_profile_result(result: dict[str, Any]) -> None:
+        profile_result.update(result)
+
+    def save(clues: list[Clue]) -> None:
+        store.set_diagnosis(
+            session_id,
+            Diagnosis(
+                posts=tuple(posts),
+                clues=tuple(clues),
+                profile_claims=tuple(profile_result.get("profile_claims", ())),
+                profile_claim_suggestions=tuple(profile_result.get("profile_claim_suggestions", ())),
+                web_facts=tuple(profile_result.get("web_facts", ())),
+                web_lookup_status=profile_result.get("web_lookup_status", "not_run"),
+                external_profile_results=tuple(profile_result.get("external_profile_results", ())),
+                external_lookup_status=profile_result.get("external_lookup_status", ExternalLookupStatus.NOT_REQUESTED),
+                owner_profile_text=profile_result.get("owner_profile_text", ""),
+                self_report_clues=tuple(profile_result.get("self_report_clues", ())),
+            ),
+        )
+
+    stream = diagnose_events(
+        posts,
+        extractions,
+        gazetteer,
+        interval,
+        on_finished=save,
+        on_result=save_profile_result,
+        owner_profile_text=owner_profile_text,
+        owner_profile_analyzer=owner_profile_analyzer,
+        web_facts=web_facts,
+        web_lookup_status=web_lookup_status,
+        external_profile_results=external_profile_results,
+        external_lookup_status=external_lookup_status,
+        external_lookup=external_lookup,
+    )
     return _sse_response(_with_keep_alive(_stream(stream), settings.sse_keepalive_seconds), lease)
 
 

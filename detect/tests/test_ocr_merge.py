@@ -1,3 +1,5 @@
+import pytest
+
 from tkb_common.schemas import Clue, ClueSource, ClueType
 from tkb_detect.ocr_client import OcrLine
 from tkb_detect.ocr_merge import merge_ocr
@@ -69,3 +71,134 @@ def test_ignores_ocr_lines_without_area() -> None:
     lines = [OcrLine(text="273-0031", score=0.88, box=(10, 10, 10, 40))]
 
     assert merge_ocr(POST_ID, 0, [], lines) == []
+
+
+def test_emits_high_confidence_literal_company_bridge_with_original_region() -> None:
+    line = OcrLine(text="株式会社青空の青空物流センター", score=0.93, box=(20, 30, 420, 75))
+
+    clues = merge_ocr(POST_ID, 2, [], [line])
+
+    assert len(clues) == 1
+    clue = clues[0]
+    assert (clue.type, clue.value, clue.source) == (ClueType.ORG_TEXT, line.text, ClueSource.OCR)
+    assert clue.image_index == 2
+    assert clue.region == line.box
+
+
+@pytest.mark.parametrize(
+    "text,score",
+    [
+        ("株式会社青空の青空物流センター", 0.79),
+        ("ロゴ 株式会社青空の青空物流センター", 0.99),
+        ("青空の青空物流センター", 0.99),
+        ("合同会社青空の青空物流センター", 0.99),
+    ],
+)
+def test_rejects_weak_or_nonliteral_company_bridge_lines(text: str, score: float) -> None:
+    assert merge_ocr(POST_ID, 0, [], [OcrLine(text, score, (10, 10, 300, 50))]) == []
+
+
+def test_ocr_station_text_requires_same_name_vlm_sign_context() -> None:
+    lines = [
+        OcrLine(text="根津", score=0.94, box=(20, 30, 180, 70)),
+        OcrLine(text="湯島", score=0.92, box=(20, 80, 180, 120)),
+        OcrLine(text="未登録", score=0.99, box=(20, 130, 180, 170)),
+        OcrLine(text="根x", score=0.99, box=(20, 180, 180, 220)),
+        OcrLine(text="千駄木", score=0.79, box=(20, 230, 180, 270)),
+    ]
+
+    # A Gazetteer match alone cannot distinguish a station sign from a map or ad.
+    assert merge_ocr(POST_ID, 1, [], lines, station_names={"根津", "湯島", "千駄木"}) == []
+
+    vlm = [
+        Clue(
+            post_id=POST_ID,
+            image_index=1,
+            type=ClueType.STATION_SIGN,
+            value="根津",
+            region=(25, 35, 175, 65),
+            confidence=0.9,
+            source=ClueSource.VLM,
+        ),
+        Clue(
+            post_id=POST_ID,
+            image_index=1,
+            type=ClueType.STATION_SIGN,
+            value="湯島",
+            region=(25, 85, 175, 115),
+            confidence=0.9,
+            source=ClueSource.VLM,
+        ),
+    ]
+    clues = merge_ocr(POST_ID, 1, vlm, lines, station_names={"根津", "湯島", "千駄木"})
+
+    station_clues = [clue for clue in clues if clue.type is ClueType.STATION_SIGN]
+    assert [(clue.value, clue.source, clue.image_index, clue.region) for clue in station_clues] == [
+        ("根津", ClueSource.VLM, 1, (20, 30, 180, 70)),
+        ("湯島", ClueSource.VLM, 1, (20, 80, 180, 120)),
+        ("根津", ClueSource.OCR, 1, (20, 30, 180, 70)),
+        ("湯島", ClueSource.OCR, 1, (20, 80, 180, 120)),
+    ]
+
+
+def test_station_name_suffix_is_removed_before_exact_match_with_vlm_context() -> None:
+    vlm = Clue(
+        post_id=POST_ID,
+        image_index=0,
+        type=ClueType.STATION_SIGN,
+        value="根津駅",
+        region=(1, 2, 80, 30),
+        confidence=0.9,
+        source=ClueSource.VLM,
+    )
+    merged_clues = merge_ocr(
+        POST_ID,
+        0,
+        [vlm],
+        [OcrLine(text="根津駅", score=0.9, box=(1, 2, 80, 30))],
+        station_names={"根津"},
+    )
+
+    ocr_clue = next(clue for clue in merged_clues if clue.source is ClueSource.OCR)
+    assert ocr_clue.value == "根津"
+    assert ocr_clue.region == (1, 2, 80, 30)
+
+
+def test_station_ocr_rejects_mismatched_or_nonoverlapping_vlm_context() -> None:
+    line = [OcrLine("根津", 0.95, (1, 2, 80, 30))]
+    for value, region in (("湯島", (1, 2, 80, 30)), ("根津", (100, 100, 180, 140)), ("根津", None)):
+        vlm = Clue(
+            post_id=POST_ID,
+            image_index=0,
+            type=ClueType.STATION_SIGN,
+            value=value,
+            region=region,
+            confidence=0.9,
+            source=ClueSource.VLM,
+        )
+        merged = merge_ocr(POST_ID, 0, [vlm], line, station_names={"根津", "湯島"})
+        assert all(clue.source is not ClueSource.OCR for clue in merged)
+
+
+def test_station_ocr_clue_survives_same_value_vlm_clue() -> None:
+    vlm = Clue(
+        post_id=POST_ID,
+        image_index=0,
+        type=ClueType.STATION_SIGN,
+        value="根津",
+        region=(1, 2, 80, 30),
+        confidence=0.9,
+        source=ClueSource.VLM,
+    )
+    merged = merge_ocr(
+        POST_ID,
+        0,
+        [vlm],
+        [OcrLine("根津", 0.95, (1, 2, 80, 30))],
+        station_names={"根津"},
+    )
+
+    assert {clue.source for clue in merged if clue.type is ClueType.STATION_SIGN} == {
+        ClueSource.VLM,
+        ClueSource.OCR,
+    }

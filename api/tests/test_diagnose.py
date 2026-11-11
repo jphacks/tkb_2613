@@ -72,7 +72,7 @@ def test_completed_diagnosis_can_be_read_again_only_in_its_session(client: TestC
     _login(client)
     assert client.get("/api/diagnosis").status_code == 404
 
-    result = client.post("/api/diagnose")
+    result = client.post("/api/diagnose", json={"public_web_lookup_consent": True})
     assert result.status_code == 200
     restored = client.get("/api/diagnosis")
     assert restored.status_code == 200
@@ -82,6 +82,12 @@ def test_completed_diagnosis_can_be_read_again_only_in_its_session(client: TestC
     assert len(data["clues"]) > 0
     assert data["conclusions"] == _events(result.text)[-3][1]["conclusions"]
     assert data["plan"] == _events(result.text)[-2][1]
+    streamed_claims = _events(result.text)[-3][1]
+    assert streamed_claims["external_lookup_status"] == "fixture"
+    assert data["profile_claims"] == streamed_claims["profile_claims"]
+    assert data["profile_claim_suggestions"] == streamed_claims["profile_claim_suggestions"]
+    assert data["external_profile_results"] == streamed_claims["external_profile_results"]
+    assert data["external_lookup_status"] == streamed_claims["external_lookup_status"]
 
     # 同じブラウザでもログインし直すと別セッション。前の結果には入れない。
     _login(client)
@@ -262,7 +268,7 @@ def _real_settings(allowed: str) -> Settings:
 def test_extractor_uses_the_allowlist_from_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     # .env から読んだ許可リストが、環境変数を経由せずに VLM と OCR の両方に効く
     monkeypatch.delenv("MODEL_ALLOWED_HOST_SUFFIXES", raising=False)
-    extractor = get_extractor_factory(_real_settings("10.0.2.15"))()
+    extractor = get_extractor_factory(_real_settings("10.0.2.15"), MINI_GAZETTEER)()
     assert isinstance(extractor, Extractor)
 
 
@@ -273,7 +279,7 @@ def test_extractor_rejects_hosts_outside_the_allowlist(
     # 環境変数に許可があっても、Settings の許可リスト（空なら localhost だけ）が優先される
     monkeypatch.setenv("MODEL_ALLOWED_HOST_SUFFIXES", "10.0.2.15")
     with pytest.raises(ForbiddenEndpointError):
-        get_extractor_factory(_real_settings(allowed))()
+        get_extractor_factory(_real_settings(allowed), MINI_GAZETTEER)()
 
 
 def test_real_diagnose_reports_bluesky_errors_as_bad_gateway() -> None:

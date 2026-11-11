@@ -15,6 +15,7 @@ import { validNameConclusions } from "@/lib/reveal";
 import type { Clue } from "@/types/clue";
 import type { Conclusion, RiskyPost, Simulation } from "@/types/diagnose";
 import type { Post } from "@/types/post";
+import type { ExternalLookupStatus, ExternalProfileResult, ProfileItem, WebFact } from "@/types/profile";
 
 const t = messages.diagnose;
 
@@ -33,6 +34,13 @@ type Phase =
 interface Result {
   clues: readonly Clue[];
   conclusions: readonly Conclusion[];
+  profileClaims?: readonly ProfileItem[];
+  profileClaimSuggestions?: readonly string[];
+  webFacts?: readonly WebFact[];
+  externalLookupStatus?: ExternalLookupStatus;
+  externalProfileResults?: readonly ExternalProfileResult[];
+  ownerProfileText?: string;
+  selfReportClues?: readonly Clue[];
 }
 
 function statusText(phase: Phase, postCount: number, searchedCount: number): string | null {
@@ -66,6 +74,7 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
   const [result, setResult] = useState<Result | null>(null);
   const [risky, setRisky] = useState<readonly RiskyPost[] | null>(null);
   const [simulation, setSimulation] = useState<Simulation | null>(null);
+  const [publicWebLookupConsent, setPublicWebLookupConsent] = useState(false);
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   const controller = useRef<AbortController | null>(null);
   const restoreController = useRef<AbortController | null>(null);
@@ -90,7 +99,17 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
           post.post_id,
           { clues: snapshot.clues.filter((clue) => clue.post_id === post.post_id), error: null },
         ])));
-        setResult({ clues: snapshot.clues, conclusions: validNameConclusions(snapshot.conclusions) });
+        setResult({
+          clues: snapshot.clues,
+          conclusions: validNameConclusions(snapshot.conclusions),
+          profileClaims: snapshot.profile_claims ?? [],
+          profileClaimSuggestions: snapshot.profile_claim_suggestions ?? [],
+          webFacts: snapshot.web_facts ?? [],
+          externalLookupStatus: snapshot.external_lookup_status ?? "not_requested",
+          externalProfileResults: snapshot.external_profile_results ?? [],
+          ownerProfileText: snapshot.owner_profile_text ?? "",
+          selfReportClues: snapshot.self_report_clues ?? [],
+        });
         setRisky(snapshot.plan.posts);
         setPhase({ kind: "done", postsSeen: snapshot.posts.length });
         onRevealedChange?.(true);
@@ -109,6 +128,8 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
   if (session.status !== "authenticated") return null;
 
   async function start() {
+    const consentForThisRun = publicWebLookupConsent;
+    setPublicWebLookupConsent(false);
     restoreController.current?.abort();
     controller.current?.abort();
     const current = new AbortController();
@@ -121,7 +142,7 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
     onRevealedChange?.(false);
     setPhase({ kind: "connecting" });
     try {
-      for await (const event of diagnose({ signal: current.signal })) {
+      for await (const event of diagnose({ signal: current.signal, publicWebLookupConsent: consentForThisRun })) {
         switch (event.event) {
           case "post":
             setPosts((prev) => [...prev, event.post]);
@@ -132,7 +153,17 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
             setPhase({ kind: "searching" });
             break;
           case "conclusions":
-            setResult({ clues: event.clues, conclusions: validNameConclusions(event.conclusions) });
+            setResult({
+              clues: event.clues,
+              conclusions: validNameConclusions(event.conclusions),
+              profileClaims: event.profile_claims ?? [],
+              profileClaimSuggestions: event.profile_claim_suggestions ?? [],
+              webFacts: event.web_facts ?? [],
+              externalLookupStatus: event.external_lookup_status ?? "not_requested",
+              externalProfileResults: event.external_profile_results ?? [],
+              ownerProfileText: event.owner_profile_text ?? "",
+              selfReportClues: event.self_report_clues ?? [],
+            });
             break;
           case "plan":
             setRisky(event.posts);
@@ -155,6 +186,10 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
   // 結果が出たら再診断ボタンを下へ移し、身元カード→写真→捜査ボードを続けて見せる。
   const controls = (
     <div>
+        <label className="mb-4 flex max-w-2xl items-start gap-3 rounded-sm border border-ink/20 px-4 py-3 text-sm">
+          <input type="checkbox" checked={publicWebLookupConsent} onChange={(event) => setPublicWebLookupConsent(event.currentTarget.checked)} disabled={busy} className="mt-1 size-4 shrink-0 accent-seeker" />
+          <span><span className="block font-bold">公開Webで外部SNS・ブログ・記事の候補を検索する（この診断のみ）</span><span className="mt-1 block text-xs text-ink/70">同意すると、実モードではログイン中の公開BlueskyハンドルだけをBraveへ送ります。検索語は最大90日保持され、利用には有料プランと支払情報の登録が必要です。投稿文・プロフィール文・写真は送りません。候補だけでは同一人物と判断しません。モックモードは固定の架空結果を使い、外部通信しません。</span></span>
+        </label>
         <button
           type="button"
           onClick={start}
@@ -193,6 +228,14 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
           clues={result.clues}
           conclusions={simulation ? validNameConclusions(simulation.after) : result.conclusions}
           unknown={simulation?.broken}
+          profileClaims={result.profileClaims}
+          profileClaimSuggestions={result.profileClaimSuggestions}
+          posts={posts}
+          webFacts={result.webFacts}
+          externalLookupStatus={result.externalLookupStatus}
+          externalProfileResults={result.externalProfileResults}
+          ownerProfileText={result.ownerProfileText}
+          selfReportClues={result.selfReportClues}
         />
       )}
 

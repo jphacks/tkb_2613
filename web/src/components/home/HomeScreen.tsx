@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import { DiagnosePanel } from "@/components/diagnose/DiagnosePanel";
+import { DraftCheckPanel } from "@/components/draft-check/DraftCheckPanel";
 import { LoginPanel } from "@/components/login/LoginPanel";
 import { useSession } from "@/components/session/SessionProvider";
 import { messages } from "@/lib/messages";
@@ -47,6 +48,7 @@ function HomeContent() {
       {/* 結果を出している間も、ページの名前は読み上げで伝える */}
       {showResult && <h1 className="sr-only">{name}</h1>}
       <DiagnosePanel onRevealedChange={setRevealed} />
+      <DraftCheckPanel />
       {showResult && (
         <footer className="mt-20 border-t border-ink/15 pt-6 text-sm text-ink/60">
           <button type="button" onClick={logout} className="underline underline-offset-4 hover:text-ink">

@@ -4,7 +4,8 @@
  *
  *   event: post         data: {"post": 投稿}                             投稿を 1 件取得するたびに
  *   event: clues        data: {"post_id", "clues": [手がかり], "error"}  手がかりの取り出しが終わった順
- *   event: conclusions  data: {"clues": [全手がかり], "conclusions": [推理]}  最後に 1 回
+ *   event: conclusions  data: {"clues": [全手がかり], "conclusions": [推理],
+ *                             "profile_claim_suggestions": [最大3件の投稿ID]} 最後に 1 回
  *   event: plan         data: {"delete", "broken", "after", "posts"}      危ない投稿。最後に 1 回
  *   event: done         data: {"posts_seen": 件数}                       最後に 1 回
  *
@@ -14,6 +15,7 @@
 
 import { type Clue, isClue } from "./clue";
 import { isPost, type Post } from "./post";
+import { isExternalProfileResult, isProfileItem, isWebFact, type ExternalLookupStatus, type ExternalProfileResult, type ProfileItem, type WebFact } from "./profile";
 
 /** 推理ルールが出した結論 1 つ（engine の Conclusion） */
 export interface Conclusion {
@@ -61,6 +63,14 @@ export interface DiagnosisSnapshot {
   readonly clues: readonly Clue[];
   readonly conclusions: readonly Conclusion[];
   readonly plan: Simulation & { readonly posts: readonly RiskyPost[] };
+  readonly profile_claims?: readonly ProfileItem[];
+  readonly profile_claim_suggestions?: readonly string[];
+  readonly web_facts?: readonly WebFact[];
+  readonly web_lookup_status?: "not_run" | "fixture";
+  readonly external_lookup_status?: ExternalLookupStatus;
+  readonly external_profile_results?: readonly ExternalProfileResult[];
+  readonly owner_profile_text?: string;
+  readonly self_report_clues?: readonly Clue[];
 }
 
 export type DiagnoseEvent =
@@ -76,6 +86,15 @@ export type DiagnoseEvent =
       readonly event: "conclusions";
       readonly clues: readonly Clue[];
       readonly conclusions: readonly Conclusion[];
+      readonly profile_claims?: readonly ProfileItem[];
+      /** Up to three diagnosis-order-stable post IDs selected by exact claim-path removal. */
+      readonly profile_claim_suggestions?: readonly string[];
+      readonly web_facts?: readonly WebFact[];
+      readonly web_lookup_status?: "not_run" | "fixture";
+      readonly external_lookup_status?: ExternalLookupStatus;
+      readonly external_profile_results?: readonly ExternalProfileResult[];
+      readonly owner_profile_text?: string;
+      readonly self_report_clues?: readonly Clue[];
     }
   | ({
       readonly event: "plan";
@@ -107,6 +126,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isClueList(value: unknown): value is readonly Clue[] {
   return Array.isArray(value) && value.every(isClue);
+}
+
+function isExternalLookupStatus(value: unknown): value is ExternalLookupStatus {
+  return ["not_requested", "fixture", "searched", "no_results", "unavailable"].includes(value as string);
 }
 
 function isConclusion(value: unknown, clueCount: number): value is Conclusion {
@@ -167,7 +190,25 @@ export function isDiagnosisSnapshot(value: unknown): value is DiagnosisSnapshot 
   const clueCount = value.clues.length;
   if (!Array.isArray(value.conclusions) || !value.conclusions.every((c) => isConclusion(c, clueCount))) return false;
   const plan = value.plan;
-  return isSimulation(plan, clueCount) && isRecord(plan) && Array.isArray(plan.posts) && plan.posts.every(isRiskyPost);
+  if (!isSimulation(plan, clueCount) || !isRecord(plan) || !Array.isArray(plan.posts) || !plan.posts.every(isRiskyPost)) return false;
+  let conclusionsEvent: DiagnoseEvent | null;
+  try {
+    conclusionsEvent = toDiagnoseEvent("conclusions", JSON.stringify({
+      clues: value.clues,
+      conclusions: value.conclusions,
+      ...(Object.hasOwn(value, "profile_claims") ? { profile_claims: value.profile_claims } : {}),
+      ...(Object.hasOwn(value, "profile_claim_suggestions") ? { profile_claim_suggestions: value.profile_claim_suggestions } : {}),
+      ...(Object.hasOwn(value, "web_facts") ? { web_facts: value.web_facts } : {}),
+      ...(Object.hasOwn(value, "web_lookup_status") ? { web_lookup_status: value.web_lookup_status } : {}),
+      ...(Object.hasOwn(value, "external_lookup_status") ? { external_lookup_status: value.external_lookup_status } : {}),
+      ...(Object.hasOwn(value, "external_profile_results") ? { external_profile_results: value.external_profile_results } : {}),
+      ...(Object.hasOwn(value, "owner_profile_text") ? { owner_profile_text: value.owner_profile_text } : {}),
+      ...(Object.hasOwn(value, "self_report_clues") ? { self_report_clues: value.self_report_clues } : {}),
+    }));
+  } catch {
+    return false;
+  }
+  return conclusionsEvent?.event === "conclusions";
 }
 
 /**
@@ -201,14 +242,54 @@ export function toDiagnoseEvent(
   if (event === "conclusions" && isRecord(value) && isClueList(value.clues)) {
     const clueCount = value.clues.length;
     const { conclusions } = value;
+    const profileClaims = value.profile_claims ?? [];
+    const profileClaimSuggestions = Object.hasOwn(value, "profile_claim_suggestions")
+      ? value.profile_claim_suggestions
+      : [];
+    const profileText = value.owner_profile_text ?? "";
+    const selfReportClues = value.self_report_clues ?? [];
+    const webFacts = value.web_facts ?? [];
+    const webLookupStatus = value.web_lookup_status ?? "not_run";
+    const externalLookupStatus = value.external_lookup_status ?? "not_requested";
+    const externalProfileResults = value.external_profile_results ?? [];
+    const webFactIds = Array.isArray(webFacts) && webFacts.every(isWebFact)
+      ? new Set(webFacts.map((fact) => fact.id))
+      : new Set<string>();
+    const claimsReferenceKnownWebFacts = Array.isArray(profileClaims) && profileClaims.every(isProfileItem) && profileClaims.every((claim) =>
+      claim.evidence.every((evidence) => evidence.source !== "public_web" ||
+        (typeof evidence.web_fact_id === "string" && webFactIds.has(evidence.web_fact_id))) &&
+      (claim.evidence_paths ?? []).every((path) => path.evidence.every((evidence) =>
+        evidence.source !== "public_web" ||
+        (typeof evidence.web_fact_id === "string" && webFactIds.has(evidence.web_fact_id)))),
+    );
     if (
-      Array.isArray(conclusions) &&
-      conclusions.every((c) => isConclusion(c, clueCount))
+      Array.isArray(conclusions) && conclusions.every((c) => isConclusion(c, clueCount)) &&
+      Array.isArray(profileClaims) && profileClaims.every(isProfileItem) && typeof profileText === "string" &&
+      Array.isArray(profileClaimSuggestions) && profileClaimSuggestions.length <= 3 &&
+      profileClaimSuggestions.every((postId) => typeof postId === "string" && postId.length > 0) &&
+      new Set(profileClaimSuggestions).size === profileClaimSuggestions.length &&
+      profileClaimSuggestions.every((postId) => profileClaims.some((claim) =>
+        (claim.evidence_paths ?? []).some((path) => path.evidence.some((evidence) => evidence.post_id === postId)),
+      )) &&
+      isClueList(selfReportClues) && Array.isArray(webFacts) && webFacts.every(isWebFact) &&
+      new Set(webFacts.map((fact) => fact.id)).size === webFacts.length && claimsReferenceKnownWebFacts &&
+      (webLookupStatus === "not_run" || webLookupStatus === "fixture") &&
+      isExternalLookupStatus(externalLookupStatus) &&
+      Array.isArray(externalProfileResults) && externalProfileResults.length <= 5 && externalProfileResults.every(isExternalProfileResult) &&
+      new Set(externalProfileResults.map((result) => result.id)).size === externalProfileResults.length
     ) {
       return {
         event,
         clues: value.clues,
         conclusions: conclusions as Conclusion[],
+        ...(Object.hasOwn(value, "profile_claims") ? { profile_claims: profileClaims } : {}),
+        ...(Object.hasOwn(value, "profile_claim_suggestions") ? { profile_claim_suggestions: profileClaimSuggestions } : {}),
+        ...(Object.hasOwn(value, "web_facts") ? { web_facts: webFacts } : {}),
+        ...(Object.hasOwn(value, "web_lookup_status") ? { web_lookup_status: webLookupStatus } : {}),
+        ...(Object.hasOwn(value, "external_lookup_status") ? { external_lookup_status: externalLookupStatus } : {}),
+        ...(Object.hasOwn(value, "external_profile_results") ? { external_profile_results: externalProfileResults } : {}),
+        ...(Object.hasOwn(value, "owner_profile_text") ? { owner_profile_text: profileText } : {}),
+        ...(Object.hasOwn(value, "self_report_clues") ? { self_report_clues: selfReportClues } : {}),
       };
     }
   }
