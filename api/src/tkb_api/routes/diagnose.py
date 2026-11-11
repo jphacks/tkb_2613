@@ -416,14 +416,18 @@ async def diagnose(
         web_lookup_status = "fixture" if web_facts else "not_run"
         if public_web_lookup_consent:
             owner_profile_text, demo_results = _load_demo_external_lookup(settings)
-            external_profile_results = list(mark_owner_linked(posts, owner_profile_text, demo_results))
+            external_profile_results = list(
+                mark_owner_linked(posts, owner_profile_text, demo_results)
+            )
             external_lookup_status = ExternalLookupStatus.FIXTURE
     else:
         try:
             if session.client is not None:
                 owner_profile_text = await fetch_profile_text(session.client, session.did)
             elif session.auth_method == "oauth" and settings.auth_mode == "oauth":
-                async with AsyncClient(base_url="https://public.api.bsky.app/xrpc") as profile_client:
+                async with AsyncClient(
+                    base_url="https://public.api.bsky.app/xrpc"
+                ) as profile_client:
                     owner_profile_text = await fetch_profile_text(profile_client, session.did)
         except bluesky.BlueskyUnavailableError:
             raise HTTPException(
@@ -458,11 +462,17 @@ async def diagnose(
                 posts=tuple(posts),
                 clues=tuple(clues),
                 profile_claims=tuple(profile_result.get("profile_claims", ())),
-                profile_claim_suggestions=tuple(profile_result.get("profile_claim_suggestions", ())),
+                profile_claim_suggestions=tuple(
+                    profile_result.get("profile_claim_suggestions", ())
+                ),
                 web_facts=tuple(profile_result.get("web_facts", ())),
                 web_lookup_status=profile_result.get("web_lookup_status", "not_run"),
-                external_profile_results=tuple(profile_result.get("external_profile_results", ())),
-                external_lookup_status=profile_result.get("external_lookup_status", ExternalLookupStatus.NOT_REQUESTED),
+                external_profile_results=tuple(
+                    profile_result.get("external_profile_results", ())
+                ),
+                external_lookup_status=profile_result.get(
+                    "external_lookup_status", ExternalLookupStatus.NOT_REQUESTED
+                ),
                 owner_profile_text=profile_result.get("owner_profile_text", ""),
                 self_report_clues=tuple(profile_result.get("self_report_clues", ())),
             ),

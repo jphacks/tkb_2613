@@ -29,9 +29,9 @@ from tkb_common.schemas import (
 )
 from tkb_detect.batch import PostExtraction, extract_posts
 from tkb_detect.extract import Extractor
+from tkb_engine.cross_post import infer_owner_claims_with_web, plan_profile_claim_deletion
 from tkb_engine.gazetteer import Gazetteer, Knowledge
 from tkb_engine.planner import Simulation, plan, simulate
-from tkb_engine.cross_post import infer_owner_claims_with_web, plan_profile_claim_deletion
 from tkb_engine.rules import infer
 
 logger = logging.getLogger(__name__)
