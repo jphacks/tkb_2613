@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { forgetOAuthSession, validInternalSecret } from "@/lib/server/oauth";
+import { revokeOAuthSession, validInternalSecret } from "@/lib/server/oauth";
 
 export async function POST(request: Request) {
   if (!validInternalSecret(request)) return new NextResponse(null, { status: 403 });
@@ -8,6 +8,7 @@ export async function POST(request: Request) {
   if (typeof body !== "object" || body === null || !("did" in body) || typeof body.did !== "string") {
     return new NextResponse(null, { status: 400 });
   }
-  forgetOAuthSession(body.did);
+  // ログアウト：Bluesky 側でトークンを失効させてから消す。失効に失敗してもメモリからは消して 204
+  await revokeOAuthSession(body.did);
   return new NextResponse(null, { status: 204 });
 }
