@@ -102,7 +102,7 @@ SSEブロックは `event: <name>\ndata: <JSON>\n\n`。JSONはUTF-8で送られ�
 
 ### プロフィール推定と公開Web検索
 
-- 現在の限定推論対象は `residential_area`, `regular_station`, `employer_name`, `child_age`。候補は本人の複数投稿・観測手がかり・本人プロフィール文の組合せから作る。成立条件、棄却条件、根拠経路、確信度の扱いは [profile-classification-v2.md](profile-classification-v2.md) を参照。
+- 現在の限定推論対象は `residential_area`, `regular_station`, `employer_name`, `child_age`, `school`。候補は本人の複数投稿・観測手がかり・本人プロフィール文の組合せから作る。`school` は学校名を写す写真と学校文脈の投稿、授業の投稿、近づく学校祭の投稿が別々にそろう場合に限る弱い候補。成立条件、棄却条件、根拠経路、確信度の扱いは [profile-classification-v2.md](profile-classification-v2.md) を参照。
 - `profile_claim_suggestions` は推定の根拠経路がすべて崩れる投稿の組合せから最大3件を選ぶ。これは main の Conclusion 向け `plan` / `/api/simulate` と別の根拠モデルで、実削除はしない。
 - 公開Web検索は診断ごとの明示同意がある場合だけ行う。送信値は本人の公開Blueskyハンドルと固定 `site:` 検索演算子のみ。投稿文・プロフィール文・Clue・DID・投稿URI・画像・氏名は送らない。Brave検索語は最大90日保持され、実検索は `BRAVE_SEARCH_API_KEY` 設定時のみ可能。
 - `external_profile_results` は検索候補と、本人プロフィール/投稿に記載されたURLと照合した候補を返す。これは公開URL上のリンク関係を示すだけで、実世界の本人確認や記事の執筆者確認を意味しない。検索結果本文の取得はしない。`MOCK_MODE=1` は固定fixtureのみで外部通信しない。

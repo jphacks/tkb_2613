@@ -597,11 +597,151 @@ def infer_owner_claims(
     child_age = infer_child_age_claim(posts, diagnosis_date=diagnosis_date)
     if child_age is not None:
         claims.append(child_age)
+    school_claim = infer_school_claim(posts, clues)
+    if school_claim is not None:
+        claims.append(school_claim)
     if gazetteer is not None:
         regular_station = infer_regular_station_claim(posts, clues, gazetteer)
         if regular_station is not None:
             claims.append(regular_station)
     return claims
+
+
+_SCHOOL_SUFFIX = re.compile(r"(?:大学|高等学校|高校|高専|専門学校|中学校|中学|学校)$")
+_SCHOOL_CONTEXT = re.compile(r"大学|高校|高専|専門学校|中学校|学校|キャンパス|学園")
+_CLASS_CONTEXT = re.compile(
+    r"(?:授業|講義)\s*(?:終わり|おわり|後|のあと|が終わ|終わった|受け|に行|ある|中)"
+)
+_FESTIVAL_CONTEXT = re.compile(
+    r"(?:(?:近づ|近付|ちかづ|迫っ|もうすぐ|間近|来週|今週|まもなく).{0,8}"
+    r"(?:文化祭|学園祭|大学祭)|(?:文化祭|学園祭|大学祭).{0,8}"
+    r"(?:近づ|近付|ちかづ|迫っ|もうすぐ|間近|来週|今週|まもなく|開催))"
+)
+_SCHOOL_STAFF_OR_VISIT = re.compile(
+    r"(?:教員|先生|講師|教授|教師|職員|スタッフ|非常勤|教える|授業を担当|"
+    r"訪問|見学|遊びに|guest|visitor|visit-only)",
+    re.IGNORECASE,
+)
+_SCHOOL_MENTION = re.compile(
+    r"[\wぁ-んァ-ヶ一-龠々・]{2,30}(?:大学|高等学校|高校|高専|専門学校|中学校|中学|学校)"
+)
+
+
+def infer_school_claim(posts: list[Post], clues: list[Clue]) -> ProfileItem | None:
+    """Infer a weak school-affiliation candidate from an image observation and two posts.
+
+    The named institution must be an exact OCR/VLM organization clue in a post whose text
+    independently mentions a school or campus. Different posts must then describe the owner's
+    own class context and an upcoming school festival. Visitor/staff and competing-school
+    contexts are rejected. The pattern is deliberately conservative and does not establish
+    student status.
+    """
+    post_by_id = {post.post_id: post for post in posts}
+    school_signs: dict[str, list[tuple[int, Clue, Post]]] = {}
+    for index, clue in enumerate(clues):
+        post = post_by_id.get(clue.post_id)
+        name = unicodedata.normalize("NFKC", clue.value).strip()
+        if (
+            post is None
+            or clue.type is not ClueType.ORG_TEXT
+            or clue.source not in {ClueSource.OCR, ClueSource.VLM}
+            or clue.image_index is None
+            or clue.confidence < 0.85
+            or not _SCHOOL_SUFFIX.search(name)
+            or not _SCHOOL_CONTEXT.search(post.text)
+            or _SCHOOL_STAFF_OR_VISIT.search(post.text)
+            or _forbidden_context(post.text)
+        ):
+            continue
+        school_signs.setdefault(name, []).append((index, clue, post))
+    # Multiple named institutions in the observations make the association ambiguous.
+    if len(school_signs) != 1:
+        return None
+    school_name, signs = next(iter(school_signs.items()))
+    anchor_post_ids = {post.post_id for _, _, post in signs}
+    if len(anchor_post_ids) != 1:
+        return None
+    anchor_post_id = next(iter(anchor_post_ids))
+
+    def mentions_other_school(text: str) -> bool:
+        mentions = {
+            unicodedata.normalize("NFKC", match.group(0)).strip()
+            for match in _SCHOOL_MENTION.finditer(text)
+        }
+        return any(mention != school_name for mention in mentions)
+
+    class_posts = [
+        post
+        for post in posts
+        if post.post_id != anchor_post_id
+        and _CLASS_CONTEXT.search(post.text)
+        and not _SCHOOL_STAFF_OR_VISIT.search(post.text)
+        and not _forbidden_context(post.text)
+        and not mentions_other_school(post.text)
+    ]
+    festival_posts = [
+        post
+        for post in posts
+        if post.post_id != anchor_post_id
+        and _FESTIVAL_CONTEXT.search(post.text)
+        and not _SCHOOL_STAFF_OR_VISIT.search(post.text)
+        and not _forbidden_context(post.text)
+        and not mentions_other_school(post.text)
+    ]
+    for clue_index, _, anchor_post in signs:
+        anchor_context = _SCHOOL_CONTEXT.search(anchor_post.text)
+        if anchor_context is None:
+            continue
+        for class_post in class_posts:
+            if class_post.post_id == anchor_post.post_id:
+                continue
+            for festival_post in festival_posts:
+                if festival_post.post_id in {anchor_post.post_id, class_post.post_id}:
+                    continue
+                class_match = _CLASS_CONTEXT.search(class_post.text)
+                festival_match = _FESTIVAL_CONTEXT.search(festival_post.text)
+                if class_match is None or festival_match is None:
+                    continue
+                evidence = [
+                    ProfileEvidence(
+                        post_id=anchor_post.post_id,
+                        clue_index=clue_index,
+                        required=True,
+                        source="clue",
+                    ),
+                    ProfileEvidence(
+                        post_id=anchor_post.post_id,
+                        required=True,
+                        source="post_text",
+                        excerpt=anchor_context.group(0),
+                    ),
+                    ProfileEvidence(
+                        post_id=class_post.post_id,
+                        required=True,
+                        source="post_text",
+                        excerpt=class_match.group(0),
+                    ),
+                    ProfileEvidence(
+                        post_id=festival_post.post_id,
+                        required=True,
+                        source="post_text",
+                        excerpt=festival_match.group(0),
+                    ),
+                ]
+                path = ProfileEvidencePath(evidence=evidence, confidence=0.55)
+                return ProfileItem(
+                    attribute=ProfileAttribute.SCHOOL,
+                    value=school_name,
+                    confidence=0.55,
+                    status=ProfileStatus.WEAK,
+                    evidence=evidence,
+                    evidence_paths=[path],
+                    assessment=ClaimAssessment(
+                        minimal_scope=EvidenceScope.BLUESKY,
+                        harm_status="unknown",
+                    ),
+                )
+    return None
 
 
 _CHILD_BIRTH_YEAR_RE = re.compile(

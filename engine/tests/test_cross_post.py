@@ -54,6 +54,18 @@ def profile_clue(value: str, kind: ClueType) -> Clue:
     )
 
 
+def school_org_clue(p: Post, value: str, *, confidence: float = 0.92) -> Clue:
+    return Clue(
+        post_id=p.post_id,
+        image_index=0,
+        type=ClueType.ORG_TEXT,
+        value=value,
+        region=(20, 30, 220, 90),
+        confidence=confidence,
+        source=ClueSource.VLM,
+    )
+
+
 def test_residential_claim_uses_landmark_bridge_across_two_posts() -> None:
     anchor = post("a", "自宅近くの青葉商店街")
     area = post("b", "青葉商店街は文京区")
@@ -65,6 +77,58 @@ def test_residential_claim_uses_landmark_bridge_across_two_posts() -> None:
     path = claim.evidence_paths[0].evidence
     assert {ref.post_id for ref in path} == {anchor.post_id, area.post_id}
     assert {ref.source for ref in path} == {"post_text", "clue"}
+
+
+def test_school_candidate_needs_independent_sign_class_and_festival_posts() -> None:
+    campus = post("school-campus", "大学も秋を感じる")
+    class_day = post("school-class", "授業終わりに学食へ")
+    festival = post("school-festival", "文化祭ちかづいてきた")
+    clue = school_org_clue(campus, "東京外国語大学")
+    irrelevant = typed_clue(class_day, "授業終わり", ClueType.ROUTINE_TEXT)
+
+    claim = next(
+        item
+        for item in infer_owner_claims([campus, class_day, festival], [irrelevant, clue])
+        if item.attribute is ProfileAttribute.SCHOOL
+    )
+
+    assert claim.value == "東京外国語大学"
+    assert claim.status is ProfileStatus.WEAK
+    assert claim.confidence == 0.55
+    path = claim.evidence_paths[0].evidence
+    assert {ref.post_id for ref in path} == {campus.post_id, class_day.post_id, festival.post_id}
+    assert {ref.clue_index for ref in path if ref.clue_index is not None} == {1}
+    assert all(ref.required for ref in path)
+    assert any(
+        ref.post_id == campus.post_id and ref.source == "post_text" and ref.excerpt == "大学"
+        for ref in path
+    )
+    required_posts = {campus.post_id, class_day.post_id, festival.post_id}
+    assert all(recalculate_after_deletion(claim, {post_id}) is None for post_id in required_posts)
+
+
+def test_school_candidate_rejects_single_sign_incomplete_and_non_owner_contexts() -> None:
+    campus = post("school-campus", "大学も秋を感じる")
+    class_day = post("school-class", "授業終わりに学食へ")
+    festival = post("school-festival", "文化祭ちかづいてきた")
+    clue = school_org_clue(campus, "東京外国語大学")
+    cases = [
+        ([campus], [clue]),
+        ([campus, class_day], [clue]),
+        ([campus, class_day, post("visit", "文化祭ちかづいてきた。見学に行く")], [clue]),
+        ([campus.model_copy(update={"text": "大学の説明会を見学"}), class_day, festival], [clue]),
+        ([campus, post("teacher-class", "先生として授業終わり"), festival], [clue]),
+        ([campus, post("other-class", "東京大学の授業終わり"), festival], [clue]),
+        (
+            [campus, class_day, festival],
+            [school_org_clue(campus, "東京外国語大学", confidence=0.8)],
+        ),
+    ]
+    for posts, clues in cases:
+        assert all(
+            item.attribute is not ProfileAttribute.SCHOOL
+            for item in infer_owner_claims(posts, clues)
+        )
 
 
 def test_employer_claim_is_not_inferred_from_company_possessive_bridge() -> None:
