@@ -122,7 +122,8 @@ resource "aws_cloudfront_distribution" "main" {
   # ログの保存先は作らない（決定事項 14.1 の5）
 }
 
-# --- WAF（4章）。ログは保存せず、サンプル表示と CloudWatch のメトリクスだけで見張る ---
+# --- WAF（4章）。OAuth コードを残さないためサンプリングを無効にする。
+# CloudWatch の集計メトリクスは維持し、ログの保存先は作らない。 ---
 
 # 全遮断：ふだんは空。全遮断のときは 0.0.0.0/1 と 128.0.0.0/1 を入れる（README の手順）。
 # 手で入れた値を terraform apply が戻さないよう、addresses の変更は無視する
@@ -168,7 +169,7 @@ resource "aws_wafv2_web_acl" "main" {
     visibility_config {
       cloudwatch_metrics_enabled = true
       metric_name                = "kill-switch"
-      sampled_requests_enabled   = true
+      sampled_requests_enabled   = false
     }
   }
 
@@ -222,7 +223,7 @@ resource "aws_wafv2_web_acl" "main" {
       visibility_config {
         cloudwatch_metrics_enabled = true
         metric_name                = "oauth-test-team-only"
-        sampled_requests_enabled   = true
+        sampled_requests_enabled   = false
       }
     }
   }
@@ -242,7 +243,7 @@ resource "aws_wafv2_web_acl" "main" {
     visibility_config {
       cloudwatch_metrics_enabled = true
       metric_name                = "ip-reputation"
-      sampled_requests_enabled   = true
+      sampled_requests_enabled   = false
     }
   }
 
@@ -277,7 +278,7 @@ resource "aws_wafv2_web_acl" "main" {
     visibility_config {
       cloudwatch_metrics_enabled = true
       metric_name                = "block-detect"
-      sampled_requests_enabled   = true
+      sampled_requests_enabled   = false
     }
   }
 
@@ -361,7 +362,7 @@ resource "aws_wafv2_web_acl" "main" {
     visibility_config {
       cloudwatch_metrics_enabled = true
       metric_name                = "rate-login"
-      sampled_requests_enabled   = true
+      sampled_requests_enabled   = false
     }
   }
 
@@ -410,7 +411,7 @@ resource "aws_wafv2_web_acl" "main" {
     visibility_config {
       cloudwatch_metrics_enabled = true
       metric_name                = "rate-diagnose"
-      sampled_requests_enabled   = true
+      sampled_requests_enabled   = false
     }
   }
 
@@ -449,13 +450,13 @@ resource "aws_wafv2_web_acl" "main" {
     visibility_config {
       cloudwatch_metrics_enabled = true
       metric_name                = "rate-all"
-      sampled_requests_enabled   = true
+      sampled_requests_enabled   = false
     }
   }
 
   visibility_config {
     cloudwatch_metrics_enabled = true
     metric_name                = "tkb_2613"
-    sampled_requests_enabled   = true
+    sampled_requests_enabled   = false
   }
 }

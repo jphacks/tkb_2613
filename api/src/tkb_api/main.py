@@ -23,6 +23,7 @@ from tkb_api.routes import (
     session,
     share,
     simulate,
+    threads,
     x,
 )
 from tkb_api.shares import ShareStore
@@ -135,6 +136,16 @@ def create_app(
     app.include_router(delete.router)
     app.include_router(share.router)
     app.include_router(features.router)
+    access_logger = logging.getLogger("uvicorn.access")
+    if not any(
+        isinstance(item, threads.ThreadsCallbackAccessFilter) for item in access_logger.filters
+    ):
+        access_logger.addFilter(threads.ThreadsCallbackAccessFilter())
+    app.include_router(threads.router)
+    app.state.threads_sessions = threads.ThreadsSessionStore(
+        min(settings.session_ttl_minutes * 60, 1800)
+    )
+    app.state.threads_settings = settings
     app.include_router(x.router)
     app.state.x_sessions = x.XSessionStore(settings.session_ttl_minutes * 60)
     app.state.x_settings = settings
