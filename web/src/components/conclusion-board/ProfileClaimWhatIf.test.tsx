@@ -35,11 +35,11 @@ describe("ProfileClaimWhatIf", () => {
   it("shows broken claims separately from evidence fragments that remain", () => {
     render(<ProfileClaimWhatIf claims={[claim]} clues={[]} posts={posts} suggestions={[posts[0].post_id, posts[2].post_id]} webFacts={[]} />);
 
-    expect(screen.getByRole("region", { name: "仮除外で支持されなくなる推定" })).toHaveTextContent("架空の区");
-    expect(screen.getByText("残る個別の根拠")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "外すと根拠がなくなる推定" })).toHaveTextContent("架空の区");
+    expect(screen.getByText("残っている根拠（これだけでは推定できないもの）")).toBeInTheDocument();
     expect(screen.getByText(/投稿内の記述 b/)).toBeInTheDocument();
     expect(screen.getByText(/投稿内の記述 d/)).toBeInTheDocument();
-    expect(screen.getByText(/根拠経路だけを使う比較/)).toBeInTheDocument();
+    expect(screen.getByText(/根拠の組み合わせだけで比べる/)).toBeInTheDocument();
   });
 
   it("keeps a known claim when one complete alternative path survives", () => {
@@ -47,21 +47,21 @@ describe("ProfileClaimWhatIf", () => {
 
     const checkboxes = screen.getAllByRole("checkbox");
     fireEvent.click(checkboxes[1]); // Keep post C, so path C+D survives.
-    expect(screen.getByRole("region", { name: "仮除外後も根拠経路が残る推定" })).toHaveTextContent("架空の区");
-    expect(screen.getByRole("region", { name: "仮除外後も根拠経路が残る推定" })).toHaveTextContent("残る完全な根拠経路：1 件");
-    expect(screen.getByRole("region", { name: "仮除外で支持されなくなる推定" })).toHaveTextContent("0");
+    expect(screen.getByRole("region", { name: "外しても根拠が残る推定" })).toHaveTextContent("架空の区");
+    expect(screen.getByRole("region", { name: "外しても根拠が残る推定" })).toHaveTextContent("残る根拠の組み合わせ：1 通り");
+    expect(screen.getByRole("region", { name: "外すと根拠がなくなる推定" })).toHaveTextContent("0");
   });
 
   it("allows choosing other evidence posts when no suggestion is produced and caps selections at three", () => {
     render(<ProfileClaimWhatIf claims={[claim]} clues={[]} posts={posts} suggestions={[]} webFacts={[]} />);
 
-    const morePosts = screen.getByText(/ほかの根拠投稿/);
+    const morePosts = screen.getByText(/^ほかの根拠の投稿（/);
     fireEvent.click(morePosts);
     const choices = within(morePosts.closest("details")!).getAllByRole("checkbox");
     fireEvent.click(choices[0]);
     fireEvent.click(choices[1]);
     fireEvent.click(choices[2]);
     expect(choices[3]).toBeDisabled();
-    expect(screen.getByText(/現在の候補には3件以内で推定を崩す組合せがありません/)).toBeInTheDocument();
+    expect(screen.getByText(/3件以内で推定が崩れる組み合わせは見つかりませんでした/)).toBeInTheDocument();
   });
 });

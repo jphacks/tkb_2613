@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { messages } from "@/lib/messages";
 import type { Clue } from "@/types/clue";
 import type { Conclusion } from "@/types/diagnose";
+import type { ProfileItem } from "@/types/profile";
 
 import { ConclusionBoard } from "./ConclusionBoard";
 
@@ -120,5 +121,18 @@ describe("ConclusionBoard", () => {
 
     expect(screen.getByText(messages.board.chain.summary)).toBeInTheDocument();
     expect(screen.getByRole("list", { name: messages.board.chain.label })).toHaveTextContent("新宿で乗り換え");
+  });
+
+  it("shows cross-post estimates like the board: an estimate tag, a weak mark only when weak, and no percentage", () => {
+    const reference = { post_id: CLUE.post_id, clue_index: null, required: true, source: "post_text" as const, excerpt: "架空の記述" };
+    const weak: ProfileItem = { attribute: "residential_area", value: "架空の区", confidence: 0.65, status: "weak", evidence: [reference] };
+    const found: ProfileItem = { attribute: "school", value: "架空の学校", confidence: 0.9, status: "found", evidence: [reference] };
+    render(<ConclusionBoard clues={[CLUE]} conclusions={[CONCLUSION]} profileClaims={[weak, found]} />);
+
+    const section = screen.getByRole("region", { name: "投稿を横断したプロフィール推定" });
+    const [weakItem, foundItem] = within(section).getAllByRole("listitem");
+    expect(weakItem).toHaveTextContent(messages.board.confidence.weak);
+    expect(foundItem).not.toHaveTextContent(messages.board.confidence.weak);
+    expect(section).not.toHaveTextContent("%");
   });
 });

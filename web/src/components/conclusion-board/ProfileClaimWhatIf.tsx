@@ -79,7 +79,7 @@ export function ProfileClaimWhatIf({ claims, clues, posts, suggestions, webFacts
     const number = postNumbers.get(postId);
     return <label key={postId} className="flex items-start gap-2 break-words rounded border border-ink/20 p-2 text-sm">
       <input type="checkbox" checked={selected.has(postId)} disabled={!selected.has(postId) && selected.size >= 3} onChange={() => toggle(postId)} />
-      <span className="min-w-0"><span className="block font-bold">投稿 {number}{suggested ? " ・削除候補" : ""}</span>
+      <span className="min-w-0"><span className="block font-bold">投稿 {number}{suggested ? "（削除候補）" : ""}</span>
         <span className="break-words">{postText(post)}</span>
       </span>
     </label>;
@@ -89,45 +89,45 @@ export function ProfileClaimWhatIf({ claims, clues, posts, suggestions, webFacts
     <section aria-labelledby="profile-what-if-heading" className="mt-5 space-y-4 rounded-sm border-2 border-seeker/50 bg-paper px-4 py-4">
       <div>
         <h4 id="profile-what-if-heading" className="font-display text-xl">投稿を仮に外して比べる</h4>
-        <p className="mt-1 text-sm text-ink/70">診断で確認した根拠経路だけを使う比較です。推理をやり直す機能ではなく、候補がなくなっても安全の確認にはなりません。</p>
+        <p className="mt-1 text-sm text-ink/70">選んだ投稿が無かったら、それぞれの推定に根拠が残るかを見ます。診断で見つけた根拠の組み合わせだけで比べるので、ここで推定が消えても、ほかの方法で推定されないとは限りません。</p>
       </div>
       <fieldset className="space-y-2">
-        <legend className="font-bold">仮に外す投稿を選ぶ（最大3件）</legend>
-        {validSuggestions.length === 0 && <p className="text-sm text-ink/70">現在の候補には3件以内で推定を崩す組合せがありません。別の根拠投稿を選んで比較できます。</p>}
+        <legend className="font-bold">外してみる投稿を選ぶ（3件まで）</legend>
+        {validSuggestions.length === 0 && <p className="text-sm text-ink/70">3件以内で推定が崩れる組み合わせは見つかりませんでした。「ほかの根拠の投稿」から選んで比べられます。</p>}
         {validSuggestions.map((postId) => postChoice(postId, true))}
         {otherEvidencePosts.length > 0 && <details className="rounded border border-ink/20 px-3 py-2">
-          <summary className="cursor-pointer font-bold">ほかの根拠投稿 ({otherEvidencePosts.length})</summary>
+          <summary className="cursor-pointer font-bold">ほかの根拠の投稿（{otherEvidencePosts.length} 件）</summary>
           <ul className="mt-2 space-y-2">{otherEvidencePosts.map((postId) => <li key={postId}>{postChoice(postId, false)}</li>)}</ul>
         </details>}
       </fieldset>
       <div className="grid gap-4 sm:grid-cols-2">
-        <section aria-label="仮除外後も根拠経路が残る推定" className="space-y-2">
-          <h5 className="font-bold">仮除外後も支持される推定 ({after.length})</h5>
-          {after.length === 0 ? <p className="text-sm text-ink/70">残る完全な根拠経路はありません。</p> : after.map((claim) => (
+        <section aria-label="外しても根拠が残る推定" className="space-y-2">
+          <h5 className="font-bold">外しても根拠が残る推定（{after.length}）</h5>
+          {after.length === 0 ? <p className="text-sm text-ink/70">根拠が残る推定はありません。</p> : after.map((claim) => (
             <article key={claim.attribute} className="rounded border border-ink/20 p-3 text-sm">
               <p className="font-bold">{PROFILE_ATTRIBUTE_CATALOG[claim.attribute].label}：{claim.value}</p>
-              <p className="mt-1 text-xs text-ink/70">残る完全な根拠経路：{claim.evidence_paths?.length ?? 0} 件</p>
+              <p className="mt-1 text-xs text-ink/70">残る根拠の組み合わせ：{claim.evidence_paths?.length ?? 0} 通り</p>
               {(claim.evidence_paths ?? []).slice(0, 1).map((path) => (
-                <ul key="example-path" aria-label="残る根拠経路の例" className="mt-2 list-disc pl-5 text-xs">
+                <ul key="example-path" aria-label="残る根拠の例" className="mt-2 list-disc pl-5 text-xs">
                   {path.evidence.map((reference) => <li key={evidenceKey(reference)}>{evidenceLabel(reference, clues, webFacts)}{reference.post_id ? `（投稿 ${postNumbers.get(reference.post_id) ?? "?"}）` : ""}</li>)}
                 </ul>
               ))}
             </article>
           ))}
-          {notCompared.length > 0 && <p className="text-xs text-ink/60">根拠経路が型に含まれない {notCompared.length} 件は比較できません。</p>}
+          {notCompared.length > 0 && <p className="text-xs text-ink/60">根拠の組み合わせが記録されていない {notCompared.length} 件は、ここでは比べられません。</p>}
         </section>
-        <section aria-label="仮除外で支持されなくなる推定" className="space-y-2">
-          <h5 className="font-bold">完全な根拠経路がなくなる推定 ({broken.length})</h5>
-          {broken.length === 0 ? <p className="text-sm text-ink/70">選んだ投稿を仮に外しても、既知の経路は残ります。</p> : broken.map((claim) => (
+        <section aria-label="外すと根拠がなくなる推定" className="space-y-2">
+          <h5 className="font-bold">外すと根拠がなくなる推定（{broken.length}）</h5>
+          {broken.length === 0 ? <p className="text-sm text-ink/70">選んだ投稿を外しても、どの推定にも根拠が残ります。</p> : broken.map((claim) => (
             <article key={claim.attribute} className="rounded border border-ink/20 p-3 text-sm">
               <p className="font-bold">{PROFILE_ATTRIBUTE_CATALOG[claim.attribute].label}：{claim.value}</p>
-              <p className="mt-1 text-xs">仮除外した投稿を含まない完全な経路は残りません。</p>
+              <p className="mt-1 text-xs">選んだ投稿なしでは、この推定を支える根拠がそろいません。</p>
             </article>
           ))}
           {uniquePieces.length > 0 && (
             <div className="rounded border border-ink/20 p-3 text-sm">
-              <p className="font-bold">残る個別の根拠</p>
-              <p className="text-xs text-ink/70">これらは一部の根拠で、単独では上の推定を支えません。</p>
+              <p className="font-bold">残っている根拠（これだけでは推定できないもの）</p>
+              <p className="text-xs text-ink/70">推定に使った根拠の一部です。これだけでは上の推定は成り立ちません。</p>
               <ul className="mt-2 list-disc pl-5 text-xs">
                 {uniquePieces.slice(0, 8).map(({ claim, reference }) => <li key={`${claim.attribute}:${evidenceKey(reference)}`}>
                   {PROFILE_ATTRIBUTE_CATALOG[claim.attribute].label}：{evidenceLabel(reference, clues, webFacts)}{reference.post_id ? `（投稿 ${postNumbers.get(reference.post_id) ?? "?"}）` : ""}
