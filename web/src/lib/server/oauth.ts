@@ -10,7 +10,14 @@ import {
 } from "@atproto/oauth-client-node";
 
 export const OAUTH_SCOPE = "atproto repo:app.bsky.feed.post?action=delete";
-export const OAUTH_TTL_SECONDS = 30 * 60;
+const DEFAULT_SESSION_TTL_MINUTES = 30;
+
+/** api と同じ SESSION_TTL_MINUTES（未設定・不正な値は30分）で OAuth のセッションを持つ秒数 */
+export function oauthTtlSeconds(): number {
+  const minutes = Number(process.env.SESSION_TTL_MINUTES);
+  const valid = Number.isInteger(minutes) && minutes > 0;
+  return (valid ? minutes : DEFAULT_SESSION_TTL_MINUTES) * 60;
+}
 export const START_COOKIE = "tkb_oauth_start";
 
 const memory = globalThis as typeof globalThis & {
@@ -91,7 +98,7 @@ export function getOAuthClient(): NodeOAuthClient {
         async set(key, value) {
           let expires = memory.tkbOAuthExpiries?.get(key);
           if (!expires || expires <= Date.now()) {
-            expires = Date.now() + OAUTH_TTL_SECONDS * 1000;
+            expires = Date.now() + oauthTtlSeconds() * 1000;
             memory.tkbOAuthExpiries?.set(key, expires);
           }
           memory.tkbOAuthSessions?.set(key, { value, expires });
@@ -112,7 +119,7 @@ export function forgetOAuthSession(did: string): void {
 }
 
 export function resetOAuthExpiry(did: string): void {
-  const expires = Date.now() + OAUTH_TTL_SECONDS * 1000;
+  const expires = Date.now() + oauthTtlSeconds() * 1000;
   memory.tkbOAuthExpiries?.set(did, expires);
   const item = memory.tkbOAuthSessions?.get(did);
   if (item) memory.tkbOAuthSessions?.set(did, { ...item, expires });

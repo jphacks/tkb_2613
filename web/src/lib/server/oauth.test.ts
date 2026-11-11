@@ -2,16 +2,47 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { POST as deletePost } from "@/app/%5F%5Finternal/oauth/delete/route";
-import { OAUTH_SCOPE, pendingStateMatches, validInternalSecret } from "@/lib/server/oauth";
+import {
+  OAUTH_SCOPE, oauthTtlSeconds, pendingStateMatches, resetOAuthExpiry, validInternalSecret,
+} from "@/lib/server/oauth";
 
 const memory = globalThis as typeof globalThis & {
   tkbOAuthStates?: Map<string, { value: { appState: string }; expires: number }>;
+  tkbOAuthSessions?: Map<string, { value: unknown; expires: number }>;
+  tkbOAuthExpiries?: Map<string, number>;
 };
 
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.useRealTimers();
   memory.tkbOAuthStates?.clear();
+  memory.tkbOAuthSessions?.clear();
+  memory.tkbOAuthExpiries?.clear();
+});
+
+describe("OAuth session lifetime", () => {
+  it("follows SESSION_TTL_MINUTES like the api", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-15T10:00:00Z"));
+    vi.stubEnv("SESSION_TTL_MINUTES", "60");
+    memory.tkbOAuthSessions?.set("did:plc:alice", { value: {}, expires: 0 });
+
+    resetOAuthExpiry("did:plc:alice");
+
+    const expected = Date.now() + 60 * 60 * 1000;
+    expect(oauthTtlSeconds()).toBe(60 * 60);
+    expect(memory.tkbOAuthExpiries?.get("did:plc:alice")).toBe(expected);
+    expect(memory.tkbOAuthSessions?.get("did:plc:alice")?.expires).toBe(expected);
+  });
+
+  it("falls back to 30 minutes when unset or invalid", () => {
+    vi.stubEnv("SESSION_TTL_MINUTES", undefined);
+    expect(oauthTtlSeconds()).toBe(30 * 60);
+    for (const value of ["", "0", "-5", "1.5", "abc"]) {
+      vi.stubEnv("SESSION_TTL_MINUTES", value);
+      expect(oauthTtlSeconds()).toBe(30 * 60);
+    }
+  });
 });
 
 describe("OAuth internal boundary", () => {
