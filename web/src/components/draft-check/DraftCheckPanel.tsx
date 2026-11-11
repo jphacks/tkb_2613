@@ -26,6 +26,18 @@ function AuthenticatedDraftCheckPanel() {
   useEffect(() => {
     return () => controller.current?.abort();
   }, []);
+  const photoTooLarge = (photo?.size ?? 0) > MAX_IMAGE_BYTES;
+  const submitDisabled = busy || (!text.trim() && !photo) || photoTooLarge;
+  const showSubmitHint = !busy && !text.trim() && !photo;
+
+  function clearPhoto() {
+    setPhoto(undefined);
+    setResult(null);
+    if (photoInput.current) {
+      photoInput.current.value = "";
+      photoInput.current.focus();
+    }
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -67,27 +79,50 @@ function AuthenticatedDraftCheckPanel() {
             className="w-full rounded-sm border-2 border-ink bg-paper-deep px-3 py-2 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-seeker"
           />
         </label>
-        <div className="block space-y-2">
-          <label className="block space-y-2">
-            <span className="block font-bold">写真（1枚まで）</span>
-            <input
-              ref={photoInput}
-              type="file"
-              accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
-              aria-describedby="draft-photo-help"
-              onChange={(event) => { setPhoto(event.target.files?.[0]); setResult(null); }}
-              className="block max-w-full text-sm"
-            />
-          </label>
+        <div className="space-y-2">
+          <span id="draft-photo-label" className="block font-bold">写真（1枚まで）</span>
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="cursor-pointer rounded-sm border-2 border-ink bg-paper px-4 py-2 text-sm font-bold transition-transform hover:-translate-y-0.5 focus-within:outline-3 focus-within:outline-offset-2 focus-within:outline-seeker active:translate-y-0">
+              写真を選ぶ
+              <input
+                ref={photoInput}
+                type="file"
+                accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
+                aria-labelledby="draft-photo-label"
+                aria-describedby="draft-photo-status draft-photo-help"
+                onChange={(event) => { setPhoto(event.target.files?.[0]); setResult(null); }}
+                className="sr-only"
+              />
+            </label>
+            <span id="draft-photo-status" className="min-w-0 break-all text-sm text-ink/70">
+              {photo ? photo.name : "選んでいません"}
+            </span>
+            {photo && (
+              <button
+                type="button"
+                onClick={clearPhoto}
+                className="rounded-sm px-2 py-1 text-sm underline underline-offset-2 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-seeker"
+              >
+                写真を外す
+              </button>
+            )}
+          </div>
           <span id="draft-photo-help" className="block text-xs text-ink/60">20MBまで。写真は確認中だけメモリ上で扱います。</span>
+          {photoTooLarge && <p role="alert" className="text-sm text-seeker">写真が20MBを超えています。別の写真を選んでください。</p>}
         </div>
-        <button
-          type="submit"
-          disabled={busy || (!text.trim() && !photo) || (photo?.size ?? 0) > MAX_IMAGE_BYTES}
-          className="rounded-sm bg-seeker px-5 py-2.5 font-bold text-paper shadow-[3px_3px_0_var(--color-ink)] disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {busy ? "投稿を照合しています…" : "過去の投稿と照合"}
-        </button>
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="submit"
+            disabled={submitDisabled}
+            aria-describedby={showSubmitHint ? "draft-submit-hint" : undefined}
+            className="rounded-sm border-2 border-transparent bg-seeker px-5 py-2.5 font-bold text-paper shadow-[3px_3px_0_var(--color-ink)] disabled:cursor-not-allowed disabled:border-dashed disabled:border-ink/40 disabled:bg-transparent disabled:text-ink/50 disabled:shadow-none"
+          >
+            {busy ? "投稿を照合しています…" : "過去の投稿と照合"}
+          </button>
+          {showSubmitHint && (
+            <span id="draft-submit-hint" className="text-sm text-ink/60">本文か写真を入れると照合できます</span>
+          )}
+        </div>
       </form>
       {error && <p role="alert" className="border-l-4 border-seeker bg-seeker/10 px-4 py-3">{error}</p>}
       {result && (

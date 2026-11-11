@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SessionProvider, useSession } from "@/components/session/SessionProvider";
-import { checkDraft, createSession, deleteSession, getSession } from "@/lib/api";
+import { checkDraft, createSession, deleteSession, getSession, MAX_IMAGE_BYTES } from "@/lib/api";
 import type { DraftCheckResponse } from "@/types/draftCheck";
 
 import { DraftCheckPanel } from "./DraftCheckPanel";
@@ -122,5 +122,42 @@ describe("DraftCheckPanel", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("下書きを確認できませんでした");
     expect(screen.queryByText("internal detail")).not.toBeInTheDocument();
+  });
+
+  it("shows a Japanese photo picker with the chosen file name and lets the user clear it", async () => {
+    vi.mocked(getSession).mockResolvedValue(ALICE);
+    render(<SessionProvider><DraftCheckPanel /></SessionProvider>);
+
+    const input = await screen.findByLabelText("写真（1枚まで）");
+    expect(input).toHaveAttribute("type", "file");
+    expect(screen.getByText("写真を選ぶ")).toBeInTheDocument();
+    expect(screen.getByText("選んでいません")).toBeInTheDocument();
+    expect(screen.getByText("本文か写真を入れると照合できます")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "過去の投稿と照合" })).toBeDisabled();
+
+    const photo = new File(["photo"], "draft-photo.png", { type: "image/png" });
+    fireEvent.change(input, { target: { files: [photo] } });
+    expect(screen.getByText("draft-photo.png")).toBeInTheDocument();
+    expect(screen.queryByText("選んでいません")).not.toBeInTheDocument();
+    expect(screen.queryByText("本文か写真を入れると照合できます")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "過去の投稿と照合" })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "写真を外す" }));
+    expect(screen.getByText("選んでいません")).toBeInTheDocument();
+    expect(input).toHaveValue("");
+    expect(screen.queryByRole("button", { name: "写真を外す" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "過去の投稿と照合" })).toBeDisabled();
+  });
+
+  it("explains when the chosen photo is over the size limit", async () => {
+    vi.mocked(getSession).mockResolvedValue(ALICE);
+    render(<SessionProvider><DraftCheckPanel /></SessionProvider>);
+
+    const big = new File(["x"], "big.png", { type: "image/png" });
+    Object.defineProperty(big, "size", { value: MAX_IMAGE_BYTES + 1 });
+    fireEvent.change(await screen.findByLabelText("写真（1枚まで）"), { target: { files: [big] } });
+
+    expect(screen.getByRole("alert")).toHaveTextContent("写真が20MBを超えています");
+    expect(screen.getByRole("button", { name: "過去の投稿と照合" })).toBeDisabled();
   });
 });
