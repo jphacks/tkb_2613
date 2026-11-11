@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { InvalidDiagnoseEventError, toDiagnoseEvent } from "./diagnose";
+import { InvalidDiagnoseEventError, isDiagnosisSnapshot, toDiagnoseEvent } from "./diagnose";
 
 const POST = {
   post_id: "at://did:plc:xxxx/app.bsky.feed.post/3kxxxx",
@@ -26,6 +26,30 @@ const CONCLUSION = {
   clue_indices: [0],
   note: "",
 };
+
+describe("isDiagnosisSnapshot", () => {
+  const snapshot = {
+    posts: [POST],
+    clues: [CLUE],
+    conclusions: [CONCLUSION],
+    plan: { delete: [], broken: [], after: [CONCLUSION], posts: [] },
+  };
+
+  it("accepts a snapshot without deleted posts (shared results do not have them)", () => {
+    expect(isDiagnosisSnapshot(snapshot)).toBe(true);
+  });
+
+  it("accepts deleted posts that were part of the diagnosis", () => {
+    expect(isDiagnosisSnapshot({ ...snapshot, deleted: [POST.post_id] })).toBe(true);
+    expect(isDiagnosisSnapshot({ ...snapshot, deleted: [] })).toBe(true);
+  });
+
+  it("rejects deleted posts that were not diagnosed or are not strings", () => {
+    expect(isDiagnosisSnapshot({ ...snapshot, deleted: ["at://did:plc:other/app.bsky.feed.post/3k"] })).toBe(false);
+    expect(isDiagnosisSnapshot({ ...snapshot, deleted: [1] })).toBe(false);
+    expect(isDiagnosisSnapshot({ ...snapshot, deleted: null })).toBe(false);
+  });
+});
 
 describe("toDiagnoseEvent", () => {
   it("reads a clues event", () => {

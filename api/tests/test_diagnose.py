@@ -87,6 +87,7 @@ def test_completed_diagnosis_can_be_read_again_only_in_its_session(client: TestC
     data = restored.json()
     assert len(data["posts"]) == DEMO_POST_COUNT
     assert len(data["clues"]) > 0
+    assert data["deleted"] == []
     assert data["conclusions"] == _events(result.text)[-3][1]["conclusions"]
     assert data["plan"] == _events(result.text)[-2][1]
     streamed_claims = _events(result.text)[-3][1]

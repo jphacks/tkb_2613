@@ -98,6 +98,7 @@ export const messages = {
     searching: (searched: number, posts: number) => `手がかりを探しています…（${searched} / ${posts} 件）`,
     done: (posts: number) => `${posts} 件の投稿を読みました`,
     failed: "診断できませんでした",
+    deletedBadge: "削除済み",
     postsLabel: "読んだ投稿",
   },
   /** 診断の間の画面 */

@@ -97,6 +97,33 @@ describe("DiagnosePanel", () => {
     expect(diagnose).not.toHaveBeenCalled();
   });
 
+  it("marks posts deleted after the diagnosis and keeps them out of the delete candidates", async () => {
+    const gone = post(1, "消した投稿");
+    const kept = post(2, "残った投稿");
+    vi.mocked(getSession).mockResolvedValue(ALICE);
+    vi.mocked(getDiagnosis).mockResolvedValue({
+      posts: [gone, kept],
+      clues: [clue(gone.post_id, "毎週火曜はジム"), clue(kept.post_id, "夜勤明け")],
+      deleted: [gone.post_id],
+      conclusions: [{ rule: "R3", attribute: "routine", value: "夜勤明け", clue_indices: [1], note: "" }],
+      // api は消した投稿を候補から除いて返す。画面でも念のため外す
+      plan: {
+        delete: [kept.post_id], broken: ["routine"], after: [],
+        posts: [{ post_id: gone.post_id, broken: ["routine"] }, { post_id: kept.post_id, broken: ["routine"] }],
+      },
+    });
+    render(<SessionProvider><DiagnosePanel /></SessionProvider>);
+
+    const candidates = await screen.findByRole("list", { name: messages.risky.listLabel });
+    expect(within(candidates).getAllByRole("listitem")).toHaveLength(1);
+    expect(candidates).toHaveTextContent("残った投稿");
+    expect(candidates).not.toHaveTextContent("消した投稿");
+
+    const items = within(screen.getByRole("list", { name: d.postsLabel })).getAllByRole("listitem");
+    expect(items[0]).toHaveTextContent(d.deletedBadge);
+    expect(items[1]).not.toHaveTextContent(d.deletedBadge);
+  });
+
   it("shows nothing when logged out", async () => {
     vi.mocked(getSession).mockResolvedValue(null);
     const { container } = render(
