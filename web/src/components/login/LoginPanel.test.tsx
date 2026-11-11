@@ -51,6 +51,27 @@ describe("LoginPanel", () => {
     expect(screen.queryByLabelText(t.password)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Bluesky でログイン" })).toBeInTheDocument();
   });
+  it("shows the OAuth failure from the callback and removes it from the URL", async () => {
+    vi.mocked(getFeatures).mockResolvedValue({ share_enabled: false, auth_mode: "oauth" });
+    window.history.replaceState(null, "", "/?auth_error=1");
+    try {
+      await renderLoggedOut();
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(t.oauthFailed);
+      expect(window.location.search).toBe("");
+      expect(window.location.pathname).toBe("/");
+    } finally {
+      window.history.replaceState(null, "", "/");
+    }
+  });
+
+  it("does not show the OAuth failure without the query", async () => {
+    vi.mocked(getFeatures).mockResolvedValue({ share_enabled: false, auth_mode: "oauth" });
+    await renderLoggedOut();
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("shows a status while checking the existing session", () => {
     vi.mocked(getSession).mockReturnValue(new Promise(() => {}));
     render(

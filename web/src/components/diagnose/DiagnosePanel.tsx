@@ -58,6 +58,11 @@ function statusText(phase: Phase, postCount: number, searchedCount: number): str
   }
 }
 
+/** api が 401（セッションの時間切れ）を返したか */
+function isUnauthorized(e: unknown): boolean {
+  return e instanceof ApiError && e.kind === "unauthorized";
+}
+
 interface DiagnosePanelProps {
   /** 結果を叩きつけたら true、診断をやり直したら false。ホームがタイトルをしまうのに使う */
   onRevealedChange?: (revealed: boolean) => void;
@@ -68,7 +73,7 @@ interface DiagnosePanelProps {
  * 診断の結果は画面のメモリにだけ置き、保存しない。
  */
 export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
-  const { state: session } = useSession();
+  const { state: session, expire } = useSession();
   const [posts, setPosts] = useState<readonly Post[]>([]);
   const [found, setFound] = useState<Readonly<Record<string, PostClues>>>({});
   const [result, setResult] = useState<Result | null>(null);
@@ -118,11 +123,12 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
         setPhase({ kind: "done", postsSeen: snapshot.posts.length });
         onRevealedChange?.(true);
       })
-      .catch(() => {
-        // 復元に失敗しても、診断ボタンからやり直せる。
+      .catch((e: unknown) => {
+        // 時間切れはログイン画面に戻す。それ以外の失敗は、診断ボタンからやり直せる。
+        if (!current.signal.aborted && isUnauthorized(e)) expire();
       });
     return () => current.abort();
-  }, [sessionDid, onRevealedChange]);
+  }, [sessionDid, onRevealedChange, expire]);
 
   // 結果への切り替えでヘッダーとローディング画面の高さが変わる。描画後に先頭へ戻す。
   useEffect(() => {
@@ -181,6 +187,10 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
       }
     } catch (e) {
       if (current.signal.aborted) return;
+      if (isUnauthorized(e)) {
+        expire();
+        return;
+      }
       setPhase({ kind: "error", message: e instanceof ApiError ? e.message : t.failed });
     }
   }
@@ -246,7 +256,7 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
       )}
 
       {!busy && result && risky && (
-        <RiskyPosts posts={posts} risky={risky} clues={result.clues} clueCount={result.clues.length} onSimulated={setSimulation} />
+        <RiskyPosts posts={posts} risky={risky} clues={result.clues} clueCount={result.clues.length} onSimulated={setSimulation} onSessionExpired={expire} />
       )}
       {!busy && result && <ResultShare />}
       {!busy && result && controls}

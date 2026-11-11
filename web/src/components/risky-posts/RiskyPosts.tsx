@@ -29,6 +29,8 @@ interface RiskyPostsProps {
   clueCount: number;
   /** 消したらどうなるか・実際に消した結果。元に戻したり選び直したりしたら null */
   onSimulated: (simulation: Simulation | null) => void;
+  /** api が 401（セッションの時間切れ）を返したときに呼ぶ。ログイン画面に戻すのは呼び出し側 */
+  onSessionExpired?: () => void;
 }
 
 function labelsOf(attributes: readonly string[]): string {
@@ -45,7 +47,7 @@ function excerpt(text: string): string {
  * 結果は捜査ボードに渡して、崩れた項目を「不明」にする。
  * 試したあと、確認ダイアログで OK したときだけ Bluesky から実際に消す（もういいよ）。消したあとは選び直せない。
  */
-export function RiskyPosts({ posts, risky, clues = [], clueCount, onSimulated }: RiskyPostsProps) {
+export function RiskyPosts({ posts, risky, clues = [], clueCount, onSimulated, onSessionExpired }: RiskyPostsProps) {
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set(risky.map((r) => r.post_id)));
   const [result, setResult] = useState<Simulation | null>(null);
   const [pending, setPending] = useState(false);
@@ -89,6 +91,13 @@ export function RiskyPosts({ posts, risky, clues = [], clueCount, onSimulated }:
     });
   }
 
+  /** 401 なら呼び出し側に知らせて true（エラー文は出さない）。呼び出し側がいなければ false でエラー文を出す */
+  function expiredBy(e: unknown): boolean {
+    if (!(e instanceof ApiError) || e.kind !== "unauthorized" || !onSessionExpired) return false;
+    onSessionExpired();
+    return true;
+  }
+
   async function confirmDelete() {
     if (!result) return;
     setDeleting(true);
@@ -101,6 +110,7 @@ export function RiskyPosts({ posts, risky, clues = [], clueCount, onSimulated }:
       setConfirming(false);
     } catch (e) {
       setConfirming(false);
+      if (expiredBy(e)) return;
       setError(e instanceof ApiError ? e.message : t.deleteFailed);
     } finally {
       setDeleting(false);
@@ -123,6 +133,7 @@ export function RiskyPosts({ posts, risky, clues = [], clueCount, onSimulated }:
       onSimulated(simulation);
     } catch (e) {
       if (current.signal.aborted) return;
+      if (expiredBy(e)) return;
       setError(e instanceof ApiError ? e.message : t.failed);
     } finally {
       if (!current.signal.aborted) setPending(false);
