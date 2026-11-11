@@ -24,11 +24,14 @@ const memory = globalThis as typeof globalThis & {
   tkbOAuthStates?: Map<string, { value: NodeSavedState; expires: number }>;
   tkbOAuthSessions?: Map<string, { value: NodeSavedSession; expires: number }>;
   tkbOAuthExpiries?: Map<string, number>;
+  /** 失効の処理中の DID。この間だけ、期限切れのトークンを SDK の revoke に渡せる */
+  tkbOAuthRevoking?: Set<string>;
   tkbOAuthClient?: NodeOAuthClient;
 };
 memory.tkbOAuthStates ??= new Map();
 memory.tkbOAuthSessions ??= new Map();
 memory.tkbOAuthExpiries ??= new Map();
+memory.tkbOAuthRevoking ??= new Set();
 
 export function authMode(): "oauth" | "app_password" {
   return process.env.AUTH_MODE === "oauth" ? "oauth" : "app_password";
@@ -90,7 +93,7 @@ export function getOAuthClient(): NodeOAuthClient {
       sessionStore: {
         async get(key) {
           const item = memory.tkbOAuthSessions?.get(key);
-          if (item && item.expires > Date.now()) return item.value;
+          if (item && (item.expires > Date.now() || memory.tkbOAuthRevoking?.has(key))) return item.value;
           memory.tkbOAuthSessions?.delete(key);
           memory.tkbOAuthExpiries?.delete(key);
           return undefined;
@@ -118,11 +121,38 @@ export function forgetOAuthSession(did: string): void {
   memory.tkbOAuthExpiries?.delete(did);
 }
 
+/**
+ * Bluesky 側でトークンを失効させてから、メモリから消す。失効に失敗しても（認可サーバーに届かないなど）
+ * メモリからは必ず消し、例外は出さない（ログアウトを止めないため。トークンには Bluesky 側の期限もある）。
+ * DID もトークンも外に出さない。
+ */
+export async function revokeOAuthSession(did: string): Promise<void> {
+  memory.tkbOAuthRevoking?.add(did);
+  try {
+    await getOAuthClient().revoke(did);
+  } catch {
+    // 失効できなくても、下でメモリからは消す
+  } finally {
+    memory.tkbOAuthRevoking?.delete(did);
+    forgetOAuthSession(did);
+  }
+}
+
+/** 期限が来たら、ログアウトと同じく失効させる。その前に再ログインして期限が変わっていれば何もしない */
+function scheduleExpiry(did: string, expires: number): void {
+  const timer = setTimeout(() => {
+    if (memory.tkbOAuthExpiries?.get(did) !== expires) return;
+    void revokeOAuthSession(did);
+  }, Math.max(0, expires - Date.now()));
+  timer.unref?.();
+}
+
 export function resetOAuthExpiry(did: string): void {
   const expires = Date.now() + oauthTtlSeconds() * 1000;
   memory.tkbOAuthExpiries?.set(did, expires);
   const item = memory.tkbOAuthSessions?.get(did);
   if (item) memory.tkbOAuthSessions?.set(did, { ...item, expires });
+  scheduleExpiry(did, expires);
 }
 
 export function pendingStateMatches(oauthState: string | null, browserState: string | undefined): boolean {

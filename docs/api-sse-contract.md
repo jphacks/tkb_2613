@@ -22,7 +22,7 @@
 | `POST /__internal/oauth/complete` | Next.js からのみ使う。共有秘密のヘッダーがない場合は403。確認済み DID と handle で api セッションを作る。 |
 | `POST /__internal/oauth/delete`・`drop` | api からのみ使う。共有秘密のヘッダーがない場合は403。削除前に api は診断済み・本人投稿を確認し、Next.js も DID と AT URI を再確認する。 |
 
-OAuth 時の投稿取得は、セッション DID に限定して公開 AppView の `getAuthorFeed` を使う。Cookie と共有秘密を持つ内部経路は公開しない。ログアウト時は両プロセスのメモリからセッションを消す。
+OAuth 時の投稿取得は、セッション DID に限定して公開 AppView の `getAuthorFeed` を使う。Cookie と共有秘密を持つ内部経路は公開しない。ログアウト時は両プロセスのメモリからセッションを消す。Next.js は消す前に SDK の `revoke` で Bluesky 側のトークンを失効させる（失効に失敗してもメモリからは消し、ログアウトは204）。`SESSION_TTL_MINUTES` の期限が来たときも同じく失効させてから消す。
 
 | メソッド・パス | リクエスト | 成功応答 | 実装上の注意 |
 | --- | --- | --- | --- |
