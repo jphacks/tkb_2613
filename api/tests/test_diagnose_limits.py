@@ -24,6 +24,9 @@ from tkb_common.schemas import Post
 from tkb_detect.extract import Extractor
 from tkb_detect.vlm_client import VlmClient, VlmConfig
 
+# ブラウザは POST・DELETE に Origin を付ける（元に戻せない操作は Origin を確かめる）
+BROWSER_ORIGIN = {"Origin": "http://localhost:3000"}
+
 PASSWORD = "correct horse battery staple"  # noqa: S105  テスト用の架空の値
 FIXTURE = Path(__file__).resolve().parents[2] / "eval" / "fixtures" / "demo_observations.json"
 REAL_DID = "did:plc:me00000000000000000000"
@@ -55,7 +58,7 @@ def _client(settings: Settings, now: datetime = NOW) -> TestClient:
     app = create_app(settings)
     app.dependency_overrides[get_settings] = lambda: settings
     app.dependency_overrides[get_clock] = lambda: lambda: now
-    return TestClient(app)
+    return TestClient(app, headers=BROWSER_ORIGIN)
 
 
 def _login(client: TestClient) -> None:

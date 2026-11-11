@@ -25,6 +25,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from tkb_api import bluesky
 from tkb_api.bluesky import BlueskySession, PostsDeleter, SessionStore
 from tkb_api.config import Settings, get_settings
+from tkb_api.origin import same_origin
 from tkb_api.pipeline import simulate_json
 from tkb_api.routes.diagnose import get_gazetteer
 from tkb_api.routes.session import current_session, current_session_id, get_session_store
@@ -72,7 +73,7 @@ async def _delete(
     return await delete_posts(session.client, session.did, post_ids)
 
 
-@router.post("/delete")
+@router.post("/delete", dependencies=[Depends(same_origin)])
 async def delete(
     body: DeleteRequest,
     store: Annotated[SessionStore, Depends(get_session_store)],

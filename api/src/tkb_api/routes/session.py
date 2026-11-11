@@ -15,6 +15,7 @@ from tkb_api import bluesky
 from tkb_api.bluesky import BlueskySession, LoginFn, LoginResult, SessionStore
 from tkb_api.config import Settings, get_settings
 from tkb_api.errors import BLUESKY_BUSY_MESSAGE, refusal
+from tkb_api.origin import same_origin
 from tkb_api.schemas import SessionRequest, SessionResponse
 
 router = APIRouter(prefix="/api")
@@ -103,7 +104,9 @@ def read_session(session: Annotated[BlueskySession, Depends(current_session)]) -
     return SessionResponse(handle=session.handle, did=session.did)
 
 
-@router.delete("/session", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/session", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(same_origin)]
+)
 async def delete_session(
     response: Response,
     settings: Annotated[Settings, Depends(get_settings)],

@@ -19,6 +19,7 @@ from pydantic import BaseModel, ConfigDict
 from tkb_api.config import Settings
 from tkb_api.errors import refusal
 from tkb_api.limits import AlreadyRunningError, BusyError, DailyLimitError, DiagnoseLimiter, Lease
+from tkb_api.origin import check_origin
 from tkb_api.pipeline import (
     diagnose_events,
     plan_json,
@@ -191,8 +192,7 @@ def _acquire_model_slot(request: Request) -> Lease:
 
 
 def _origin(request: Request) -> None:
-    if request.headers.get("origin") != _settings(request).x_public_origin:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "同じサイトから操作してください")
+    check_origin(request, [_settings(request).x_public_origin])
 
 
 def _live_ready(settings: Settings) -> bool:

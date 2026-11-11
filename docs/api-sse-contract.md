@@ -10,6 +10,8 @@
 - `MOCK_MODE=1` が既定。モックログインは架空DIDを使い、Blueskyへ接続しない。モック診断は `eval/fixtures/demo_observations.json` を再生し、モデルにも接続しない。
 - `MOCK_MODE=0` の診断では、セッションの DID の本人投稿だけを新しい順に最大 `MAX_POSTS` 件（既定30、設定上限100）取得する。
 
+- 元に戻せない操作（`POST /api/delete`・`DELETE /api/session`・`POST`/`DELETE /api/result-link`）は、`Origin` ヘッダーが `CORS_ORIGINS` のどれかと同じ要求だけを受け付け、ほかは403「同じサイトから操作してください」（`Origin` がない要求も403）。Cookie の SameSite=Lax に加えた確認で、X・Threads の `/api/x/*`・`/api/threads/*` も同じ関数（`tkb_api.origin.check_origin`）でそれぞれの公開オリジンを確かめる。
+
 ## エンドポイント一覧
 
 ### OAuth 経路（`AUTH_MODE=oauth` の場合）

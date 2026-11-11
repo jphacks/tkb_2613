@@ -21,6 +21,7 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, ConfigDict
 
 from tkb_api.config import Settings
+from tkb_api.origin import check_origin
 from tkb_api.pipeline import (
     diagnose_events,
     load_gazetteer,
@@ -167,8 +168,7 @@ def _store(request: Request) -> ThreadsSessionStore:
 
 
 def _origin(request: Request) -> None:
-    if request.headers.get("origin") != _settings(request).threads_public_origin:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "同じサイトから操作してください")
+    check_origin(request, [_settings(request).threads_public_origin])
 
 
 def _live_ready(settings: Settings) -> bool:
