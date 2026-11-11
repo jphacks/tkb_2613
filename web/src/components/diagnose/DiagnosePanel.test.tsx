@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { LoginPanel } from "@/components/login/LoginPanel";
 import { SessionProvider } from "@/components/session/SessionProvider";
 import { ApiError, diagnose, getDiagnosis, getSession, simulate } from "@/lib/api";
 import { messages } from "@/lib/messages";
@@ -21,7 +22,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
     getDiagnosis: vi.fn(),
     getSession: vi.fn(),
     simulate: vi.fn(),
-    getFeatures: vi.fn(async () => ({ share_enabled: false })),
+    getFeatures: vi.fn(async () => ({ share_enabled: false, auth_mode: "app_password" })),
   };
 });
 
@@ -95,6 +96,40 @@ describe("DiagnosePanel", () => {
     expect(screen.getAllByText("保存済みの投稿")).toHaveLength(2);
     expect(screen.getByRole("list", { name: messages.risky.listLabel })).toBeInTheDocument();
     expect(diagnose).not.toHaveBeenCalled();
+  });
+
+  it("goes back to the login screen and says the session expired when diagnose returns 401", async () => {
+    vi.mocked(getSession).mockResolvedValue(ALICE);
+    vi.mocked(getDiagnosis).mockResolvedValue(null);
+    vi.mocked(diagnose).mockImplementation(async function* () {
+      throw new ApiError("unauthorized", messages.errors.sessionExpired, 401);
+    });
+    render(
+      <SessionProvider>
+        <LoginPanel />
+        <DiagnosePanel />
+      </SessionProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: d.start }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(messages.login.expired);
+    expect(screen.getByRole("form", { name: messages.login.formLabel })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: d.start })).not.toBeInTheDocument();
+  });
+
+  it("goes back to the login screen when restoring the diagnosis returns 401", async () => {
+    vi.mocked(getSession).mockResolvedValue(ALICE);
+    vi.mocked(getDiagnosis).mockRejectedValue(new ApiError("unauthorized", messages.errors.sessionExpired, 401));
+    render(
+      <SessionProvider>
+        <LoginPanel />
+        <DiagnosePanel />
+      </SessionProvider>,
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(messages.login.expired);
+    expect(screen.getByRole("form", { name: messages.login.formLabel })).toBeInTheDocument();
   });
 
   it("shows nothing when logged out", async () => {
