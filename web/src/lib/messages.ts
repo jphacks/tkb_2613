@@ -196,6 +196,9 @@ export const messages = {
     result: (deleted: number, broken: number) =>
       broken > 0 ? `${deleted} 件消すと、${broken} つの項目が不明になります` : `${deleted} 件消しても、推定は崩れません`,
     safe: "重要な推定と直接写った手がかりがなくなりました",
+    /** 消す前後の、推定できた項目の数 */
+    countHeading: "推定できた項目",
+    countLabel: (before: number, after: number) => `推定できた項目は ${before} から ${after} になります`,
     none: "重要な推定や直接写った手がかりを減らせる投稿は見つかりませんでした",
     failed: "推理し直せませんでした",
     /** ここから下は、Bluesky から実際に消すとき */
