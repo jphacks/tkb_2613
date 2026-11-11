@@ -1,0 +1,202 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 900" width="1440" height="900" role="img" aria-labelledby="t d" xmlns:c2pa="http://c2pa.org/manifest">
+  <title id="t">みーつけた の本番構成</title>
+  <desc id="d">ブラウザから CloudFront と AWS WAF を通り、公開IPを持たないアプリの EC2（Next.js と FastAPI）に届く。写真と本文の解析は同じ VPC の GPU の EC2（vLLM）だけで行う。Bluesky へは NAT Gateway から出る。運用は Terraform、SSM、Secrets Manager、EventBridge Scheduler、AWS Budgets。</desc>
+  <defs>
+    <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">
+      <path d="M24 0H0V24" fill="none" stroke="#10204d" stroke-width="1"/>
+    </pattern>
+    <pattern id="grid5" width="120" height="120" patternUnits="userSpaceOnUse">
+      <path d="M120 0H0V120" fill="none" stroke="#152a5e" stroke-width="1"/>
+    </pattern>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#ef2b36"/>
+    </marker>
+    <marker id="arrg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#8fa6d8"/>
+    </marker>
+    <style>
+      .jp{font-family:"Noto Sans JP","Noto Sans CJK JP","Hiragino Sans","Yu Gothic UI","Meiryo",sans-serif}
+      .mono{font-family:"JetBrains Mono","SFMono-Regular",Menlo,Consolas,"DejaVu Sans Mono",monospace}
+      .h1{font-size:30px;font-weight:700;fill:#eef2fc}
+      .lead{font-size:15px;fill:#9fb0d6}
+      .name{font-size:18px;font-weight:700;fill:#eef2fc}
+      .spec{font-size:13px;fill:#9fb0d6}
+      .note{font-size:13px;fill:#c9d4ee}
+      .bound{font-size:13px;fill:#7f95c9}
+      .num{font-size:13px;font-weight:700;fill:#071233}
+      .lbl{font-size:12.5px;fill:#ffb3b7}
+      .lblg{font-size:12.5px;fill:#8fa6d8}
+      .tag{font-size:12px;fill:#ffd2d4}
+      .card{fill:#0b1940;stroke:#6f86bf;stroke-width:1.2}
+      .card2{fill:#0e1f4f;stroke:#8fa6d8;stroke-width:1.2}
+    </style>
+  </defs>
+
+  <!-- 地 -->
+  <rect width="1440" height="900" fill="#071233"/>
+  <rect width="1440" height="900" fill="url(#grid)"/>
+  <rect width="1440" height="900" fill="url(#grid5)"/>
+
+  <!-- 表題 -->
+  <text x="40" y="58" class="jp h1">みーつけた の本番構成</text>
+  <text x="40" y="86" class="jp lead">外から届くのは CloudFront だけ。サーバーには公開 IP も SSH もなく、写真の解析は自分たちの GPU の中で終わる。</text>
+
+  <!-- ブラウザ -->
+  <rect x="40" y="352" width="150" height="96" rx="6" class="card2"/>
+  <text x="62" y="392" class="jp name">ブラウザ</text>
+  <text x="62" y="418" class="jp spec">利用者の端末</text>
+
+  <!-- AWS -->
+  <rect x="230" y="118" width="990" height="584" rx="10" fill="none" stroke="#3a5596" stroke-width="1.4" stroke-dasharray="7 6"/>
+  <text x="250" y="142" class="mono bound">AWS  us-east-1</text>
+
+  <!-- CloudFront + WAF -->
+  <rect x="262" y="230" width="214" height="340" rx="6" class="card"/>
+  <text x="282" y="266" class="jp name">CloudFront</text>
+  <text x="282" y="290" class="jp spec">HTTPS の入口、VPC オリジン</text>
+  <line x1="278" y1="310" x2="460" y2="310" stroke="#2c437e"/>
+  <text x="282" y="340" class="jp name">AWS WAF</text>
+  <g class="jp note">
+    <text x="282" y="370">IP の評判リストで遮断</text>
+    <text x="282" y="396">ログインの回数を制限</text>
+    <text x="282" y="422">診断の回数を制限</text>
+    <text x="282" y="448">全体の回数を制限</text>
+    <text x="282" y="474">内部の経路を遮断</text>
+    <text x="282" y="500">非公開の API を遮断</text>
+    <text x="282" y="526">緊急時の全遮断スイッチ</text>
+  </g>
+  <text x="282" y="554" class="jp spec">記録は件数だけ、中身は残さない</text>
+
+  <!-- VPC -->
+  <rect x="512" y="160" width="680" height="524" rx="8" fill="#0a173b" fill-opacity="0.55" stroke="#4a66a8" stroke-width="1.2"/>
+  <text x="530" y="184" class="mono bound">VPC  10.0.0.0/16</text>
+
+  <!-- public subnet / NAT -->
+  <rect x="540" y="200" width="300" height="96" rx="6" fill="none" stroke="#33508f" stroke-dasharray="4 4"/>
+  <text x="556" y="220" class="mono bound">public  10.0.0.0/24</text>
+  <rect x="556" y="232" width="268" height="50" rx="5" class="card"/>
+  <text x="572" y="263" class="jp name" style="font-size:16px">NAT Gateway</text>
+  <text x="700" y="263" class="jp spec">外へ出る唯一の口</text>
+
+  <!-- app subnet -->
+  <rect x="540" y="318" width="330" height="346" rx="6" fill="none" stroke="#33508f" stroke-dasharray="4 4"/>
+  <text x="556" y="338" class="mono bound">private app  10.0.1.0/24</text>
+  <rect x="556" y="350" width="298" height="298" rx="6" class="card"/>
+  <text x="574" y="380" class="jp name">アプリの EC2</text>
+  <text x="574" y="404" class="mono spec">t3.small  Docker Compose</text>
+  <g class="jp tag">
+    <rect x="574" y="416" width="132" height="26" rx="13" fill="#ef2b36" fill-opacity="0.16" stroke="#ef2b36" stroke-opacity="0.6"/>
+    <text x="590" y="434">公開 IP なし</text>
+    <rect x="714" y="416" width="70" height="26" rx="13" fill="#ef2b36" fill-opacity="0.16" stroke="#ef2b36" stroke-opacity="0.6"/>
+    <text x="727" y="434">SSH なし</text>
+  </g>
+
+  <rect x="574" y="454" width="262" height="66" rx="5" class="card2"/>
+  <text x="590" y="480" class="jp name" style="font-size:16px">Next.js</text>
+  <text x="680" y="480" class="mono spec">web :3000</text>
+  <text x="590" y="506" class="jp spec">画面、OAuth、/api の中継</text>
+
+  <rect x="574" y="544" width="262" height="94" rx="5" class="card2"/>
+  <text x="590" y="570" class="jp name" style="font-size:16px">FastAPI</text>
+  <text x="680" y="570" class="mono spec">api</text>
+  <text x="590" y="594" class="jp spec">投稿の取得、手がかり、推理</text>
+  <text x="590" y="618" class="jp spec">投稿と結果はメモリだけ</text>
+
+  <!-- gpu subnet -->
+  <rect x="896" y="318" width="276" height="346" rx="6" fill="none" stroke="#33508f" stroke-dasharray="4 4"/>
+  <text x="912" y="338" class="mono bound">private gpu  10.0.2.0/24</text>
+  <rect x="912" y="350" width="244" height="298" rx="6" class="card"/>
+  <text x="930" y="380" class="jp name">GPU の EC2</text>
+  <text x="930" y="404" class="mono spec">g6e.xlarge  L40S 48GB</text>
+
+  <rect x="930" y="544" width="208" height="94" rx="5" class="card2"/>
+  <text x="946" y="570" class="jp name" style="font-size:16px">vLLM</text>
+  <text x="1006" y="570" class="mono spec">:8000</text>
+  <text x="946" y="594" class="jp spec">写真と本文を読む VLM</text>
+  <text x="946" y="618" class="jp spec">第三者の AI には送らない</text>
+
+  <!-- 守りの札 -->
+  <g class="jp tag">
+    <rect x="930" y="424" width="132" height="26" rx="13" fill="#ef2b36" fill-opacity="0.16" stroke="#ef2b36" stroke-opacity="0.6"/>
+    <text x="946" y="442">公開 IP なし</text>
+    <rect x="930" y="460" width="164" height="26" rx="13" fill="#ef2b36" fill-opacity="0.16" stroke="#ef2b36" stroke-opacity="0.6"/>
+    <text x="946" y="478">アプリからの通信だけ</text>
+    <rect x="1070" y="424" width="70" height="26" rx="13" fill="#ef2b36" fill-opacity="0.16" stroke="#ef2b36" stroke-opacity="0.6"/>
+    <text x="1083" y="442">SSH なし</text>
+  </g>
+
+  <!-- Bluesky -->
+  <rect x="1262" y="196" width="150" height="116" rx="6" class="card2"/>
+  <text x="1282" y="234" class="jp name">Bluesky</text>
+  <text x="1282" y="260" class="jp spec">OAuth、PDS</text>
+  <text x="1282" y="282" class="jp spec">AppView、画像 CDN</text>
+
+  <!-- 経路（赤） -->
+  <g fill="none" stroke="#ef2b36" stroke-width="2.4" marker-end="url(#arr)">
+    <path d="M190 400H254"/>
+    <path d="M476 400H520Q540 400 540 420V487H566"/>
+    <path d="M705 520V536"/>
+    <path d="M836 592H922"/>
+  </g>
+  <!-- Bluesky へ（細い線） -->
+  <g fill="none" stroke="#8fa6d8" stroke-width="1.8" marker-end="url(#arrg)">
+    <path d="M854 380H866Q880 380 880 366V270Q880 257 866 257H832"/>
+    <path d="M824 244H1254"/>
+  </g>
+
+  <!-- 番号 -->
+  <g class="mono num">
+    <circle cx="222" cy="400" r="12" fill="#ef2b36"/><text x="218" y="405">1</text>
+    <circle cx="498" cy="400" r="12" fill="#ef2b36"/><text x="494" y="405">2</text>
+    <circle cx="683" cy="530" r="12" fill="#ef2b36"/><text x="679" y="535">3</text>
+    <circle cx="879" cy="592" r="12" fill="#ef2b36"/><text x="875" y="597">4</text>
+    <circle cx="1100" cy="244" r="12" fill="#8fa6d8"/><text x="1096" y="249">5</text>
+  </g>
+  <g class="jp">
+    <text x="489" y="430" class="lbl">3000 番だけ</text>
+    <text x="716" y="535" class="lbl">/api</text>
+    <text x="852" y="624" class="lbl">8000 番</text>
+    <text x="936" y="232" class="lblg">443 番、出ていく通信だけ</text>
+  </g>
+
+  <!-- 凡例 -->
+  <g class="jp">
+    <text x="1262" y="370" class="spec" style="font-weight:700;fill:#c9d4ee">流れ</text>
+    <g class="mono" style="font-size:13px;font-weight:700;fill:#ef2b36">
+      <text x="1262" y="398">1</text><text x="1262" y="424">2</text><text x="1262" y="476">3</text><text x="1262" y="502">4</text>
+    </g>
+    <text x="1262" y="528" class="mono" style="font-size:13px;font-weight:700;fill:#8fa6d8">5</text>
+    <g class="note">
+      <text x="1280" y="398">HTTPS で接続</text>
+      <text x="1280" y="424">WAF を通った要求だけ</text>
+      <text x="1280" y="450">を VPC の中へ</text>
+      <text x="1280" y="476">画面から api へ中継</text>
+      <text x="1280" y="502">写真と本文の解析</text>
+      <text x="1280" y="528">本人の投稿を取得し、</text>
+      <text x="1280" y="554">本人の操作で削除</text>
+    </g>
+  </g>
+
+  <!-- 運用 -->
+  <rect x="230" y="724" width="1182" height="140" rx="10" fill="#0a173b" fill-opacity="0.7" stroke="#2c437e"/>
+  <text x="250" y="752" class="jp spec" style="font-weight:700;fill:#c9d4ee">運用と守り</text>
+  <g class="jp">
+    <text x="250" y="790" class="name" style="font-size:16px">Terraform</text>
+    <text x="250" y="816" class="spec">構成をすべてコードで管理</text>
+    <text x="250" y="838" class="spec">変更は plan を見てから適用</text>
+
+    <text x="482" y="790" class="name" style="font-size:16px">SSM Session Manager</text>
+    <text x="482" y="816" class="spec">SSH を開けずにサーバーへ入る</text>
+
+    <text x="736" y="790" class="name" style="font-size:16px">Secrets Manager</text>
+    <text x="736" y="816" class="spec">鍵は起動時にメモリ上へだけ</text>
+    <text x="736" y="838" class="spec">展開し、ディスクに書かない</text>
+
+    <text x="976" y="790" class="name" style="font-size:16px">EventBridge Scheduler</text>
+    <text x="976" y="816" class="spec">GPU は使う時間帯だけ起動</text>
+
+    <text x="1210" y="790" class="name" style="font-size:16px">AWS Budgets</text>
+    <text x="1210" y="816" class="spec">予算を超えたら</text>
+    <text x="1210" y="838" class="spec">GPU を自動で停止</text>
+  </g>
+<metadata><c2pa:manifest>AAAWgmp1bWIAAAAeanVtZGMycGEAEQAQgAAAqgA4m3EDYzJwYQAAABZcanVtYgAAAEdqdW1kYzJtYQARABCAAACqADibcQN1cm46YzJwYTo0OTIyNTdlYS0yNDIyLTRiY2ItOWVkZC0yMmMzNDM5MmNjNzQAAAADl2p1bWIAAAApanVtZGMyYXMAEQAQgAAAqgA4m3EDYzJwYS5hc3NlcnRpb25zAAAAALxqdW1iAAAARGp1bWRjYm9yABEAEIAAAKoAOJtxE2MycGEuaW5ncmVkaWVudC52MwAAAAAYYzJzaNtcAW/NqrIHLgdrLKJpvZ8AAABwY2JvcqNpZGM6Zm9ybWF0bWltYWdlL3N2Zyt4bWxqaW5zdGFuY2VJRHgseG1wOmlpZDoxNGJlYmY0Yi0xNDUwLTRjMDYtYWY1Ny05NjgxZjk0MWFkYzFscmVsYXRpb25zaGlwaHBhcmVudE9mAAAB4mp1bWIAAABBanVtZGNib3IAEQAQgAAAqgA4m3ETYzJwYS5hY3Rpb25zLnYyAAAAABhjMnNo1XqxCW4ugbntBjJJxscMiAAAAZljYm9yomdhY3Rpb25zgqJmYWN0aW9ua2MycGEub3BlbmVkanBhcmFtZXRlcnOha2luZ3JlZGllbnRzgaJjdXJseC1zZWxmI2p1bWJmPWMycGEuYXNzZXJ0aW9ucy9jMnBhLmluZ3JlZGllbnQudjNkaGFzaFggDIB0qkm1fl2M8c98w4JXZ0QU5xkqSfUOzybP80tJiJKkZmFjdGlvbngdY29tLmFudGhyb3BpYy5jbGF1ZGUucHJvdmlkZWRqcGFyYW1ldGVyc6F4H2NvbS5hbnRocm9waWMub3JpZ2luLWNvbmZpZGVuY2VndW5rbm93bmtkZXNjcmlwdGlvbnhmQ2xhdWRlIHByb3ZpZGVkIHRoaXMgZmlsZSBhdCB0aGUgcmVxdWVzdCBvZiBhIHVzZXIgYW5kIG1heSBoYXZlIGNyZWF0ZWQgb3IgbW9kaWZpZWQgdGhlIGZpbGUgY29udGVudHMubXNvZnR3YXJlQWdlbnShZG5hbWVmQ2xhdWRlcmFsbEFjdGlvbnNJbmNsdWRlZPUAAADIanVtYgAAAEBqdW1kY2JvcgARABCAAACqADibcRNjMnBhLmhhc2guZGF0YQAAAAAYYzJzaEE5hsvMqTvLCWaiqHS+tMsAAACAY2JvcqVjYWxnZnNoYTI1NmNwYWRMAAAAAAAAAAAAAAAAZGhhc2hYIB04ofW+Rusn9h+N6l04U6wSuBiBF/pb606nMpDWDuVzZG5hbWVuanVtYmYgbWFuaWZlc3RqZXhjbHVzaW9uc4GiZXN0YXJ0GSuVZmxlbmd0aBkeBAAAAj5qdW1iAAAAJ2p1bWRjMmNsABEAEIAAAKoAOJtxA2MycGEuY2xhaW0udjIAAAACD2Nib3KlY2FsZ2ZzaGEyNTZpc2lnbmF0dXJleE1zZWxmI2p1bWJmPS9jMnBhL3VybjpjMnBhOjQ5MjI1N2VhLTI0MjItNGJjYi05ZWRkLTIyYzM0MzkyY2M3NC9jMnBhLnNpZ25hdHVyZWppbnN0YW5jZUlEeCx4bXA6aWlkOjAzNDc2YzA0LTYxN2EtNGRlYy1iMGU0LWY4ZjY1MTkxMjBlM3JjcmVhdGVkX2Fzc2VydGlvbnODomN1cmx4LXNlbGYjanVtYmY9YzJwYS5hc3NlcnRpb25zL2MycGEuaW5ncmVkaWVudC52M2RoYXNoWCAMgHSqSbV+XYzxz3zDgldnRBTnGSpJ9Q7PJs/zS0mIkqJjdXJseCpzZWxmI2p1bWJmPWMycGEuYXNzZXJ0aW9ucy9jMnBhLmFjdGlvbnMudjJkaGFzaFggG//204D1Nfrus+eGE3geLl4TqAdCBL3975JPD9Pb+HSiY3VybHgpc2VsZiNqdW1iZj1jMnBhLmFzc2VydGlvbnMvYzJwYS5oYXNoLmRhdGFkaGFzaFggKqQDoGhdBEa+ukGcbdSwWx3/We09aBjri+UwB0spQsB0Y2xhaW1fZ2VuZXJhdG9yX2luZm+jZG5hbWVvQW50aHJvcGljIEZpbGVzZ3ZlcnNpb25lMS4wLjBrc3BlY1ZlcnNpb25lMi40LjAAABA4anVtYgAAAChqdW1kYzJjcwARABCAAACqADibcQNjMnBhLnNpZ25hdHVyZQAAABAIY2JvctKEWQISogEmGCFZAgowggIGMIIBjaADAgECAhRA5aAK7sI50L64g/oGQgU9Z1UTADAKBggqhkjOPQQDAzBJMRcwFQYDVQQKEw5BbnRocm9waWMsIFBCQzEuMCwGA1UEAxMlQW50aHJvcGljIENvbnRlbnQgQ3JlZGVudGlhbHMgUm9vdCBDQTAeFw0yNjA4MDcxODQzNTZaFw0yODA4MDYxOTQzNTZaMEQxFzAVBgNVBAoTDkFudGhyb3BpYywgUEJDMSkwJwYDVQQDEyBBbnRocm9waWMgQ2xhdWRlIENvbnRlbnQgU2lnbmluZzBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABJh6CmvLUBgFFNU0vUKlOVtE6djd17L5SuwX0LemFisBM3dkd/3cyjxFA3Qo5S46fX0/ihY0VZ7mfb9KF703t5OjWDBWMA4GA1UdDwEB/wQEAwIHgDAVBgNVHSUEDjAMBgorBgEEAYPoXgIBMAwGA1UdEwEB/wQCMAAwHwYDVR0jBBgwFoAUzlHiBIFOZFsj+OPEz5o+nMHXXMIwCgYIKoZIzj0EAwMDZwAwZAIwMXMdFJ4BetLLVY7ORuE9noqbbAZOZn/aArXyTwFAZfKrPzxF2vPoJNf1+UCdg1XGAjBwX1zd9WGqYkqmL5SFqw1QySjr1zJfpJM9+1rdDwSPLMOPOjKuiXjoU/pUUeG9RwmhY3BhZFkNngAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPZYQF+k7hKjqd5Po3XmRb2FDpbXOu/KP6sa/wql+zGEe8l+op9CfY7lmbuq88LL+gIKID4H10M//1qF7RL0eV+Ekug=</c2pa:manifest></metadata></svg>
