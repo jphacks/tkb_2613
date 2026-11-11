@@ -294,18 +294,6 @@ class Extractor:
                     repetition_penalty=penalty,
                 )
             ),
-        raw = await _timed(
-            "本文VLM",
-            _retry_if_cut_off(
-                lambda penalty: self._vlm.complete_text(
-                    text_user_prompt(text),
-                    system=TEXT_SYSTEM_PROMPT,
-                    json_schema=TEXT_SCHEMA,
-                    max_tokens=TEXT_MAX_TOKENS,
-                    repetition_penalty=penalty,
-                )
-            ),
-        )
         )
         clues = []
         for item in _parse_items(raw):

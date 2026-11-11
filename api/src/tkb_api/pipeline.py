@@ -262,17 +262,19 @@ async def diagnose_events(
         },
     )
     if on_result is not None:
-        on_result({
-            "clues": all_clues,
-            "profile_claims": profile_claims,
-            "profile_claim_suggestions": profile_claim_suggestions,
-            "web_facts": list(web_facts),
-            "web_lookup_status": web_lookup_status,
-            "external_profile_results": list(external_profile_results),
-            "external_lookup_status": external_lookup_status,
-            "owner_profile_text": owner_profile_text,
-            "self_report_clues": self_report_clues,
-        })
+        on_result(
+            {
+                "clues": all_clues,
+                "profile_claims": profile_claims,
+                "profile_claim_suggestions": profile_claim_suggestions,
+                "web_facts": list(web_facts),
+                "web_lookup_status": web_lookup_status,
+                "external_profile_results": list(external_profile_results),
+                "external_lookup_status": external_lookup_status,
+                "owner_profile_text": owner_profile_text,
+                "self_report_clues": self_report_clues,
+            }
+        )
     yield "plan", plan_json(all_clues, posts, gazetteer)
     logger.info(
         "診断の時間：手がかりの取り出し %.1f 秒"

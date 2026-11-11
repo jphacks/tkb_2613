@@ -425,10 +425,11 @@ async def diagnose(
             if session.client is not None:
                 owner_profile_text = await fetch_profile_text(session.client, session.did)
             elif session.auth_method == "oauth" and settings.auth_mode == "oauth":
-                async with AsyncClient(
-                    base_url="https://public.api.bsky.app/xrpc"
-                ) as profile_client:
+                profile_client = AsyncClient(base_url="https://public.api.bsky.app/xrpc")
+                try:
                     owner_profile_text = await fetch_profile_text(profile_client, session.did)
+                finally:
+                    await profile_client.request.close()
         except bluesky.BlueskyUnavailableError:
             raise HTTPException(
                 status.HTTP_502_BAD_GATEWAY, "Bluesky からプロフィールを取得できませんでした"
@@ -467,9 +468,7 @@ async def diagnose(
                 ),
                 web_facts=tuple(profile_result.get("web_facts", ())),
                 web_lookup_status=profile_result.get("web_lookup_status", "not_run"),
-                external_profile_results=tuple(
-                    profile_result.get("external_profile_results", ())
-                ),
+                external_profile_results=tuple(profile_result.get("external_profile_results", ())),
                 external_lookup_status=profile_result.get(
                     "external_lookup_status", ExternalLookupStatus.NOT_REQUESTED
                 ),
