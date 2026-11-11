@@ -17,6 +17,7 @@ from tkb_api.routes import (
     delete,
     detect,
     diagnose,
+    draft_check,
     features,
     oauth_internal,
     session,
@@ -129,6 +130,7 @@ def create_app(
     app.include_router(session.router)
     app.include_router(oauth_internal.router)
     app.include_router(diagnose.router)
+    app.include_router(draft_check.router)
     app.include_router(simulate.router)
     app.include_router(delete.router)
     app.include_router(share.router)
@@ -136,6 +138,7 @@ def create_app(
     app.include_router(x.router)
     app.state.x_sessions = x.XSessionStore(settings.session_ttl_minutes * 60)
     app.state.x_settings = settings
+    app.include_router(draft_check.router)
 
     @app.get("/health")
     def health() -> dict[str, str | bool]:

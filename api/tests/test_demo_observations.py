@@ -29,12 +29,12 @@ def test_every_clue_matches_the_clue_format(doc: dict[str, Any]) -> None:
 def test_every_post_matches_the_post_format(doc: dict[str, Any]) -> None:
     posts = [Post.model_validate(p) for p in doc["posts"]]
 
-    assert len(posts) == 10
+    assert len(posts) == 12
 
 
 def test_clues_point_to_existing_posts_images_and_regions(doc: dict[str, Any]) -> None:
     posts = {p["post_id"]: p for p in doc["posts"]}
-    assert len(posts) == 10
+    assert len(posts) == 12
 
     for raw in doc["clues"]:
         clue = Clue.model_validate(raw)

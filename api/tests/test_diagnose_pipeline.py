@@ -141,12 +141,22 @@ async def test_events_keep_failed_posts_and_index_conclusions_into_all_clues() -
         PostExtraction(post_id=post.post_id, clues=[clue]),
     ]
 
-    events = [e async for e in diagnose_events([post], _stream(extractions), Gazetteer())]
+    saved_result: dict[str, Any] = {}
+    events = [
+        e
+        async for e in diagnose_events(
+            [post], _stream(extractions), Gazetteer(), on_result=saved_result.update
+        )
+    ]
 
     assert [name for name, _ in events] == ["post", "clues", "clues", "conclusions", "plan", "done"]
     assert events[1][1]["error"] == "写真を取得できませんでした"
     result = events[3][1]
     assert result["clues"] == [clue.model_dump(mode="json")]
+    assert result["profile_claims"] == []
+    assert result["profile_claim_suggestions"] == []
+    assert saved_result["clues"] == [clue]
+    assert saved_result["profile_claims"] == []
     routine = next(c for c in result["conclusions"] if c["attribute"] == "routine")
     assert routine["clue_indices"] == [0]
     assert set(routine) == {"rule", "attribute", "value", "clue_indices", "note"}

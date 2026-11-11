@@ -243,6 +243,19 @@ describe("diagnose", () => {
     expect(url).toBe("http://api.test/api/diagnose");
     expect(init?.method).toBe("POST");
     expect(init?.credentials).toBe("include");
+    expect(init?.headers).toEqual({ "Content-Type": "application/json" });
+    expect(init?.body).toBe(JSON.stringify({ public_web_lookup_consent: false }));
+  });
+
+  it("sends explicit per-run public lookup consent", async () => {
+    const fetchFn = mockFetch(sse('event: done\ndata: {"posts_seen":0}\n\n'));
+    const received: string[] = [];
+    for await (const event of diagnose({ baseUrl: "http://api.test", publicWebLookupConsent: true })) {
+      received.push(event.event);
+    }
+    expect(received).toEqual(["done"]);
+    const [, init] = fetchFn.mock.calls[0];
+    expect(init?.body).toBe(JSON.stringify({ public_web_lookup_consent: true }));
   });
 
   it("skips events the screen does not know yet", async () => {

@@ -137,7 +137,7 @@ Python は `common/` の Pydantic モデル（`tkb_common.schemas`）、TypeScri
 
 「1件ずつは無害な投稿でも、組み合わせるとここまでわかる」を見せるのがねらいなので、推定は本人が Bluesky に上げたものの中だけで行う。
 
-- 推定に使うのは、ログインした本人が Bluesky に上げた投稿（写真・本文・投稿時刻）だけ。外の Web の検索や、ほかのサイトからの取得はしない。推定した名前などをもとに Web で本人を探す機能は作らない
+- 診断のプロフィール推定は、ログインした本人のBluesky投稿とプロフィール文を使う。公開Web検索は診断ごとの明示同意がある場合に限り、Braveへ本人の公開Blueskyハンドルと固定 `site:` 演算子だけを送る。投稿・プロフィール本文・Clue・DID・投稿URI・写真・氏名などは送らない。検索語は最大90日保持される。候補は本人と断定せず、本人の公開投稿/プロフィールに書かれたURLと照合できる場合もリンク関係としてだけ表示する。検索結果ページは取得しない
 - デモは、本人が同意したメンバーの実名のアカウントで行ってよい。他人の顔が写った写真は投稿しない。テストは架空の人物で行う
 
 ## 環境変数
@@ -146,8 +146,11 @@ Python は `common/` の Pydantic モデル（`tkb_common.schemas`）、TypeScri
 - `BSKY_SERVICE`（ログイン先。既定 `https://bsky.social`）
 - `SESSION_TTL_MINUTES`（既定30）
 - `MAX_POSTS`（既定30）
+- `BRAVE_SEARCH_API_KEY`（任意。明示同意後の外部SNS/ブログ/記事候補検索のみ。APIサーバーだけに設定し、モックは通信しない）
 
 既存：`MOCK_MODE`、`VLM_BASE_URL`、`VLM_API_KEY`、`VLM_MODEL`、`OCR_BASE_URL`。鍵を `NEXT_PUBLIC_` で始まる変数に入れない。
+
+プロフィール推定は現在 `residential_area`、`regular_station`、`employer_name`、`child_age` の限定ルールのみ。投稿ごとの観測手がかりと、投稿を横断した推定を区別し、根拠経路は `docs/profile-classification-v2.md` に合わせる。ProfileItem用の仮除外候補と、mainのConclusion向けplan/simulate/deleteは別フローとして維持する。
 
 OAuth：`AUTH_MODE`（ローカル既定 `app_password`、本番は採用試験を通れば `oauth`）、`PUBLIC_URL`（公開の HTTPS オリジン）、`OAUTH_WEB_ORIGIN`（api から web への Docker 内部 URL）、`API_INTERNAL_ORIGIN`（web から api への Docker 内部 URL）、`INTERNAL_AUTH_SECRET`（起動時に生成し、両コンテナへ別の一時ファイルで渡す）。
 

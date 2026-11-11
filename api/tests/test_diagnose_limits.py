@@ -4,6 +4,7 @@ import json
 from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -26,7 +27,15 @@ from tkb_detect.vlm_client import VlmClient, VlmConfig
 PASSWORD = "correct horse battery staple"  # noqa: S105  テスト用の架空の値
 FIXTURE = Path(__file__).resolve().parents[2] / "eval" / "fixtures" / "demo_observations.json"
 REAL_DID = "did:plc:me00000000000000000000"
-REAL_CLIENT = cast(AsyncClient, object())
+
+
+class FakeBlueskyClient:
+    async def get_profile(self, *, actor: str) -> SimpleNamespace:
+        assert actor == REAL_DID
+        return SimpleNamespace(description="")
+
+
+REAL_CLIENT = cast(AsyncClient, FakeBlueskyClient())
 NOW = datetime(2026, 11, 16, 20, 30, tzinfo=JST)
 DEMO_POSTS = tuple(
     Post.model_validate(p) for p in json.loads(FIXTURE.read_text(encoding="utf-8"))["posts"][:3]

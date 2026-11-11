@@ -102,6 +102,7 @@ class Extractor:
         zoom: bool = True,
         text_client: TextClient | None = None,
         image_enabled: bool = True,
+        station_names: set[str] | frozenset[str] = frozenset(),
     ) -> None:
         self._vlm = vlm
         self._ocr = ocr
@@ -109,6 +110,7 @@ class Extractor:
         self._zoom = zoom
         self._text_client = text_client
         self.image_enabled = image_enabled
+        self._station_names = frozenset(station_names)
 
     @property
     def uses_ocr(self) -> bool:
@@ -143,6 +145,13 @@ class Extractor:
         )
         if post.text.strip():
             tasks.append(self._extract_text(post.post_id, post.text))
+        tasks.extend(
+            self._extract_text(
+                post.post_id, image.alt, image_index=image.index, source=ClueSource.ALT
+            )
+            for image in post.images
+            if image.alt.strip()
+        )
 
         if self._text_client is not None and self.image_enabled:
             # 画像VLMの停止時も、本文から得た手がかりは残す。
@@ -160,6 +169,12 @@ class Extractor:
                 if clue.type is not ClueType.NAME_TEXT or is_person_name_text(clue.value)
             ]
         )
+
+    async def extract_profile_text(self, did: str, text: str) -> list[Clue]:
+        """Analyze the authenticated owner's profile description as self-report only."""
+        if not text.strip():
+            return []
+        return await self._extract_text(f"profile:{did}", text, source=ClueSource.PROFILE_TEXT)
 
     async def _extract_image(self, post_id: str, index: int, data: bytes) -> list[Clue]:
         codes_task = asyncio.create_task(
@@ -198,7 +213,7 @@ class Extractor:
         # OCR は元の画像を読み、元の画像のピクセルで箱を返す
         raw, lines = await asyncio.gather(vlm_task, _timed("OCR", self._ocr.recognize(data)))
         clues = await self._reread_small(data, self._photo_clues(post_id, index, raw, prepared))
-        return merge_ocr(post_id, index, clues, lines)
+        return merge_ocr(post_id, index, clues, lines, station_names=self._station_names)
 
     async def _reread_small(self, data: bytes, clues: list[Clue]) -> list[Clue]:
         """小さい文字や映り込みを拡大して読み直し、小ささによる confidence の上限をかける。"""
@@ -258,9 +273,16 @@ class Extractor:
                 clues.append(clue)
         return clues
 
-    async def _extract_text(self, post_id: str, text: str) -> list[Clue]:
+    async def _extract_text(
+        self,
+        post_id: str,
+        text: str,
+        *,
+        image_index: int | None = None,
+        source: ClueSource = ClueSource.TEXT,
+    ) -> list[Clue]:
         if self._text_client is not None:
-            return await self._extract_ollama_text(post_id, text)
+            return await self._extract_ollama_text(post_id, text, image_index, source)
         raw = await _timed(
             "本文VLM",
             _retry_if_cut_off(
@@ -278,16 +300,22 @@ class Extractor:
             clue = _build_clue(
                 item,
                 post_id=post_id,
-                image_index=None,
+                image_index=image_index,
                 region_box=None,
-                source=ClueSource.TEXT,
+                source=source,
                 to_region=lambda _b: None,
             )
             if clue is not None:
                 clues.append(clue)
         return clues
 
-    async def _extract_ollama_text(self, post_id: str, text: str) -> list[Clue]:
+    async def _extract_ollama_text(
+        self,
+        post_id: str,
+        text: str,
+        image_index: int | None = None,
+        source: ClueSource = ClueSource.TEXT,
+    ) -> list[Clue]:
         if self._text_client is None:
             raise DetectError("Ollama の設定がありません")
         raw = await _timed(
@@ -327,9 +355,9 @@ class Extractor:
             clue = _build_clue(
                 item,
                 post_id=post_id,
-                image_index=None,
+                image_index=image_index,
                 region_box=None,
-                source=ClueSource.TEXT,
+                source=source,
                 to_region=lambda _b: None,
             )
             if clue is None or clue.type not in TEXT_CLUE_TYPES:
@@ -356,6 +384,7 @@ def build_extractor(
     text_backend: str = "vlm",
     ollama_base_url: str = "http://localhost:11434",
     ollama_model: str = "qwen3:4b-instruct",
+    station_names: set[str] | frozenset[str] = frozenset(),
 ) -> Extractor:
     """設定から作る。OCR は OCR_BASE_URL が空なら使わない。
 
@@ -393,6 +422,7 @@ def build_extractor(
         zoom,
         text_client=text_client,
         image_enabled=image_enabled,
+        station_names=station_names,
     )
 
 
@@ -466,10 +496,13 @@ def _build_clue(
 
 
 def _dedupe(clues: list[Clue]) -> list[Clue]:
-    seen: set[tuple[int | None, ClueType, str]] = set()
+    seen: set[tuple[int | None, ClueType, str, ClueSource | None]] = set()
     unique = []
     for clue in clues:
-        key = (clue.image_index, clue.type, clue.value)
+        # Preserve an OCR station-sign clue alongside an identical VLM clue. The
+        # regular-station rule is deliberately gated on OCR evidence.
+        source = clue.source if clue.type is ClueType.STATION_SIGN else None
+        key = (clue.image_index, clue.type, clue.value, source)
         if key not in seen:
             seen.add(key)
             unique.append(clue)

@@ -1,6 +1,7 @@
 import json
 from collections.abc import Iterator
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -10,7 +11,12 @@ from fastapi.testclient import TestClient
 from tkb_api.bluesky import BlueskyUnavailableError, LoginResult, PostsFetcher
 from tkb_api.config import Settings, get_settings
 from tkb_api.main import create_app
-from tkb_api.routes.diagnose import get_extractor_factory, get_fetch_posts, get_gazetteer
+from tkb_api.routes.diagnose import (
+    get_extractor_factory,
+    get_fetch_posts,
+    get_fetch_profile_text,
+    get_gazetteer,
+)
 from tkb_api.routes.session import get_login
 from tkb_common.schemas import Clue, ClueSource, ClueType, Post
 from tkb_detect.errors import ForbiddenEndpointError
@@ -20,6 +26,7 @@ from tkb_engine.gazetteer import Gazetteer
 
 PASSWORD = "correct horse battery staple"  # noqa: S105  テスト用の架空の値
 FIXTURE = Path(__file__).resolve().parents[2] / "eval" / "fixtures" / "demo_observations.json"
+DEMO_POST_COUNT = len(json.loads(FIXTURE.read_text(encoding="utf-8"))["posts"])
 
 # 根津のまわりだけの小さな表（data/processed がなくてもテストできるように）
 NEZU_MESH = "53394661"
@@ -72,16 +79,22 @@ def test_completed_diagnosis_can_be_read_again_only_in_its_session(client: TestC
     _login(client)
     assert client.get("/api/diagnosis").status_code == 404
 
-    result = client.post("/api/diagnose")
+    result = client.post("/api/diagnose", json={"public_web_lookup_consent": True})
     assert result.status_code == 200
     restored = client.get("/api/diagnosis")
     assert restored.status_code == 200
     assert restored.headers["cache-control"] == "no-store, no-transform"
     data = restored.json()
-    assert len(data["posts"]) == 10
+    assert len(data["posts"]) == DEMO_POST_COUNT
     assert len(data["clues"]) > 0
     assert data["conclusions"] == _events(result.text)[-3][1]["conclusions"]
     assert data["plan"] == _events(result.text)[-2][1]
+    streamed_claims = _events(result.text)[-3][1]
+    assert streamed_claims["external_lookup_status"] == "fixture"
+    assert data["profile_claims"] == streamed_claims["profile_claims"]
+    assert data["profile_claim_suggestions"] == streamed_claims["profile_claim_suggestions"]
+    assert data["external_profile_results"] == streamed_claims["external_profile_results"]
+    assert data["external_lookup_status"] == streamed_claims["external_lookup_status"]
 
     # 同じブラウザでもログインし直すと別セッション。前の結果には入れない。
     _login(client)
@@ -99,7 +112,11 @@ def test_mock_diagnose_streams_posts_clues_conclusions_plan_then_done(client: Te
     posts, clues = doc["posts"], doc["clues"]
     events = _events(res.text)
     names = [name for name, _ in events]
-    assert names == ["post"] * 10 + ["clues"] * 10 + ["conclusions", "plan", "done"]
+    assert names == ["post"] * DEMO_POST_COUNT + ["clues"] * DEMO_POST_COUNT + [
+        "conclusions",
+        "plan",
+        "done",
+    ]
     assert [data for name, data in events if name == "post"] == [{"post": p} for p in posts]
 
     # 手がかりはデモ用データのものを、投稿ごとにまとめて流す
@@ -119,7 +136,15 @@ def test_mock_diagnose_streams_posts_clues_conclusions_plan_then_done(client: Te
 
 
 REAL_DID = "did:plc:me00000000000000000000"
-REAL_CLIENT = cast(AsyncClient, object())  # 本物の通信はしない。fetch_posts に渡ることだけ確かめる
+
+
+class FakeBlueskyClient:
+    async def get_profile(self, *, actor: str) -> SimpleNamespace:
+        assert actor == REAL_DID
+        return SimpleNamespace(description="")
+
+
+REAL_CLIENT = cast(AsyncClient, FakeBlueskyClient())
 
 
 class FakeExtractor(Extractor):
@@ -194,6 +219,12 @@ def test_oauth_diagnose_accepts_a_session_without_a_password_client() -> None:
         async def model_reachable(self, timeout_s: float) -> bool:
             return True
 
+    profile_requests: list[tuple[AsyncClient, str]] = []
+
+    async def fetch_profile(client: AsyncClient, did: str) -> str:
+        profile_requests.append((client, did))
+        return ""
+
     async def fetch_posts(client: AsyncClient, did: str, limit: int) -> list[Post]:
         calls.append((client, did, limit))
         return [post]
@@ -207,6 +238,7 @@ def test_oauth_diagnose_accepts_a_session_without_a_password_client() -> None:
     with _client(settings) as client:
         overrides = client.app.dependency_overrides  # type: ignore[attr-defined]
         overrides[get_fetch_posts] = lambda: fetch_posts
+        overrides[get_fetch_profile_text] = lambda: fetch_profile
         overrides[get_extractor_factory] = lambda: ReadyExtractor
         completed = client.post(
             "/__internal/oauth/complete",
@@ -220,6 +252,8 @@ def test_oauth_diagnose_accepts_a_session_without_a_password_client() -> None:
     assert len(calls) == 1
     assert isinstance(calls[0][0], AsyncClient)
     assert calls[0][1:] == (REAL_DID, 5)
+    assert len(profile_requests) == 1
+    assert profile_requests[0][1] == REAL_DID
     assert [name for name, _ in _events(res.text)] == [
         "post",
         "clues",
@@ -262,7 +296,7 @@ def _real_settings(allowed: str) -> Settings:
 def test_extractor_uses_the_allowlist_from_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     # .env から読んだ許可リストが、環境変数を経由せずに VLM と OCR の両方に効く
     monkeypatch.delenv("MODEL_ALLOWED_HOST_SUFFIXES", raising=False)
-    extractor = get_extractor_factory(_real_settings("10.0.2.15"))()
+    extractor = get_extractor_factory(_real_settings("10.0.2.15"), MINI_GAZETTEER)()
     assert isinstance(extractor, Extractor)
 
 
@@ -273,7 +307,7 @@ def test_extractor_rejects_hosts_outside_the_allowlist(
     # 環境変数に許可があっても、Settings の許可リスト（空なら localhost だけ）が優先される
     monkeypatch.setenv("MODEL_ALLOWED_HOST_SUFFIXES", "10.0.2.15")
     with pytest.raises(ForbiddenEndpointError):
-        get_extractor_factory(_real_settings(allowed))()
+        get_extractor_factory(_real_settings(allowed), MINI_GAZETTEER)()
 
 
 def test_real_diagnose_reports_bluesky_errors_as_bad_gateway() -> None:
@@ -341,4 +375,7 @@ def test_diagnose_sends_keep_alive_comments_while_waiting_between_events() -> No
     blocks = [b for b in res.text.split("\n\n") if b]
     assert ": keep-alive" in blocks
     events = [b for b in blocks if not b.startswith(":")]
-    assert _events("\n\n".join(events) + "\n\n")[-1] == ("done", {"posts_seen": 10})
+    assert _events("\n\n".join(events) + "\n\n")[-1] == (
+        "done",
+        {"posts_seen": DEMO_POST_COUNT},
+    )

@@ -21,7 +21,15 @@ from atproto_client.exceptions import (
 )
 from pydantic import ValidationError
 
-from tkb_common.schemas import Clue, Post, PostImage
+from tkb_common.schemas import (
+    Clue,
+    ExternalLookupStatus,
+    ExternalProfileResult,
+    Post,
+    PostImage,
+    ProfileItem,
+    WebFact,
+)
 
 # 自分の投稿が limit 件そろうまでにタイムラインをたどるページ数の上限（リポストが多い人向け）
 MAX_FEED_PAGES = 3
@@ -188,6 +196,16 @@ async def delete_own_posts(client: AsyncClient, did: str, post_ids: Sequence[str
     return deleted
 
 
+async def fetch_own_profile_text(client: AsyncClient, did: str) -> str:
+    """Fetch only the session owner's public profile description via the session DID."""
+    try:
+        profile = await client.get_profile(actor=did)
+    except AtProtocolError as e:
+        raise BlueskyUnavailableError from e
+    description = getattr(profile, "description", "")
+    return description if isinstance(description, str) else ""
+
+
 @dataclass(frozen=True)
 class BlueskySession:
     handle: str
@@ -199,11 +217,18 @@ class BlueskySession:
 
 @dataclass(frozen=True)
 class Diagnosis:
-    """最後に終わった診断の投稿と手がかり。消したらどうなるか（simulate）を、モデルを呼ばずに
-    計算し直すために、セッションといっしょにメモリにだけ置く。"""
+    """最後に終わった診断の一時結果。セッションといっしょにメモリだけに保持する。"""
 
     posts: tuple[Post, ...]
     clues: tuple[Clue, ...]
+    profile_claims: tuple[ProfileItem, ...] = ()
+    profile_claim_suggestions: tuple[str, ...] = ()
+    web_facts: tuple[WebFact, ...] = ()
+    web_lookup_status: str = "not_run"
+    external_profile_results: tuple[ExternalProfileResult, ...] = ()
+    external_lookup_status: ExternalLookupStatus = ExternalLookupStatus.NOT_REQUESTED
+    owner_profile_text: str = ""
+    self_report_clues: tuple[Clue, ...] = ()
 
 
 class SessionStore:

@@ -6,8 +6,8 @@ from pydantic import ValidationError
 from tkb_common.schemas import (
     PROFILE_ATTRIBUTE_CATALOG,
     PROFILE_CATEGORY_LABELS,
-    Guessability,
-    PersonalLevel,
+    ClaimAssessment,
+    EvidenceScope,
     ProfileAttribute,
     ProfileEvidence,
     ProfileItem,
@@ -17,69 +17,48 @@ from tkb_common.schemas import (
 POST_ID = "at://did:plc:xxxx/app.bsky.feed.post/3kxxxx"
 
 
-def test_profile_catalog_has_all_16_stable_ids_and_metadata() -> None:
-    assert len(ProfileAttribute) == 16
+def test_profile_catalog_has_all_25_candidate_ids_and_metadata() -> None:
+    assert len(ProfileAttribute) == 25
     assert set(PROFILE_ATTRIBUTE_CATALOG) == set(ProfileAttribute)
     assert len(PROFILE_CATEGORY_LABELS) == 4
     assert all(item.label for item in PROFILE_ATTRIBUTE_CATALOG.values())
-    assert {item.personal_level for item in PROFILE_ATTRIBUTE_CATALOG.values()} == {
-        PersonalLevel.LEVEL_4,
-        PersonalLevel.LEVEL_5,
-    }
-    assert {item.guessability for item in PROFILE_ATTRIBUTE_CATALOG.values()} == {
-        Guessability.A,
-        Guessability.A_TO_B,
-        Guessability.B,
-    }
+    assert all(
+        item.personal_level is None and item.guessability is None
+        for item in PROFILE_ATTRIBUTE_CATALOG.values()
+    )
     assert {key.value: item.label for key, item in PROFILE_ATTRIBUTE_CATALOG.items()} == {
         "facial_appearance": "顔貌（自撮り・他撮り・反射）",
         "full_name": "本名（フルネーム）",
-        "given_name_or_nickname": "下の名前 / 呼ばれている名前",
+        "given_name": "下の名前",
+        "nickname": "呼ばれている名前",
         "other_social_account": "別SNSのアカウント / 本垢",
         "realtime_location": "リアルタイムの現在地",
-        "home_building_or_room": "自宅の建物外観・部屋の位置",
-        "commute_station_or_line": "最寄り駅 / 日常の利用路線",
+        "home_building": "自宅の建物候補",
+        "home_room": "自宅の部屋・階・位置",
+        "home_nearest_station": "自宅の最寄り駅",
+        "regular_station": "日常的に利用する駅",
+        "regular_line": "日常的に利用する路線",
         "residential_area": "居住エリア（市区町村・町域）",
-        "long_term_home_absence": "自宅の長期不在（旅行・帰省中）",
-        "workplace": "勤務先（企業名・店舗・ビル）",
+        "announced_long_absence": "予告された長期不在",
+        "actual_home_absence": "実際の自宅不在",
+        "employer_name": "雇用主名の推定",
+        "workplace_building_candidate": "勤務先建物候補",
         "workplace_area": "勤務先エリア（オフィス街）",
         "school": "通学先（大学・キャンパス・学校）",
         "frequent_shop": "行きつけの店（ジム・美容院・カフェ）",
-        "vehicle_model_or_partial_plate": "自家用車の車種・ナンバー（一部）",
-        "partner_status_and_attributes": "配偶者・交際相手の有無と属性",
-        "children_age_and_school": "子どもの有無・年齢・通園通学先",
+        "vehicle_model": "自家用車の車種",
+        "partial_plate": "ナンバーの一部",
+        "partner_status": "配偶者・交際相手の有無",
+        "partner_attributes": "配偶者・交際相手の属性",
+        "child_age": "子どもの年齢",
+        "child_school": "子どもの通園・通学先",
     }
 
 
 def test_profile_catalog_matches_requested_metadata() -> None:
-    expected = {
-        "facial_appearance": ("identity_and_face", 5, "A"),
-        "full_name": ("identity_and_face", 5, "B"),
-        "given_name_or_nickname": ("identity_and_face", 4, "A〜B"),
-        "other_social_account": ("identity_and_face", 4, "A"),
-        "realtime_location": ("home_and_location", 5, "A"),
-        "home_building_or_room": ("home_and_location", 5, "B"),
-        "commute_station_or_line": ("home_and_location", 4, "A〜B"),
-        "residential_area": ("home_and_location", 4, "B"),
-        "long_term_home_absence": ("home_and_location", 4, "A〜B"),
-        "workplace": ("affiliation_and_work", 4, "B"),
-        "workplace_area": ("affiliation_and_work", 4, "A〜B"),
-        "school": ("affiliation_and_work", 4, "B"),
-        "frequent_shop": ("activity_and_family", 4, "B"),
-        "vehicle_model_or_partial_plate": ("activity_and_family", 4, "A〜B"),
-        "partner_status_and_attributes": ("activity_and_family", 4, "B"),
-        "children_age_and_school": ("activity_and_family", 4, "B"),
-    }
-    actual = {
-        attribute.value: (
-            metadata.category.value,
-            int(metadata.personal_level),
-            metadata.guessability.value,
-        )
-        for attribute, metadata in PROFILE_ATTRIBUTE_CATALOG.items()
-    }
-
-    assert actual == expected
+    assert set(PROFILE_ATTRIBUTE_CATALOG) == set(ProfileAttribute)
+    assert all(metadata.personal_level is None for metadata in PROFILE_ATTRIBUTE_CATALOG.values())
+    assert all(metadata.guessability is None for metadata in PROFILE_ATTRIBUTE_CATALOG.values())
 
 
 def test_profile_item_matches_documented_shape_and_allows_unknown_value() -> None:
@@ -102,12 +81,25 @@ def test_profile_item_matches_documented_shape_and_allows_unknown_value() -> Non
         "confidence": 0.0,
         "status": "unknown",
         "evidence": [],
+        "evidence_paths": [],
+        "assessment": {
+            "minimal_scope": None,
+            "offline_subtype": None,
+            "psychological_resistance": None,
+            "persona_context": None,
+            "inference_ease": None,
+            "inference_ease_basis": None,
+            "harm_severity": None,
+            "harm_scenario": None,
+            "harm_prerequisites": [],
+            "harm_status": "unknown",
+        },
     }
 
 
 def test_profile_item_accepts_existing_evidence_shape() -> None:
     item = ProfileItem(
-        attribute=ProfileAttribute.WORKPLACE,
+        attribute=ProfileAttribute.EMPLOYER_NAME,
         value="サンプル会社",
         confidence=0.6,
         status=ProfileStatus.WEAK,
@@ -119,47 +111,70 @@ def test_profile_item_accepts_existing_evidence_shape() -> None:
     assert item.evidence[0].required is True
 
 
+def test_profile_evidence_can_reference_profile_text_separately() -> None:
+    evidence = ProfileEvidence(source="profile_text", excerpt="自宅近くの青葉商店街", required=True)
+    assert evidence.post_id is None
+    assert evidence.clue_index is None
+
+
+def test_claim_assessment_enforces_conditional_score_context() -> None:
+    with pytest.raises(ValidationError):
+        ClaimAssessment(minimal_scope=EvidenceScope.BLUESKY_OFFLINE)
+    with pytest.raises(ValidationError):
+        ClaimAssessment(psychological_resistance=3)
+    with pytest.raises(ValidationError):
+        ClaimAssessment(inference_ease=3)
+    with pytest.raises(ValidationError):
+        ClaimAssessment(harm_status="applicable", harm_severity=4)
+    unmet = ClaimAssessment(
+        harm_status="prerequisites_unmet",
+        harm_scenario="訪問者が不在を把握する",
+        harm_prerequisites=["同一人物と特定される", "訪問する"],
+    )
+    assert unmet.harm_severity is None
+
+
 @pytest.mark.parametrize(
     "data",
     [
         {"attribute": "not_a_profile_attribute"},
         {
-            "attribute": "workplace",
+            "attribute": "employer_name",
             "value": None,
             "confidence": 1.01,
             "status": "found",
             "evidence": [],
         },
         {
-            "attribute": "workplace",
+            "attribute": "employer_name",
             "value": None,
             "confidence": 0.5,
             "status": "missing",
             "evidence": [],
         },
         {
-            "attribute": "workplace",
+            "attribute": "employer_name",
             "value": None,
             "confidence": 0.5,
             "status": "found",
             "evidence": [],
         },
         {
-            "attribute": "workplace",
+            "attribute": "employer_name",
             "value": "会社",
             "confidence": 0.5,
             "status": "unknown",
             "evidence": [],
         },
         {
-            "attribute": "workplace",
+            "attribute": "employer_name",
             "value": "  ",
             "confidence": 0.5,
             "status": "weak",
             "evidence": [],
         },
         {
-            "attribute": "workplace",
+            "attribute": "employer_name",
             "value": None,
             "confidence": 0.5,
             "status": "found",
