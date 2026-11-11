@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  InvalidDiagnoseEventError, STRONG_CONFIDENCE, confidenceLevel, isDiagnosisSnapshot, toDiagnoseEvent,
+  InvalidDiagnoseEventError, STRONG_CONFIDENCE, confidenceLevel, isDemoDiagnosis, isDiagnosisSnapshot,
+  toDiagnoseEvent,
 } from "./diagnose";
 
 const POST = {
@@ -50,6 +51,22 @@ describe("isDiagnosisSnapshot", () => {
     expect(isDiagnosisSnapshot({ ...snapshot, deleted: ["at://did:plc:other/app.bsky.feed.post/3k"] })).toBe(false);
     expect(isDiagnosisSnapshot({ ...snapshot, deleted: [1] })).toBe(false);
     expect(isDiagnosisSnapshot({ ...snapshot, deleted: null })).toBe(false);
+  });
+});
+
+describe("isDemoDiagnosis", () => {
+  const snapshot = {
+    posts: [POST],
+    clues: [CLUE],
+    conclusions: [CONCLUSION],
+    plan: { delete: [], broken: [], after: [], posts: [] },
+  };
+
+  it("accepts only snapshots marked as the demo", () => {
+    expect(isDemoDiagnosis({ ...snapshot, demo: true })).toBe(true);
+    expect(isDemoDiagnosis(snapshot)).toBe(false);
+    expect(isDemoDiagnosis({ ...snapshot, demo: "true" })).toBe(false);
+    expect(isDemoDiagnosis({ demo: true })).toBe(false);
   });
 });
 

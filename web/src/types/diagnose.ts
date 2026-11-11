@@ -206,6 +206,16 @@ function isRiskyPost(value: unknown): value is RiskyPost {
   );
 }
 
+/**
+ * ログインなしの体験デモの結果（GET /api/demo/diagnosis）。架空アカウントの診断で、形は DiagnosisSnapshot と同じ。
+ * api/src/tkb_api/routes/demo.py と同時に変更すること
+ */
+export type DemoDiagnosis = DiagnosisSnapshot & { readonly demo: true };
+
+export function isDemoDiagnosis(value: unknown): value is DemoDiagnosis {
+  return isRecord(value) && value.demo === true && isDiagnosisSnapshot(value);
+}
+
 export function isDiagnosisSnapshot(value: unknown): value is DiagnosisSnapshot {
   if (!isRecord(value) || !Array.isArray(value.posts) || !value.posts.every(isPost) || !isClueList(value.clues)) return false;
   const clueCount = value.clues.length;
