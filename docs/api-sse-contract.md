@@ -142,7 +142,7 @@ Bluesky の `/api/session`・`/api/diagnose`・`/api/simulate` とは独立し�
 | `GET /api/x/callback` | X の `state,code` と開始 Cookie | state/PKCE を照合し、トークン交換と本人確認の後 `/x` へ 303。 |
 | `GET /api/x/session` | X セッション Cookie | `username, mock`。未認証401。 |
 | `DELETE /api/x/session` | X セッション Cookie | セッション・結果をメモリから削除、204。 |
-| `POST /api/x/diagnose` | X セッション Cookie | `DiagnosisSnapshot` と `elapsed_ms, mock`。実経路は本人の投稿を最大30リソース読み、Ollama本文抽出→既存推論。2回目はメモリの結果を返し再課金しない。モデルを呼ぶ経路（GPUデモ・実経路）は本体の診断と同じ同時実行枠（`MAX_CONCURRENT_DIAGNOSES`）を使い、埋まっていれば503 `busy`（`Retry-After` つき）。1日の回数には数えない。プリセットのモックは枠を使わない。 |
+| `POST /api/x/diagnose` | X セッション Cookie | `DiagnosisSnapshot` と `post_errors, elapsed_ms, mock`。抽出に失敗した投稿があっても全体は200で、失敗した投稿は `post_errors: [{"post_id","error"}]`（理由は固定の文言で本文を含まない）に入れ、その投稿の手がかりは空。実経路は本人の投稿を最大30リソース読み、Ollama本文抽出→既存推論。2回目はメモリの結果を返し再課金しない。モデルを呼ぶ経路（GPUデモ・実経路）は本体の診断と同じ同時実行枠（`MAX_CONCURRENT_DIAGNOSES`）を使い、埋まっていれば503 `busy`（`Retry-After` つき）。1日の回数には数えない。プリセットのモックは枠を使わない。 |
 | `GET /api/x/diagnosis` | X セッション Cookie | 直近の完了結果。なければ404。 |
 | `POST /api/x/simulate` | `{"delete":[診断済み投稿ID]}` | 既存 `Simulation`。X API・モデルは再呼出ししない。 |
 | `POST /api/x/rediagnose` | 同上 | 除外後の `posts, clues, conclusions, plan, mock` を再計算。X API・モデルは再呼出ししない。 |

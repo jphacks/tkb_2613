@@ -252,7 +252,7 @@ Webブラウザが動くPC。実投稿の診断には、Blueskyアカウント�
   写真と本文から得た観測を、地域情報や別投稿の手がかりと組み合わせて推定します。実装は[`engine/src/tkb_engine/rules.py`](engine/src/tkb_engine/rules.py)にあります。
 
 * **根拠を維持した仮除外と削除候補の選定**  
-  投稿を除いた場合に推定がどう変わるかを、モデルを呼ばずに再計算します。現在は捜査ボード末尾の3項目を対象に、対象項目と根拠の減り方を比較しながら最大3投稿を選びます。全項目に対して最小の削除件数を保証する方式ではありません。実装は[`engine/src/tkb_engine/planner.py`](engine/src/tkb_engine/planner.py)にあります。
+  投稿を除いた場合に推定がどう変わるかを、モデルを呼ばずに再計算します。氏名・生年月日・住まいなど17項目の推定に重みを付け（`ATTRIBUTE_WEIGHTS`）、写真や文字に直接写った顔・名前・住所・電話番号・郵便番号にも重みを付けて（`DIRECT_CLUE_WEIGHTS`）、残る危険の合計が最も減る投稿から順に最大3投稿を選びます（貪欲法）。選んだ投稿の組み合わせを比べ、同じ効果ならより少ない件数にします。全項目に対して最小の削除件数を保証する方式ではありません。実装は[`engine/src/tkb_engine/planner.py`](engine/src/tkb_engine/planner.py)にあります。
 
 * **観測から結果表示までの逐次配信**  
   本人投稿の取得、手がかり抽出、推理、候補提示をつなぎ、SSEで画面へ配信します。実装は[`api/src/tkb_api/pipeline.py`](api/src/tkb_api/pipeline.py)、画面側は[`DiagnosePanel.tsx`](web/src/components/diagnose/DiagnosePanel.tsx)と[`ConclusionBoard.tsx`](web/src/components/conclusion-board/ConclusionBoard.tsx)にあります。

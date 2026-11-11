@@ -87,10 +87,41 @@ async def test_gpu_x_diagnosis_waits_for_a_free_diagnose_slot() -> None:
             assert not router.calls  # 枠がないときは GPU に送らない
 
             other.release()
-            # 枠が空けば進む（ここではモデルが空の応答を返して 503 になるが、枠は返す）
+            # 枠が空けば進む（ここでは本文のモデルの応答を用意していないが、終われば枠は返す）
             await client.post("/api/x/diagnose", headers=HEADERS)
             assert router.calls
     assert app.state.diagnose_limiter.active == 0
+
+
+@pytest.mark.anyio
+async def test_x_diagnosis_succeeds_and_reports_posts_whose_extraction_failed() -> None:
+    async with _client_for(_app(**GPU_DEMO)) as client:
+        with respx.mock(assert_all_called=False) as router:
+            router.get(f"{GPU_BASE}/models").respond(json={"data": [{"id": "synthetic-vlm"}]})
+
+            def vlm_response(request: httpx.Request) -> httpx.Response:
+                prompt = json.dumps(json.loads(request.content), ensure_ascii=False)
+                if "今週も火曜のジム" in prompt:
+                    return httpx.Response(500)  # この投稿だけモデルが失敗する
+                clue = {"type": "routine_text", "value": "毎週火曜はジム", "confidence": 0.9}
+                content = json.dumps({"clues": [clue]})
+                return httpx.Response(
+                    200,
+                    json={"choices": [{"message": {"content": content}, "finish_reason": "stop"}]},
+                )
+
+            router.post(f"{GPU_BASE}/chat/completions").mock(side_effect=vlm_response)
+            await client.post("/api/x/mock/gpu-session", json={"consent": True}, headers=HEADERS)
+
+            result = await client.post("/api/x/diagnose", headers=HEADERS)
+
+    assert result.status_code == 200
+    snapshot = result.json()
+    assert len(snapshot["posts"]) == 2
+    assert [e["post_id"] for e in snapshot["post_errors"]] == ["x:9002"]
+    assert snapshot["post_errors"][0]["error"]
+    assert "火曜" not in snapshot["post_errors"][0]["error"]  # 理由に本文を入れない
+    assert [c["post_id"] for c in snapshot["clues"]] == ["x:9001"]
 
 
 @pytest.mark.anyio
