@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 
 import { DiagnosePanel } from "@/components/diagnose/DiagnosePanel";
@@ -43,6 +44,13 @@ function HomeContent() {
             <p className="mt-5 max-w-xl text-ink/80">{messages.home.lead}</p>
           </header>
           <LoginPanel />
+          {session.status === "anonymous" && (
+            <p className="mt-8">
+              <Link href="/demo" className="font-bold underline underline-offset-4 hover:text-seeker">
+                {messages.demo.entry}
+              </Link>
+            </p>
+          )}
         </>
       )}
       {/* 結果を出している間も、ページの名前は読み上げで伝える */}

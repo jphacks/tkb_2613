@@ -47,6 +47,17 @@ afterEach(() => {
 });
 
 describe("HomeScreen", () => {
+  it("offers the login-free demo to visitors who are not logged in", async () => {
+    vi.mocked(getSession).mockResolvedValue(null);
+    render(
+      <SessionProvider>
+        <HomeScreen />
+      </SessionProvider>,
+    );
+
+    expect(await screen.findByRole("link", { name: messages.demo.entry })).toHaveAttribute("href", "/demo");
+  });
+
   it("hides the title and the login bar once the result is revealed, and brings them back after logout", async () => {
     vi.mocked(getSession).mockResolvedValue({ handle: "alice.bsky.social", did: "did:plc:abc" });
     vi.mocked(deleteSession).mockResolvedValue(undefined);

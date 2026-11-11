@@ -15,6 +15,7 @@ from tkb_api.config import Settings, get_settings
 from tkb_api.limits import DiagnoseLimiter
 from tkb_api.routes import (
     delete,
+    demo,
     detect,
     diagnose,
     draft_check,
@@ -136,6 +137,7 @@ def create_app(
     app.include_router(delete.router)
     app.include_router(share.router)
     app.include_router(features.router)
+    app.include_router(demo.router)
     access_logger = logging.getLogger("uvicorn.access")
     if not any(
         isinstance(item, threads.ThreadsCallbackAccessFilter) for item in access_logger.filters

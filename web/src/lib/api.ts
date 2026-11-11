@@ -5,8 +5,10 @@ import { type DetectResponse, isDetectResponse } from "@/types/clue";
 import {
   type Deletion,
   type DiagnoseEvent,
+  type DemoDiagnosis,
   type DiagnosisSnapshot,
   isDeletion,
+  isDemoDiagnosis,
   isDiagnosisSnapshot,
   isSimulation,
   type Simulation,
@@ -444,4 +446,47 @@ async function postDeleteIds(
   }
 
   return res.json().catch(() => undefined);
+}
+
+/**
+ * ログインなしの体験デモの結果（架空アカウント）。Cookie は送らない。モデルにも Bluesky にも接続しない。
+ */
+export async function getDemoDiagnosis({
+  baseUrl = DEFAULT_BASE_URL,
+  signal,
+}: RequestOptions = {}): Promise<DemoDiagnosis> {
+  let res: Response;
+  try {
+    res = await fetch(`${baseUrl}/api/demo/diagnosis`, { credentials: "omit", signal });
+  } catch {
+    throw new ApiError("network", messages.errors.network);
+  }
+  if (!res.ok) throw new ApiError("server", messages.errors.server(res.status), res.status);
+  const data: unknown = await res.json().catch(() => undefined);
+  if (!isDemoDiagnosis(data)) throw new ApiError("invalid_response", messages.errors.invalidResponse);
+  return data;
+}
+
+/** 体験デモで、選んだ投稿を消したらどうなるか。実際には何も消さない。clueCount はデモの手がかりの数 */
+export async function simulateDemo(
+  deleteIds: readonly string[],
+  clueCount: number,
+  { baseUrl = DEFAULT_BASE_URL, signal }: RequestOptions = {},
+): Promise<Simulation> {
+  let res: Response;
+  try {
+    res = await fetch(`${baseUrl}/api/demo/simulate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ delete: deleteIds }),
+      credentials: "omit",
+      signal,
+    });
+  } catch {
+    throw new ApiError("network", messages.errors.network);
+  }
+  if (!res.ok) throw new ApiError("server", messages.errors.server(res.status), res.status);
+  const data: unknown = await res.json().catch(() => undefined);
+  if (!isSimulation(data, clueCount)) throw new ApiError("invalid_response", messages.errors.invalidResponse);
+  return data;
 }
