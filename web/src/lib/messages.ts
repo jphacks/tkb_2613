@@ -225,6 +225,12 @@ export const messages = {
     deleting: "Bluesky から消しています…",
     deleteFailed: "消せませんでした",
   },
+  /** 友だちを誘う Bluesky の投稿画面（結果の最後）。本文に診断の中身は入れない */
+  invite: {
+    link: "友だちにも「診断してみて」と誘う",
+    note: "Bluesky の投稿画面が開きます。誘い文とこのサイトの URL だけが入り、あなたの診断結果は入りません。",
+    text: "Bluesky の自分の投稿から、どこまで特定されるか試せる「みーつけた」。診断してみて",
+  },
   /** 実際に消したあと */
   escaped: {
     heading: "もういいよ",

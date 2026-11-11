@@ -7,7 +7,7 @@ import type { Clue } from "@/types/clue";
 import type { RiskyPost, Simulation } from "@/types/diagnose";
 import type { Post } from "@/types/post";
 
-import { RiskyPosts } from "./RiskyPosts";
+import { RiskyPosts, inviteComposeUrl } from "./RiskyPosts";
 
 const t = messages.risky;
 
@@ -337,4 +337,36 @@ it("does not report escape while the home block can still be inferred", async ()
   fireEvent.click(screen.getByRole("button", { name: t.simulate }));
   expect(await screen.findByText(t.result(2, 3))).toBeInTheDocument();
   expect(screen.queryByText(t.safe)).not.toBeInTheDocument();
+});
+
+describe("InviteLink", () => {
+  it("invites friends with only the fixed text and the site URL, never the diagnosis", async () => {
+    vi.mocked(simulate).mockResolvedValue(ALL_BROKEN);
+    renderRisky();
+    fireEvent.click(screen.getByRole("button", { name: t.simulate }));
+    await screen.findByText(t.result(2, 3));
+
+    const link = screen.getByRole("link", { name: messages.invite.link });
+    const href = link.getAttribute("href") ?? "";
+    expect(href.startsWith("https://bsky.app/intent/compose?text=")).toBe(true);
+    expect(link).toHaveAttribute("target", "_blank");
+    expect(link).toHaveAttribute("rel", "noopener noreferrer");
+    const text = new URL(href).searchParams.get("text");
+    expect(text).toBe(`${messages.invite.text}\n${window.location.origin}/`);
+    // 投稿の本文・ハンドル・項目名・件数は入らない
+    for (const leak of [GYM.text, ADDRESS.text, "did:plc", "最寄り駅", "決まった外出", "2 件", "3 つ"]) {
+      expect(text).not.toContain(leak);
+    }
+  });
+
+  it("offers the invite even when there is nothing to delete", () => {
+    render(<RiskyPosts posts={[]} risky={[]} clueCount={0} onSimulated={vi.fn()} />);
+
+    expect(screen.getByRole("link", { name: messages.invite.link })).toBeInTheDocument();
+  });
+
+  it("builds the compose URL from the origin alone", () => {
+    const text = new URL(inviteComposeUrl("https://d111.cloudfront.net")).searchParams.get("text");
+    expect(text).toBe(`${messages.invite.text}\nhttps://d111.cloudfront.net/`);
+  });
 });
