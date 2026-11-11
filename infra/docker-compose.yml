@@ -19,6 +19,8 @@ services:
     build:
       context: ..
       dockerfile: api/Dockerfile
+    # 落ちたら自動で起動し直す（EC2 の systemd は oneshot で、コンテナを見張らないため）
+    restart: unless-stopped
     env_file:
       - path: ../.env
         required: false
@@ -51,6 +53,8 @@ services:
       args:
         # 画面の /api を、同じネットワークの api コンテナに中継する
         API_ORIGIN: http://api:8001
+    # api と同じく、落ちたら自動で起動し直す
+    restart: unless-stopped
     env_file:
       - path: ../.env
         required: false
