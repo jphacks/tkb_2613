@@ -73,6 +73,7 @@ export function RiskyPosts({ posts, risky, clues = [], clueCount, onSimulated, o
           {t.heading}
         </h3>
         <p className="text-ink/70">{t.none}</p>
+        <InviteLink />
       </section>
     );
   }
@@ -263,7 +264,34 @@ export function RiskyPosts({ posts, risky, clues = [], clueCount, onSimulated, o
           onCancel={() => setConfirming(false)}
         />
       )}
+      <InviteLink />
     </section>
+  );
+}
+
+/**
+ * 友だちに「診断してみて」と誘う Bluesky の投稿画面の URL。本文は固定の誘い文とサイトの URL だけ。
+ * 引数はオリジンだけなので、推定結果・件数・ハンドル・投稿の中身は入りようがない
+ */
+export function inviteComposeUrl(origin: string): string {
+  const text = `${messages.invite.text}\n${origin}/`;
+  return `https://bsky.app/intent/compose?text=${encodeURIComponent(text)}`;
+}
+
+/** 結果の最後に置く、誘いのリンク。投稿するかは本人が Bluesky の画面で決める（新しい権限は要らない） */
+function InviteLink() {
+  return (
+    <p className="border-t border-ink/15 pt-4">
+      <a
+        href={inviteComposeUrl(window.location.origin)}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="font-bold underline underline-offset-4 hover:text-seeker focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-ink"
+      >
+        {messages.invite.link}
+      </a>
+      <span className="mt-1 block text-sm text-ink/60">{messages.invite.note}</span>
+    </p>
   );
 }
 
