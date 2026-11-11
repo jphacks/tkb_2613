@@ -17,13 +17,15 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, ConfigDict
 
 from tkb_api.config import Settings
+from tkb_api.errors import refusal
+from tkb_api.limits import AlreadyRunningError, BusyError, DailyLimitError, DiagnoseLimiter, Lease
 from tkb_api.pipeline import (
     diagnose_events,
-    load_gazetteer,
     plan_json,
     real_extractions,
     simulation_json,
 )
+from tkb_api.routes.diagnose import get_gazetteer
 from tkb_api.schemas import SimulateRequest
 from tkb_api.x_poc import XPocError, fetch_posts_for_owner, get_my_user, to_post
 from tkb_common.schemas import Clue, ClueSource, ClueType, Post
@@ -37,6 +39,9 @@ router = APIRouter(prefix="/api/x", tags=["x"])
 SESSION_COOKIE = "x_tkb_session"
 START_COOKIE = "x_oauth_start"
 START_TTL_S = 300
+# 未認証の POST でも増えるので、件数に上限を付ける（超えたら古い順に捨てる）
+MAX_PENDING = 500
+MAX_SESSIONS = 500
 
 
 class XCallbackAccessFilter(logging.Filter):
@@ -77,16 +82,33 @@ class XSession:
 class XSessionStore:
     """X の PKCE 情報、トークン、診断結果をプロセスメモリだけに置く。"""
 
-    def __init__(self, ttl_s: int) -> None:
+    def __init__(
+        self, ttl_s: int, max_pending: int = MAX_PENDING, max_sessions: int = MAX_SESSIONS
+    ) -> None:
         self.ttl_s = ttl_s
+        self.max_pending = max_pending
+        self.max_sessions = max_sessions
         self.pending: dict[str, PendingAuth] = {}
         self.sessions: dict[str, XSession] = {}
         self.lock = RLock()
+
+    def _purge(self) -> None:
+        """期限切れを捨て、上限を超えた分を古い順（dict は入れた順）に捨てる。lock の中で呼ぶ。"""
+        now = time.monotonic()
+        for state in [k for k, v in self.pending.items() if v.expires_at <= now]:
+            del self.pending[state]
+        for session_id in [k for k, v in self.sessions.items() if v.expires_at <= now]:
+            del self.sessions[session_id]
+        while len(self.pending) > self.max_pending:
+            del self.pending[next(iter(self.pending))]
+        while len(self.sessions) > self.max_sessions:
+            del self.sessions[next(iter(self.sessions))]
 
     def start(self, verifier: str, nonce: str) -> str:
         state = secrets.token_urlsafe(32)
         with self.lock:
             self.pending[state] = PendingAuth(verifier, nonce, time.monotonic() + START_TTL_S)
+            self._purge()
         return state
 
     def consume(self, state: str, nonce: str | None) -> str | None:
@@ -112,6 +134,7 @@ class XSessionStore:
                 time.monotonic() + self.ttl_s,
                 demo_backend=demo_backend,
             )
+            self._purge()
         return session_id
 
     def get(self, session_id: str | None) -> XSession | None:
@@ -143,6 +166,28 @@ def _settings(request: Request) -> Settings:
 def _store(request: Request) -> XSessionStore:
     store: XSessionStore = request.app.state.x_sessions
     return store
+
+
+def _acquire_model_slot(request: Request) -> Lease:
+    """モデルを呼ぶ X 診断は、本体の診断と同じ同時実行の枠を取る（1日の回数は数えない）。
+
+    架空アカウントはどのセッションも owner_id が同じなので、枠の鍵はセッション ID から作る。
+    """
+    limiter: DiagnoseLimiter = request.app.state.diagnose_limiter
+    session_id = request.cookies.get(SESSION_COOKIE, "")
+    try:
+        return limiter.acquire(session_id, f"x-session:{session_id}")
+    except AlreadyRunningError:
+        raise HTTPException(status.HTTP_409_CONFLICT, "診断中です") from None
+    except (BusyError, DailyLimitError):
+        retry_after = _settings(request).diagnose_busy_retry_after_seconds
+        raise refusal(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "busy",
+            "混雑しています",
+            headers={"Retry-After": str(retry_after)},
+            retry_after=retry_after,
+        ) from None
 
 
 def _origin(request: Request) -> None:
@@ -410,7 +455,10 @@ async def diagnose(request: Request) -> dict[str, Any]:
         if current.busy:
             raise HTTPException(status.HTTP_409_CONFLICT, "診断中です")
         current.busy = True
+    lease: Lease | None = None
     try:
+        if current.token is not None or current.demo_backend == "vlm":
+            lease = _acquire_model_slot(request)
         if current.token is None:
             if not settings.x_mock_mode:
                 raise HTTPException(status.HTTP_403_FORBIDDEN, "モック診断は無効です")
@@ -471,7 +519,7 @@ async def diagnose(request: Request) -> dict[str, Any]:
                 current.posts = posts
                 current.fetched = True
             extractions = real_extractions(extractor, posts)
-        gazetteer = load_gazetteer(settings.gazetteer_dir)
+        gazetteer = get_gazetteer(settings)
         started = time.monotonic()
         events = [event async for event in diagnose_events(posts, extractions, gazetteer)]
         results = {name: data for name, data in events if name in {"conclusions", "plan"}}
@@ -493,6 +541,8 @@ async def diagnose(request: Request) -> dict[str, Any]:
         }
         return current.snapshot
     finally:
+        if lease is not None:
+            lease.release()
         with _store(request).lock:
             current.busy = False
 
@@ -510,7 +560,7 @@ async def simulate(body: SimulateRequest, request: Request) -> dict[str, Any]:
     _origin(request)
     current = _session(request)
     _selected(body, current)
-    gazetteer = load_gazetteer(_settings(request).gazetteer_dir)
+    gazetteer = get_gazetteer(_settings(request))
     return simulation_json(
         simulate_deletion(current.clues, current.posts, gazetteer, body.delete), current.clues
     )
@@ -525,7 +575,7 @@ async def rediagnose(body: SimulateRequest, request: Request) -> dict[str, Any]:
     gone = set(body.delete)
     posts = [post for post in current.posts if post.post_id not in gone]
     clues = [clue for clue in current.clues if clue.post_id not in gone]
-    gazetteer = load_gazetteer(_settings(request).gazetteer_dir)
+    gazetteer = get_gazetteer(_settings(request))
     return {
         "posts": [post.model_dump(mode="json") for post in posts],
         "clues": [clue.model_dump(mode="json") for clue in clues],
