@@ -12,7 +12,8 @@ import type { SessionResponse } from "@/types/session";
  */
 export type SessionState =
   | { status: "checking" }
-  | { status: "anonymous" }
+  /** expired は、ログイン中に api が 401 を返して（時間切れで）ログアウト扱いになったとき */
+  | { status: "anonymous"; expired?: true }
   | { status: "authenticated"; session: SessionResponse };
 
 interface SessionContextValue {
@@ -20,6 +21,8 @@ interface SessionContextValue {
   /** 失敗したら ApiError を投げる */
   login: (handle: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  /** api が 401 を返したときに呼ぶ。ログイン画面に戻し、時間切れを知らせる */
+  expire: () => void;
 }
 
 const SessionContext = createContext<SessionContextValue | null>(null);
@@ -52,7 +55,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setState({ status: "anonymous" });
   }, []);
 
-  const value = useMemo(() => ({ state, login, logout }), [state, login, logout]);
+  const expire = useCallback(() => {
+    setState({ status: "anonymous", expired: true });
+  }, []);
+
+  const value = useMemo(() => ({ state, login, logout, expire }), [state, login, logout, expire]);
   return <SessionContext value={value}>{children}</SessionContext>;
 }
 

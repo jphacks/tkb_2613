@@ -101,6 +101,11 @@ export function LoginPanel() {
 
   return (
     <form action={authMode === "oauth" ? (formData) => { void startOAuth(normalizeHandle(String(formData.get("handle") ?? ""))); } : formAction} aria-label={t.formLabel} className="max-w-md">
+      {session.expired && (
+        <p role="alert" className="mb-5 border-l-4 border-seeker bg-seeker/10 px-4 py-3">
+          {t.expired}
+        </p>
+      )}
       <p className="mb-5 flex items-center gap-2.5 font-bold">
         <BlueskyLogo className="size-7" />
         {t.heading}

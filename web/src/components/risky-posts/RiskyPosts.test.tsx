@@ -137,6 +137,33 @@ describe("RiskyPosts", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(messages.errors.diagnoseFirst);
   });
 
+  it("hands an expired session to the caller instead of showing an error", async () => {
+    vi.mocked(simulate).mockRejectedValue(new ApiError("unauthorized", messages.errors.sessionExpired, 401));
+    const onSessionExpired = vi.fn();
+    render(
+      <RiskyPosts posts={[GYM, ADDRESS]} risky={RISKY} clueCount={20} onSimulated={vi.fn()} onSessionExpired={onSessionExpired} />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: t.simulate }));
+
+    await vi.waitFor(() => expect(onSessionExpired).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("hands an expired session to the caller when deleting", async () => {
+    vi.mocked(simulate).mockResolvedValue(ALL_BROKEN);
+    vi.mocked(deletePosts).mockRejectedValue(new ApiError("unauthorized", messages.errors.sessionExpired, 401));
+    const onSessionExpired = vi.fn();
+    render(
+      <RiskyPosts posts={[GYM, ADDRESS]} risky={RISKY} clueCount={20} onSimulated={vi.fn()} onSessionExpired={onSessionExpired} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: t.simulate }));
+    fireEvent.click(await screen.findByRole("button", { name: t.deleteForReal }));
+    fireEvent.click(screen.getByRole("button", { name: t.confirm }));
+
+    await vi.waitFor(() => expect(onSessionExpired).toHaveBeenCalledTimes(1));
+  });
+
   it("offers to delete for real only after simulating", async () => {
     vi.mocked(simulate).mockResolvedValue(ALL_BROKEN);
     renderRisky();

@@ -82,6 +82,7 @@ export const messages = {
     pending: "Bluesky にログインしています…",
     failed: "ログインできませんでした",
     loggedIn: "ログイン中",
+    expired: "時間が切れました。もう一度ログインしてください",
     logout: "ログアウト",
     // 同意と、アプリパスワードの取り消しの案内（文章の続きは web/src/lib/legal.ts）
     consentBefore: "ログインすると、",
