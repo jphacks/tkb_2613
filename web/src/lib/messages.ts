@@ -145,8 +145,8 @@ export const messages = {
     evidence: "証拠",
     conclusionsLabel: "推定できたこと",
     inferred: "推定",
-    /** 推定の確からしさの2段階（数字は出さない。web/src/types/diagnose.ts の STRONG_CONFIDENCE） */
-    confidence: { strong: "確からしさ：強い", weak: "確からしさ：弱い" },
+    /** 確からしさが弱い推定にだけ付ける印（数字は出さない。web/src/types/diagnose.ts の STRONG_CONFIDENCE 未満） */
+    confidence: { weak: "確からしさ：弱い" },
     attributeLabels: ATTRIBUTE_LABELS,
     reasons: (count: number) => `根拠（${count} 件）`,
     reasonsLabel: "根拠の手がかり",
