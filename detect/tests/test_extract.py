@@ -555,3 +555,49 @@ async def test_model_reachable_skips_ocr_when_photos_are_not_read() -> None:
         assert await Extractor(_vlm_client(), ocr, image_enabled=False).model_reachable(1) is True
 
     assert health.call_count == 0
+
+
+@pytest.mark.anyio
+async def test_prepares_and_crops_images_off_the_event_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # 画像の縮小と拡大用の切り出しは別のスレッドで動く（診断中もほかの人の応答を止めない）
+    import threading
+
+    from tkb_detect import extract
+    from tkb_detect.image import crop_and_enlarge as real_crop
+    from tkb_detect.image import prepare_image as real_prepare
+
+    loop_thread = threading.get_ident()
+    threads: dict[str, list[int]] = {"prepare": [], "crop": []}
+
+    def prepare_image(data: bytes) -> Any:
+        threads["prepare"].append(threading.get_ident())
+        return real_prepare(data)
+
+    def crop_and_enlarge(data: bytes, region: tuple[int, int, int, int]) -> bytes:
+        threads["crop"].append(threading.get_ident())
+        return real_crop(data, region)
+
+    monkeypatch.setattr(extract, "prepare_image", prepare_image)
+    monkeypatch.setattr(extract, "crop_and_enlarge", crop_and_enlarge)
+    first = {
+        "clues": [
+            {
+                "type": "org_text",
+                "value": "厚生",
+                "bbox_2d": [500, 100, 510, 300],
+                "confidence": 0.9,
+            }
+        ]
+    }
+    zoom = {"clues": [{"type": "org_text", "value": "弥生", "confidence": 0.9}]}
+    extractor = Extractor(_vlm_client(), coordinate_space=CoordinateSpace.RELATIVE_1000)
+
+    with respx.mock as router:
+        router.post(f"{VLM}/chat/completions").mock(side_effect=_zoom_aware_router(first, zoom))
+        await extractor.extract_post(_post("", 1), [_png(2560, 1440)])
+
+    assert len(threads["prepare"]) == 1
+    assert len(threads["crop"]) == 1
+    assert loop_thread not in [*threads["prepare"], *threads["crop"]]

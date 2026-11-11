@@ -161,6 +161,19 @@ describe("OAuth internal boundary", () => {
     expect(pendingStateMatches("old", "browser-state")).toBe(false);
   });
 
+  it("compares secrets of different byte lengths without throwing", () => {
+    // 文字数は同じでもバイト長が違う（é は UTF-8 で2バイト）。これまでは timingSafeEqual が例外を出して 500 になった
+    vi.stubEnv("INTERNAL_AUTH_SECRET", "secret-e");
+    const request = new Request("http://web:3000", { headers: { "X-Internal-Auth": "secret-é" } });
+    expect(() => validInternalSecret(request)).not.toThrow();
+    expect(validInternalSecret(request)).toBe(false);
+
+    memory.tkbOAuthStates?.set("sdk-state", { value: { appState: "state-e" }, expires: Date.now() + 1000 });
+    expect(() => pendingStateMatches("sdk-state", "state-é")).not.toThrow();
+    expect(pendingStateMatches("sdk-state", "state-é")).toBe(false);
+    expect(pendingStateMatches("sdk-state", "state-e")).toBe(true);
+  });
+
   it("rejects missing or incorrect internal credentials", () => {
     vi.stubEnv("INTERNAL_AUTH_SECRET", "test-only-secret");
     expect(validInternalSecret(new Request("http://web:3000"))).toBe(false);

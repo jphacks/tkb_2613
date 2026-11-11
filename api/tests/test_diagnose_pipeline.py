@@ -198,3 +198,40 @@ async def test_events_log_timings_without_post_contents(caplog: pytest.LogCaptur
     ]
     # 投稿の ID・本文・手がかりの中身はログに出さない
     assert not any(post.post_id in m or "ジム" in m for m in messages)
+
+
+@pytest.mark.anyio
+async def test_events_run_inference_and_planning_off_the_event_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # 推理と危ない投稿の選び方は別のスレッドで動き、その間もイベントループは止まらない
+    import threading
+
+    from tkb_api import pipeline
+    from tkb_engine.rules import infer as real_infer
+
+    loop_thread = threading.get_ident()
+    threads: dict[str, int] = {}
+    real_plan_json = pipeline.plan_json
+
+    def infer(*args: Any) -> Any:
+        threads["infer"] = threading.get_ident()
+        return real_infer(*args)
+
+    def plan_json(*args: Any) -> Any:
+        threads["plan_json"] = threading.get_ident()
+        return real_plan_json(*args)
+
+    monkeypatch.setattr(pipeline, "infer", infer)
+    monkeypatch.setattr(pipeline, "plan_json", plan_json)
+    post = _post(0)
+    events = [
+        e
+        async for e in diagnose_events(
+            [post], _stream([PostExtraction(post_id=post.post_id, clues=[])]), Gazetteer()
+        )
+    ]
+
+    assert [name for name, _ in events][-3:] == ["conclusions", "plan", "done"]
+    assert set(threads) == {"infer", "plan_json"}
+    assert loop_thread not in threads.values()

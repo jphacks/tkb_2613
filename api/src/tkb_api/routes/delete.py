@@ -39,6 +39,17 @@ def get_delete_posts() -> PostsDeleter:
     return bluesky.delete_own_posts
 
 
+def _deleted(reply: httpx.Response) -> bool:
+    """内部経路の応答が「消せた」か。JSON でない・形が違う応答は、消せなかったとして扱う。"""
+    if reply.status_code != 200:
+        return False
+    try:
+        body = reply.json()
+    except ValueError:
+        return False
+    return isinstance(body, dict) and body.get("deleted") is True
+
+
 async def _delete(
     session: BlueskySession, settings: Settings, delete_posts: PostsDeleter, post_ids: list[str]
 ) -> list[str]:
@@ -61,7 +72,7 @@ async def _delete(
                     )
                 except httpx.HTTPError:
                     continue
-                if reply.status_code == 200 and reply.json().get("deleted") is True:
+                if _deleted(reply):
                     done.append(post_id)
                 elif reply.status_code == 429:
                     raise bluesky.BlueskyRateLimitedError(done)

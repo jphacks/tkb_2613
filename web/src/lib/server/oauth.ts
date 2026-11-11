@@ -1,4 +1,4 @@
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 
 import {
   NodeOAuthClient,
@@ -155,17 +155,26 @@ export function resetOAuthExpiry(did: string): void {
   scheduleExpiry(did, expires);
 }
 
+/**
+ * 秘密の値を一定時間で比べる。両方を SHA-256（常に32バイト）にしてから比べるので、
+ * バイト長の違う値（文字数が同じでもマルチバイト文字を含むなど）でも timingSafeEqual が例外を出さない
+ */
+function sameSecret(a: string, b: string): boolean {
+  const digest = (value: string) => createHash("sha256").update(value, "utf8").digest();
+  return timingSafeEqual(digest(a), digest(b));
+}
+
 export function pendingStateMatches(oauthState: string | null, browserState: string | undefined): boolean {
   if (!oauthState || !browserState) return false;
   const item = memory.tkbOAuthStates?.get(oauthState);
   const value = item?.value.appState;
-  if (!item || item.expires <= Date.now() || typeof value !== "string" || value.length !== browserState.length) return false;
-  return timingSafeEqual(Buffer.from(value), Buffer.from(browserState));
+  if (!item || item.expires <= Date.now() || typeof value !== "string") return false;
+  return sameSecret(value, browserState);
 }
 
 export function validInternalSecret(request: Request): boolean {
   const expected = process.env.INTERNAL_AUTH_SECRET;
   const actual = request.headers.get("x-internal-auth");
-  if (!expected || !actual || expected.length !== actual.length) return false;
-  return timingSafeEqual(Buffer.from(expected), Buffer.from(actual));
+  if (!expected || !actual) return false;
+  return sameSecret(expected, actual);
 }
