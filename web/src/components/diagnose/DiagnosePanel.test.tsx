@@ -318,7 +318,7 @@ describe("DiagnosePanel", () => {
     expect(screen.getByRole("status")).toHaveTextContent(d.done(2));
   });
 
-  it("asks before diagnosing again from the result, since it uses one of today's diagnoses", async () => {
+  it("offers a quiet re-diagnose button after the result that warns it uses one of today's diagnoses", async () => {
     vi.mocked(diagnose).mockImplementation(async function* () {
       yield { event: "post", post: post(1, "夜勤明け。電車混んでる") };
       yield { event: "conclusions", clues: [], conclusions: [] };
@@ -330,18 +330,8 @@ describe("DiagnosePanel", () => {
     expect(screen.queryByRole("button", { name: d.start })).not.toBeInTheDocument();
     expect(again).toHaveAccessibleDescription(d.rediagnoseNote);
 
+    // 確認は挟まず、押したらそのまま診断し直す
     fireEvent.click(again);
-    const confirm = screen.getByRole("group", { name: d.rediagnoseConfirm });
-    expect(diagnose).toHaveBeenCalledTimes(1);
-    expect(within(confirm).getByRole("button", { name: d.start })).toHaveFocus();
-
-    fireEvent.click(within(confirm).getByRole("button", { name: d.rediagnoseCancel }));
-    expect(screen.queryByRole("group", { name: d.rediagnoseConfirm })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: d.rediagnose })).toHaveFocus();
-    expect(diagnose).toHaveBeenCalledTimes(1);
-
-    fireEvent.click(screen.getByRole("button", { name: d.rediagnose }));
-    fireEvent.click(screen.getByRole("button", { name: d.start }));
     expect(diagnose).toHaveBeenCalledTimes(2);
     expect(await screen.findByRole("button", { name: d.rediagnose })).toBeInTheDocument();
     expect(diagnose).toHaveBeenCalledTimes(2);
