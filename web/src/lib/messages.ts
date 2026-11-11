@@ -119,6 +119,8 @@ export const messages = {
     failed: "診断できませんでした",
     deletedBadge: "削除済み",
     postsLabel: "読んだ投稿",
+    /** 結果が出たあと、読んだ投稿の一覧を折りたたむときの見出し */
+    postsSummary: (posts: number) => `読んだ投稿 ${posts} 件と、見つけた手がかり`,
   },
   /** 診断の間の画面 */
   loading: {
@@ -155,6 +157,8 @@ export const messages = {
     failed: (reason: string) => `手がかりを探せませんでした（${reason}）`,
   },
   board: {
+    /** 投稿を横断したプロフィール推定の、根拠経路ごとの比較（折りたたみ）の見出し */
+    whatIfSummary: "詳しく比べる：投稿を仮に外すと、どの推定の根拠がなくなるか",
     heading: "捜査ボード",
     /** 推理の結論が出た瞬間の鬼のかけ声。アプリ名と同じ言葉だが、名前を変えてもこちらは変えない */
     found: "みーつけた",
@@ -207,6 +211,18 @@ export const messages = {
     cluesFound: "見つかった手がかり",
     cluesUnit: "個",
     inferred: "推定",
+  },
+  /** 結果の先頭に出す、消す投稿の要約と、いまどの段階か */
+  plan: {
+    label: "消す投稿の要約",
+    stepsLabel: "診断の流れ",
+    steps: ["もういいかい", "みーつけた", "まーだだよ", "もういいよ"],
+    stepNotes: ["投稿を読む", "推定を見る", "消す投稿を選ぶ", "消して逃げ切る"],
+    /** labels は不明になる項目の表示名。1件ずつ消したときに崩れる項目を合わせたもの */
+    breaks: (count: number, labels: string) => `この ${count} 件を消すと、少なくとも「${labels}」が不明になります`,
+    direct: (count: number) => `この ${count} 件に、名前や住所などの手がかりが直接残っています`,
+    none: "消すと推定が崩れる投稿は見つかりませんでした",
+    show: "消す投稿を見る",
   },
   risky: {
     heading: "まーだだよ",

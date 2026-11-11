@@ -99,6 +99,28 @@ describe("DiagnosePanel", () => {
     expect(diagnose).not.toHaveBeenCalled();
   });
 
+  it("puts the delete summary above the board and folds the read posts", async () => {
+    const savedPost = post(1, "保存済みの投稿");
+    vi.mocked(getSession).mockResolvedValue(ALICE);
+    vi.mocked(getDiagnosis).mockResolvedValue({
+      posts: [savedPost], clues: [clue(savedPost.post_id, "毎週火曜はジム")],
+      conclusions: [{ rule: "R3", attribute: "routine", value: "毎週火曜", clue_indices: [0], note: "" }],
+      plan: { delete: [savedPost.post_id], broken: ["routine"], after: [], posts: [{ post_id: savedPost.post_id, broken: ["routine"] }] },
+    });
+    render(<SessionProvider><DiagnosePanel /></SessionProvider>);
+
+    const summary = await screen.findByRole("region", { name: messages.plan.label });
+    const board = screen.getByRole("region", { name: b.heading });
+    // 要約は捜査ボードより前にある
+    expect(summary.compareDocumentPosition(board) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const link = within(summary).getByRole("link", { name: messages.plan.show });
+    expect(document.getElementById(link.getAttribute("href")!.slice(1))).toHaveTextContent(messages.risky.heading);
+
+    const posts = screen.getByRole("list", { name: d.postsLabel });
+    expect(posts.closest("details")).not.toHaveAttribute("open");
+    expect(screen.getByText(d.postsSummary(1))).toBeInTheDocument();
+  });
+
   it("marks posts deleted after the diagnosis and keeps them out of the delete candidates", async () => {
     const gone = post(1, "消した投稿");
     const kept = post(2, "残った投稿");

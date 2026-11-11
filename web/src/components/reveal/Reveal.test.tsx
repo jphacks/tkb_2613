@@ -75,6 +75,24 @@ afterEach(() => {
 });
 
 describe("Reveal", () => {
+  it("puts its children right after the identity card, before the evidence", () => {
+    render(
+      <Reveal posts={[POST]} clues={[TEXT_CLUE, PHOTO_CLUE]} conclusions={[CONCLUSION]}>
+        <p>消す投稿の要約</p>
+      </Reveal>,
+    );
+
+    const summary = screen.getByText("消す投稿の要約");
+    const evidence = screen.getByRole("list", { name: messages.reveal.evidenceLabel });
+    expect(summary.compareDocumentPosition(evidence) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("still shows its children when nothing was found", () => {
+    render(<Reveal posts={[]} clues={[]} conclusions={[]}><p>消す投稿の要約</p></Reveal>);
+
+    expect(screen.getByText("消す投稿の要約")).toBeInTheDocument();
+  });
+
   it("shows the conclusions and the evidence, marking the ones used by a conclusion", () => {
     render(<Reveal posts={[POST]} clues={[TEXT_CLUE, PHOTO_CLUE]} conclusions={[CONCLUSION]} />);
 

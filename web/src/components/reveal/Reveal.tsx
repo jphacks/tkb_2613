@@ -1,5 +1,7 @@
 "use client";
 
+import type { ReactNode } from "react";
+
 import { messages } from "@/lib/messages";
 import { identityName, pickFace, pickSpotlight, type RevealItem } from "@/lib/reveal";
 import { toPercentBox } from "@/lib/region";
@@ -72,6 +74,8 @@ interface RevealProps {
   posts: readonly Post[];
   clues: readonly Clue[];
   conclusions: readonly Conclusion[];
+  /** 身元カードのすぐ下に置くもの（消す投稿の要約）。推定が何もないときは、これだけを出す */
+  children?: ReactNode;
 }
 
 /**
@@ -79,9 +83,9 @@ interface RevealProps {
  * 推定できたことを大きく出し、続けて証拠を 1 枚ずつ机に投げ出すように並べる。
  * 動きを減らす設定の人には、動きなしで並べて見せる（globals.css）。
  */
-export function Reveal({ posts, clues, conclusions }: RevealProps) {
+export function Reveal({ posts, clues, conclusions, children }: RevealProps) {
   const items = pickSpotlight(posts, clues, conclusions);
-  if (items.length === 0 && conclusions.length === 0) return null;
+  if (items.length === 0 && conclusions.length === 0) return children ?? null;
   const postCount = new Set(clues.map((c) => c.post_id)).size;
 
   const identity = identityName(clues, conclusions);
@@ -106,6 +110,8 @@ export function Reveal({ posts, clues, conclusions }: RevealProps) {
           .map((item) => ({ label: messages.clues.typeLabels[item.clue.type], value: item.clue.value }))}
         clueCount={clues.length}
       />
+
+      {children}
 
       {items.length > 0 && (
         <ul aria-label={t.evidenceLabel} className="grid grid-cols-1 gap-8">
