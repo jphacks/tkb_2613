@@ -36,12 +36,18 @@ function postText(post: Post | undefined): string {
 }
 
 /** Compare only already diagnosed evidence paths. This component never reruns inference. */
+/** 比べられる根拠投稿（根拠経路に出てきて、読んだ投稿の中にあるもの）。空なら比較は出さない */
+export function whatIfEvidencePostIds(claims: readonly ProfileItem[], posts: readonly Post[]): string[] {
+  const known = new Set(posts.map((post) => post.post_id));
+  return [...new Set(claims.flatMap((claim) =>
+    (claim.evidence_paths ?? []).flatMap((path) => path.evidence.map((reference) => reference.post_id).filter((id): id is string => id !== null)),
+  ))].filter((postId) => known.has(postId));
+}
+
 export function ProfileClaimWhatIf({ claims, clues, posts, suggestions, webFacts }: ProfileClaimWhatIfProps) {
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set(suggestions));
   const postById = new Map(posts.map((post) => [post.post_id, post]));
-  const evidencePostIds = [...new Set(claims.flatMap((claim) =>
-    (claim.evidence_paths ?? []).flatMap((path) => path.evidence.map((reference) => reference.post_id).filter((id): id is string => id !== null)),
-  ))].filter((postId) => postById.has(postId));
+  const evidencePostIds = whatIfEvidencePostIds(claims, posts);
   const validSuggestions = suggestions.filter((postId) => evidencePostIds.includes(postId));
   const otherEvidencePosts = evidencePostIds.filter((postId) => !validSuggestions.includes(postId));
   const postNumbers = new Map(posts.map((post, index) => [post.post_id, index + 1]));

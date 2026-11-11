@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { ConclusionBoard } from "@/components/conclusion-board/ConclusionBoard";
 import { DiagnoseLoading } from "@/components/diagnose-loading/DiagnoseLoading";
+import { PlanSummary } from "@/components/plan-summary/PlanSummary";
 import { PostCard, type PostClues } from "@/components/post-list/PostCard";
 import { Reveal } from "@/components/reveal/Reveal";
 import { RiskyPosts } from "@/components/risky-posts/RiskyPosts";
@@ -18,6 +19,9 @@ import type { Post } from "@/types/post";
 import type { ExternalLookupStatus, ExternalProfileResult, ProfileItem, WebFact } from "@/types/profile";
 
 const t = messages.diagnose;
+
+/** まーだだよ の見出しの id（RiskyPosts の h3）。要約から飛ぶ先 */
+const RISKY_HEADING_ID = "risky-heading";
 
 /**
  * 診断の状態。connecting は押してから最初のイベントが届くまで、reading は投稿が届いている間、
@@ -198,6 +202,7 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
   const busy = phase.kind === "connecting" || phase.kind === "reading" || phase.kind === "searching";
   const status = statusText(phase, posts.length, Object.keys(found).length);
   const livePosts = deleted.size === 0 ? posts : posts.filter((post) => !deleted.has(post.post_id));
+  const postList = <PostList posts={posts} found={found} deleted={deleted} />;
 
   // 結果が出たら再診断ボタンを下へ移し、身元カード→写真→捜査ボードを続けて見せる。
   // afterResult のときは、赤い「診断する」の代わりに控えめな「もう一度診断する」と、回数を使う注意を出す。
@@ -246,7 +251,12 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
       <h2 id="diagnose-heading" className="sr-only">
         {t.heading}
       </h2>
-      {!busy && result && <Reveal posts={livePosts} clues={result.clues} conclusions={result.conclusions} />}
+      {!busy && result && (
+        <Reveal posts={livePosts} clues={result.clues} conclusions={result.conclusions}>
+          {/* いちばん大事な「どれを消せばよいか」を、身元カードのすぐ下で、長い結果を読む前に示す */}
+          {risky && <PlanSummary risky={risky} targetId={RISKY_HEADING_ID} />}
+        </Reveal>
+      )}
       {(busy || !result) && controls(false)}
 
       {!busy && result && (
@@ -271,20 +281,36 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
       {!busy && result && <ResultShare />}
       {!busy && result && controls(true)}
 
-      {posts.length > 0 && (
-        <ol aria-label={t.postsLabel} className="max-w-2xl space-y-5">
-          {posts.map((post) => (
-            <li key={post.post_id}>
-              {deleted.has(post.post_id) && (
-                <p className="mb-1 inline-block rounded-sm bg-ink px-2 py-0.5 text-xs font-bold text-paper">
-                  {t.deletedBadge}
-                </p>
-              )}
-              <PostCard post={post} found={found[post.post_id]} />
-            </li>
-          ))}
-        </ol>
+      {posts.length > 0 && (busy || !result) && postList}
+      {posts.length > 0 && !busy && result && (
+        // 結果が出たら、読んだ投稿の一覧は折りたたむ（結果の画面を短くし、消す操作を先に見せる）
+        <details className="max-w-2xl">
+          <summary className="cursor-pointer font-bold">{t.postsSummary(posts.length)}</summary>
+          <div className="mt-5">{postList}</div>
+        </details>
       )}
     </section>
+  );
+}
+
+
+function PostList({ posts, found, deleted }: {
+  posts: readonly Post[];
+  found: Readonly<Record<string, PostClues>>;
+  deleted: ReadonlySet<string>;
+}) {
+  return (
+    <ol aria-label={t.postsLabel} className="max-w-2xl space-y-5">
+      {posts.map((post) => (
+        <li key={post.post_id}>
+          {deleted.has(post.post_id) && (
+            <p className="mb-1 inline-block rounded-sm bg-ink px-2 py-0.5 text-xs font-bold text-paper">
+              {t.deletedBadge}
+            </p>
+          )}
+          <PostCard post={post} found={found[post.post_id]} />
+        </li>
+      ))}
+    </ol>
   );
 }

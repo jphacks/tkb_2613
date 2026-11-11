@@ -7,7 +7,7 @@ import type { Clue } from "@/types/clue";
 import { confidenceLevel, type Conclusion } from "@/types/diagnose";
 import { PROFILE_ATTRIBUTE_CATALOG, type ExternalLookupStatus, type ExternalProfileResult, type ProfileItem, type WebFact } from "@/types/profile";
 import type { Post } from "@/types/post";
-import { ProfileClaimWhatIf } from "./ProfileClaimWhatIf";
+import { ProfileClaimWhatIf, whatIfEvidencePostIds } from "./ProfileClaimWhatIf";
 import { ReasoningChain } from "./ReasoningChain";
 
 const t = messages.board;
@@ -219,7 +219,13 @@ export function ConclusionBoard({
             ))}
           </ul>
         )}
-        <ProfileClaimWhatIf claims={profileClaims} clues={clues} posts={posts} suggestions={profileClaimSuggestions} webFacts={webFacts} />
+        {/* 消す投稿は「まーだだよ」で選ぶ。こちらは根拠経路ごとの細かい比較なので、開いたときだけ見せる */}
+        {whatIfEvidencePostIds(profileClaims, posts).length > 0 && (
+          <details className="rounded-sm border border-ink/20 px-4 py-3">
+            <summary className="cursor-pointer font-bold">{messages.board.whatIfSummary}</summary>
+            <ProfileClaimWhatIf claims={profileClaims} clues={clues} posts={posts} suggestions={profileClaimSuggestions} webFacts={webFacts} />
+          </details>
+        )}
         {ownerProfileText && <details><summary className="cursor-pointer font-bold">本人プロフィール文と自己申告の手がかり</summary><p className="mt-2 whitespace-pre-wrap text-sm">{ownerProfileText}</p><ul className="mt-2 list-disc pl-5 text-sm">{selfReportClues.map((clue, index) => <li key={`${clue.post_id}:${index}`}>{clue.value}</li>)}</ul></details>}
         {externalLookupStatus !== "not_requested" && <div className="rounded border border-ink/20 p-3">
           <h4 className="font-bold">公開Web上の外部ページ候補</h4>

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { messages } from "@/lib/messages";
 import type { Clue } from "@/types/clue";
 import type { Conclusion } from "@/types/diagnose";
+import type { Post } from "@/types/post";
 import type { ProfileItem } from "@/types/profile";
 
 import { ConclusionBoard } from "./ConclusionBoard";
@@ -134,5 +135,32 @@ describe("ConclusionBoard", () => {
     expect(weakItem).toHaveTextContent(messages.board.confidence.weak);
     expect(foundItem).not.toHaveTextContent(messages.board.confidence.weak);
     expect(section).not.toHaveTextContent("%");
+  });
+
+  const REFERENCE = { post_id: CLUE.post_id, clue_index: null, required: true, source: "post_text" as const, excerpt: "架空の記述" };
+
+  it("folds the per-path what-if comparison so the board stays short", () => {
+    const claim: ProfileItem = {
+      attribute: "residential_area", value: "架空の区", confidence: 0.65, status: "weak",
+      evidence: [REFERENCE],
+      evidence_paths: [{ evidence: [REFERENCE], confidence: 0.65 }],
+    };
+    const post: Post = { post_id: CLUE.post_id, text: "架空の投稿", created_at: "2026-10-20T08:31:00+09:00", images: [] };
+    render(<ConclusionBoard clues={[CLUE]} conclusions={[CONCLUSION]} profileClaims={[claim]} posts={[post]} />);
+
+    const summary = screen.getByText(messages.board.whatIfSummary);
+    const details = summary.closest("details");
+    expect(details).not.toBeNull();
+    expect(details).not.toHaveAttribute("open");
+    expect(within(details!).getByText("投稿を仮に外して比べる")).toBeInTheDocument();
+  });
+
+  it("does not show an empty fold when there are no evidence paths to compare", () => {
+    const claim: ProfileItem = {
+      attribute: "residential_area", value: "架空の区", confidence: 0.65, status: "weak", evidence: [REFERENCE],
+    };
+    render(<ConclusionBoard clues={[CLUE]} conclusions={[CONCLUSION]} profileClaims={[claim]} />);
+
+    expect(screen.queryByText(messages.board.whatIfSummary)).not.toBeInTheDocument();
   });
 });
