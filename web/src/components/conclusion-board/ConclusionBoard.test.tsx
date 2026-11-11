@@ -90,4 +90,23 @@ describe("ConclusionBoard", () => {
     expect(screen.queryByText(CLUE.value)).not.toBeInTheDocument();
     expect(screen.queryByText(messages.board.empty)).not.toBeInTheDocument();
   });
+
+  it("marks each inference as strong or weak without showing the number", () => {
+    const conclusions: Conclusion[] = [
+      { ...CONCLUSION, confidence: 0.92 },
+      { ...CONCLUSION, attribute: "active_time", value: "平日の朝", confidence: 0.4 },
+      { ...CONCLUSION, attribute: "routine", value: "毎朝" },
+    ];
+    render(<ConclusionBoard clues={[CLUE]} conclusions={conclusions} />);
+
+    const cards = within(screen.getByRole("list", { name: messages.board.conclusionsLabel })).getAllByRole(
+      "listitem",
+    ).filter((item) => item.parentElement?.getAttribute("aria-label") === messages.board.conclusionsLabel);
+    expect(cards[0]).toHaveTextContent(messages.board.confidence.strong);
+    expect(cards[1]).toHaveTextContent(messages.board.confidence.weak);
+    // 確からしさのない古い閲覧リンクには印を出さない
+    expect(cards[2]).not.toHaveTextContent(messages.board.confidence.strong);
+    expect(cards[2]).not.toHaveTextContent(messages.board.confidence.weak);
+    expect(screen.queryByText(/0\.92|92%/)).not.toBeInTheDocument();
+  });
 });

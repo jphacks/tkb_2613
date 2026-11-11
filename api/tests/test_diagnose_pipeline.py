@@ -159,7 +159,9 @@ async def test_events_keep_failed_posts_and_index_conclusions_into_all_clues() -
     assert saved_result["profile_claims"] == []
     routine = next(c for c in result["conclusions"] if c["attribute"] == "routine")
     assert routine["clue_indices"] == [0]
-    assert set(routine) == {"rule", "attribute", "value", "clue_indices", "note"}
+    assert set(routine) == {"rule", "attribute", "value", "clue_indices", "note", "confidence"}
+    # 根拠は確からしさ 0.9 の手がかり1件だけなので、合成しても 0.9
+    assert routine["confidence"] == 0.9
 
 
 @pytest.mark.anyio

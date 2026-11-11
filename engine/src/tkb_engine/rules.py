@@ -53,7 +53,7 @@ eval/spike/run.py の結果を見ながら調整する。
 import re
 from collections import Counter
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -115,6 +115,8 @@ class Conclusion:
     - value：画面に出す値
     - clue_indices：根拠の手がかりの、clues での番号
     - note：どう結論したかのメモ（推理の実況に使える）
+    - confidence：確からしさ（0〜1）。根拠の手がかりの confidence を 1 − ∏(1 − c) で合成した値。
+      infer が最後に入れる（各ルールは入れない）
     """
 
     rule: str
@@ -122,6 +124,7 @@ class Conclusion:
     value: str
     clue_indices: list[int]
     note: str = ""
+    confidence: float = 0.0
 
 
 def rule_r1(
@@ -735,7 +738,19 @@ def infer(clues: Sequence[Clue], posts: Sequence[Post], gaz: Gazetteer) -> list[
         *rule_r10(clues),
         *rule_r11(clues, r1, gaz),
     ]
-    return link(clues, posts, [*base, *rule_x1(clues, posts, base)], gaz)
+    linked = link(clues, posts, [*base, *rule_x1(clues, posts, base)], gaz)
+    return [replace(c, confidence=combined_confidence(clues, c.clue_indices)) for c in linked]
+
+
+def combined_confidence(clues: Sequence[Clue], clue_indices: Sequence[int]) -> float:
+    """根拠の手がかりの確からしさを 1 − ∏(1 − c) で合成する（CLAUDE.md の推定の考え方）。
+
+    同じ手がかりを2回数えない。根拠がなければ 0。小数4桁で丸める（応答を安定させるため）。
+    """
+    remaining = 1.0
+    for i in dict.fromkeys(clue_indices):
+        remaining *= 1.0 - clues[i].confidence
+    return round(1.0 - remaining, 4)
 
 
 HOME_SCHOOL_LINK = re.compile(

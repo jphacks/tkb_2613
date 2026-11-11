@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { InvalidDiagnoseEventError, isDiagnosisSnapshot, toDiagnoseEvent } from "./diagnose";
+import {
+  InvalidDiagnoseEventError, STRONG_CONFIDENCE, confidenceLevel, isDiagnosisSnapshot, toDiagnoseEvent,
+} from "./diagnose";
 
 const POST = {
   post_id: "at://did:plc:xxxx/app.bsky.feed.post/3kxxxx",
@@ -48,6 +50,24 @@ describe("isDiagnosisSnapshot", () => {
     expect(isDiagnosisSnapshot({ ...snapshot, deleted: ["at://did:plc:other/app.bsky.feed.post/3k"] })).toBe(false);
     expect(isDiagnosisSnapshot({ ...snapshot, deleted: [1] })).toBe(false);
     expect(isDiagnosisSnapshot({ ...snapshot, deleted: null })).toBe(false);
+  });
+});
+
+describe("conclusion confidence", () => {
+  it("accepts a confidence between 0 and 1 and conclusions without one", () => {
+    const event = (conclusion: unknown) =>
+      toDiagnoseEvent("conclusions", JSON.stringify({ clues: [CLUE], conclusions: [conclusion] }));
+    expect(event({ ...CONCLUSION, confidence: 0.95 })).not.toBeNull();
+    expect(event(CONCLUSION)).not.toBeNull();
+    for (const bad of [-0.1, 1.5, "0.9", null]) {
+      expect(() => event({ ...CONCLUSION, confidence: bad })).toThrow(InvalidDiagnoseEventError);
+    }
+  });
+
+  it("splits confidence into strong and weak at STRONG_CONFIDENCE", () => {
+    expect(confidenceLevel({ ...CONCLUSION, confidence: STRONG_CONFIDENCE })).toBe("strong");
+    expect(confidenceLevel({ ...CONCLUSION, confidence: STRONG_CONFIDENCE - 0.01 })).toBe("weak");
+    expect(confidenceLevel(CONCLUSION)).toBeNull();
   });
 });
 
