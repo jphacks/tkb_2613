@@ -125,6 +125,46 @@ def test_simulate_rejects_posts_that_were_not_diagnosed(client: TestClient) -> N
     assert other not in res.text
 
 
+def test_simulate_starts_from_the_posts_left_after_a_delete(client: TestClient) -> None:
+    _login(client)
+    _diagnose(client)
+    assert client.post("/api/delete", json={"delete": [GYM_POST]}).status_code == 200
+
+    res = client.post("/api/simulate", json={"delete": []})
+
+    assert res.status_code == 200
+    body = res.json()
+    # 消したジムの投稿の分（決まった外出）は、仮除外の結果に戻ってこない
+    assert body["broken"] == []
+    assert all(c["attribute"] != "routine" for c in body["after"])
+    # 復元した結論と同じで、番号も診断時の clues での番号
+    assert body["after"] == client.get("/api/diagnosis").json()["conclusions"]
+
+
+def test_simulate_matches_the_restored_plan_after_a_delete(client: TestClient) -> None:
+    _login(client)
+    _diagnose(client)
+    client.post("/api/delete", json={"delete": [GYM_POST]})
+    plan = client.get("/api/diagnosis").json()["plan"]
+    assert plan["delete"]
+
+    body = client.post("/api/simulate", json={"delete": plan["delete"]}).json()
+
+    assert body["after"] == plan["after"]
+    assert body["broken"] == plan["broken"]
+
+
+def test_simulate_rejects_posts_that_were_already_deleted(client: TestClient) -> None:
+    _login(client)
+    _diagnose(client)
+    client.post("/api/delete", json={"delete": [GYM_POST]})
+
+    res = client.post("/api/simulate", json={"delete": [GYM_POST]})
+
+    assert res.status_code == 422
+    assert GYM_POST not in res.text
+
+
 def test_simulate_rejects_unknown_fields(client: TestClient) -> None:
     _login(client)
     _diagnose(client)

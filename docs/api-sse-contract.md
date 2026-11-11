@@ -38,7 +38,7 @@ OAuth 時の投稿取得は、セッション DID に限定して公開 AppView 
 | `DELETE /api/result-link` | `tkb_session` Cookie、JSON `{"token":"…"}` | 204 | 作成者の DID と一致するリンクだけを無効化する。別人のリンクは消せない。 |
 | `POST /api/shared-result` | JSON `{"token":"…"}` | 200 `{"posts":[Post],"clues":[Clue],"conclusions":[Conclusion],"plan":Plan}` | トークンを知る人はログインなしで閲覧できる。無効・期限切れは404。閲覧側の画面に削除操作はない。結果は設定された `SHARE_DB_PATH` の SQLite に期限付きで保存し、APIプロセスの再起動後も読める。`SHARE_ENABLED=0` なら、オフにする前に作ったリンクも404 `share_disabled`。 |
 | `POST /api/delete` | `tkb_session` Cookie。JSON `{"delete":["at://…",…]}` | 200 Deletion（下記） | 本人の投稿だけを Bluesky から1件ずつ消す。Cookieなし・無効は401、診断前は409、最後の診断にない投稿ID・もう消した投稿IDは422。消せた投稿IDはセッションの診断に記録し、2回目以降の `broken`・`after` はそれまでに消した投稿を除いた状態から計算する。途中で Bluesky に回数制限（429）で断られたら残りは試さず `failed` に入れ、`bluesky_busy: true` を返す。 |
-| `POST /api/simulate` | `tkb_session` Cookie。JSON `{"delete":["at://…",…]}`（最大100件） | 200 Simulation（下記） | 実際には消さない（Bluesky の削除APIを呼ばない）。モデルも呼ばない。Cookieなし・無効は401、そのセッションで診断が終わっていなければ409、最後の診断にない投稿IDや余計なキーは422（送られたIDは応答に入れない）。 |
+| `POST /api/simulate` | `tkb_session` Cookie。JSON `{"delete":["at://…",…]}`（最大100件） | 200 Simulation（下記） | 実際には消さない（Bluesky の削除APIを呼ばない）。モデルも呼ばない。Cookieなし・無効は401、そのセッションで診断が終わっていなければ409、最後の診断にない投稿ID・もう消した投稿ID・余計なキーは422（送られたIDは応答に入れない）。もう消した投稿を除いた状態から計算する（`POST /api/delete` と同じ）。 |
 | `POST /api/draft-check` | Cookie認証。JSON `{"text":"…","photo_base64":string|null,"photo_content_type":string|null}` | 200 `{"posts_checked":number,"overlaps":[…],"mock_mode":boolean,"notices":[…]}` | 認証必須。セッション本人の投稿だけを取得し、下書きと既存投稿の観測手がかりが一致する箇所を返す。診断の推理・投稿時刻由来推定は行わない。本文は最大10,000文字、写真は最大20MiB。 |
 
 バリデーションエラーは422で `{"detail":[{"loc":[…],"msg":"…","type":"…"}]}` を返す。送信値そのものは詳細に含めない。その他のエラー形式は FastAPI のHTTPエラー応答に従う。
