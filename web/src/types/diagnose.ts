@@ -61,6 +61,11 @@ export interface RiskyPost {
 export interface DiagnosisSnapshot {
   readonly posts: readonly Post[];
   readonly clues: readonly Clue[];
+  /**
+   * 診断のあとに Bluesky から消した投稿の ID（GET /api/diagnosis だけが返す）。posts と clues は診断時のまま
+   * （番号を変えない）で、conclusions と plan はここの投稿を除いて計算してある
+   */
+  readonly deleted?: readonly string[];
   readonly conclusions: readonly Conclusion[];
   readonly plan: Simulation & { readonly posts: readonly RiskyPost[] };
   readonly profile_claims?: readonly ProfileItem[];
@@ -188,6 +193,10 @@ function isRiskyPost(value: unknown): value is RiskyPost {
 export function isDiagnosisSnapshot(value: unknown): value is DiagnosisSnapshot {
   if (!isRecord(value) || !Array.isArray(value.posts) || !value.posts.every(isPost) || !isClueList(value.clues)) return false;
   const clueCount = value.clues.length;
+  if (Object.hasOwn(value, "deleted")) {
+    const postIds = new Set(value.posts.map((post) => post.post_id));
+    if (!isStringList(value.deleted) || !value.deleted.every((id) => postIds.has(id))) return false;
+  }
   if (!Array.isArray(value.conclusions) || !value.conclusions.every((c) => isConclusion(c, clueCount))) return false;
   const plan = value.plan;
   if (!isSimulation(plan, clueCount) || !isRecord(plan) || !Array.isArray(plan.posts) || !plan.posts.every(isRiskyPost)) return false;

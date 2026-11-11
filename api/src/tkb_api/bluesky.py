@@ -10,7 +10,7 @@ import secrets
 import threading
 import time
 from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from atproto import AsyncClient, models
 from atproto_client.exceptions import (
@@ -229,6 +229,9 @@ class Diagnosis:
     external_lookup_status: ExternalLookupStatus = ExternalLookupStatus.NOT_REQUESTED
     owner_profile_text: str = ""
     self_report_clues: tuple[Clue, ...] = ()
+    # この診断のあとに Bluesky から消せた投稿の ID（消した順）。posts と clues は診断時のまま残し、
+    # 手がかりの番号（clue_indices）を変えない。結論と削除候補を作るときに、ここの投稿を除く
+    deleted: tuple[str, ...] = ()
 
 
 class SessionStore:
@@ -286,6 +289,15 @@ class SessionStore:
                 self._diagnoses.pop(session_id, None)
             else:
                 self._diagnoses[session_id] = diagnosis
+
+    def mark_deleted(self, session_id: str, post_ids: Sequence[str]) -> None:
+        """消せた投稿をセッションの診断に記録する。診断がなければ何もしない。"""
+        with self._lock:
+            diagnosis = self._diagnoses.get(session_id)
+            if diagnosis is None or session_id not in self._sessions:
+                return
+            deleted = tuple(dict.fromkeys([*diagnosis.deleted, *post_ids]))
+            self._diagnoses[session_id] = replace(diagnosis, deleted=deleted)
 
     def get_diagnosis(self, session_id: str) -> Diagnosis | None:
         with self._lock:

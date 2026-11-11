@@ -79,6 +79,8 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
   const [result, setResult] = useState<Result | null>(null);
   const [risky, setRisky] = useState<readonly RiskyPost[] | null>(null);
   const [simulation, setSimulation] = useState<Simulation | null>(null);
+  // 開き直したときに api から受け取る、診断のあとに消した投稿。一覧では「削除済み」と示し、候補と身元カードから外す
+  const [deleted, setDeleted] = useState<ReadonlySet<string>>(() => new Set());
   const [publicWebLookupConsent, setPublicWebLookupConsent] = useState(false);
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   const controller = useRef<AbortController | null>(null);
@@ -115,7 +117,9 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
           ownerProfileText: snapshot.owner_profile_text ?? "",
           selfReportClues: snapshot.self_report_clues ?? [],
         });
-        setRisky(snapshot.plan.posts);
+        const gone = new Set(snapshot.deleted ?? []);
+        setDeleted(gone);
+        setRisky(snapshot.plan.posts.filter((risky) => !gone.has(risky.post_id)));
         setPhase({ kind: "done", postsSeen: snapshot.posts.length });
         onRevealedChange?.(true);
       })
@@ -144,6 +148,7 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
     setFound({});
     setResult(null);
     setRisky(null);
+    setDeleted(new Set());
     setSimulation(null);
     onRevealedChange?.(false);
     setPhase({ kind: "connecting" });
@@ -192,6 +197,7 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
 
   const busy = phase.kind === "connecting" || phase.kind === "reading" || phase.kind === "searching";
   const status = statusText(phase, posts.length, Object.keys(found).length);
+  const livePosts = deleted.size === 0 ? posts : posts.filter((post) => !deleted.has(post.post_id));
 
   // 結果が出たら再診断ボタンを下へ移し、身元カード→写真→捜査ボードを続けて見せる。
   const controls = (
@@ -230,7 +236,7 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
       <h2 id="diagnose-heading" className="sr-only">
         {t.heading}
       </h2>
-      {!busy && result && <Reveal posts={posts} clues={result.clues} conclusions={result.conclusions} />}
+      {!busy && result && <Reveal posts={livePosts} clues={result.clues} conclusions={result.conclusions} />}
       {(busy || !result) && controls}
 
       {!busy && result && (
@@ -259,6 +265,11 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
         <ol aria-label={t.postsLabel} className="max-w-2xl space-y-5">
           {posts.map((post) => (
             <li key={post.post_id}>
+              {deleted.has(post.post_id) && (
+                <p className="mb-1 inline-block rounded-sm bg-ink px-2 py-0.5 text-xs font-bold text-paper">
+                  {t.deletedBadge}
+                </p>
+              )}
               <PostCard post={post} found={found[post.post_id]} />
             </li>
           ))}

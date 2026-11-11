@@ -26,7 +26,6 @@ import json
 import logging
 import time
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
-from dataclasses import asdict
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
@@ -53,6 +52,7 @@ from tkb_api.limits import (
     next_jst_midnight,
 )
 from tkb_api.pipeline import (
+    conclusions_json,
     diagnose_events,
     load_gazetteer,
     mock_extractions,
@@ -76,7 +76,6 @@ from tkb_detect.batch import PostExtraction
 from tkb_detect.errors import DetectError
 from tkb_detect.extract import Extractor, build_extractor
 from tkb_engine.gazetteer import Gazetteer
-from tkb_engine.rules import infer
 
 router = APIRouter(prefix="/api")
 logger = logging.getLogger(__name__)
@@ -301,16 +300,21 @@ def read_diagnosis(
     session_id: Annotated[str, Depends(current_session_id)],
     gazetteer: Annotated[Gazetteer, Depends(get_gazetteer)],
 ) -> dict[str, Any]:
-    """同じログインセッションで画面を開き直したとき、直近の完了結果を返す。"""
+    """同じログインセッションで画面を開き直したとき、直近の完了結果を返す。
+
+    posts と clues は診断時のまま返す（手がかりの番号を変えない）。そのあとに消した投稿は
+    deleted に入れ、conclusions と plan は消した投稿を除いて計算する（番号は clues での番号）。
+    """
     diagnosis = store.get_diagnosis(session_id)
     if diagnosis is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "復元できる診断結果はありません")
-    posts, clues = diagnosis.posts, diagnosis.clues
+    posts, clues, deleted = diagnosis.posts, diagnosis.clues, diagnosis.deleted
     return {
         "posts": [post.model_dump(mode="json") for post in posts],
         "clues": [clue.model_dump(mode="json") for clue in clues],
-        "conclusions": [asdict(conclusion) for conclusion in infer(clues, posts, gazetteer)],
-        "plan": plan_json(clues, posts, gazetteer),
+        "deleted": list(deleted),
+        "conclusions": conclusions_json(clues, posts, gazetteer, deleted),
+        "plan": plan_json(clues, posts, gazetteer, deleted),
         "profile_claims": [claim.model_dump(mode="json") for claim in diagnosis.profile_claims],
         "profile_claim_suggestions": list(diagnosis.profile_claim_suggestions),
         "web_facts": [fact.model_dump(mode="json") for fact in diagnosis.web_facts],
