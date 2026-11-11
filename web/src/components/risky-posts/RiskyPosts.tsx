@@ -4,9 +4,9 @@ import { useEffect, useRef, useState } from "react";
 
 import { ApiError, deletePosts, simulate } from "@/lib/api";
 import { messages } from "@/lib/messages";
-import { isLikelyNameText } from "@/lib/reveal";
+import { isLikelyNameText, validNameConclusions } from "@/lib/reveal";
 import type { Clue } from "@/types/clue";
-import type { Deletion, RiskyPost, Simulation } from "@/types/diagnose";
+import type { Conclusion, Deletion, RiskyPost, Simulation } from "@/types/diagnose";
 import type { Post } from "@/types/post";
 
 import { DeleteConfirm } from "./DeleteConfirm";
@@ -31,6 +31,13 @@ interface RiskyPostsProps {
   onSimulated: (simulation: Simulation | null) => void;
   /** api が 401（セッションの時間切れ）を返したときに呼ぶ。ログイン画面に戻すのは呼び出し側 */
   onSessionExpired?: () => void;
+  /** 消す前の結論（捜査ボードに出しているもの）。あれば、消す前後の「推定できた項目」の数を大きく出す */
+  conclusions?: readonly Conclusion[];
+}
+
+/** 推定できた項目の数（同じ項目に結論が2つあっても1と数える） */
+function countAttributes(conclusions: readonly Conclusion[]): number {
+  return new Set(conclusions.map((c) => c.attribute)).size;
 }
 
 function labelsOf(attributes: readonly string[]): string {
@@ -47,7 +54,7 @@ function excerpt(text: string): string {
  * 結果は捜査ボードに渡して、崩れた項目を「不明」にする。
  * 試したあと、確認ダイアログで OK したときだけ Bluesky から実際に消す（もういいよ）。消したあとは選び直せない。
  */
-export function RiskyPosts({ posts, risky, clues = [], clueCount, onSimulated, onSessionExpired }: RiskyPostsProps) {
+export function RiskyPosts({ posts, risky, clues = [], clueCount, onSimulated, onSessionExpired, conclusions }: RiskyPostsProps) {
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set(risky.map((r) => r.post_id)));
   const [result, setResult] = useState<Simulation | null>(null);
   const [pending, setPending] = useState(false);
@@ -144,6 +151,10 @@ export function RiskyPosts({ posts, risky, clues = [], clueCount, onSimulated, o
   const gone = new Set(shown?.delete ?? []);
   const directCluesLeft = clues.some((c) => !gone.has(c.post_id) && directClueLabel(c) !== null);
   const escaped = shown !== null && !directCluesLeft && IMPORTANT_ATTRIBUTES.every((a) => !shown.after.some((c) => c.attribute === a));
+  // 捜査ボードと同じく、名前らしくない名前の結論は数えない
+  const counts = shown !== null && conclusions !== undefined
+    ? { before: countAttributes(conclusions), after: countAttributes(validNameConclusions(shown.after)) }
+    : null;
 
   return (
     <section aria-labelledby="risky-heading" aria-busy={pending} className="max-w-2xl space-y-4">
@@ -229,6 +240,7 @@ export function RiskyPosts({ posts, risky, clues = [], clueCount, onSimulated, o
           {t.simulating}
         </p>
       )}
+      {counts && <CountChange before={counts.before} after={counts.after} />}
       {result && !deletion && (
         <div role="status" className="space-y-1">
           <p className="font-bold">{t.result(result.delete.length, result.broken.length)}</p>
@@ -260,6 +272,20 @@ function directClueLabel(clue: Clue): string | null {
   if (clue.type === "face" && clue.confidence < 0.8) return null;
   if (clue.type === "name_text" && !isLikelyNameText(clue.value)) return null;
   return messages.clues.typeLabels[clue.type];
+}
+
+/** 消す前後で「推定できた項目」の数がどう変わるかを、いちばん大きく見せる */
+function CountChange({ before, after }: { before: number; after: number }) {
+  return (
+    <figure aria-label={t.countLabel(before, after)} className="border-y-2 border-ink py-4 text-center">
+      <figcaption className="text-sm tracking-widest text-ink/70">{t.countHeading}</figcaption>
+      <p aria-hidden className="mt-1 font-display text-6xl leading-none tabular-nums sm:text-7xl">
+        <span>{before}</span>
+        <span className="mx-3 text-ink/40 sm:mx-5">→</span>
+        <span className={after < before ? "text-seeker" : ""}>{after}</span>
+      </p>
+    </figure>
+  );
 }
 
 /** 実際に消したあと：消せた数、消せなかった数、逃げ切れたか */

@@ -164,6 +164,49 @@ describe("RiskyPosts", () => {
     await vi.waitFor(() => expect(onSessionExpired).toHaveBeenCalledTimes(1));
   });
 
+  it("shows how many items could be inferred before and after the simulated deletion", async () => {
+    const before = [
+      { rule: "R4", attribute: "station", value: "根津", clue_indices: [0], note: "" },
+      { rule: "R4", attribute: "station", value: "湯島", clue_indices: [1], note: "" },
+      { rule: "R3", attribute: "routine", value: "毎週火曜", clue_indices: [2], note: "" },
+      { rule: "R6", attribute: "active_time", value: "夜", clue_indices: [3], note: "" },
+    ];
+    vi.mocked(simulate).mockResolvedValue({ ...ALL_BROKEN, broken: ["station", "active_time"], after: [before[2]] });
+    render(<RiskyPosts posts={[GYM, ADDRESS]} risky={RISKY} clueCount={20} onSimulated={vi.fn()} conclusions={before} />);
+    expect(screen.queryByRole("figure")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: t.simulate }));
+
+    // 同じ項目（最寄り駅）の結論が2つあっても1と数える：3 → 1
+    const figure = await screen.findByRole("figure", { name: t.countLabel(3, 1) });
+    expect(figure).toHaveTextContent(t.countHeading);
+    expect(figure).toHaveTextContent("3→1");
+  });
+
+  it("keeps showing the counts after deleting for real", async () => {
+    const before = [{ rule: "R3", attribute: "routine", value: "毎週火曜", clue_indices: [0], note: "" }];
+    vi.mocked(simulate).mockResolvedValue(ALL_BROKEN);
+    vi.mocked(deletePosts).mockResolvedValue({ ...ALL_BROKEN, failed: [] });
+    render(<RiskyPosts posts={[GYM, ADDRESS]} risky={RISKY} clueCount={20} onSimulated={vi.fn()} conclusions={before} />);
+    fireEvent.click(screen.getByRole("button", { name: t.simulate }));
+    fireEvent.click(await screen.findByRole("button", { name: t.deleteForReal }));
+
+    fireEvent.click(screen.getByRole("button", { name: t.confirm }));
+
+    expect(await screen.findByText(messages.escaped.heading)).toBeInTheDocument();
+    expect(screen.getByRole("figure", { name: t.countLabel(1, 0) })).toBeInTheDocument();
+  });
+
+  it("does not show the counts without the conclusions before deletion", async () => {
+    vi.mocked(simulate).mockResolvedValue(ALL_BROKEN);
+    renderRisky();
+
+    fireEvent.click(screen.getByRole("button", { name: t.simulate }));
+
+    expect(await screen.findByText(t.result(2, 3))).toBeInTheDocument();
+    expect(screen.queryByRole("figure")).not.toBeInTheDocument();
+  });
+
   it("offers to delete for real only after simulating", async () => {
     vi.mocked(simulate).mockResolvedValue(ALL_BROKEN);
     renderRisky();

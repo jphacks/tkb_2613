@@ -256,7 +256,7 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
       )}
 
       {!busy && result && risky && (
-        <RiskyPosts posts={posts} risky={risky} clues={result.clues} clueCount={result.clues.length} onSimulated={setSimulation} onSessionExpired={expire} />
+        <RiskyPosts posts={posts} risky={risky} clues={result.clues} clueCount={result.clues.length} conclusions={result.conclusions} onSimulated={setSimulation} onSessionExpired={expire} />
       )}
       {!busy && result && <ResultShare />}
       {!busy && result && controls}
