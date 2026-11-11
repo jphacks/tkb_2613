@@ -299,7 +299,8 @@ describe("DiagnosePanel", () => {
     const board = await screen.findByRole("region", { name: b.heading });
     const identity = screen.getByRole("article", { name: messages.identity.label });
     const evidence = screen.getByRole("list", { name: messages.reveal.evidenceLabel });
-    const restart = screen.getByRole("button", { name: d.start });
+    const restart = screen.getByRole("button", { name: d.rediagnose });
+    expect(screen.queryByRole("button", { name: d.start })).not.toBeInTheDocument();
     expect(identity.compareDocumentPosition(evidence) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(evidence.compareDocumentPosition(board) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(board.compareDocumentPosition(restart) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -315,6 +316,25 @@ describe("DiagnosePanel", () => {
     expect(screen.getByRole("list", { name: messages.post.cluesLabel })).toHaveTextContent("毎週火曜はジム");
     expect(screen.getByText(messages.clues.failed("写真を取得できませんでした"))).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent(d.done(2));
+  });
+
+  it("offers a quiet re-diagnose button after the result that warns it uses one of today's diagnoses", async () => {
+    vi.mocked(diagnose).mockImplementation(async function* () {
+      yield { event: "post", post: post(1, "夜勤明け。電車混んでる") };
+      yield { event: "conclusions", clues: [], conclusions: [] };
+      yield { event: "done", posts_seen: 1 };
+    });
+    fireEvent.click(await renderLoggedIn());
+    const again = await screen.findByRole("button", { name: d.rediagnose });
+    expect(diagnose).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: d.start })).not.toBeInTheDocument();
+    expect(again).toHaveAccessibleDescription(d.rediagnoseNote);
+
+    // 確認は挟まず、押したらそのまま診断し直す
+    fireEvent.click(again);
+    expect(diagnose).toHaveBeenCalledTimes(2);
+    expect(await screen.findByRole("button", { name: d.rediagnose })).toBeInTheDocument();
+    expect(diagnose).toHaveBeenCalledTimes(2);
   });
 
   it("returns to the top after the result replaces the loading screen", async () => {
