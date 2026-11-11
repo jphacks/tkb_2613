@@ -131,7 +131,7 @@ SSEブロックは `event: <name>\ndata: <JSON>\n\n`。JSONはUTF-8で送られ�
 
 ## X 専用の読み取り診断（`poc/x-local-text`）
 
-Bluesky の `/api/session`・`/api/diagnose`・`/api/simulate` とは独立した `/api/x/*`。X の OAuth と診断は専用の HttpOnly `x_tkb_session` Cookie（Path `/api/x`）を使う。X の実投稿は用途承認・費用承認・上流クエリログ対策の設定がそろうまで拒否する。実X投稿の本文は loopback の Ollama のみに送る。`X_GPU_DEMO_ENABLED=1` で許可した場合に限り、固定の架空X投稿を既存VLMへ送る別セッションを作れる。結果はプロセスメモリだけに置き、X 投稿の実削除・結果共有は行わない。
+Bluesky の `/api/session`・`/api/diagnose`・`/api/simulate` とは独立した `/api/x/*`。X の OAuth と診断は専用の HttpOnly `x_tkb_session` Cookie（Path `/api/x`）を使う。X の実投稿は用途承認・費用承認・上流クエリログ対策の設定がそろうまで拒否する。実X投稿の本文は loopback の Ollama のみに送る。`X_GPU_DEMO_ENABLED=1` で許可した場合に限り、固定の架空X投稿を既存VLMへ送る別セッションを作れる。結果はプロセスメモリだけに置き、X 投稿の実削除・結果共有は行わない。X のセッションと認可開始の情報は、作るたびに期限切れを捨て、それぞれ500件を超えたら古い順に捨てる。
 
 | メソッド・パス | 入力 | 応答・動作 |
 | --- | --- | --- |
@@ -142,7 +142,7 @@ Bluesky の `/api/session`・`/api/diagnose`・`/api/simulate` とは独立し�
 | `GET /api/x/callback` | X の `state,code` と開始 Cookie | state/PKCE を照合し、トークン交換と本人確認の後 `/x` へ 303。 |
 | `GET /api/x/session` | X セッション Cookie | `username, mock`。未認証401。 |
 | `DELETE /api/x/session` | X セッション Cookie | セッション・結果をメモリから削除、204。 |
-| `POST /api/x/diagnose` | X セッション Cookie | `DiagnosisSnapshot` と `elapsed_ms, mock`。実経路は本人の投稿を最大30リソース読み、Ollama本文抽出→既存推論。2回目はメモリの結果を返し再課金しない。 |
+| `POST /api/x/diagnose` | X セッション Cookie | `DiagnosisSnapshot` と `elapsed_ms, mock`。実経路は本人の投稿を最大30リソース読み、Ollama本文抽出→既存推論。2回目はメモリの結果を返し再課金しない。モデルを呼ぶ経路（GPUデモ・実経路）は本体の診断と同じ同時実行枠（`MAX_CONCURRENT_DIAGNOSES`）を使い、埋まっていれば503 `busy`（`Retry-After` つき）。1日の回数には数えない。プリセットのモックは枠を使わない。 |
 | `GET /api/x/diagnosis` | X セッション Cookie | 直近の完了結果。なければ404。 |
 | `POST /api/x/simulate` | `{"delete":[診断済み投稿ID]}` | 既存 `Simulation`。X API・モデルは再呼出ししない。 |
 | `POST /api/x/rediagnose` | 同上 | 除外後の `posts, clues, conclusions, plan, mock` を再計算。X API・モデルは再呼出ししない。 |

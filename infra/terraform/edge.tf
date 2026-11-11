@@ -376,24 +376,32 @@ resource "aws_wafv2_web_acl" "main" {
         limit                 = var.rate_limit_diagnose
         evaluation_window_sec = 300
         aggregate_key_type    = "IP"
+        # GPU を使う診断の入口。X・Threads の診断も本体と同じ上限で数える
         scope_down_statement {
-          byte_match_statement {
-            search_string         = "/api/diagnose"
-            positional_constraint = "STARTS_WITH"
-            field_to_match {
-              uri_path {}
-            }
-            text_transformation {
-              priority = 0
-              type     = "URL_DECODE"
-            }
-            text_transformation {
-              priority = 1
-              type     = "NORMALIZE_PATH"
-            }
-            text_transformation {
-              priority = 2
-              type     = "LOWERCASE"
+          or_statement {
+            dynamic "statement" {
+              for_each = ["/api/diagnose", "/api/x/diagnose", "/api/threads/diagnose"]
+              content {
+                byte_match_statement {
+                  search_string         = statement.value
+                  positional_constraint = "STARTS_WITH"
+                  field_to_match {
+                    uri_path {}
+                  }
+                  text_transformation {
+                    priority = 0
+                    type     = "URL_DECODE"
+                  }
+                  text_transformation {
+                    priority = 1
+                    type     = "NORMALIZE_PATH"
+                  }
+                  text_transformation {
+                    priority = 2
+                    type     = "LOWERCASE"
+                  }
+                }
+              }
             }
           }
         }

@@ -3,16 +3,19 @@
 import json
 import logging
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 import httpx
 import pytest
 import respx
+from fastapi import FastAPI
 
 from tkb_api.config import Settings
 from tkb_api.main import create_app
-from tkb_api.routes.x import XCallbackAccessFilter
+from tkb_api.routes import x as x_routes
+from tkb_api.routes.x import XCallbackAccessFilter, XSessionStore
 
 ORIGIN = "http://testserver"
 HEADERS = {"Origin": ORIGIN}
@@ -32,7 +35,7 @@ def test_oauth_callback_code_is_redacted_from_access_log() -> None:
     assert "secret" not in record.getMessage()
 
 
-def _client(**kwargs: Any) -> httpx.AsyncClient:
+def _app(**kwargs: Any) -> FastAPI:
     settings = Settings(
         _env_file=None,
         x_public_origin=ORIGIN,
@@ -41,9 +44,94 @@ def _client(**kwargs: Any) -> httpx.AsyncClient:
         share_enabled=False,
         **kwargs,
     )
-    return httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=create_app(settings=settings)), base_url=ORIGIN
-    )
+    return create_app(settings=settings)
+
+
+def _client(**kwargs: Any) -> httpx.AsyncClient:
+    return _client_for(_app(**kwargs))
+
+
+def _client_for(app: FastAPI) -> httpx.AsyncClient:
+    return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url=ORIGIN)
+
+
+GPU_BASE = "http://gpu.example.test:8000/v1"
+GPU_DEMO = {
+    "x_mock_mode": True,
+    "x_gpu_demo_enabled": True,
+    "vlm_base_url": GPU_BASE,
+    "vlm_model": "synthetic-vlm",
+    "model_allowed_host_suffixes": "gpu.example.test",
+    "max_concurrent_diagnoses": 1,
+}
+
+
+@pytest.mark.anyio
+async def test_gpu_x_diagnosis_waits_for_a_free_diagnose_slot() -> None:
+    app = _app(**GPU_DEMO)
+    # 本体の診断が枠を使い切っている
+    other = app.state.diagnose_limiter.acquire("bluesky-session", "did:plc:other")
+    async with _client_for(app) as client:
+        with respx.mock(assert_all_called=False) as router:
+            router.get(f"{GPU_BASE}/models").respond(json={"data": [{"id": "synthetic-vlm"}]})
+            start = await client.post(
+                "/api/x/mock/gpu-session", json={"consent": True}, headers=HEADERS
+            )
+            assert start.status_code == 200
+
+            busy = await client.post("/api/x/diagnose", headers=HEADERS)
+
+            assert busy.status_code == 503
+            assert busy.json()["detail"]["code"] == "busy"
+            assert "retry-after" in busy.headers
+            assert not router.calls  # 枠がないときは GPU に送らない
+
+            other.release()
+            # 枠が空けば進む（ここではモデルが空の応答を返して 503 になるが、枠は返す）
+            await client.post("/api/x/diagnose", headers=HEADERS)
+            assert router.calls
+    assert app.state.diagnose_limiter.active == 0
+
+
+@pytest.mark.anyio
+async def test_preset_x_diagnosis_does_not_take_a_diagnose_slot() -> None:
+    app = _app(x_mock_mode=True, max_concurrent_diagnoses=1)
+    other = app.state.diagnose_limiter.acquire("bluesky-session", "did:plc:other")
+    async with _client_for(app) as client:
+        await client.post("/api/x/mock/session", json={"consent": True}, headers=HEADERS)
+
+        result = await client.post("/api/x/diagnose", headers=HEADERS)
+
+    assert result.status_code == 200
+    other.release()
+
+
+def test_x_session_store_drops_expired_sessions_and_pending_logins(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = [1000.0]
+    monkeypatch.setattr(x_routes, "time", SimpleNamespace(monotonic=lambda: now[0]))
+    store = XSessionStore(ttl_s=60)
+    old_session = store.create(None, "0", "old")
+    old_state = store.start("verifier", "nonce")
+
+    now[0] += x_routes.START_TTL_S + 61
+    store.create(None, "0", "new")
+    store.start("verifier", "nonce")
+
+    assert old_session not in store.sessions
+    assert old_state not in store.pending
+    assert len(store.sessions) == 1
+    assert len(store.pending) == 1
+
+
+def test_x_session_store_drops_the_oldest_when_over_the_limit() -> None:
+    store = XSessionStore(ttl_s=60, max_pending=2, max_sessions=2)
+    sessions = [store.create(None, "0", f"user{i}") for i in range(3)]
+    states = [store.start("verifier", "nonce") for _ in range(3)]
+
+    assert list(store.sessions) == sessions[1:]
+    assert list(store.pending) == states[1:]
 
 
 @pytest.mark.anyio
