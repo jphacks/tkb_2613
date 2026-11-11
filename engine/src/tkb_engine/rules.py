@@ -229,7 +229,7 @@ def rule_r3(clues: Sequence[Clue], posts: Sequence[Post]) -> list[Conclusion]:
                 "routine",
                 f"毎週{WEEKDAYS[day]}曜 {_hour_label(group)}に出かけている{detail}",
                 indices,
-                f"同じ曜日・時間帯の投稿 {len(group)} 件（根拠の番号は、その投稿の routine_text）",
+                f"同じ曜日・時間帯の投稿 {len(group)} 件",
             )
         )
 
@@ -606,7 +606,7 @@ def rule_r8(clues: Sequence[Clue]) -> list[Conclusion]:
     if sum(confidence(k) == confidence(best) for k in sure) > 1:
         return []
     indices = groups[best]
-    note = f"名前の手がかり {len(indices)} 件（合わせた確からしさ {confidence(best):.2f}）"
+    note = f"名前の手がかり {len(indices)} 件"
     return [Conclusion("R8", "given_name_or_nickname", shown[best], indices, note)]
 
 

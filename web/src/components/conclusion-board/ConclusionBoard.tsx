@@ -14,7 +14,10 @@ const t = messages.board;
 
 /** 確からしさが弱い推定にだけ、点線の枠の印を付ける。強い推定と、値のない古い閲覧リンクには何も出さない */
 function ConfidenceMark({ conclusion }: { conclusion: Conclusion }) {
-  if (confidenceLevel(conclusion) !== "weak") return null;
+  return confidenceLevel(conclusion) === "weak" ? <WeakMark /> : null;
+}
+
+function WeakMark() {
   return (
     <span className="ml-2 rounded-sm border border-dashed border-ink/40 px-1.5 py-0.5 text-ink/70">
       {t.confidence.weak}
@@ -201,13 +204,17 @@ export function ConclusionBoard({
     {(profileClaims.length > 0 || ownerProfileText || externalProfileResults.length > 0 || externalLookupStatus !== "not_requested") && (
       <section aria-labelledby="profile-claims-heading" className="mt-8 max-w-2xl space-y-4">
         <h3 id="profile-claims-heading" className="font-display text-2xl">投稿を横断したプロフィール推定</h3>
-        {profileClaims.length === 0 ? <p className="text-ink/70">現行ルールで候補が成立しませんでした。</p> : (
+        {profileClaims.length === 0 ? <p className="text-ink/70">投稿を横断して推定できた項目はありませんでした。</p> : (
           <ul className="space-y-3">
             {profileClaims.map((claim) => (
               <li key={claim.attribute} className="border-l-4 border-seeker bg-paper-deep px-4 py-3">
-                <p className="text-xs tracking-widest text-ink/60">{PROFILE_ATTRIBUTE_CATALOG[claim.attribute].label} ・{claim.status === "found" ? "推定" : "弱い推定"}</p>
+                {/* 捜査ボードと同じ見せ方：「推定」の印と、弱いときだけ「確からしさ：弱い」。数字は出さない */}
+                <p className="text-xs tracking-widest text-ink/60">
+                  {PROFILE_ATTRIBUTE_CATALOG[claim.attribute].label}
+                  <span className="ml-2 rounded-sm bg-ink/10 px-1.5 py-0.5">{t.inferred}</span>
+                  {claim.status === "weak" && <WeakMark />}
+                </p>
                 <p className="mt-1 text-xl font-bold">{claim.value}</p>
-                <p className="mt-1 text-sm text-ink/70">確からしさ {Math.round(claim.confidence * 100)}%</p>
               </li>
             ))}
           </ul>
