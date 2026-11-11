@@ -24,6 +24,7 @@ html {
 }
 
 body {
+  position: relative;
   background:
     radial-gradient(ellipse 80% 60vh at 50% 0%, oklch(32% 0.12 265 / 0.6), transparent 70%) no-repeat,
     var(--paper);
@@ -31,18 +32,23 @@ body {
   font-family: var(--font-sans);
 }
 
-/* 画面の四隅を暗くし、走査線を重ねる。操作の邪魔をしないよう pointer-events は切る */
+/* 画面の四隅を暗くし、走査線を重ねる。操作の邪魔をしないよう pointer-events は切る。
+   fixed にすると全体のスクリーンショットで最初の1画面にしか掛からず、その下との境目が出るので、
+   ページ全体（body）に掛け、暗くするのは左右の端と、ページの最初と最後の端にする */
 body::before,
 body::after {
   content: "";
-  position: fixed;
+  position: absolute;
   inset: 0;
   pointer-events: none;
   z-index: 50;
 }
 
 body::before {
-  background: radial-gradient(ellipse at center, transparent 55%, oklch(5% 0.03 265 / 0.85) 100%);
+  background:
+    linear-gradient(to right, oklch(5% 0.03 265 / 0.6), transparent 12%, transparent 88%, oklch(5% 0.03 265 / 0.6)),
+    linear-gradient(to bottom, oklch(5% 0.03 265 / 0.6), transparent 160px),
+    linear-gradient(to top, oklch(5% 0.03 265 / 0.6), transparent 160px);
 }
 
 body::after {
