@@ -79,7 +79,7 @@ export function ProfileClaimWhatIf({ claims, clues, posts, suggestions, webFacts
     const number = postNumbers.get(postId);
     return <label key={postId} className="flex items-start gap-2 break-words rounded border border-ink/20 p-2 text-sm">
       <input type="checkbox" checked={selected.has(postId)} disabled={!selected.has(postId) && selected.size >= 3} onChange={() => toggle(postId)} />
-      <span className="min-w-0"><span className="block font-bold">投稿 {number}{suggested ? "（消す候補）" : ""}</span>
+      <span className="min-w-0"><span className="block font-bold">投稿 {number}{suggested ? "（削除候補）" : ""}</span>
         <span className="break-words">{postText(post)}</span>
       </span>
     </label>;
