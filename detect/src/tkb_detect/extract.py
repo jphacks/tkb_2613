@@ -189,7 +189,9 @@ class Extractor:
     async def _extract_image_with_models(self, post_id: str, index: int, data: bytes) -> list[Clue]:
         prepare_started = time.monotonic()
         try:
-            prepared = prepare_image(data)
+            # 画像の縮小・変換は CPU を使うので、別のスレッドで行う
+            # （ほかの人の応答と keep-alive を止めない）
+            prepared = await asyncio.to_thread(prepare_image, data)
         finally:
             logger.info("診断の内訳：画像準備 %.2f 秒", time.monotonic() - prepare_started)
         vlm_task = _timed(
@@ -233,11 +235,13 @@ class Extractor:
         if region is None:  # select_zoom_targets は region のあるものだけを選ぶ
             return [target]
         try:
+            # 切り出しと拡大は CPU を使うので別のスレッドで1回だけ行い、再試行では同じ画像を送る
+            cropped = await asyncio.to_thread(crop_and_enlarge, data, region)
             raw = await _timed(
                 "拡大VLM",
                 _retry_if_cut_off(
                     lambda penalty: self._vlm.complete(
-                        crop_and_enlarge(data, region),
+                        cropped,
                         SENT_MIME_TYPE,
                         ZOOM_USER_PROMPT,
                         system=PHOTO_SYSTEM_PROMPT,

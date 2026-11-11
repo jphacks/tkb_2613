@@ -283,7 +283,9 @@ async def diagnose_events(
             external_lookup_status = ExternalLookupStatus.UNAVAILABLE
             external_profile_results = ()
 
-    conclusions = infer(all_clues, list(posts), gazetteer)
+    # 推理と危ない投稿の選び方は CPU を使うので、別のスレッドで行う
+    # （診断中も、ほかの人の応答と SSE の keep-alive を止めない）
+    conclusions = await asyncio.to_thread(infer, all_clues, list(posts), gazetteer)
     self_report_clues = (
         await owner_profile_analyzer(owner_profile_text)
         if owner_profile_text and owner_profile_analyzer
@@ -332,7 +334,7 @@ async def diagnose_events(
                 "self_report_clues": self_report_clues,
             }
         )
-    yield "plan", plan_json(all_clues, posts, gazetteer)
+    yield "plan", await asyncio.to_thread(plan_json, all_clues, posts, gazetteer)
     logger.info(
         "診断の時間：手がかりの取り出し %.1f 秒"
         "（投稿 %d 件、写真 %d 枚、手がかり %d 件、失敗 %d 件）、推理と危ない投稿 %.2f 秒",
