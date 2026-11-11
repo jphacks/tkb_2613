@@ -8,6 +8,7 @@ import { confidenceLevel, type Conclusion } from "@/types/diagnose";
 import { PROFILE_ATTRIBUTE_CATALOG, type ExternalLookupStatus, type ExternalProfileResult, type ProfileItem, type WebFact } from "@/types/profile";
 import type { Post } from "@/types/post";
 import { ProfileClaimWhatIf } from "./ProfileClaimWhatIf";
+import { ReasoningChain } from "./ReasoningChain";
 
 const t = messages.board;
 
@@ -180,6 +181,7 @@ export function ConclusionBoard({
                     );
                   })}
                 </ul>
+                {posts.length > 0 && <ReasoningChain conclusion={conclusion} clues={clues} posts={posts} />}
               </li>
             ))}
             {unknown.map((attribute) => (

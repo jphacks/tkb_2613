@@ -110,4 +110,15 @@ describe("ConclusionBoard", () => {
     expect(screen.getAllByText(messages.board.confidence.weak)).toHaveLength(1);
     expect(screen.queryByText(/0\.92|0\.4|92%|40%/)).not.toBeInTheDocument();
   });
+
+  it("lets the user follow the reasoning chain only when the posts are given", () => {
+    const post = { post_id: CLUE.post_id, text: "新宿で乗り換え", created_at: "2026-10-20T08:31:00+09:00", images: [] };
+    const { rerender } = render(<ConclusionBoard clues={[CLUE]} conclusions={[CONCLUSION]} />);
+    expect(screen.queryByText(messages.board.chain.summary)).not.toBeInTheDocument();
+
+    rerender(<ConclusionBoard clues={[CLUE]} conclusions={[CONCLUSION]} posts={[post]} />);
+
+    expect(screen.getByText(messages.board.chain.summary)).toBeInTheDocument();
+    expect(screen.getByRole("list", { name: messages.board.chain.label })).toHaveTextContent("新宿で乗り換え");
+  });
 });
