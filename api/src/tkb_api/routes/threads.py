@@ -425,6 +425,47 @@ async def diagnosis(request: Request) -> dict[str, Any]:
     return current.snapshot
 
 
+async def _own_posts(current: ThreadsSession, settings: Settings) -> list[Post]:
+    if current.token is not None:
+        _require_live(settings)
+    if current.fetched:
+        return current.posts
+    if current.token is None:
+        posts, _ = _mock_data()
+    else:
+        try:
+            owner_id, posts = await fetch_own_posts(current.token, settings.threads_max_posts)
+            if owner_id != current.owner_id:
+                raise ThreadsPocError("本人 ID が一致しません")
+        except ThreadsPocError as exc:
+            raise _threads_error(exc) from None
+    current.posts = posts
+    current.fetched = True
+    return posts
+
+
+@router.get("/posts")
+async def posts(request: Request) -> dict[str, Any]:
+    """ログイン本人の本文投稿を取得する。モデルが未稼働でも確認できる。"""
+    settings = _settings(request)
+    current = _session(request)
+    if current.token is None and not settings.threads_mock_mode:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "モック投稿は無効です")
+    with _store(request).lock:
+        if current.busy:
+            raise HTTPException(status.HTTP_409_CONFLICT, "処理中です")
+        current.busy = True
+    try:
+        own_posts = await _own_posts(current, settings)
+        return {
+            "posts": [post.model_dump(mode="json") for post in own_posts],
+            "mock": current.token is None,
+        }
+    finally:
+        with _store(request).lock:
+            current.busy = False
+
+
 @router.delete("/session", status_code=204)
 async def logout(request: Request, response: Response) -> None:
     _origin(request)
@@ -524,19 +565,7 @@ async def diagnose(request: Request) -> dict[str, Any]:
                 raise HTTPException(
                     status.HTTP_503_SERVICE_UNAVAILABLE, "ローカルモデルを利用できません"
                 )
-            if current.fetched:
-                posts = current.posts
-            else:
-                try:
-                    owner_id, posts = await fetch_own_posts(
-                        current.token, settings.threads_max_posts
-                    )
-                    if owner_id != current.owner_id:
-                        raise ThreadsPocError("本人 ID が一致しません")
-                except ThreadsPocError as exc:
-                    raise _threads_error(exc) from None
-                current.posts = posts
-                current.fetched = True
+            posts = await _own_posts(current, settings)
             extractions = real_extractions(extractor, posts)
         gazetteer = load_gazetteer(settings.gazetteer_dir)
         started = time.monotonic()

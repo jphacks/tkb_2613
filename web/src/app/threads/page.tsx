@@ -6,6 +6,7 @@ import Link from "next/link";
 import { ConclusionBoard } from "@/components/conclusion-board/ConclusionBoard";
 import { PostCard } from "@/components/post-list/PostCard";
 import { isDiagnosisSnapshot, isSimulation, type DiagnosisSnapshot, type Simulation } from "@/types/diagnose";
+import { isPost, type Post } from "@/types/post";
 
 type ThreadsDiagnosis = DiagnosisSnapshot & { readonly elapsed_ms?: number; readonly mock?: boolean };
 type ThreadsConfig = { mock_enabled: boolean; gpu_demo_enabled: boolean; live_enabled: boolean; max_posts: number };
@@ -66,6 +67,7 @@ export default function ThreadsPage() {
   const [view, setView] = useState<ThreadsDiagnosis | null>(null);
   const [selected, setSelected] = useState<readonly string[]>([]);
   const [preview, setPreview] = useState<Simulation | null>(null);
+  const [fetchedPosts, setFetchedPosts] = useState<readonly Post[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -170,9 +172,23 @@ export default function ThreadsPage() {
             {session.mock ? session.username : `@${session.username}`}</p>
           <button type="button" disabled={busy} className="text-sm underline" onClick={() => void perform(async () => {
             await call("session", "DELETE");
-            setSession(null); setOriginal(null); setView(null); setSelected([]); setPreview(null);
+            setSession(null); setOriginal(null); setView(null); setSelected([]); setPreview(null); setFetchedPosts(null);
           })}>ログアウト</button>
         </div>
+        {!original && <button type="button" disabled={busy}
+          className="rounded-sm border border-ink px-5 py-3 font-bold disabled:opacity-50"
+          onClick={() => void perform(async () => {
+            const data = await call("posts");
+            if (!isRecord(data) || data.mock !== session.mock || !Array.isArray(data.posts) ||
+                !data.posts.every((post) => isPost(post) && post.post_id.startsWith("threads:") && post.images.length === 0)) {
+              throw new Error("本人投稿を読み取れませんでした。");
+            }
+            setFetchedPosts(data.posts);
+          })}>本人投稿を確認</button>}
+        {!original && fetchedPosts && <section aria-label="取得した本人投稿" className="space-y-4">
+          <p className="text-sm text-ink/70">本人投稿 {fetchedPosts.length} 件を取得しました。本文と投稿時刻だけを表示しています。AI診断はまだ開始していません。</p>
+          <ol className="space-y-5">{fetchedPosts.map((post) => <li key={post.post_id}><PostCard post={post} /></li>)}</ol>
+        </section>}
         {!original && <button type="button" disabled={busy}
           className="rounded-sm bg-seeker px-6 py-3 font-bold text-paper disabled:opacity-50"
           onClick={() => void perform(async () => {

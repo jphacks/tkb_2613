@@ -233,3 +233,68 @@ async def test_meta_deauthorize_and_data_deletion_clear_only_signed_owner() -> N
         assert result.json()["url"] == f"{origin}/threads/data-deletion-status"
         assert result.json()["confirmation_code"].isalnum()
         assert app.state.threads_sessions.get(other_session) is None
+
+
+@pytest.mark.anyio
+async def test_posts_are_limited_to_verified_owner_without_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tkb_api.routes import threads
+    from tkb_common.schemas import Post
+
+    origin = "https://testserver"
+    settings = Settings(
+        _env_file=None,
+        threads_public_origin=origin,
+        threads_callback_url=f"{origin}/api/threads/callback",
+        threads_enabled=True,
+        threads_query_logs_redacted=True,
+        threads_app_id="app-id",
+        threads_app_secret="test-only-secret",  # noqa: S106
+        cookie_secure=True,
+        share_enabled=False,
+    )
+    app = create_app(settings=settings)
+    calls = 0
+
+    async def fetch(token: str, limit: int) -> tuple[str, list[Post]]:
+        nonlocal calls
+        calls += 1
+        assert token == "test-only-token"  # noqa: S105
+        assert limit == settings.threads_max_posts
+        return "42", [
+            Post.model_validate(
+                {
+                    "post_id": "threads:1",
+                    "text": "架空の本文",
+                    "created_at": "2026-11-11T00:00:00+09:00",
+                    "images": [],
+                }
+            )
+        ]
+
+    monkeypatch.setattr(threads, "fetch_own_posts", fetch)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url=origin) as client:
+        assert (await client.get("/api/threads/posts")).status_code == 401
+        session_id = app.state.threads_sessions.create("test-only-token", "42", "tester")
+        client.cookies.set("threads_tkb_session", session_id, path="/api/threads")
+        first = await client.get("/api/threads/posts")
+        assert first.status_code == 200
+        assert first.json()["posts"][0]["post_id"] == "threads:1"
+        assert first.json()["mock"] is False
+        assert (await client.get("/api/threads/posts")).status_code == 200
+        assert calls == 1
+        assert (
+            await client.delete("/api/threads/session", headers={"Origin": origin})
+        ).status_code == 204
+        assert (await client.get("/api/threads/posts")).status_code == 401
+
+    async def wrong_owner(token: str, limit: int) -> tuple[str, list[Post]]:
+        return "43", []
+
+    monkeypatch.setattr(threads, "fetch_own_posts", wrong_owner)
+    app = create_app(settings=settings)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url=origin) as client:
+        session_id = app.state.threads_sessions.create("test-only-token", "42", "tester")
+        client.cookies.set("threads_tkb_session", session_id, path="/api/threads")
+        assert (await client.get("/api/threads/posts")).status_code == 502

@@ -6,6 +6,8 @@ test("合成Threads投稿を診断し、根拠を見て仮除外・再診断す�
   await page.getByRole("checkbox", { name: /自分の投稿を診断し/ }).check();
   await page.getByRole("button", { name: "架空のThreads投稿で試す" }).click();
   await expect(page.getByText("架空のThreadsアカウント")).toBeVisible();
+  await page.getByRole("button", { name: "本人投稿を確認" }).click();
+  await expect(page.getByText("本人投稿 2 件を取得しました。")).toBeVisible();
   await page.getByRole("button", { name: "診断する" }).click();
   await expect(page.getByText("診断結果", { exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "診断した投稿" })).toBeVisible();

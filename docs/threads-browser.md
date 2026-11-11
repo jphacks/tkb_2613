@@ -2,6 +2,8 @@
 
 Threads の本人投稿の本文と投稿時刻を読む。画像は診断しない。投稿の実削除は行わず、仮除外と再診断だけを行う。トークン・投稿・診断結果は API プロセスのメモリに最大30分保持し、ログアウトでも消す。`THREADS_ENABLED=0` が既定なので、配備しただけでは実 OAuth は公開されない。
 
+ログイン後の「本人投稿を確認」は `GET /api/threads/posts` を使い、AIモデルが未稼働でも本人IDを再照合して投稿を表示する。診断はその後に別操作で始める。
+
 ## 確認済みの公開経路
 
 2026-11-11 に AWS の CloudFront 配信 `d2qyby5y8mc03f.cloudfront.net` を読み取り確認した。登録する URL は **`https://d2qyby5y8mc03f.cloudfront.net/api/threads/callback`**。`/api/*` は HTTPS 強制、非キャッシュ、全 viewer ヘッダー・Cookie・クエリを VPC origin の web:3000 に転送し、Next.js の rewrite が api:8001 に中継する。CloudFront 標準アクセスログは無効、FastAPI の本番コンテナは `--no-access-log` で動く。現行 WAF はリクエストサンプリングが有効で、認可コードを含むクエリがサンプルに残る可能性がある。`infra/terraform/edge.tf` にサンプリングを無効化する差分を用意したが、AWS にはまだ適用していない。Next.js とコンテナのリクエスト時ログも配備後の実測が必要。2026-11-11 現在の公開 `/threads` は 404（このブランチは未配備）。
