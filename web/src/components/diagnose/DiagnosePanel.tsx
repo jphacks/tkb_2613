@@ -85,6 +85,22 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   const controller = useRef<AbortController | null>(null);
   const restoreController = useRef<AbortController | null>(null);
+  // 結果の画面からの再診断は1日の回数を使うので、押したらまず確認を出す
+  const [confirmingRestart, setConfirmingRestart] = useState(false);
+  const rediagnoseButton = useRef<HTMLButtonElement>(null);
+  const confirmButton = useRef<HTMLButtonElement>(null);
+  const confirmOpened = useRef(false);
+
+  // 確認を開いたら「診断する」へ、やめたら「もう一度診断する」へフォーカスを移す
+  useEffect(() => {
+    if (confirmingRestart) {
+      confirmOpened.current = true;
+      confirmButton.current?.focus();
+    } else if (confirmOpened.current) {
+      confirmOpened.current = false;
+      rediagnoseButton.current?.focus();
+    }
+  }, [confirmingRestart]);
 
   // 画面を離れたら、読み込み中の診断を止める
   useEffect(() => () => {
@@ -140,6 +156,7 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
   async function start() {
     const consentForThisRun = publicWebLookupConsent;
     setPublicWebLookupConsent(false);
+    setConfirmingRestart(false);
     restoreController.current?.abort();
     controller.current?.abort();
     const current = new AbortController();
@@ -200,12 +217,35 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
   const livePosts = deleted.size === 0 ? posts : posts.filter((post) => !deleted.has(post.post_id));
 
   // 結果が出たら再診断ボタンを下へ移し、身元カード→写真→捜査ボードを続けて見せる。
-  const controls = (
+  // afterResult のときは、赤い「診断する」の代わりに控えめな「もう一度診断する」と確認を出す。
+  const controls = (afterResult: boolean) => (
     <div>
         <label className="mb-4 flex max-w-2xl items-start gap-3 rounded-sm border border-ink/20 px-4 py-3 text-sm">
           <input type="checkbox" checked={publicWebLookupConsent} onChange={(event) => setPublicWebLookupConsent(event.currentTarget.checked)} disabled={busy} className="mt-1 size-4 shrink-0 accent-seeker" />
           <span><span className="block font-bold">公開Webで外部SNS・ブログ・記事の候補を検索する（この診断のみ）</span><span className="mt-1 block text-xs text-ink/70">同意すると、実モードではログイン中の公開BlueskyハンドルだけをBraveへ送ります。検索語は最大90日保持され、利用には有料プランと支払情報の登録が必要です。投稿文・プロフィール文・写真は送りません。候補だけでは同一人物と判断しません。モックモードは固定の架空結果を使い、外部通信しません。</span></span>
         </label>
+        {afterResult ? (
+          confirmingRestart ? (
+            <div role="group" aria-labelledby="rediagnose-confirm" className="max-w-2xl rounded-sm border border-ink/50 px-4 py-3">
+              <p id="rediagnose-confirm" className="font-bold">{t.rediagnoseConfirm}</p>
+              <div className="mt-3 flex flex-wrap gap-3">
+                <button ref={confirmButton} type="button" onClick={start} className="rounded-sm border border-seeker px-4 py-2 font-bold text-seeker hover:bg-seeker/10 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-ink">
+                  {t.start}
+                </button>
+                <button type="button" onClick={() => setConfirmingRestart(false)} className="rounded-sm border border-ink/50 px-4 py-2 hover:bg-ink/10 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-ink">
+                  {t.rediagnoseCancel}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+              <button ref={rediagnoseButton} type="button" onClick={() => setConfirmingRestart(true)} aria-describedby="rediagnose-note" className="rounded-sm border border-ink/50 px-4 py-2 hover:bg-ink/10 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-ink">
+                {t.rediagnose}
+              </button>
+              <p id="rediagnose-note" className="text-sm text-ink/70">{t.rediagnoseNote}</p>
+            </div>
+          )
+        ) : (
         <button
           type="button"
           onClick={start}
@@ -220,6 +260,7 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
           )}
           {t.start}
         </button>
+        )}
 
         {/* 診断の間は専用の画面を出し、done で捜査ボードに切り替える */}
         {status && <DiagnoseLoading active={busy} posts={posts} found={found} status={status} />}
@@ -237,7 +278,7 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
         {t.heading}
       </h2>
       {!busy && result && <Reveal posts={livePosts} clues={result.clues} conclusions={result.conclusions} />}
-      {(busy || !result) && controls}
+      {(busy || !result) && controls(false)}
 
       {!busy && result && (
         <ConclusionBoard
@@ -259,7 +300,7 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
         <RiskyPosts posts={posts} risky={risky} clues={result.clues} clueCount={result.clues.length} conclusions={result.conclusions} onSimulated={setSimulation} onSessionExpired={expire} />
       )}
       {!busy && result && <ResultShare />}
-      {!busy && result && controls}
+      {!busy && result && controls(true)}
 
       {posts.length > 0 && (
         <ol aria-label={t.postsLabel} className="max-w-2xl space-y-5">

@@ -108,6 +108,12 @@ export const messages = {
   diagnose: {
     heading: "診断",
     start: "診断する",
+    /** 結果のあとに出す、控えめな再診断ボタン。1日の回数を使うので確認を挟む */
+    rediagnose: "もう一度診断する",
+    // 1日の上限回数と残りの回数は画面に届かないので、数字は書かない（api の DIAGNOSE_DAILY_LIMIT）
+    rediagnoseNote: "1日に診断できる回数には上限があります。押すと1回分を使います。",
+    rediagnoseConfirm: "もう一度診断しますか？ 今日の回数を1回使います",
+    rediagnoseCancel: "やめる",
     connecting: "特定班AIが投稿を取りに行っています…",
     reading: (posts: number) => `${posts} 件の投稿を調べています…`,
     searching: (searched: number, posts: number) => `手がかりを探しています…（${searched} / ${posts} 件）`,
@@ -248,7 +254,7 @@ export const messages = {
     failed: (count: number) => `${count} 件は消せませんでした。Bluesky のアプリから直接消してください`,
     blueskyBusy: (count: number) =>
       `Bluesky が混雑しているため、${count} 件は消せませんでした。少し待ってから消し直すか、Bluesky のアプリから直接消してください`,
-    rediagnose: "もう一度「診断する」を押すと、残った投稿で最初から調べ直します",
+    rediagnose: "下の「もう一度診断する」を押すと、残った投稿で最初から調べ直します",
   },
   hideAndSeek: {
     pickerLabel: "写真の選択",
