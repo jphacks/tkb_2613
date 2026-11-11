@@ -150,7 +150,7 @@ variable "buildx_version" {
 # --- 公開時間帯（docs/aws-migration.md の 6.3）。時刻は日本時間 ---
 
 variable "public_windows" {
-  description = "公開する日。gpu_start に GPU を起動し、open〜close に公開し、gpu_stop に GPU を止める"
+  description = "GPU を動かす日。gpu_start に GPU を起動し、gpu_stop に止める。open〜close は利用規約に書く主な時間帯の目安で、アプリの制限には使わない"
   type = list(object({
     date      = string # 2026-11-16
     gpu_start = string # 19:45

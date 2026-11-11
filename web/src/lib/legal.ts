@@ -2,11 +2,12 @@
  * 利用規約・プライバシーポリシー・問い合わせのページの文章（docs/aws-migration.md の 9章）。
  * 書いてある動き（保存しないもの・送り先・期限）は、api の実装と設定に合わせること。
  * 変えたら、api/src/tkb_api/config.py・docs/api-sse-contract.md と食い違わないか確かめる。
- * 公開の日時（PUBLIC_SCHEDULE）は、本番の PUBLIC_WINDOWS（infra/aws.env.example）と必ず合わせる。
+ * 診断できる主な時間帯（PUBLIC_SCHEDULE）は、GPU のスケジュール（infra/terraform の public_windows）と合わせる。
+ * 本番の PUBLIC_WINDOWS は空で、公開時間では断らない（GPU が止まっていれば「準備中」になる）。
  */
 
 export const ISSUES_URL = "https://github.com/jphacks/tkb_2613/issues";
-export const LEGAL_UPDATED = "2026年11月9日";
+export const LEGAL_UPDATED = "2026年11月10日";
 
 /** 段落か箇条書きのどちらか */
 export type LegalBlock = string | readonly string[];
@@ -26,7 +27,7 @@ export interface LegalDocument {
 export const REVOKE_APP_PASSWORD =
   "使い終わったら、Bluesky の「設定 → プライバシーとセキュリティ → アプリパスワード」から、このサービスに使ったアプリパスワードを削除してください。";
 
-/** 公開する期間と時間帯（日本時間）。api の PUBLIC_WINDOWS と合わせる */
+/** 診断できる主な期間と時間帯（日本時間）。GPU のスケジュールと合わせる */
 export const PUBLIC_SCHEDULE: readonly string[] = [
   "11月15日（Award Day 当日）の 11:00〜16:20",
   "11月16日・17日・18日の 20:00〜22:00",
@@ -40,7 +41,7 @@ export const terms: LegalDocument = {
       heading: "このサービスについて",
       blocks: [
         "このサービスは、JPHACKS 2026 の作品として、チーム tkb_2613 が無料で公開するものです。Bluesky の自分の投稿を読み、1件ずつは無害な投稿の組み合わせから何がわかるかを推定して見せ、消す投稿を提案します。",
-        "公開は期間と時間帯を限っています。",
+        "診断に使う AI のサーバーは、主に次の時間帯に動かします。それ以外の時間は、サーバーが止まっていて診断できないことがあります。",
         PUBLIC_SCHEDULE,
       ],
     },
@@ -49,7 +50,7 @@ export const terms: LegalDocument = {
       blocks: [
         "調べられるのは、ログインした本人のアカウントだけです。ハンドル名や URL を指定して、ほかの人のアカウントを調べることはできません。",
         "通常は Bluesky の認可画面でログインします。障害時にアプリパスワード方式へ切り戻した場合は、あとで取り消せるアプリパスワードを使ってください。",
-        "診断は、1つのアカウントにつき1日に決まった回数までです。混雑しているときや公開時間外は、診断できません。",
+        "診断は、1つのアカウントにつき1日に決まった回数までです。混雑しているときや、AI のサーバーが止まっているときは、診断できません。",
       ],
     },
     {

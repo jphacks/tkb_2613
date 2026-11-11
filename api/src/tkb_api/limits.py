@@ -1,6 +1,6 @@
 """診断の乱用対策と公開時間帯（docs/aws-migration.md の 5章）。
 
-- 公開時間帯（PUBLIC_WINDOWS）：設定が空なら制限しない（ローカル開発用）
+- 公開時間帯（PUBLIC_WINDOWS）：設定が空なら制限しない（本番も空。2026-11-10 決定）
 - 1アカウント（DID）1日（日本時間）の診断回数（DIAGNOSE_DAILY_LIMIT）
 - 同時に診断できる数（MAX_CONCURRENT_DIAGNOSES）。空きがなければ待たずに断る
 - 同じアカウント（DID）での同時診断は1つまで（セッションが違っても）
