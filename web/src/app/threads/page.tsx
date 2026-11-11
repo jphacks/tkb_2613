@@ -72,6 +72,13 @@ export default function ThreadsPage() {
   useEffect(() => {
     let active = true;
     void (async () => {
+      const authError = new URLSearchParams(window.location.search).get("auth_error");
+      if (authError) {
+        setError(authError === "denied" ? "Threadsの認可が完了しませんでした。もう一度お試しください。" :
+          authError === "state" ? "認証を確認できませんでした。最初からログインし直してください。" :
+          "Threadsの認証に失敗しました。時間を置いて再度お試しください。");
+        window.history.replaceState(null, "", "/threads");
+      }
       try {
         const settings = await call("config");
         if (!isConfig(settings)) throw new Error("Threads診断の設定を読み取れませんでした。");

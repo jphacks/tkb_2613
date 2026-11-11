@@ -23,3 +23,9 @@ test("合成Threads投稿を診断し、根拠を見て仮除外・再診断す�
   await page.getByRole("button", { name: "ログアウト" }).click();
   await expect(page.getByRole("button", { name: "架空のThreads投稿で試す" })).toBeVisible();
 });
+
+test("OAuth失敗を説明し、URLから失敗理由を消す", async ({ page }) => {
+  await page.goto("/threads?auth_error=state");
+  await expect(page.getByRole("alert")).toContainText("最初からログインし直してください");
+  await expect(page).toHaveURL(/\/threads$/);
+});

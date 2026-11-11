@@ -6,6 +6,7 @@ from typing import Any
 
 import httpx
 import pytest
+import respx
 
 from tkb_api.config import Settings
 from tkb_api.main import create_app
@@ -109,8 +110,8 @@ async def test_oauth_state_cookie_identity_and_replay(monkeypatch: pytest.Monkey
         threads_callback_url=f"{origin}/api/threads/callback",
         threads_enabled=True,
         threads_query_logs_redacted=True,
-        threads_client_id="123",
-        threads_client_secret="secret",  # noqa: S106
+        threads_app_id="123",
+        threads_app_secret="secret",  # noqa: S106
         cookie_secure=True,
         share_enabled=False,
     )
@@ -124,9 +125,14 @@ async def test_oauth_state_cookie_identity_and_replay(monkeypatch: pytest.Monkey
         query = parse_qs(urlparse(start.json()["authorize_url"]).query)
         assert query["scope"] == ["threads_basic"]
         state = query["state"][0]
-        assert (
-            await client.get("/api/threads/callback", params={"state": "wrong", "code": "code"})
-        ).status_code == 400
+        wrong = await client.get("/api/threads/callback", params={"state": "wrong", "code": "code"})
+        assert wrong.status_code == 303
+        assert wrong.headers["location"] == "/threads?auth_error=state"
+        assert "code" not in wrong.headers["location"]
+        restarted = await client.post(
+            "/api/threads/start", json={"consent": True}, headers={"Origin": origin}
+        )
+        state = parse_qs(urlparse(restarted.json()["authorize_url"]).query)["state"][0]
         callback = await client.get(
             "/api/threads/callback", params={"state": state, "code": "code"}
         )
@@ -137,10 +143,93 @@ async def test_oauth_state_cookie_identity_and_replay(monkeypatch: pytest.Monkey
             "mock": False,
         }
         assert (await client.get("/api/x/session")).status_code == 401
-        assert (
-            await client.get("/api/threads/callback", params={"state": state, "code": "code"})
-        ).status_code == 400
+        replay = await client.get("/api/threads/callback", params={"state": state, "code": "code"})
+        assert replay.status_code == 303
+        assert replay.headers["location"] == "/threads?auth_error=state"
         assert (
             await client.delete("/api/threads/session", headers={"Origin": origin})
         ).status_code == 204
         assert (await client.get("/api/threads/diagnosis")).status_code == 401
+
+
+@pytest.mark.anyio
+async def test_threads_code_exchange_uses_server_secret_and_exact_callback() -> None:
+    from urllib.parse import parse_qs
+
+    from tkb_api.routes.threads import _exchange
+
+    settings = Settings(
+        _env_file=None,
+        threads_app_id="app-id",
+        threads_app_secret="test-only-secret",  # noqa: S106
+        threads_callback_url="https://example.test/api/threads/callback",
+    )
+    with respx.mock(assert_all_called=True) as router:
+        route = router.post("https://graph.threads.net/oauth/access_token").respond(
+            json={"access_token": "test-only-token", "user_id": 42}
+        )
+        token, owner_id = await _exchange("one-time-code", "unused", settings)
+    assert route.called
+    assert token == "test-only-token"  # noqa: S105
+    assert owner_id == "42"
+    body = parse_qs(route.calls[0].request.content.decode())
+    assert body["client_id"] == ["app-id"]
+    assert body["client_secret"] == ["test-only-secret"]
+    assert body["code"] == ["one-time-code"]
+    assert body["redirect_uri"] == ["https://example.test/api/threads/callback"]
+    assert body["grant_type"] == ["authorization_code"]
+
+
+@pytest.mark.anyio
+async def test_meta_deauthorize_and_data_deletion_clear_only_signed_owner() -> None:
+    import base64
+    import hashlib
+    import hmac
+    import json
+
+    def signed(owner_id: str) -> str:
+        payload = (
+            base64.urlsafe_b64encode(
+                json.dumps({"algorithm": "HMAC-SHA256", "user_id": owner_id}).encode()
+            )
+            .decode()
+            .rstrip("=")
+        )
+        signature = (
+            base64.urlsafe_b64encode(
+                hmac.new(b"test-only-secret", payload.encode(), hashlib.sha256).digest()
+            )
+            .decode()
+            .rstrip("=")
+        )
+        return f"{signature}.{payload}"
+
+    origin = "https://testserver"
+    settings = Settings(
+        _env_file=None,
+        threads_public_origin=origin,
+        threads_app_secret="test-only-secret",  # noqa: S106
+        cookie_secure=True,
+        share_enabled=False,
+    )
+    app = create_app(settings=settings)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url=origin) as client:
+        owner_session = app.state.threads_sessions.create(None, "42", "owner")
+        other_session = app.state.threads_sessions.create(None, "43", "other")
+        client.cookies.set("threads_tkb_session", owner_session, path="/api/threads")
+        invalid = await client.post("/api/threads/deauthorize", data={"signed_request": "bad"})
+        assert invalid.status_code == 400
+        assert (await client.get("/api/threads/session")).status_code == 200
+        deleted = await client.post(
+            "/api/threads/deauthorize", data={"signed_request": signed("42")}
+        )
+        assert deleted.status_code == 204
+        assert (await client.get("/api/threads/session")).status_code == 401
+        assert app.state.threads_sessions.get(other_session) is not None
+        result = await client.post(
+            "/api/threads/data-deletion", data={"signed_request": signed("43")}
+        )
+        assert result.status_code == 200
+        assert result.json()["url"] == f"{origin}/threads/data-deletion-status"
+        assert result.json()["confirmation_code"].isalnum()
+        assert app.state.threads_sessions.get(other_session) is None

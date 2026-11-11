@@ -70,8 +70,8 @@ class Settings(BaseSettings):
     model_probe_timeout_seconds: float = Field(default=3, gt=0)
 
     # X 専用。X の用途承認と有料 API の予算承認を得るまでは実接続しない。
-    threads_client_id: str = ""
-    threads_client_secret: SecretStr = SecretStr("")
+    threads_app_id: str = ""
+    threads_app_secret: SecretStr = SecretStr("")
     threads_callback_url: str = ""
     threads_public_origin: str = "http://localhost:3000"
     threads_enabled: bool = False

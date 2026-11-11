@@ -1,6 +1,11 @@
-"""Threads 専用の本人認証・テキスト診断。実 Threads 投稿の処理は用途と費用の承認で閉じる。"""
+"""Threads 専用の本人認証・読み取り専用テキスト診断。"""
 
 import asyncio
+import base64
+import binascii
+import hashlib
+import hmac
+import json
 import logging
 import secrets
 import time
@@ -8,7 +13,7 @@ from collections.abc import AsyncIterator
 from dataclasses import asdict, dataclass, field
 from threading import RLock
 from typing import Any, Literal
-from urllib.parse import urlencode, urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request, Response, status
@@ -74,7 +79,7 @@ class ThreadsSession:
 
 
 class ThreadsSessionStore:
-    """Threads の PKCE 情報、トークン、診断結果をプロセスメモリだけに置く。"""
+    """OAuth state、トークン、診断結果をプロセスメモリだけに置く。"""
 
     def __init__(self, ttl_s: int) -> None:
         self.ttl_s = ttl_s
@@ -139,6 +144,12 @@ class ThreadsSessionStore:
             with self.lock:
                 self.sessions.pop(session_id, None)
 
+    def delete_for_owner(self, owner_id: str) -> None:
+        with self.lock:
+            for session_id, session in list(self.sessions.items()):
+                if session.owner_id == owner_id:
+                    self.sessions.pop(session_id, None)
+
 
 class StartRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -163,8 +174,8 @@ def _origin(request: Request) -> None:
 def _live_ready(settings: Settings) -> bool:
     return bool(
         settings.threads_enabled
-        and settings.threads_client_id
-        and settings.threads_client_secret.get_secret_value()
+        and settings.threads_app_id
+        and settings.threads_app_secret.get_secret_value()
         and settings.threads_query_logs_redacted
         and settings.cookie_secure
     )
@@ -271,7 +282,7 @@ async def start(body: StartRequest, request: Request, response: Response) -> dic
     query = urlencode(
         {
             "response_type": "code",
-            "client_id": settings.threads_client_id,
+            "client_id": settings.threads_app_id,
             "redirect_uri": settings.threads_callback_url,
             "scope": "threads_basic",
             "state": state,
@@ -287,8 +298,8 @@ async def _exchange(code: str, verifier: str, settings: Settings) -> tuple[str, 
             response = await client.post(
                 "https://graph.threads.net/oauth/access_token",
                 data={
-                    "client_id": settings.threads_client_id,
-                    "client_secret": settings.threads_client_secret.get_secret_value(),
+                    "client_id": settings.threads_app_id,
+                    "client_secret": settings.threads_app_secret.get_secret_value(),
                     "grant_type": "authorization_code",
                     "redirect_uri": settings.threads_callback_url,
                     "code": code,
@@ -325,29 +336,79 @@ async def _identity(token: str) -> tuple[str, str]:
 
 
 @router.get("/callback")
-async def callback(request: Request, state: str = "", code: str = "") -> Response:
+async def callback(request: Request, state: str = "", code: str = "", error: str = "") -> Response:
     settings = _settings(request)
-    _require_live(settings)
+    result = RedirectResponse("/threads?auth_error=failed", status_code=303)
+    result.delete_cookie(START_COOKIE, path="/api/threads")
+    if not _live_ready(settings):
+        return result
     verifier = _store(request).consume(state, request.cookies.get(START_COOKIE))
-    if not verifier or not code:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Threads の認証状態が一致しません")
-    token, expected_id = await _exchange(code, verifier, settings)
+    if not verifier or error or not code:
+        result.headers["location"] = (
+            "/threads?auth_error=state" if not verifier else "/threads?auth_error=denied"
+        )
+        return result
     try:
+        token, expected_id = await _exchange(code, verifier, settings)
         owner_id, username = await _identity(token)
         if owner_id != expected_id:
             raise ThreadsPocError("本人 ID が一致しません")
-    except ThreadsPocError as exc:
-        raise _threads_error(exc) from None
-    result = RedirectResponse("/threads", status_code=303)
+    except (ThreadsPocError, HTTPException):
+        return result
+    result.headers["location"] = "/threads"
     _store(request).delete(request.cookies.get(SESSION_COOKIE))
     _cookie(result, settings, _store(request).create(token, owner_id, username))
-    result.delete_cookie(START_COOKIE, path="/api/threads")
     return result
 
 
 def _threads_error(exc: ThreadsPocError) -> HTTPException:
     del exc
     return HTTPException(status.HTTP_502_BAD_GATEWAY, "Threads API に接続できませんでした")
+
+
+async def _verified_meta_owner(request: Request) -> str:
+    """Meta の signed_request を検証し、本文をログに出さず本人 ID を返す。"""
+    secret = _settings(request).threads_app_secret.get_secret_value()
+    if not secret:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Threads の設定がありません")
+    body = await request.body()
+    if len(body) > 8192:
+        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "リクエストが大きすぎます")
+    try:
+        fields = parse_qs(body.decode("ascii"), strict_parsing=True)
+        signed = fields["signed_request"]
+        if len(signed) != 1:
+            raise ValueError
+        signature, payload = signed[0].split(".")
+        if len(signature) > 128 or len(payload) > 8192:
+            raise ValueError
+        actual = base64.urlsafe_b64decode(signature + "=" * (-len(signature) % 4))
+        expected = hmac.new(secret.encode(), payload.encode("ascii"), hashlib.sha256).digest()
+        if not hmac.compare_digest(actual, expected):
+            raise ValueError
+        data = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+        if not isinstance(data, dict) or data.get("algorithm") != "HMAC-SHA256":
+            raise ValueError
+        owner_id = data.get("user_id")
+        if not str(owner_id).isascii() or not str(owner_id).isdecimal():
+            raise ValueError
+        return str(owner_id)
+    except (KeyError, ValueError, UnicodeError, TypeError, binascii.Error):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "署名を確認できません") from None
+
+
+@router.post("/deauthorize", status_code=204)
+async def deauthorize(request: Request) -> None:
+    _store(request).delete_for_owner(await _verified_meta_owner(request))
+
+
+@router.post("/data-deletion")
+async def data_deletion(request: Request) -> dict[str, str]:
+    _store(request).delete_for_owner(await _verified_meta_owner(request))
+    return {
+        "url": f"{_settings(request).threads_public_origin}/threads/data-deletion-status",
+        "confirmation_code": secrets.token_hex(16),
+    }
 
 
 @router.get("/session")
