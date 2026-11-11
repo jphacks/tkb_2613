@@ -81,6 +81,7 @@ export const messages = {
     checking: "ログイン状態を確認しています…",
     pending: "Bluesky にログインしています…",
     failed: "ログインできませんでした",
+    oauthFailed: "Bluesky でのログインに失敗しました。もう一度お試しください",
     loggedIn: "ログイン中",
     expired: "時間が切れました。もう一度ログインしてください",
     logout: "ログアウト",
