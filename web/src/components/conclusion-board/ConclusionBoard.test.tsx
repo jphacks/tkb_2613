@@ -91,7 +91,7 @@ describe("ConclusionBoard", () => {
     expect(screen.queryByText(messages.board.empty)).not.toBeInTheDocument();
   });
 
-  it("marks each inference as strong or weak without showing the number", () => {
+  it("marks only weak inferences, without showing the number", () => {
     const conclusions: Conclusion[] = [
       { ...CONCLUSION, confidence: 0.92 },
       { ...CONCLUSION, attribute: "active_time", value: "平日の朝", confidence: 0.4 },
@@ -102,11 +102,12 @@ describe("ConclusionBoard", () => {
     const cards = within(screen.getByRole("list", { name: messages.board.conclusionsLabel })).getAllByRole(
       "listitem",
     ).filter((item) => item.parentElement?.getAttribute("aria-label") === messages.board.conclusionsLabel);
-    expect(cards[0]).toHaveTextContent(messages.board.confidence.strong);
+    // 強い推定には印を出さない
+    expect(cards[0]).not.toHaveTextContent(messages.board.confidence.weak);
     expect(cards[1]).toHaveTextContent(messages.board.confidence.weak);
-    // 確からしさのない古い閲覧リンクには印を出さない
-    expect(cards[2]).not.toHaveTextContent(messages.board.confidence.strong);
+    // 確からしさのない古い閲覧リンクにも出さない
     expect(cards[2]).not.toHaveTextContent(messages.board.confidence.weak);
-    expect(screen.queryByText(/0\.92|92%/)).not.toBeInTheDocument();
+    expect(screen.getAllByText(messages.board.confidence.weak)).toHaveLength(1);
+    expect(screen.queryByText(/0\.92|0\.4|92%|40%/)).not.toBeInTheDocument();
   });
 });

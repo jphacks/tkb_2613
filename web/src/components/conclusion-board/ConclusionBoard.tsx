@@ -11,14 +11,14 @@ import { ProfileClaimWhatIf } from "./ProfileClaimWhatIf";
 
 const t = messages.board;
 
-/** 確からしさの「強い／弱い」の印。強いほうを塗りつぶして目立たせ、弱いほうは点線の枠にする */
+/** 確からしさが弱い推定にだけ、点線の枠の印を付ける。強い推定と、値のない古い閲覧リンクには何も出さない */
 function ConfidenceMark({ conclusion }: { conclusion: Conclusion }) {
-  const level = confidenceLevel(conclusion);
-  if (level === null) return null;
-  const style = level === "strong"
-    ? "bg-seeker text-paper"
-    : "border border-dashed border-ink/40 text-ink/70";
-  return <span className={`ml-2 rounded-sm px-1.5 py-0.5 ${style}`}>{t.confidence[level]}</span>;
+  if (confidenceLevel(conclusion) !== "weak") return null;
+  return (
+    <span className="ml-2 rounded-sm border border-dashed border-ink/40 px-1.5 py-0.5 text-ink/70">
+      {t.confidence.weak}
+    </span>
+  );
 }
 
 /** 糸のたるみ（px） */
