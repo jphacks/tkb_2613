@@ -523,11 +523,13 @@ async def diagnose(request: Request) -> dict[str, Any]:
         started = time.monotonic()
         events = [event async for event in diagnose_events(posts, extractions, gazetteer)]
         results = {name: data for name, data in events if name in {"conclusions", "plan"}}
-        failures = sum(1 for name, data in events if name == "clues" and data["error"])
-        if failures:
-            raise HTTPException(
-                status.HTTP_503_SERVICE_UNAVAILABLE, "一部の投稿の抽出に失敗しました"
-            )
+        # 抽出に失敗した投稿があっても、全体は成功にする。失敗した投稿は理由つきで返す
+        # （理由は pipeline が作る固定の文言で、投稿の本文は入らない）
+        post_errors = [
+            {"post_id": data["post_id"], "error": data["error"]}
+            for name, data in events
+            if name == "clues" and data["error"]
+        ]
         conclusion = results["conclusions"]
         current.posts = posts
         current.clues = [Clue.model_validate(item) for item in conclusion["clues"]]
@@ -536,6 +538,7 @@ async def diagnose(request: Request) -> dict[str, Any]:
             "clues": conclusion["clues"],
             "conclusions": conclusion["conclusions"],
             "plan": results["plan"],
+            "post_errors": post_errors,
             "elapsed_ms": round((time.monotonic() - started) * 1000),
             "mock": current.token is None,
         }

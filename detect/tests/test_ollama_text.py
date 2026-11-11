@@ -1,4 +1,4 @@
-"""Ollama の出力は原文に根拠がある場合だけ Clue に変換する。"""
+"""Ollama の出力は原文に根拠がある場合だけ Clue に変換する。根拠のない手がかりは1件ずつ捨てる。"""
 
 import asyncio
 import json
@@ -13,7 +13,7 @@ from tkb_detect.vlm_client import VlmClient, VlmConfig
 
 
 class FakeOllama:
-    def __init__(self, clues: list[dict[str, object]]) -> None:
+    def __init__(self, clues: list[object]) -> None:
         self.clues = clues
 
     async def is_reachable(self, _timeout_s: float) -> bool:
@@ -34,7 +34,7 @@ def post(text: str) -> Post:
     )
 
 
-def extractor(clues: list[dict[str, object]]) -> Extractor:
+def extractor(clues: list[object]) -> Extractor:
     vlm = VlmClient(VlmConfig(base_url="", api_key="", model="", mock_mode=True))
     return Extractor(vlm, text_client=FakeOllama(clues), image_enabled=False)
 
@@ -96,25 +96,44 @@ def test_multiple_clues_keep_post_id_and_exact_quote() -> None:
     assert all(c.post_id.endswith("/a") and c.quote for c in clues)
 
 
-def test_rejects_invented_value_and_quote() -> None:
-    with pytest.raises(DetectError, match="根拠"):
-        asyncio.run(
-            extractor(
-                [{"type": "place_text", "value": "渋谷", "quote": "渋谷", "confidence": 0.9}]
-            ).extract_post(post("新宿へ行った"), [])
-        )
+def test_drops_only_the_clue_whose_quote_is_not_in_the_text() -> None:
+    clues = asyncio.run(
+        extractor(
+            [
+                {"type": "place_text", "value": "渋谷", "quote": "渋谷", "confidence": 0.9},
+                {"type": "place_text", "value": "新宿", "quote": "新宿へ", "confidence": 0.9},
+                {"type": "place_text", "value": "原宿", "quote": "新宿へ", "confidence": 0.9},
+            ]
+        ).extract_post(post("新宿へ行った"), [])
+    )
+    # 本文にない引用（渋谷）と、引用にない値（原宿）だけを捨てる
+    assert [(c.type.value, c.value) for c in clues] == [("place_text", "新宿")]
 
 
-def test_rejects_invalid_type_and_confidence() -> None:
-    with pytest.raises(DetectError, match="確信度"):
-        asyncio.run(
-            extractor(
-                [{"type": "place_text", "value": "新宿", "quote": "新宿", "confidence": 2}]
-            ).extract_post(post("新宿へ"), [])
-        )
-    with pytest.raises(DetectError, match="型"):
-        asyncio.run(
-            extractor(
-                [{"type": "face", "value": "新宿", "quote": "新宿", "confidence": 0.9}]
-            ).extract_post(post("新宿へ"), [])
-        )
+def test_drops_clues_with_invalid_type_confidence_or_shape() -> None:
+    clues = asyncio.run(
+        extractor(
+            [
+                {"type": "place_text", "value": "新宿", "quote": "新宿", "confidence": 2},
+                {"type": "place_text", "value": "新宿", "quote": "新宿", "confidence": True},
+                {"type": "face", "value": "新宿", "quote": "新宿", "confidence": 0.9},
+                {"type": "place_text", "value": "新宿", "confidence": 0.9},
+                "新宿",
+                {"type": "routine_text", "value": "毎朝", "quote": "毎朝新宿", "confidence": 0.7},
+            ]
+        ).extract_post(post("毎朝新宿へ"), [])
+    )
+    assert [(c.type.value, c.value) for c in clues] == [("routine_text", "毎朝")]
+
+
+def test_still_fails_when_the_whole_response_is_malformed() -> None:
+    class BrokenOllama(FakeOllama):
+        async def complete_text(
+            self, _prompt: str, *, system: str, json_schema: dict[str, Any]
+        ) -> str:
+            return "not json"
+
+    vlm = VlmClient(VlmConfig(base_url="", api_key="", model="", mock_mode=True))
+    built = Extractor(vlm, text_client=BrokenOllama([]), image_enabled=False)
+    with pytest.raises(DetectError, match="応答形式"):
+        asyncio.run(built.extract_post(post("新宿へ"), []))
