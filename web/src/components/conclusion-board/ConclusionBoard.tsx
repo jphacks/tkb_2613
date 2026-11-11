@@ -4,12 +4,22 @@ import { useLayoutEffect, useRef, useState } from "react";
 
 import { messages } from "@/lib/messages";
 import type { Clue } from "@/types/clue";
-import type { Conclusion } from "@/types/diagnose";
+import { confidenceLevel, type Conclusion } from "@/types/diagnose";
 import { PROFILE_ATTRIBUTE_CATALOG, type ExternalLookupStatus, type ExternalProfileResult, type ProfileItem, type WebFact } from "@/types/profile";
 import type { Post } from "@/types/post";
 import { ProfileClaimWhatIf } from "./ProfileClaimWhatIf";
 
 const t = messages.board;
+
+/** 確からしさの「強い／弱い」の印。強いほうを塗りつぶして目立たせ、弱いほうは点線の枠にする */
+function ConfidenceMark({ conclusion }: { conclusion: Conclusion }) {
+  const level = confidenceLevel(conclusion);
+  if (level === null) return null;
+  const style = level === "strong"
+    ? "bg-seeker text-paper"
+    : "border border-dashed border-ink/40 text-ink/70";
+  return <span className={`ml-2 rounded-sm px-1.5 py-0.5 ${style}`}>{t.confidence[level]}</span>;
+}
 
 /** 糸のたるみ（px） */
 const SAG = 28;
@@ -152,6 +162,7 @@ export function ConclusionBoard({
                 <p className="text-xs tracking-widest text-ink/60">
                   {t.attributeLabels[conclusion.attribute] ?? conclusion.attribute}
                   <span className="ml-2 rounded-sm bg-ink/10 px-1.5 py-0.5">{t.inferred}</span>
+                  <ConfidenceMark conclusion={conclusion} />
                 </p>
                 <p className="mt-1 text-xl font-bold">{conclusion.value}</p>
                 {conclusion.note && <p className="mt-1 text-sm text-ink/70">{conclusion.note}</p>}

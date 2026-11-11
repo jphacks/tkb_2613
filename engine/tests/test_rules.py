@@ -10,6 +10,7 @@ from tkb_common.schemas import TEXT_ONLY_TYPES, Clue, ClueSource, ClueType, Post
 from tkb_engine import Conclusion, Gazetteer, infer, rule_r1, rule_r2, rule_r3
 from tkb_engine.gazetteer import CollectionArea, Knowledge, TrashBag, University
 from tkb_engine.rules import (
+    combined_confidence,
     rule_birthday,
     rule_r4,
     rule_r5,
@@ -962,3 +963,33 @@ def test_x1_demo_fixture_matches_the_published_post_texts() -> None:
     cross = [c for c in infer(clues, posts, GAZ) if c.attribute == "home_school_commute"]
     assert len(cross) == 1
     assert cross[0].clue_indices == [0, 1, 2, 3]
+
+
+def test_combined_confidence_uses_one_minus_product_of_doubts() -> None:
+    clues = [
+        _clue("p1", ClueType.ROUTINE_TEXT, "毎週火曜"),
+        _clue("p2", ClueType.ROUTINE_TEXT, "ジム"),
+    ]
+    clues[1] = clues[1].model_copy(update={"confidence": 0.5})
+
+    # 1 − (1 − 0.9)(1 − 0.5) = 0.95。同じ手がかりは2回数えない。根拠がなければ 0
+    assert combined_confidence(clues, [0, 1]) == 0.95
+    assert combined_confidence(clues, [0, 0]) == 0.9
+    assert combined_confidence(clues, []) == 0.0
+
+
+def test_infer_attaches_the_combined_confidence_to_every_conclusion() -> None:
+    doc = json.loads(
+        (Path(__file__).resolve().parents[2] / "eval/fixtures/demo_observations.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    posts = [Post.model_validate(p) for p in doc["posts"]]
+    clues = [Clue.model_validate(c) for c in doc["clues"]]
+
+    conclusions = infer(clues, posts, GAZ)
+
+    assert conclusions
+    for conclusion in conclusions:
+        assert 0 <= conclusion.confidence <= 1
+        assert conclusion.confidence == combined_confidence(clues, conclusion.clue_indices)

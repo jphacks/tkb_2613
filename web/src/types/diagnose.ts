@@ -25,6 +25,20 @@ export interface Conclusion {
   readonly value: string;
   readonly clue_indices: readonly number[];
   readonly note: string;
+  /**
+   * 確からしさ（0〜1）。根拠の手がかりの confidence を 1 − ∏(1 − c) で合成した値（engine の infer）。
+   * 以前に保存した閲覧リンクにはないので省略可
+   */
+  readonly confidence?: number;
+}
+
+/** これ以上の確からしさの推定を「強い」と見せる（写真の顔の FACE_MIN_CONFIDENCE と同じ境目） */
+export const STRONG_CONFIDENCE = 0.8;
+
+/** 確からしさの2段階。値がない（古い閲覧リンク）ときは null で、印を出さない */
+export function confidenceLevel(conclusion: Conclusion): "strong" | "weak" | null {
+  if (conclusion.confidence === undefined) return null;
+  return conclusion.confidence >= STRONG_CONFIDENCE ? "strong" : "weak";
 }
 
 /**
@@ -144,6 +158,8 @@ function isConclusion(value: unknown, clueCount: number): value is Conclusion {
     typeof value.attribute === "string" &&
     typeof value.value === "string" &&
     typeof value.note === "string" &&
+    (!Object.hasOwn(value, "confidence") ||
+      (typeof value.confidence === "number" && value.confidence >= 0 && value.confidence <= 1)) &&
     Array.isArray(value.clue_indices) &&
     value.clue_indices.every(
       (i) => Number.isInteger(i) && i >= 0 && i < clueCount,
