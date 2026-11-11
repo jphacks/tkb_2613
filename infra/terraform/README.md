@@ -14,7 +14,7 @@
 | セキュリティグループ | アプリ：CloudFront の VPC origin から 3000 だけ。GPU：アプリから 8000（VLM）・8080（OCR）だけ。外向きは 443（アプリは初回の dnf のため 80 も）。SSH はどちらも開けない |
 | EC2 | アプリ（t3.small、Amazon Linux 2023）、GPU（g6e.xlarge、Deep Learning AMI）。どちらもパブリック IP なし、IMDSv2 必須・hop limit 1、ディスク暗号化 |
 | 入口 | CloudFront（`*.cloudfront.net`、HTTPS へのリダイレクト、`/api/*` と `/auth/*` はキャッシュも圧縮もしない、IPv6 オフ）、VPC origin |
-| WAF | 全遮断（IP セット）、公開前試験のチーム IP 制限、IP の評判リスト、`/api/detect` の遮断、レート制限（ログイン 10・診断 10・全体 600／5分／IP。全体は静的ファイルを数えない）。パスは URL のデコードと正規化をしてから比べる（`/api/%73ession` ですり抜けさせない）。ログは保存しない |
+| WAF | 全遮断（IP セット）、公開前試験のチーム IP 制限、IP の評判リスト、`/api/detect` と Next.js の内部経路 `/__internal`（2回デコードしてから比べる）の遮断、レート制限（ログイン 10・診断 10・全体 600／5分／IP。全体は静的ファイルを数えない）。パスは URL のデコードと正規化をしてから比べる（`/api/%73ession` ですり抜けさせない）。ログは保存しない |
 | 秘密の値 | Secrets Manager の入れ物 `tkb_2613/vlm-api-key`（値は Terraform で扱わない） |
 | IAM | アプリと GPU のロール（SSM ＋ キーの読み取りだけ）、全遮断の予備の担当の IAM ユーザー、Budgets action とスケジュールのロール |
 | 予算 | 月 $100。**実績が $10, $20, … $100 を超えるたびにメール**（Budget を2つに分ける。下の「予算の通知」）。**実績 $80 で GPU を自動で止め、スケジュールでの再起動も止める** |

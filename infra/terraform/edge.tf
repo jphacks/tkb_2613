@@ -282,6 +282,47 @@ resource "aws_wafv2_web_acl" "main" {
     }
   }
 
+  # Next.js の内部経路（/__internal/oauth/*）は api からだけ使う。外からは共有秘密がなくても届かないよう、
+  # 入口で遮断する（いまは CloudFront の既定の behavior が GET/HEAD/OPTIONS だけなので届かないが、それに頼らない）。
+  # /%5F%5Finternal や二重のエンコードですり抜けないよう、2回デコードしてから比べる
+  rule {
+    name     = "block-internal"
+    priority = 7
+    action {
+      block {}
+    }
+    statement {
+      byte_match_statement {
+        search_string         = "/__internal"
+        positional_constraint = "STARTS_WITH"
+        field_to_match {
+          uri_path {}
+        }
+        text_transformation {
+          priority = 0
+          type     = "URL_DECODE"
+        }
+        text_transformation {
+          priority = 1
+          type     = "URL_DECODE"
+        }
+        text_transformation {
+          priority = 2
+          type     = "NORMALIZE_PATH"
+        }
+        text_transformation {
+          priority = 3
+          type     = "LOWERCASE"
+        }
+      }
+    }
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "block-internal"
+      sampled_requests_enabled   = false
+    }
+  }
+
   # ログインの総当たり（Bluesky のパスワードの踏み台）を止める（11章）
   rule {
     name     = "rate-login"
