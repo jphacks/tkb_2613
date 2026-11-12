@@ -5,6 +5,7 @@ import Link from "next/link";
 
 import { ConclusionBoard } from "@/components/conclusion-board/ConclusionBoard";
 import { PostCard } from "@/components/post-list/PostCard";
+import { checkThreadsPublicText } from "@/lib/threads-public-check";
 import { isDiagnosisSnapshot, isSimulation, type DiagnosisSnapshot, type Simulation } from "@/types/diagnose";
 import { isPost, type Post } from "@/types/post";
 
@@ -45,7 +46,10 @@ async function call(path: string, method: "GET" | "POST" | "DELETE" = "GET", bod
   }
   if (!response.ok) {
     if (response.status === 504) throw new Error("通信がタイムアウトしました。時間を置いて再度お試しください。");
-    if (response.status === 429 || response.status === 503) throw new Error("Threads APIまたはモデルが混雑しています。時間を置いてください。");
+    if (response.status === 503 && path === "diagnose") {
+      throw new Error("AI診断モデルは現在利用できません。本人投稿の確認と公開情報セルフチェックは引き続き利用できます。");
+    }
+    if (response.status === 429 || response.status === 503) throw new Error("Threads APIが混雑しています。時間を置いてください。");
     if (response.status === 403) throw new Error("この操作は現在利用できません。Threadsの設定を確認してください。");
     if (response.status === 401) throw new Error("Threadsにログインし直してください。");
     throw new Error("操作に失敗しました。再度お試しください。");
@@ -68,6 +72,7 @@ export default function ThreadsPage() {
   const [selected, setSelected] = useState<readonly string[]>([]);
   const [preview, setPreview] = useState<Simulation | null>(null);
   const [fetchedPosts, setFetchedPosts] = useState<readonly Post[] | null>(null);
+  const [publicCheckDone, setPublicCheckDone] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -117,15 +122,16 @@ export default function ThreadsPage() {
   }
 
   const current = view ?? original;
+  const publicFindings = fetchedPosts ? checkThreadsPublicText(fetchedPosts) : [];
   return (
     <main className="mx-auto max-w-4xl px-5 py-12">
       <Link href="/" className="text-sm underline">みーつけたに戻る</Link>
       <header className="mt-8 border-b border-ink/30 pb-8">
-        <p className="text-sm tracking-widest text-ink/60">Threads / 本人投稿の診断</p>
+        <p className="text-sm tracking-widest text-ink/60">Threads / 本人投稿の確認</p>
         <h1 className="mt-3 font-display text-4xl">Threadsで、みーつけた</h1>
         <p className="mt-4 max-w-2xl text-ink/75">
-          自分の投稿本文から手がかりを探し、投稿を組み合わせて分かることを表示します。
-          結果は推定です。Threadsへの投稿削除は行いません。
+          自分の投稿本文と投稿時刻を取得して一覧・詳細を表示し、固定ルールによる公開情報のセルフチェックを行います。
+          セルフチェックはAIではありません。Threadsへの投稿・編集・削除は行いません。
         </p>
       </header>
 
@@ -133,9 +139,9 @@ export default function ThreadsPage() {
         <section className="mt-10 max-w-2xl space-y-5" aria-label="Threads診断の開始">
           <label className="flex gap-3 rounded-sm border border-ink/30 bg-paper-deep p-4">
             <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
-            <span>自分の投稿を診断し、本文と投稿時刻から手がかり・推定を作ることに同意します。実投稿はローカルの本文モデルに渡します。画像は対象外です。結果はログアウトまたはセッション期限で消えます。</span>
+            <span>Threadsから自分の投稿ID・本文・投稿時刻・メディア種別を取得し、一覧・詳細表示とAIを使わない公開情報セルフチェックに利用することに同意します。取得データはログアウトまたはセッション期限で消えます。</span>
           </label>
-          <p className="text-sm text-ink/70">本文と投稿時刻のみを診断します。画像は対応していません。</p>
+          <p className="text-sm text-ink/70">画像・動画のURLやデータは取得しません。表示とセルフチェックには本文と投稿時刻を使います。任意のAI診断はモデル稼働時だけ利用できます。</p>
           <div className="flex flex-wrap gap-3">
             {config?.mock_enabled && <button type="button" disabled={!consent || busy}
               className="rounded-sm bg-seeker px-5 py-3 font-bold text-paper disabled:opacity-50"
@@ -172,7 +178,7 @@ export default function ThreadsPage() {
             {session.mock ? session.username : `@${session.username}`}</p>
           <button type="button" disabled={busy} className="text-sm underline" onClick={() => void perform(async () => {
             await call("session", "DELETE");
-            setSession(null); setOriginal(null); setView(null); setSelected([]); setPreview(null); setFetchedPosts(null);
+            setSession(null); setOriginal(null); setView(null); setSelected([]); setPreview(null); setFetchedPosts(null); setPublicCheckDone(false);
           })}>ログアウト</button>
         </div>
         {!original && <button type="button" disabled={busy}
@@ -184,17 +190,46 @@ export default function ThreadsPage() {
               throw new Error("本人投稿を読み取れませんでした。");
             }
             setFetchedPosts(data.posts);
+            setPublicCheckDone(false);
           })}>本人投稿を確認</button>}
         {!original && fetchedPosts && <section aria-label="取得した本人投稿" className="space-y-4">
-          <p className="text-sm text-ink/70">本人投稿 {fetchedPosts.length} 件を取得しました。本文と投稿時刻だけを表示しています。AI診断はまだ開始していません。</p>
-          <ol className="space-y-5">{fetchedPosts.map((post) => <li key={post.post_id}><PostCard post={post} /></li>)}</ol>
+          <p className="text-sm text-ink/70">本人投稿 {fetchedPosts.length} 件を取得しました。本文と投稿時刻だけを表示しています。この表示にAIは使っていません。</p>
+          <ol className="space-y-5">{fetchedPosts.map((post) => <li key={post.post_id}>
+            <PostCard post={post} />
+            <details className="mt-2 text-sm text-ink/70">
+              <summary className="cursor-pointer underline underline-offset-4">取得情報の詳細</summary>
+              <dl className="mt-2 grid gap-1 break-all">
+                <div><dt className="inline font-bold">投稿ID：</dt><dd className="inline">{post.post_id}</dd></div>
+                <div><dt className="inline font-bold">投稿時刻：</dt><dd className="inline">{post.created_at}</dd></div>
+                <div><dt className="inline font-bold">メディア：</dt><dd className="inline">種別だけをAPIへ要求し、画像・動画のURLやデータは取得していません</dd></div>
+              </dl>
+            </details>
+          </li>)}</ol>
+          <section aria-labelledby="threads-public-check" className="space-y-3 rounded-sm border border-ink/25 bg-paper-deep p-4">
+            <h2 id="threads-public-check" className="font-bold">AIを使わない公開情報セルフチェック</h2>
+            <p className="text-sm text-ink/70">取得済み本文をこのブラウザ内の固定ルールで確認します。外部サービスやモデルへ送信せず、文字列の所有者・実在性・意味は推定しません。</p>
+            <button type="button" disabled={busy} className="rounded-sm border border-ink px-4 py-2 font-bold disabled:opacity-50"
+              onClick={() => setPublicCheckDone(true)}>公開情報をセルフチェック</button>
+            {publicCheckDone && <div role="status" className="space-y-3">
+              <p className="font-bold">チェック結果</p>
+              <p className="text-sm">すべての投稿で、本文と投稿時刻がThreads APIから取得できる公開情報として表示されています。</p>
+              <ul className="list-disc space-y-2 pl-5 text-sm">{publicFindings.map((finding, index) => <li key={finding.postId}>
+                投稿 {index + 1}：{finding.labels.length ? finding.labels.join("、") : "定型的な連絡先・URLの文字列は見つかりませんでした"}
+              </li>)}</ul>
+              <p className="text-xs text-ink/60">この結果は固定パターンとの一致であり、個人情報かどうかを判定するAI診断ではありません。</p>
+            </div>}
+          </section>
         </section>}
-        {!original && <button type="button" disabled={busy}
-          className="rounded-sm bg-seeker px-6 py-3 font-bold text-paper disabled:opacity-50"
-          onClick={() => void perform(async () => {
-            const result = requireDiagnosis(await call("diagnose", "POST"));
-            setOriginal(result); setView(result);
-          })}>{busy ? "診断中…" : "診断する"}</button>}
+        {!original && fetchedPosts && <details className="rounded-sm border border-ink/20 p-4">
+          <summary className="cursor-pointer font-bold">任意機能：AI診断（モデル稼働時のみ）</summary>
+          <p className="mt-3 text-sm text-ink/70">この機能はMeta審査の操作には不要です。チーム管理の本文モデルが停止中は利用できません。上のセルフチェックとは別機能です。</p>
+          <button type="button" disabled={busy}
+            className="mt-3 rounded-sm bg-seeker px-6 py-3 font-bold text-paper disabled:opacity-50"
+            onClick={() => void perform(async () => {
+              const result = requireDiagnosis(await call("diagnose", "POST"));
+              setOriginal(result); setView(result);
+            })}>{busy ? "AI診断中…" : "AI診断を試す"}</button>
+        </details>}
       </section>}
 
       {error && <p role="alert" className="mt-6 border-l-4 border-seeker p-3">{error}</p>}
