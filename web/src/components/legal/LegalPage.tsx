@@ -1,7 +1,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 
-import { LEGAL_UPDATED, type LegalBlock, type LegalDocument } from "@/lib/legal";
+import { LEGAL_UPDATED, SUPPORT_EMAIL, SUPPORT_MAILTO, type LegalBlock, type LegalDocument } from "@/lib/legal";
 import { messages } from "@/lib/messages";
 
 function Block({ block }: { block: LegalBlock }) {
@@ -41,6 +41,20 @@ export function LegalPage({ document, children }: { document: LegalDocument; chi
           </section>
         ))}
         {children}
+        <section aria-labelledby="official-contact" className="space-y-3">
+          <h2 id="official-contact" className="border-l-4 border-seeker pl-3 text-xl font-bold">
+            公式問い合わせ先
+          </h2>
+          <p>
+            メール：{" "}
+            <a className="underline underline-offset-4 hover:text-seeker" href={SUPPORT_MAILTO}>
+              {SUPPORT_EMAIL}
+            </a>
+          </p>
+          <p className="text-sm text-ink/70">
+            パスワード、アクセストークン、App Secretなどの認証情報は送らないでください。
+          </p>
+        </section>
       </div>
     </main>
   );

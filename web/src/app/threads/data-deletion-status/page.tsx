@@ -11,7 +11,13 @@ export default function ThreadsDataDeletionStatus() {
         診断結果は通常、サーバーに永続保存しません。
       </p>
       <p className="mt-4 leading-8">確認コードはMetaへの応答に含めています。個別の結果については連絡先ページからお問い合わせください。</p>
-      <Link href="/contact" className="mt-5 inline-block underline">連絡先</Link>
+      <p className="mt-4 leading-8">
+        このサービスは確認コードや削除依頼の履歴を永続保存しないため、このページで個別の進捗を検索することはできません。
+      </p>
+      <div className="mt-5 flex flex-wrap gap-5">
+        <Link href="/data-deletion" className="underline">データ削除の説明</Link>
+        <Link href="/support" className="underline">サポート</Link>
+      </div>
     </main>
   );
 }

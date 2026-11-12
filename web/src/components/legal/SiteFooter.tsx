@@ -3,12 +3,13 @@ import Link from "next/link";
 import { messages } from "@/lib/messages";
 
 const LINKS = [
-  { href: "/terms", label: "利用規約" },
   { href: "/privacy", label: "プライバシーポリシー" },
-  { href: "/contact", label: "問い合わせ" },
+  { href: "/terms", label: "利用規約" },
+  { href: "/data-deletion", label: "データ削除" },
+  { href: "/support", label: "サポート" },
 ] as const;
 
-/** すべての画面の一番下。利用規約・プライバシーポリシー・問い合わせへのリンク */
+/** すべての画面の一番下。Meta 審査を含む公開文書へのリンク */
 export function SiteFooter() {
   return (
     <footer className="mx-auto max-w-5xl border-t border-ink/15 px-4 py-8 text-sm text-ink/70 sm:px-8">
