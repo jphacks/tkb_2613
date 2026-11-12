@@ -29,12 +29,12 @@ def test_every_clue_matches_the_clue_format(doc: dict[str, Any]) -> None:
 def test_every_post_matches_the_post_format(doc: dict[str, Any]) -> None:
     posts = [Post.model_validate(p) for p in doc["posts"]]
 
-    assert len(posts) == 12
+    assert len(posts) == 13
 
 
 def test_clues_point_to_existing_posts_images_and_regions(doc: dict[str, Any]) -> None:
     posts = {p["post_id"]: p for p in doc["posts"]}
-    assert len(posts) == 12
+    assert len(posts) == 13
 
     for raw in doc["clues"]:
         clue = Clue.model_validate(raw)
@@ -51,7 +51,7 @@ def test_clues_point_to_existing_posts_images_and_regions(doc: dict[str, Any]) -
 def test_expected_inferences_refer_to_existing_clues(doc: dict[str, Any]) -> None:
     attributes = {e["attribute"] for e in doc["expected"]}
 
-    assert attributes == {"station", "occupation", "name", "routine"}
+    assert attributes == {"station", "occupation", "name", "routine", "home_district"}
     for e in doc["expected"]:
         assert all(0 <= i < len(doc["clues"]) for i in e["clue_indices"])
 

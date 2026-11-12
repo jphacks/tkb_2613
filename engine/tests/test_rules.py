@@ -1047,3 +1047,57 @@ def test_r1_note_is_unchanged_without_other_candidates_or_ridership() -> None:
         _by_attribute(rule_r1(both, no_data))["station"].note
         == "駅名の手がかりの票がいちばん多い駅"
     )
+
+
+BUNKYO_GAZ = Gazetteer(
+    postal=[
+        {"postal_code": "1130032", "muni_code": "13105", "city": "文京区", "town": "弥生"},
+        {"postal_code": "1130031", "muni_code": "13105", "city": "文京区", "town": "根津"},
+    ],
+    knowledge=Knowledge(
+        collection_areas=[
+            CollectionArea("文京区", "弥生1・2丁目", "月木", ["弥生1・2丁目"]),
+            CollectionArea("文京区", "根津1・2丁目", "月木", ["根津1・2丁目"]),
+            CollectionArea("文京区", "本郷1・2丁目", "火金", ["本郷1・2丁目"]),
+        ]
+    ),
+)
+
+
+def _forgot(when: str) -> tuple[Post, Clue]:
+    return _post("pg", when), _clue("pg", ClueType.ROUTINE_TEXT, "燃えるゴミ出し忘れた")
+
+
+def test_r5_reads_the_weekday_of_a_morning_garbage_post_and_the_city_from_the_address() -> None:
+    # 2026-10-22 は木曜。23区には指定ゴミ袋がないので、区は住所の手がかりから決める
+    post, forgot = _forgot("2026-10-22 07:50")
+    address = _clue("pa", ClueType.ADDRESS_TEXT, "文京区弥生二丁目xx")
+
+    [district] = rule_r5([forgot, address], BUNKYO_GAZ, [], [post])
+
+    assert district.value == "文京区 弥生1・2丁目"
+    assert district.clue_indices == [0, 1]
+    assert "投稿の時刻（木曜の朝）" in district.note
+
+
+def test_r5_with_only_the_weekday_names_the_days_shared_by_every_candidate() -> None:
+    post, forgot = _forgot("2026-10-22 07:50")
+    postal = _clue("pa", ClueType.POSTAL_CODE, "113-00xx")
+
+    [district] = rule_r5([forgot, postal], BUNKYO_GAZ, [], [post])
+
+    # 弥生と根津はどちらも月・木。本郷（火・金）は外れる
+    assert district.value == "文京区 燃やすごみが月・木の地区"
+
+
+def test_r5_ignores_a_garbage_post_at_night_or_on_a_day_that_matches_no_area() -> None:
+    address = _clue("pa", ClueType.ADDRESS_TEXT, "文京区弥生二丁目xx")
+    night, forgot = _forgot("2026-10-22 21:00")
+    assert rule_r5([forgot, address], BUNKYO_GAZ, [], [night]) == []
+    sunday, forgot = _forgot("2026-10-25 07:50")
+    assert rule_r5([forgot, address], BUNKYO_GAZ, [], [sunday]) == []
+
+
+def test_r5_needs_a_city() -> None:
+    post, forgot = _forgot("2026-10-22 07:50")
+    assert rule_r5([forgot], BUNKYO_GAZ, [], [post]) == []
