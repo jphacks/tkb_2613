@@ -170,8 +170,8 @@ def _live_ready(settings: Settings) -> bool:
         settings.x_use_case_approved
         and settings.x_paid_reads_approved
         and settings.x_query_logs_redacted
-        and settings.x_client_id
-        and settings.x_client_secret.get_secret_value()
+        and settings.x_client_id.strip()
+        and settings.x_client_secret.get_secret_value().strip()
         and not settings.x_mock_mode
     )
 
