@@ -461,6 +461,9 @@ describe("DiagnosePanel public web lookup consent", () => {
 
     const checkbox = await screen.findByRole("checkbox", { name: new RegExp(d.publicWebConsentLabel.slice(0, 8)) });
     expect(checkbox).not.toBeChecked();
+    // 利用者は払わないこと、検索語の保持期間の注意の両方を出す
+    expect(d.publicWebConsentNote).toContain("料金が請求されることはなく");
+    expect(d.publicWebConsentNote).toContain("最大90日保持");
     expect(screen.getByText(d.publicWebConsentNote)).toBeInTheDocument();
 
     fireEvent.click(checkbox);
