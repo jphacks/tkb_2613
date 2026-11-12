@@ -445,7 +445,11 @@ async def diagnose(
                 return profile_extractor.extract_profile_text(session.did, text)
 
             owner_profile_analyzer = analyze_profile
-        if public_web_lookup_consent:
+        if public_web_lookup_consent and not settings.public_web_lookup_available:
+            # キーがないのに同意が送られた（画面は欄を出さないので古い画面か直接の呼び出し）。
+            # Brave には何も送らず、検索できなかったことだけを返す
+            external_lookup_status = ExternalLookupStatus.UNAVAILABLE
+        elif public_web_lookup_consent:
 
             async def lookup_external() -> ExternalLookupResult:
                 lookup = await external_searcher(session.handle)

@@ -126,6 +126,15 @@ class Settings(BaseSettings):
             )
         return self
 
+    @property
+    def public_web_lookup_available(self) -> bool:
+        """公開Web検索の同意欄を出せるか。
+
+        モックは外へ通信せず固定の架空候補を返すので、デモで流れを見せられるよう常に真。
+        実モードは BRAVE_SEARCH_API_KEY が空でないときだけ真。キーの値や長さは外へ出さない。
+        """
+        return self.mock_mode or bool(self.brave_search_api_key.get_secret_value().strip())
+
 
 @lru_cache
 def get_settings() -> Settings:
