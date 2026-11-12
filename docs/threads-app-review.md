@@ -2,7 +2,7 @@
 
 最終確認日: 2026-11-12（日本時間）
 
-対象アプリは、ログインした本人のThreads投稿を取得して一覧・詳細表示し、公開されている情報を本人が確認できるセルフチェック「みーつけた」。審査で実演するセルフチェックはブラウザ内の固定ルールで動き、AIではない。任意のAI診断は別機能であり、現在の本番ではモデル停止中のため審査手順に含めない。申請権限は現行実装が使う `threads_basic` だけにする。
+対象アプリは、ログインした本人のThreads投稿を取得して一覧・詳細表示し、公開されている情報を本人が確認できるセルフチェック「みーつけた」。審査で実演するセルフチェックはブラウザ内の固定ルールで動き、AIではない。任意のAI診断は別機能であり、現在の本番ではモデル停止中のため審査手順に含めない。申請権限は現行実装が使う `threads_basic` だけにする。Threads画面は日本語（既定）と英語を切り替えられ、審査動画と審査員の操作は英語表示（`/threads?lang=en`）で行う。英語表示は審査後も残す。
 
 公式問い合わせ先: `komekami7110@gmail.com`
 
@@ -22,6 +22,7 @@
 | 認証解除 callback | `POST /api/threads/deauthorize`。`signed_request` をThreads App SecretでHMAC-SHA256検証し、対象ユーザーの全セッションを削除する。 |
 | データ削除 callback | `POST /api/threads/data-deletion`。同じ検証・削除後、公開状況ページURLとランダムな確認コードを返す。確認コード・依頼履歴は永続保存しないため、後から個別照会する機能はない。 |
 | ログ | アプリ独自ログは件数、手がかり件数、失敗件数、処理段階、所要時間を出す。投稿本文・画像・トークンを意図的に出す処理はない。OAuth callbackのqueryはuvicorn access log filterで除去する。本番はFastAPI access logとCloudFront標準access logを無効化する構成。コンテナログは10MB×3ファイルで回転する。リクエスト時ログに秘密が混じらないことは本番で再確認する。 |
+| 表示言語 | Threads画面は日本語（既定）と英語。画面上部の切り替え、または `/threads?lang=en` で選ぶ。選択はブラウザの `localStorage` に保存し、Threads認可画面から戻っても保つ（トークン・投稿は保存しない）。投稿本文・ユーザー名・投稿IDは取得したまま表示し、翻訳しない。APIと診断の処理は言語に依らず同じ。公開ページ（`/privacy` など）とフッターは日本語のみ。 |
 | 既存公開文書 | `/privacy`、`/terms`、`/contact` は存在したがBluesky中心だった。今回Threadsの処理を反映し、`/data-deletion` と `/support` を追加した。 |
 
 ThreadsのAPI処理は `api/src/tkb_api/routes/threads.py` と `api/src/tkb_api/threads_poc.py`、モデル処理は `detect/src/tkb_detect/ollama_client.py`、セッション期限は `api/src/tkb_api/config.py` を根拠に確認した。
@@ -38,15 +39,19 @@ ThreadsのAPI処理は `api/src/tkb_api/routes/threads.py` と `api/src/tkb_api/
 
 Reviewer credentials must be supplied only through Meta's secure reviewer-credential fields. Do not place passwords or access tokens in this document, GitHub, or the review description.
 
-1. Open `https://d2qyby5y8mc03f.cloudfront.net/threads` in a desktop or mobile browser. No login is required to open the page.
+The Threads page has a built-in English display. Open it directly in English with `https://d2qyby5y8mc03f.cloudfront.net/threads?lang=en`, or press **English** in the **日本語 / English** switch at the top of the page. The choice is saved in the browser and is kept after the Threads authorization screen, so the whole flow below stays in English. Japanese is the default when no choice has been made, and the English display stays available after the review. Post text, the username, and post IDs come from Threads and are shown as retrieved; they are never translated.
+
+1. Open `https://d2qyby5y8mc03f.cloudfront.net/threads?lang=en` in a desktop or mobile browser. No login is required to open the page.
 2. Read the notice explaining that the app retrieves the signed-in user's own Threads post text and timestamps for display and a non-AI public-information check. Check the consent checkbox.
-3. Click **“Threadsでログイン”** (Log in with Threads). The browser opens the official Threads authorization screen. Sign in with the reviewer account provided in the secure review fields and approve only `threads_basic`.
-4. After authorization, the app returns to `/threads` and shows the connected `@username`.
-5. Click **“本人投稿を確認”** (Review my posts). The app calls `/me` and `/me/threads`, verifies that the returned owner ID matches the authenticated user, and displays up to 30 of that user's text posts and timestamps.
-6. Expand **“取得情報の詳細”** (Retrieved data details) under a post. The app displays the post ID and exact timestamp and states that only media-type metadata was requested, not image/video URLs or bytes.
-7. Click **“公開情報をセルフチェック”** (Check visible public information). The browser applies fixed text patterns to the already displayed posts and shows direct matches such as URL or contact-like strings. The screen states that this is not AI and does not infer ownership or meaning.
-8. Do not open **“任意機能：AI診断（モデル稼働時のみ）”** for this review. It is not needed to demonstrate `threads_basic`, and the production model is currently unavailable.
-9. Click **“ログアウト”**. The app deletes the in-memory session containing the access token, user information, and fetched posts.
+3. Click **“Log in with Threads”**. The browser opens the official Threads authorization screen. Sign in with the reviewer account provided in the secure review fields and approve only `threads_basic`.
+4. After authorization, the app returns to `/threads` in English and shows the connected `@username`.
+5. Click **“Review my posts”**. The app calls `/me` and `/me/threads`, verifies that the returned owner ID matches the authenticated user, and displays up to 30 of that user's text posts and timestamps. While a request is running, the page shows **“Working…”**.
+6. Expand **“Retrieved data details”** under a post. The app displays the post ID and exact timestamp and states that only the media type was requested, not image/video URLs or data.
+7. Click **“Check visible public information”** in the **“Public-information self-check (not AI)”** section. The browser applies fixed text patterns to the already displayed posts and shows direct matches such as URL-like or contact-like strings. The screen states that this is not AI and does not infer ownership or meaning.
+8. Do not open **“Optional: AI diagnosis (only while the model is running)”** for this review. It is not needed to demonstrate `threads_basic`, and the production model is currently unavailable. If it is run anyway, the page reports that the model is unavailable and the steps above keep working.
+9. Click **“Log out”**. The app deletes the in-memory session containing the access token, user information, and fetched posts.
+
+Scope of the English display: the Threads page, its notices, and its error messages are translated. The site footer links and the public pages `/privacy`, `/terms`, `/data-deletion`, and `/support` are currently Japanese only.
 
 審査用アカウントには、本文と投稿時刻を確認できる投稿を2件以上用意する。セルフチェックを分かりやすくする場合は、架空のURLや `@sample` など秘密情報ではない文字列を1件に含める。実在個人の秘密情報は使わない。
 
@@ -56,32 +61,33 @@ Reviewer credentials must be supplied only through Meta's secure reviewer-creden
 
 | 時刻 | 操作と映すもの | 英語字幕・ナレーション例 |
 | --- | --- | --- |
-| 0:00–0:12 | ログアウト済みのブラウザで本番 `/threads` を開き、アドレスバー、取得対象の説明、同意欄を映す。 | “Miitsuketa is a privacy self-audit for the signed-in user's own Threads posts.” |
-| 0:12–0:30 | 同意をチェックして「Threadsでログイン」を押す。公式Threads認可画面でアプリ名と要求権限を映し、テストユーザーで許可する。パスワード入力部分は停止・カットする。 | “The app requests only `threads_basic`.” |
-| 0:30–0:43 | `/threads` に戻り、接続した `@username` を映す。 | “The returned user ID is checked against the authenticated user.” |
-| 0:43–1:05 | 「本人投稿を確認」を押し、本人の本文投稿と投稿時刻が2件以上表示されるところまでスクロールする。 | “The app reads only this user's ID, username, and up to 30 text posts. It does not retrieve media URLs or bytes.” |
-| 1:05–1:18 | 1件の「取得情報の詳細」を開き、投稿ID、正確な投稿時刻、メディア未取得の表示を映す。 | “The user can inspect the exact data retrieved for each of their own posts.” |
-| 1:18–1:38 | 「公開情報をセルフチェック」を押し、固定パターンの結果と「AI診断ではない」の表示を映す。 | “This deterministic browser-side check uses no AI and makes no inference about ownership or meaning.” |
-| 1:38–1:50 | 「ログアウト」を押し、未接続状態へ戻るところを映す。 | “Logout removes the access token and fetched posts from the in-memory session.” |
+| 0:00–0:12 | ログアウト済みのブラウザで本番 `/threads?lang=en` を開く（または右上で **English** を押す）。アドレスバー、英語の取得対象の説明、同意欄を映す。 | “Miitsuketa is a privacy self-audit for the signed-in user's own Threads posts.” |
+| 0:12–0:30 | 同意をチェックして **“Log in with Threads”** を押す。公式Threads認可画面でアプリ名と要求権限を映し、テストユーザーで許可する。パスワード入力部分は停止・カットする。 | “The app requests only `threads_basic`.” |
+| 0:30–0:43 | 英語表示のまま `/threads` に戻り、接続した `@username` を映す。 | “The returned user ID is checked against the authenticated user.” |
+| 0:43–1:05 | **“Review my posts”** を押し、本人の本文投稿と投稿時刻が2件以上表示されるところまでスクロールする。投稿本文とユーザー名は翻訳されない。 | “The app reads only this user's ID, username, and up to 30 text posts. It does not retrieve media URLs or bytes.” |
+| 1:05–1:18 | 1件の **“Retrieved data details”** を開き、投稿ID、正確な投稿時刻、メディア未取得の表示を映す。 | “The user can inspect the exact data retrieved for each of their own posts.” |
+| 1:18–1:38 | **“Check visible public information”** を押し、固定パターンの結果と “not AI” の表示を映す。 | “This deterministic browser-side check uses no AI and makes no inference about ownership or meaning.” |
+| 1:38–1:50 | **“Log out”** を押し、未接続状態へ戻るところを映す。 | “Logout removes the access token and fetched posts from the in-memory session.” |
 | 1:50–2:10 | アドレスバーから `/privacy`、`/data-deletion`、`/support` を順に直接開き、ログインなしで読めることを短く映す。 | “Public privacy, data-deletion, and support information is available without login.” |
 
-撮影前にブラウザの通知、ブックマーク、個人用プロフィール画像を隠し、ズームを100%前後にする。認証情報の入力は録画外で済ませるか編集で完全に除き、開発者ツール、ネットワークヘッダー、Meta Dashboardの秘密値は映さない。日本語UIのボタン名は上表の英語字幕と同じ意味になるように表示する。
+撮影前にブラウザの通知、ブックマーク、個人用プロフィール画像を隠し、ズームを100%前後にする。認証情報の入力は録画外で済ませるか編集で完全に除き、開発者ツール、ネットワークヘッダー、Meta Dashboardの秘密値は映さない。画面は英語表示のまま撮影し、字幕は画面の英語表記を補う程度にする。日本語表示のまま撮る場合は、日本語のボタン名が上表の英語字幕と同じ意味になるようにする。
 
 ### 提出前チェック
 
-- [ ] 本番URL `/threads` をアドレスバーに表示する（localhostやモック診断を使わない）。
+- [ ] 本番URL `/threads?lang=en` をアドレスバーに表示する（localhostやモック診断を使わない）。
+- [ ] 画面上部の **English** が選択状態（押下状態）になっていて、認可画面から戻っても英語のままであることを映す。
 - [ ] 録画開始時はログアウト状態にする。
 - [ ] 同意文で「本人投稿本文と投稿時刻」「画像は対象外」「AIを使わないセルフチェック」が読めるようにする。
-- [ ] 「Threadsでログイン」を押し、公式Threads認可画面と要求権限を映す。
+- [ ] **“Log in with Threads”** を押し、公式Threads認可画面と要求権限を映す。
 - [ ] パスワード、アクセストークン、App Secret、開発者ダッシュボードの秘密値は映さない。
 - [ ] 戻った画面の接続ユーザーネームを映す。
-- [ ] 「本人投稿を確認」を押し、本人の投稿がアプリに表示されるところを映す。
-- [ ] 「取得情報の詳細」を開き、投稿ID、投稿時刻、メディア未取得を映す。
-- [ ] 「公開情報をセルフチェック」を押し、固定ルールでありAIではないことを字幕で明示する。
+- [ ] **“Review my posts”** を押し、本人の投稿がアプリに表示されるところを映す。
+- [ ] **“Retrieved data details”** を開き、投稿ID、投稿時刻、メディア未取得を映す。
+- [ ] **“Check visible public information”** を押し、固定ルールでありAIではないことを字幕で明示する。
 - [ ] 任意のAI診断は開かず、動画説明にも審査対象機能として含めない。
 - [ ] ログアウトまで映し、セッションデータが削除されることを字幕で説明する。
 - [ ] `/privacy`、`/data-deletion`、`/support` がログインなしで開くことを短く映す。
-- [ ] 日本語UIの主要ボタンには英語字幕または画面注釈を付ける。
+- [ ] 英語表示で撮影するため、ボタンの字幕は不要。ただし投稿本文（日本語のまま表示される）が映る場合は、英語の注釈を添える。
 - [ ] 1080p程度で文字とクリック位置を読めるようにし、`threads_basic` の利用証明に不要な操作は省く。
 - [ ] 提出前に無音で再生し、初見の審査員が認可→本人投稿取得→詳細表示→セルフチェック→破棄を理解できるか確認する。
 
