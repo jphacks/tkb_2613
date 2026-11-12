@@ -50,6 +50,11 @@ class Paths:
         return self.raw_dir / "ksj" / "R3_Terms_of_use_municipality_data.xlsx"
 
     @property
+    def ridership_zip(self) -> Path:
+        """国土数値情報「駅別乗降客数（S12）」2025年度整備版（全国1ファイル）。"""
+        return self.raw_dir / "ksj" / "S12-25_GML.zip"
+
+    @property
     def estat_dir(self) -> Path:
         return self.raw_dir / "estat"
 

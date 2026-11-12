@@ -24,6 +24,7 @@ GEOJSON_SUFFIX = "UTF-8/N02-24_Station.geojson"
 
 SCHEMA = pa.schema(
     [
+        ("station_code", pa.string()),
         ("station_name", pa.string()),
         ("line_name", pa.string()),
         ("operator", pa.string()),
@@ -38,6 +39,7 @@ Point = tuple[float, float]  # （経度, 緯度）。GeoJSON の並び
 
 @dataclass(frozen=True)
 class Station:
+    station_code: str  # 駅コード（N02_005c）。駅別乗降客数（S12_001c）とつなぐ
     station_name: str
     line_name: str
     operator: str
@@ -65,7 +67,7 @@ def parse(geojson: dict[str, Any], allowed_1km: frozenset[str]) -> list[Station]
         lines_by_station.setdefault(key, []).extend(_lines(feature.get("geometry") or {}, key))
 
     stations = [
-        Station(key.station_name, key.line_name, key.operator, *_center(lines))
+        Station(key.station_code, key.station_name, key.line_name, key.operator, *_center(lines))
         for key, lines in lines_by_station.items()
     ]
     return [s for s in stations if s.mesh_1km in allowed_1km]
@@ -123,6 +125,7 @@ def load(paths: Paths, allowed_1km: frozenset[str]) -> list[Station]:
 def write(rows: Iterable[Station], path: Path) -> None:
     stations = list(rows)
     columns: dict[str, Sequence[object]] = {
+        "station_code": [s.station_code for s in stations],
         "station_name": [s.station_name for s in stations],
         "line_name": [s.line_name for s in stations],
         "operator": [s.operator for s in stations],

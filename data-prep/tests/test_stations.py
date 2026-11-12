@@ -54,6 +54,7 @@ def test_parse_merges_split_lines_and_weights_by_length() -> None:
         "京王線",
         "京王電鉄",
     )
+    assert shinjuku.station_code == "003700"
     assert shinjuku.lon == pytest.approx(139.7005)
     assert shinjuku.lat == pytest.approx(35.6896)
     assert shinjuku.mesh_1km == SHINJUKU_1KM
@@ -106,3 +107,4 @@ def test_load_reads_utf8_geojson_from_zip(tmp_path: Path) -> None:
     table = pq.read_table(tmp_path / "s.parquet").to_pydict()
     assert table["station_name"] == ["新宿"]
     assert table["mesh_1km"] == [SHINJUKU_1KM]
+    assert table["station_code"] == ["1"]

@@ -993,3 +993,57 @@ def test_infer_attaches_the_combined_confidence_to_every_conclusion() -> None:
     for conclusion in conclusions:
         assert 0 <= conclusion.confidence <= 1
         assert conclusion.confidence == combined_confidence(clues, conclusion.clue_indices)
+
+
+RIDERSHIP_GAZ = Gazetteer(
+    stations=[
+        {
+            "station_code": "003483",
+            "station_name": "根津",
+            "mesh_1km": "m-bunkyo",
+            "lat": 35.7176,
+            "lon": 139.7653,
+        },
+        {
+            "station_code": "003484",
+            "station_name": "千駄木",
+            "mesh_1km": "m-bunkyo",
+            "lat": 35.7255,
+            "lon": 139.7631,
+        },
+    ],
+    ridership={"003483": 27937, "003484": 28507},
+    ridership_year=2024,
+)
+
+
+def test_r1_adds_ridership_as_reference_only_when_other_candidates_remain() -> None:
+    clues = [
+        _clue("p1", ClueType.STATION_SIGN, "根津"),
+        _clue("p2", ClueType.PLACE_TEXT, "根津駅"),
+        _clue("p3", ClueType.PLACE_TEXT, "千駄木駅"),
+    ]
+
+    station = _by_attribute(rule_r1(clues, RIDERSHIP_GAZ))["station"]
+
+    # 乗降客数は千駄木のほうが多いが、どの駅かは票で決めたまま変えない
+    assert station.value == "根津駅"
+    assert "参考" in station.note
+    assert "根津駅 27,937人" in station.note
+    assert "千駄木駅 28,507人" in station.note
+    assert "2024年度" in station.note
+    assert "国土数値情報（駅別乗降客数データ）" in station.note
+    assert "推定には使っていません" in station.note
+
+
+def test_r1_note_is_unchanged_without_other_candidates_or_ridership() -> None:
+    only = [_clue("p1", ClueType.STATION_SIGN, "根津"), _clue("p2", ClueType.PLACE_TEXT, "根津駅")]
+    assert _by_attribute(rule_r1(only, RIDERSHIP_GAZ))["station"].note == (
+        "駅名の手がかりの票がいちばん多い駅"
+    )
+    both = [*only, _clue("p3", ClueType.PLACE_TEXT, "千駄木駅")]
+    no_data = Gazetteer(stations=RIDERSHIP_GAZ.stations)
+    assert (
+        _by_attribute(rule_r1(both, no_data))["station"].note
+        == "駅名の手がかりの票がいちばん多い駅"
+    )
