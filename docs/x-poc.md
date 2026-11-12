@@ -28,6 +28,8 @@ X専用セッション、OAuth state、PKCE verifier、アクセストークン�
 
 フラグは承認の代わりではない。現在はすべて有効化しない。
 
+どれか1つでも欠ければ（Client ID・Secret が空白だけの場合も）、`/api/x/config` の `live_enabled` は false になり画面に「Xでログイン」を出さない。`/start`・`/callback`・実トークンのセッションでの `/diagnose` も403で拒否し、X へは通信しない。`api/tests/test_x_approval_guard.py` と `web/src/app/x/page.test.tsx` で固定している。
+
 ## OAuth実装とWeb Appへの変更
 
 X公式仕様では、Native AppとSingle Page Appはpublic client、Web AppとAutomated App or Botはconfidential clientである。このアプリはブラウザへ秘密を渡さず、FastAPIサーバーがcallbackとtoken exchangeを処理するため、Developer Consoleは **Web App** が適切。

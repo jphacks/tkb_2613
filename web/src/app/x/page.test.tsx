@@ -53,6 +53,36 @@ describe("X public information page", () => {
     expect(screen.getByText(/住所、勤務先、居住地域、健康や政治信条などは推定しません/)).toBeInTheDocument();
   });
 
+  function stubConfig(config: unknown, status = 200) {
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request): Promise<Response> => {
+      const path = String(input);
+      if (path.endsWith("/config")) return response(config, status);
+      if (path.endsWith("/session")) return response({}, 401);
+      throw new Error(`unexpected path ${path}`);
+    }));
+  }
+
+  it.each([
+    ["the API reports live X closed", { mock_enabled: false, live_enabled: false, max_posts: 30 }, 200],
+    ["the config request fails", {}, 503],
+    ["the config response is malformed", { mock_enabled: false, live_enabled: "yes", max_posts: 30 }, 200],
+  ])("hides the live X entry when %s", async (_case, config, status) => {
+    stubConfig(config, status);
+    render(<XPage />);
+
+    expect(await screen.findByText("現在、X公開情報チェックは準備中です。")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Xでログイン" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/X APIの読み取りは課金対象です/)).not.toBeInTheDocument();
+  });
+
+  it("shows the live X entry only when the API reports every approval in place", async () => {
+    stubConfig({ mock_enabled: false, live_enabled: true, max_posts: 5 });
+    render(<XPage />);
+
+    expect(await screen.findByRole("button", { name: "Xでログイン" })).toBeDisabled();
+    expect(screen.getByText(/X APIの読み取りは課金対象です/)).toBeInTheDocument();
+  });
+
   it("shows literal evidence, source posts, exclusion, and reaggregation", async () => {
     const fetchMock = vi.fn(async (input: string | URL | Request): Promise<Response> => {
       const path = String(input);
