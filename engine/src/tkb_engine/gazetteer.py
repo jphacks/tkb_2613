@@ -130,6 +130,9 @@ class Gazetteer:
     # 国土地理院の指定緊急避難場所・指定避難所。{"name", "kind", "muni_code", "city", ...}。
     # 表がなければ空
     shelters: list[dict[str, Any]] = field(default_factory=list)
+    # 国土数値情報のバス停留所（令和4年度版）。{"name", "operator", "cities"（1km メッシュに
+    # かかる区市町村の候補）, ...}。表がなければ空
+    bus_stops: list[dict[str, Any]] = field(default_factory=list)
     # 法人番号の公表データの SQLite（data-prep の corporations.sqlite）。行はメモリに載せず、
     # 引くたびに読み取り専用で開く。なければ None
     corporations_path: Path | None = None
@@ -145,7 +148,8 @@ class Gazetteer:
             muni_meshes=meshes,
             knowledge=Knowledge.load() if knowledge is None else knowledge,
             schools=_optional_table(data_dir / "schools.parquet"),
-            shelters=_optional_table(data_dir / "shelters.parquet"),
+            shelters=_optional_table(data_dir / "shelters.parquet", SHELTER_COLUMNS),
+            bus_stops=_optional_table(data_dir / "bus_stops.parquet", BUS_STOP_COLUMNS),
             corporations_path=(
                 data_dir / "corporations.sqlite"
                 if (data_dir / "corporations.sqlite").is_file()
@@ -213,6 +217,25 @@ class Gazetteer:
         for row in self.shelters:
             by_core.setdefault(shelter_core_name(str(row["name"])), []).append(row)
         return by_core
+
+    @functools.cached_property
+    def _bus_stops_by_name(self) -> dict[str, list[dict[str, Any]]]:
+        by_name: dict[str, list[dict[str, Any]]] = {}
+        for row in self.bus_stops:
+            name = _normalize_name(re.sub(r"[（(].*?[）)]", "", str(row["name"])))
+            if len(name) >= MIN_BUS_STOP_NAME_LENGTH:
+                by_name.setdefault(name, []).append(row)
+        return by_name
+
+    def bus_stops_named_at(self, text: str) -> dict[str, list[dict[str, Any]]]:
+        """文字の先頭に名前が書かれたバス停。名前 → 同じ名前のバス停の行（事業者・場所が違うものも
+        すべて）。長い名前の一部（「西根津一丁目」の「根津一丁目」）には合わせない。"""
+        head = _normalize_name(text)
+        found = [name for name in self._bus_stops_by_name if head.startswith(name)]
+        if not found:
+            return {}
+        name = max(found, key=len)
+        return {name: self._bus_stops_by_name[name]}
 
     def corporations_named(self, name: str) -> list[tuple[str, str]]:
         """正規化した名前が一致する法人の (法人番号, 商号)。表がなければ空。部分一致はしない。"""
@@ -329,6 +352,8 @@ _MUNICIPAL_PREFIX = re.compile(r"^(?:.{1,6}?[都道府県区市町村]立)")
 _SHELTER_LABEL = re.compile(r"^(?:[指定広域緊急一時]{0,6}避難(?:場所|所)[:：・]?)+")
 # 手がかりの文字に合わせる名前の最短の長さ（「西公園」のような短い名前は合わせない）
 MIN_SHELTER_NAME_LENGTH = 4
+# バス停の名前の最短の長さ（「本町」「駅前」のような短い名前は合わせない）
+MIN_BUS_STOP_NAME_LENGTH = 3
 
 
 def shelter_core_name(name: str) -> str:
@@ -354,10 +379,15 @@ def _normalize_name(text: str) -> str:
     return re.sub(r"\s", "", unicodedata.normalize("NFKC", text)).replace("ヶ", "ケ")
 
 
-def _optional_table(path: Path) -> list[dict[str, Any]]:
-    """公開データの表は、ないとき（テスト、CI、取得前）は空として扱う。"""
-    return pq.read_table(path).to_pylist() if path.is_file() else []
+def _optional_table(path: Path, columns: list[str] | None = None) -> list[dict[str, Any]]:
+    """公開データの表は、ないとき（テスト、CI、取得前）は空として扱う。columns を渡すと、
+    推定に使う列だけを読む（api の常駐メモリを減らすため。座標などは読まない）。"""
+    return pq.read_table(path, columns=columns).to_pylist() if path.is_file() else []
 
+
+# 公開データの表から読む列（推定に使うものだけ）
+SHELTER_COLUMNS = ["name", "kind", "city"]
+BUS_STOP_COLUMNS = ["name", "operator", "cities"]
 
 # 同じ名前の駅をまとめるとき、中心からこれより離れた行があれば別の場所の駅とみなす
 STATION_SPREAD_KM = 3.0

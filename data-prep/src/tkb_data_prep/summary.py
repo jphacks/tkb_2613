@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 
 from tkb_data_prep.area_codes import AreaCode, Problem
+from tkb_data_prep.bus_stops import BusStop
 from tkb_data_prep.corporations import BuildResult
 from tkb_data_prep.households import Household
 from tkb_data_prep.muni_mesh import MuniMesh
@@ -23,6 +24,7 @@ class Tables:
     area_code_problems: list[Problem]
     schools: list[School]
     shelters: list[Shelter]
+    bus_stops: list[BusStop]
     corporations: BuildResult
 
 
@@ -46,6 +48,8 @@ def report(t: Tables) -> list[str]:
         f"（市区町村が引けない {sum(not s.city for s in t.schools):,}）",
         f"shelters         {len(t.shelters):>9,} 行"
         f"（2つ以上の区市町村にある名前 {_shared_names(t.shelters):,}）",
+        f"bus_stops        {len(t.bus_stops):>9,} 行"
+        f"（2つ以上の区市町村にかかる {sum(len(b.cities) > 1 for b in t.bus_stops):,}）",
         _corporations_line(t.corporations),
         "",
         "== 世帯数 ==",

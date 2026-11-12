@@ -7,6 +7,8 @@ import sys
 
 from tkb_data_prep import (
     area_codes,
+    boundaries,
+    bus_stops,
     corporations,
     households,
     muni_mesh,
@@ -29,6 +31,7 @@ def run(paths: Paths) -> Tables:
     converted = area_codes.load(paths, area_codes.NameIndex.build(munis, postals))
     school_rows = schools.load(paths, postals)
     shelter_rows = shelters.load(paths, postals)
+    bus_stop_rows = bus_stops.load(paths, munis, postals, boundaries.load(paths))
 
     out = paths.out_dir
     muni_mesh.write(munis, out / "muni_mesh.parquet")
@@ -38,6 +41,7 @@ def run(paths: Paths) -> Tables:
     area_codes.write(converted.rows, out / "area_codes.parquet")
     schools.write(school_rows, out / "schools.parquet")
     shelters.write(shelter_rows, out / "shelters.parquet")
+    bus_stops.write(bus_stop_rows, out / "bus_stops.parquet")
     corporation_result = corporations.build(paths, out / "corporations.sqlite")
 
     return Tables(
@@ -50,6 +54,7 @@ def run(paths: Paths) -> Tables:
         area_code_problems=converted.problems,
         schools=school_rows,
         shelters=shelter_rows,
+        bus_stops=bus_stop_rows,
         corporations=corporation_result,
     )
 
