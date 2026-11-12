@@ -62,6 +62,10 @@ area_codes             276 行（うち一部だけが対象 47）
 令和2年国勢調査の 1都3県の合計（人口 約 3,691 万、世帯 約 1,740 万）とほぼ合う。
 人口が少し多いのは、県境の 1km メッシュに隣の県の人の分も入るため。
 
+### 4. 本番の EC2 に届ける
+
+`data/processed` は EC2 の上で作らない。手元で作った表を `infra/upload-processed-data.sh` で S3 に上げ、EC2 で `infra/install-processed-data.sh` を実行して入れ替える。法人番号の SQLite と e-Stat から作る表も含め、11 個がそろっていないと上げない。手順は [infra/terraform/README.md](../infra/terraform/README.md) の「推理の表を届ける」。
+
 ## 出力（data/processed/）
 
 コードはすべて文字列（先頭の 0 を残すため）。

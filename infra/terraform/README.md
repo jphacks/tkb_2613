@@ -143,7 +143,85 @@ journalctl -u tkb-app -n 50 --no-pager
 
 **起動し直すときは、必ず `systemctl restart tkb-app` を使う**。`docker compose up` を手で打つと、キーのファイルがないので、api が空のキーで起動する（モデルにつながらず「準備中」になる）。
 
-推理の表（`data/processed`）は EC2 の上にはない。なくても動く（最寄り駅のルールだけを飛ばす）。入れるときは手元で `make data` してから、SSM で `/opt/tkb_2613/data/processed` に置く（方法は要確認）。
+推理の表（`data/processed`）はリポジトリにもイメージにも入っていない。なくても動く（最寄り駅・公開データのルールを飛ばす）が、本番では次の「推理の表を届ける」で入れる。
+
+## 推理の表を届ける（data/processed）
+
+手元で作った表を tar にして S3 に上げ、**期限の短い署名付き URL** を作る。アプリの EC2 はその URL から HTTPS（NAT 経由）で取るだけで、**EC2 のロールに S3 の権限は足さない**。スクリプトは作ってあるだけで、実行は人が行う。
+
+| スクリプト | 実行する場所 | すること |
+|---|---|---|
+| `infra/upload-processed-data.sh <バケット名> [秒数]` | 手元（Linux・WSL。GNU tar と aws CLI） | 表がそろっているか確かめ、tar（中の各表の sha256 つき）を S3 に上げ、署名付き URL（既定 900 秒、最大 3600 秒）と tar の sha256 を出す。バケットの公開アクセスのブロックが全部オンでなければ止まる |
+| `infra/install-processed-data.sh <tar の sha256>` | アプリの EC2（SSM、root） | URL を聞く（引数にしないので履歴に残らない）。取って sha256 と中身（決まった名前の普通のファイルだけ）を確かめ、`/opt/tkb_2613/data/processed` を入れ替え（前の表は `processed.prev`）、`systemctl restart tkb-app` する |
+
+tar に入れる表（11個。1つでも欠けたら上げない）：`stations`・`postal`・`area_codes`・`muni_mesh`・`households_500m`（e-Stat のメッシュ統計から）・`schools`・`shelters`・`bus_stops`・`school_districts`・`ridership` の `.parquet` と、法人番号の `corporations.sqlite`。固めると約 75MB、展開すると約 220MB。
+
+### 1. 手元で表を作る
+
+e-Stat の地域メッシュ統計（`data-prep/raw/estat/`）と国税庁の法人番号の zip（`data-prep/raw/houjin/`）は、どちらもブラウザで落として手で置く（[data-prep/README.md](../../data-prep/README.md)）。置いたら：
+
+```bash
+make data
+ls -l data/processed   # 上の 11 個があること
+```
+
+### 2. バケットを用意する（初回だけ）
+
+表だけを置く非公開のバケット。Terraform では作らない（消すときは下の「消す」で一緒に消す）。
+
+```bash
+BUCKET=tkb-2613-processed-$(aws sts get-caller-identity --query Account --output text)
+aws s3api create-bucket --region us-east-1 --bucket "$BUCKET"
+aws s3api put-public-access-block --bucket "$BUCKET" --public-access-block-configuration \
+  BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
+aws s3api put-bucket-tagging --bucket "$BUCKET" --tagging 'TagSet=[{Key=Project,Value=tkb_2613}]'
+```
+
+### 3. 上げて、署名付き URL を作る
+
+```bash
+infra/upload-processed-data.sh "$BUCKET"        # 期限を変えるなら 2つめの引数に秒数（60〜3600）
+```
+
+最後に、EC2 で打つコマンド（tar の sha256 つき）と URL が出る。**URL は期限内なら誰でも取れるので、チャットや Issue に貼らず、SSM のセッションにだけ貼る**。期限が切れたら、もう一度このスクリプトを実行する。
+
+### 4. アプリの EC2 で取って入れ替える
+
+EC2 のリポジトリは、このスクリプトを含むコミット以降にしておく（下の「既存 EC2 の起動スクリプト更新」と同じく `git fetch` と `git checkout`）。
+
+```bash
+aws ssm start-session --target "$(terraform output -raw app_instance_id)"
+# ここからアプリの EC2 の中
+sudo -i
+/opt/tkb_2613/infra/install-processed-data.sh <手元に出た sha256>
+# 「署名付き URL:」と聞かれたら貼って Enter（画面に出ない）
+```
+
+### 5. 手元で S3 の tar を消す
+
+```bash
+aws s3 rm "s3://$BUCKET/processed/<上げたファイル名>"
+```
+
+### 表を届けたら確かめる
+
+- アプリの EC2 で `docker logs tkb_2613-api-1 2>&1 | grep 推理の表` が何も出さない（出れば表を読めていない。「推理の表を読めませんでした（…）」の括弧の中が原因の種類）
+- `curl -s https://<配信ID>.cloudfront.net/api/demo/diagnosis | jq -r '.conclusions[] | "\(.attribute)=\(.value)"'` に次が出る（表がないと出ない）
+  - `station=根津駅`
+  - `home_district=文京区 弥生1・2丁目`
+  - `home_area=弥生`、`home_block=弥生二丁目付近`
+- ブラウザで `https://<配信ID>.cloudfront.net/demo` を開き、推理の結論に「最寄り駅：根津駅」と「ゴミの収集地区：文京区 弥生1・2丁目」が出る
+- アプリの EC2 で `docker stats --no-stream tkb_2613-api-1` のメモリが、表を入れる前より約 72MB 増えた程度（法人番号の SQLite はメモリに載せず、引くたびにディスクから読む）
+- `ls -l /opt/tkb_2613/data/processed` が 11 個で、どれも `-rw-r--r--`
+
+### 表を戻す
+
+入れ替えた表で困ったら、前の表に戻して再起動する。
+
+```bash
+cd /opt/tkb_2613/data
+mv processed processed.bad && mv processed.prev processed && systemctl restart tkb-app
+```
 
 ### 起動したら確かめる
 
@@ -256,6 +334,7 @@ terraform destroy
 - 谷口の IAM ユーザーは、手で発行したアクセスキーごと消える（`force_destroy`）
 - VPC origin が VPC の中に作るネットワークインターフェースが残っていると、サブネットや VPC の削除が数分待たされる。止まったら、少し待ってもう一度 `terraform destroy`
 - 終わったら、state のコピー（`~/tkb_2613-tfstate/`）も消してよい
+- 推理の表のバケット（Terraform の外で作ったもの）は手で消す：`aws s3 rb "s3://$BUCKET" --force`
 
 ## 要確認
 
