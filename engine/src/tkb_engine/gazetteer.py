@@ -136,12 +136,17 @@ class Gazetteer:
     # 国土数値情報の小学校区・中学校区（令和3年度版）。{"kind"（小学校・中学校）, "name", "city",
     # "terms"（自治体ごとの利用条件）, "note"（条件の原文）}。表がなければ空
     school_districts: list[dict[str, Any]] = field(default_factory=list)
+    # 国土数値情報の駅別乗降客数。駅コード → 1日の乗降客数（ridership_year 年度）。表がなければ空。
+    # 推定の結果には使わず、候補の説明に参考として添えるだけ
+    ridership: dict[str, int] = field(default_factory=dict)
+    ridership_year: int = 0
     # 法人番号の公表データの SQLite（data-prep の corporations.sqlite）。行はメモリに載せず、
     # 引くたびに読み取り専用で開く。なければ None
     corporations_path: Path | None = None
 
     @classmethod
     def load(cls, data_dir: Path = DATA_DIR, knowledge: Knowledge | None = None) -> "Gazetteer":
+        ridership_rows = _optional_table(data_dir / "ridership.parquet")
         meshes: dict[str, set[str]] = {}
         for row in pq.read_table(data_dir / "muni_mesh.parquet").to_pylist():
             meshes.setdefault(row["muni_code"], set()).add(row["mesh_1km"])
@@ -156,6 +161,8 @@ class Gazetteer:
             school_districts=_optional_table(
                 data_dir / "school_districts.parquet", SCHOOL_DISTRICT_COLUMNS
             ),
+            ridership={str(r["station_code"]): int(r["passengers"]) for r in ridership_rows},
+            ridership_year=max((int(r["year"]) for r in ridership_rows), default=0),
             corporations_path=(
                 data_dir / "corporations.sqlite"
                 if (data_dir / "corporations.sqlite").is_file()
@@ -254,6 +261,19 @@ class Gazetteer:
         """学校名（「文京区立根津小学校」「根津小」も）の学区の行。同じ名前の学校がほかの
         区市町村にもあれば、その行もすべて入る（使う側で競合として捨てる）。"""
         return self._districts_by_name.get(_school_key(name), [])
+
+    def passengers_of(self, station_name: str) -> int | None:
+        """駅（同じ名前の駅をまとめたもの）の1日の乗降客数。各社の合計。同じ名前の別の場所の駅が
+        あるか、乗降客数がなければ None。"""
+        if not self.ridership or self.station_point(station_name) is None:
+            return None
+        codes = {
+            str(s["station_code"])
+            for s in self.stations
+            if s["station_name"] == station_name and s.get("station_code")
+        }
+        counts = [self.ridership[c] for c in codes if c in self.ridership]
+        return sum(counts) if counts else None
 
     def corporations_named(self, name: str) -> list[tuple[str, str]]:
         """正規化した名前が一致する法人の (法人番号, 商号)。表がなければ空。部分一致はしない。"""

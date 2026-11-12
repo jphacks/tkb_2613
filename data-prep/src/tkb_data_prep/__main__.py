@@ -13,6 +13,7 @@ from tkb_data_prep import (
     households,
     muni_mesh,
     postal,
+    ridership,
     school_districts,
     schools,
     shelters,
@@ -29,6 +30,7 @@ def run(paths: Paths) -> Tables:
     postals = postal.load(paths)
     loaded = households.load(paths, allowed)
     station_rows = stations.load(paths, allowed)
+    ridership_year, ridership_rows = ridership.load(paths, {s.station_code for s in station_rows})
     converted = area_codes.load(paths, area_codes.NameIndex.build(munis, postals))
     school_rows = schools.load(paths, postals)
     shelter_rows = shelters.load(paths, postals)
@@ -41,6 +43,7 @@ def run(paths: Paths) -> Tables:
     households.write(loaded.rows, out / "households_500m.parquet")
     postal.write(postals, out / "postal.parquet")
     stations.write(station_rows, out / "stations.parquet")
+    ridership.write(ridership_rows, ridership_year, out / "ridership.parquet")
     area_codes.write(converted.rows, out / "area_codes.parquet")
     schools.write(school_rows, out / "schools.parquet")
     shelters.write(shelter_rows, out / "shelters.parquet")
@@ -54,6 +57,8 @@ def run(paths: Paths) -> Tables:
         estat_first_meshes=loaded.first_meshes,
         postal=postals,
         stations=station_rows,
+        ridership=ridership_rows,
+        ridership_year=ridership_year,
         area_codes=converted.rows,
         area_code_problems=converted.problems,
         schools=school_rows,

@@ -20,6 +20,8 @@ KSJ_P11_URL="https://nlftp.mlit.go.jp/ksj/gml/data/P11/P11-22"
 KSJ_N03_URL="https://nlftp.mlit.go.jp/ksj/gml/data/N03/N03-2026"
 # 国土数値情報「小学校区（A27）」「中学校区（A32）」令和3年度版と、自治体ごとの利用条件の一覧
 KSJ_GML_URL="https://nlftp.mlit.go.jp/ksj/gml/data"
+# 国土数値情報「駅別乗降客数（S12）」2025年度整備版（全国1ファイル。2024年度までの乗降客数）
+KSJ_S12_URL="https://nlftp.mlit.go.jp/ksj/gml/data/S12/S12-25/S12-25_GML.zip"
 KSJ_SCHOOL_TERMS_URL="https://nlftp.mlit.go.jp/ksj/gml/codelist/R3_Terms_of_use_municipality_data.xlsx"
 # 国土地理院「指定緊急避難場所・指定避難所データ」の都道府県別 CSV（_2 が指定緊急避難場所、_1 が指定避難所）
 GSI_SHELTER_URL="https://hinanmap.gsi.go.jp/hinanjocp/defaultFtpData/csv"
@@ -77,4 +79,5 @@ for pref in "${PREFECTURES[@]}"; do
     fetch "$KSJ_GML_URL/$kind/$kind-21/$kind-21_${pref}_GML.zip" "$RAW/ksj/$kind-21_${pref}_GML.zip"
   done
 done
+fetch "$KSJ_S12_URL" "$RAW/ksj/S12-25_GML.zip"
 fetch "$KSJ_SCHOOL_TERMS_URL" "$RAW/ksj/R3_Terms_of_use_municipality_data.xlsx"

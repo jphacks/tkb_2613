@@ -175,15 +175,31 @@ def rule_r1(
     # 最寄り駅：駅名の手がかりごとに候補へ票を入れ、区のメッシュで絞って、票のいちばん多い駅
     station = _vote_station(clues, name_hits, munis, gaz)
     if station is not None:
-        name, evidence, used_area = station
+        name, evidence, used_area, others = station
         if used_area:
             evidence |= area_evidence
         if len(evidence) >= R1_MIN_EVIDENCE:
             note = "駅名の手がかりの票がいちばん多い駅"
             if used_area:
                 note += "。" + area_note
+            note += _ridership_note([name, *others], gaz) if others else ""
             conclusions.append(Conclusion("R1", "station", f"{name}駅", sorted(evidence), note))
     return conclusions
+
+
+RIDERSHIP_CITATION = "出典：「国土数値情報（駅別乗降客数データ）」（国土交通省）を加工して作成"
+
+
+def _ridership_note(names: Sequence[str], gaz: Gazetteer) -> str:
+    """候補の駅の乗降客数（参考）。どの駅にするかには使わない。乗降客数がなければ空。"""
+    counts = [(n, c) for n in names if (c := gaz.passengers_of(n)) is not None]
+    if not counts:
+        return ""
+    listed = "、".join(f"{n}駅 {c:,}人" for n, c in counts)
+    return (
+        f"。参考：候補の駅の1日の乗降客数（{gaz.ridership_year}年度）は {listed}"
+        f"（{RIDERSHIP_CITATION}）。推定には使っていません"
+    )
 
 
 def rule_r2(clues: Sequence[Clue], posts: Sequence[Post], r1: list[Conclusion]) -> list[Conclusion]:
@@ -926,8 +942,10 @@ def _vote_station(
     name_hits: dict[int, set[str]],
     munis: set[str],
     gaz: Gazetteer,
-) -> tuple[str, set[int], bool] | None:
-    """(駅名, 根拠の手がかりの番号, 区で絞ったか)。決められなければ None。"""
+) -> tuple[str, set[int], bool, list[str]] | None:
+    """(駅名, 根拠の手がかりの番号, 区で絞ったか, ほかに残った候補の駅名)。
+
+    決められなければ None。"""
     votes: dict[str, set[int]] = {}
     for main, neighbors in _sign_groups(clues, name_hits).items():
         for name in name_hits[main]:
@@ -951,7 +969,8 @@ def _vote_station(
     winners = [name for name in votes if score(name) == best]
     if len(winners) != 1:
         return None
-    return winners[0], set(votes[winners[0]]), used_area
+    others = sorted(name for name in votes if name != winners[0] and score(name) > 0)
+    return winners[0], set(votes[winners[0]]), used_area, others
 
 
 def timestamps_usable(posts: Sequence[Post]) -> bool:
