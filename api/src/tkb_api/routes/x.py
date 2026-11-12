@@ -25,7 +25,7 @@ from tkb_api.x_budget import (
     one_check_cost,
     posts_read_cost,
 )
-from tkb_api.x_poc import XPocError, fetch_posts_for_owner, get_my_user, to_post
+from tkb_api.x_poc import X_API, XPocError, fetch_posts_for_owner, get_my_user, to_post
 from tkb_api.x_public_info import public_information_json, public_information_report
 from tkb_common.schemas import Post
 
@@ -165,6 +165,11 @@ def _settings(request: Request) -> Settings:
 def _store(request: Request) -> XSessionStore:
     store: XSessionStore = request.app.state.x_sessions
     return store
+
+
+def _x_api(settings: Settings) -> str:
+    """X API の向き先。偽の API は手元の E2E テストだけで設定できる（config の検証）。"""
+    return settings.x_fake_api_base_url.rstrip("/") or X_API
 
 
 def _budget(request: Request) -> DailyResourceBudget:
@@ -320,7 +325,7 @@ async def _exchange(code: str, verifier: str, settings: Settings) -> str:
             auth=httpx.BasicAuth(settings.x_client_id, secret) if secret else None,
         ) as client:
             response = await client.post(
-                "https://api.x.com/2/oauth2/token",
+                f"{_x_api(settings)}/2/oauth2/token",
                 data=data,
             )
             response.raise_for_status()
@@ -352,7 +357,7 @@ async def callback(request: Request, state: str = "", code: str = "") -> Respons
     token = await _exchange(code, verifier, settings)
     _reserve(request, USER_READ_RESOURCES)
     try:
-        owner_id, username = await get_my_user(token)
+        owner_id, username = await get_my_user(token, base_url=_x_api(settings))
     except XPocError as exc:
         raise _x_error(exc) from None
     result = RedirectResponse("/x", status_code=303)
@@ -432,7 +437,10 @@ async def diagnose(request: Request) -> dict[str, Any]:
                 _reserve(request, posts_read_cost(settings.x_max_posts))
                 try:
                     posts = await fetch_posts_for_owner(
-                        current.token, current.owner_id, settings.x_max_posts
+                        current.token,
+                        current.owner_id,
+                        settings.x_max_posts,
+                        base_url=_x_api(settings),
                     )
                 except XPocError as exc:
                     raise _x_error(exc) from None
