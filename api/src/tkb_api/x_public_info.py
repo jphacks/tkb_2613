@@ -118,3 +118,50 @@ def public_information_report(
 ) -> tuple[list[dict[str, object]], list[dict[str, str]]]:
     items, post_errors = extract_public_information_with_errors(posts)
     return [item.model_dump(mode="json") for item in items], post_errors
+
+
+# 集計しない表示（X_INFO_VIEW=highlight）で色を付けるカテゴリ
+HIGHLIGHT_CATEGORIES: tuple[PublicInfoCategory, ...] = ("station", "place")
+
+
+class PublicInfoHighlight(BaseModel):
+    """本文中の範囲。start・end は Unicode のコードポイント単位（X の entities と同じ）。"""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    category: PublicInfoCategory
+    start: int
+    end: int
+
+
+def post_highlights(post: Post) -> list[PublicInfoHighlight]:
+    """1件の投稿の地名・駅名の位置だけを返す。値ごとに数えたり、投稿をまたいでまとめたりしない。"""
+    found: list[PublicInfoHighlight] = []
+    for category, pattern in _PATTERNS:
+        if category not in HIGHLIGHT_CATEGORIES:
+            continue
+        for match in pattern.finditer(post.text):
+            start, end = match.span("value")
+            found.append(PublicInfoHighlight(category=category, start=start, end=end))
+    kept: list[PublicInfoHighlight] = []
+    for item in sorted(found, key=lambda h: (h.start, -h.end)):
+        if not kept or kept[-1].end <= item.start:
+            kept.append(item)
+    return kept
+
+
+def highlights_report(
+    posts: Iterable[Post],
+) -> tuple[dict[str, list[dict[str, object]]], list[dict[str, str]]]:
+    """投稿ごとの範囲。1件の投稿で失敗しても全体は止めず、post_errors として返す。"""
+    highlights: dict[str, list[dict[str, object]]] = {}
+    post_errors: list[dict[str, str]] = []
+    for post in posts:
+        try:
+            items = post_highlights(post)
+        except Exception as exc:  # 投稿単位で隔離し、全体は成功にする
+            logger.warning("X post highlight failed: %s", type(exc).__name__)
+            post_errors.append({"post_id": post.post_id, "error": POST_ERROR_MESSAGE})
+            continue
+        highlights[post.post_id] = [item.model_dump(mode="json") for item in items]
+    return highlights, post_errors

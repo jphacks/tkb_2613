@@ -5,7 +5,8 @@ import { useEffect, useState } from "react";
 
 import { PostCard } from "@/components/post-list/PostCard";
 import { XPostCard } from "@/components/x/XPostCard";
-import { isXDisplay, type XDisplay, type XPostDisplay } from "@/lib/xDisplay";
+import { HIGHLIGHT_LABEL } from "@/components/x/XPostCard";
+import { isHighlights, isXDisplay, type XDisplay, type XHighlight, type XPostDisplay } from "@/lib/xDisplay";
 import { isPost, type Post } from "@/types/post";
 
 type PublicInfoCategory = "place" | "station" | "weekday" | "time" | "school";
@@ -22,6 +23,9 @@ type XDiagnosis = {
   readonly information: readonly PublicInfoItem[];
   readonly post_errors?: readonly PostError[];
   readonly x_display?: XDisplay;
+  // highlight は地名・駅名の位置だけで、値ごとに数えない（X_INFO_VIEW）
+  readonly view?: "aggregate" | "highlight";
+  readonly highlights?: Readonly<Record<string, readonly XHighlight[]>>;
   readonly elapsed_ms?: number;
   readonly mock?: boolean;
 };
@@ -43,6 +47,7 @@ const CATEGORY_LABEL: Record<PublicInfoCategory, string> = {
 };
 const CATEGORIES = new Set(Object.keys(CATEGORY_LABEL));
 const NO_DISPLAY: XPostDisplay = { permalink: null, edited: false, entities: [] };
+const NO_HIGHLIGHTS: readonly XHighlight[] = [];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -74,7 +79,9 @@ function requireDiagnosis(value: unknown): XDiagnosis {
   if (!isRecord(value) || !Array.isArray(value.posts) || !value.posts.every(isPost) ||
       !Array.isArray(value.information) || !value.information.every(isPublicInfo) ||
       !isPostErrors(value.post_errors) ||
-      (value.x_display !== undefined && !isXDisplay(value.x_display))) {
+      (value.x_display !== undefined && !isXDisplay(value.x_display)) ||
+      (value.view !== undefined && value.view !== "aggregate" && value.view !== "highlight") ||
+      (value.highlights !== undefined && !isHighlights(value.highlights))) {
     throw new Error("公開情報チェックの結果を読み取れませんでした。");
   }
   const diagnosis = value as XDiagnosis;
@@ -173,6 +180,8 @@ export default function XPage() {
   }
 
   const current = view ?? original;
+  const highlightView = original?.view === "highlight";
+  const shown = new Set(current?.posts.map((post) => post.post_id));
   return (
     <main className="mx-auto max-w-4xl px-5 py-12">
       <Link href="/" className="text-sm underline">みーつけたに戻る</Link>
@@ -238,14 +247,27 @@ export default function XPage() {
 
       {original && current && <div className="mt-12 space-y-10">
         <div aria-live="polite" className="border-l-4 border-seeker bg-paper-deep p-4">
-          <p className="font-bold">{view === original ? "公開情報チェック結果" : "仮除外後の再集計"}</p>
-          <p className="text-sm text-ink/70">投稿 {current.posts.length} 件・明記情報 {current.information.length} 種類</p>
+          {highlightView ? <>
+            <p className="font-bold">{view === original ? "公開情報チェック結果" : "仮除外後の表示"}</p>
+            <p className="text-sm text-ink/70">投稿 {current.posts.length} 件・本文中の地名と駅名に色を付けています（件数は数えません）</p>
+          </> : <>
+            <p className="font-bold">{view === original ? "公開情報チェック結果" : "仮除外後の再集計"}</p>
+            <p className="text-sm text-ink/70">投稿 {current.posts.length} 件・明記情報 {current.information.length} 種類</p>
+          </>}
           {(original.post_errors?.length ?? 0) > 0 && <p className="mt-2 text-sm">
-            {original.post_errors?.length} 件の投稿は読み取れなかったため、集計に含めていません。
+            {original.post_errors?.length} 件の投稿は読み取れなかったため、{highlightView ? "色付けしていません" : "集計に含めていません"}。
           </p>}
         </div>
 
-        <section aria-labelledby="x-information-heading" className="space-y-4">
+        {highlightView && <section aria-labelledby="x-highlight-heading" className="space-y-2">
+          <h2 id="x-highlight-heading" className="font-display text-xl">本文の中の地名・駅名</h2>
+          <p className="text-sm">投稿の本文はそのままに、
+            <mark className="rounded-sm bg-seeker/20 px-1">{HIGHLIGHT_LABEL.station}</mark>と
+            <mark className="ml-1 rounded-sm bg-ink/15 px-1">{HIGHLIGHT_LABEL.place}</mark>に色を付けています。
+            値ごとにまとめたり数えたりはしません。</p>
+        </section>}
+
+        {!highlightView && <section aria-labelledby="x-information-heading" className="space-y-4">
           <h2 id="x-information-heading" className="font-display text-xl">本文に書かれている情報</h2>
           {current.information.length === 0 && <p>対象カテゴリの情報は見つかりませんでした。</p>}
           {current.information.map((item) => <article key={`${item.category}:${item.value}`}
@@ -264,33 +286,39 @@ export default function XPage() {
               })}
             </ul>
           </article>)}
-        </section>
+        </section>}
 
         <section aria-labelledby="x-posts-heading" className="space-y-4">
           <h2 id="x-posts-heading" className="font-display text-xl">確認した投稿</h2>
-          <p className="text-sm text-ink/70">投稿を選んで集計から仮除外できます。X上の投稿は変更・削除されません。</p>
+          <p className="text-sm text-ink/70">投稿を選んで{highlightView ? "表示" : "集計"}から仮除外できます。X上の投稿は変更・削除されません。</p>
           <ol className="space-y-5">{original.posts.map((post, index) => <li id={`x-post-${index}`} key={post.post_id}
-            className={selected.includes(post.post_id) ? "scroll-mt-5 rounded-sm border border-seeker p-3" : "scroll-mt-5 p-3"}>
+            className={[
+              "scroll-mt-5 p-3",
+              selected.includes(post.post_id) ? "rounded-sm border border-seeker" : "",
+              highlightView && !shown.has(post.post_id) ? "opacity-50" : "",
+            ].join(" ")}>
             <label className="mb-3 flex items-center gap-2 text-sm">
               <input type="checkbox" checked={selected.includes(post.post_id)} onChange={() => toggle(post.post_id)} />
               仮除外する
+              {highlightView && !shown.has(post.post_id) && <span className="ml-2 font-bold">（表示から除外中）</span>}
             </label>
             {original.x_display
               ? <XPostCard post={post} author={original.x_display.author}
                 display={original.x_display.posts[post.post_id] ?? NO_DISPLAY}
-                synthetic={original.x_display.synthetic} />
+                synthetic={original.x_display.synthetic}
+                highlights={highlightView ? original.highlights?.[post.post_id] ?? NO_HIGHLIGHTS : NO_HIGHLIGHTS} />
               : <PostCard post={post} />}
           </li>)}</ol>
           <div className="flex flex-wrap gap-3">
-            <button type="button" disabled={!selected.length || busy} className="rounded-sm border border-ink px-4 py-2 disabled:opacity-50"
+            {!highlightView && <button type="button" disabled={!selected.length || busy} className="rounded-sm border border-ink px-4 py-2 disabled:opacity-50"
               onClick={() => void perform(async () => setPreview(requireSimulation(
                 await call("simulate", "POST", { delete: selected }),
-              )))}>仮除外後を比べる</button>
+              )))}>仮除外後を比べる</button>}
             <button type="button" disabled={!selected.length || busy} className="rounded-sm bg-seeker px-4 py-2 font-bold text-paper disabled:opacity-50"
               onClick={() => void perform(async () => {
                 setView(requireDiagnosis(await call("rediagnose", "POST", { delete: selected })));
                 setPreview(null);
-              })}>選択した投稿を除いて再集計</button>
+              })}>{highlightView ? "選択した投稿を除いて表示" : "選択した投稿を除いて再集計"}</button>
             {view !== original && <button type="button" className="underline" onClick={() => {
               setView(original); setPreview(null); setSelected([]);
             }}>全投稿の結果に戻す</button>}

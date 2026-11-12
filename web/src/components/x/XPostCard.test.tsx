@@ -59,3 +59,29 @@ describe("XPostCard", () => {
     expect(card).toHaveTextContent(text); // 本文はそのまま（t.co も置き換えない）
   });
 });
+
+describe("XPostCard highlights", () => {
+  it("marks places and stations without changing the text, also inside links", () => {
+    const body = "🍜 渋谷駅 #渋谷駅 東京都渋谷区";
+    const tagged: XPostDisplay = {
+      permalink: null, edited: false,
+      entities: [{ kind: "hashtag", start: 6, end: 10, href: "https://x.com/search?q=%23渋谷駅", display: null }],
+    };
+    const { container } = render(<XPostCard post={{ ...post, text: body }} author={author} display={tagged} synthetic={false}
+      highlights={[
+        { category: "station", start: 2, end: 5 },
+        { category: "station", start: 7, end: 10 },
+        { category: "place", start: 11, end: 17 },
+      ]} />);
+
+    const marks = Array.from(container.querySelectorAll("mark")).map((m) => [m.textContent, m.dataset.category]);
+    expect(marks).toEqual([["渋谷駅", "station"], ["渋谷駅", "station"], ["東京都渋谷区", "place"]]);
+    expect(screen.getByRole("link", { name: "#渋谷駅" })).toBeInTheDocument();
+    expect(container.querySelector("p")?.textContent).toBe(body);
+  });
+
+  it("does not mark anything by default", () => {
+    const { container } = render(<XPostCard post={post} author={author} display={display} synthetic />);
+    expect(container.querySelectorAll("mark")).toHaveLength(0);
+  });
+});

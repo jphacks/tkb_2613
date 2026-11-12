@@ -2,7 +2,9 @@
 
 import { useState } from "react";
 
-import { segmentXText, type XAuthor, type XPostDisplay } from "@/lib/xDisplay";
+import {
+  segmentXText, splitByHighlights, type XAuthor, type XHighlight, type XHighlightCategory, type XPostDisplay,
+} from "@/lib/xDisplay";
 import type { Post } from "@/types/post";
 
 // X の表示要件（https://docs.x.com/developer-terms/display-requirements）に合わせた投稿の表示。
@@ -23,6 +25,19 @@ const TIME_FORMAT = new Intl.DateTimeFormat("ja-JP", {
 });
 
 const LINK_ATTRS = { target: "_blank", rel: "noopener noreferrer" } as const;
+
+export const HIGHLIGHT_LABEL: Record<XHighlightCategory, string> = { station: "駅名", place: "地名" };
+
+// 本文の文字は変えずに、地名・駅名の部分に背景色を付けるだけ（値ごとに数えない）
+function Marked({ text, offset, highlights }: { text: string; offset: number; highlights: readonly XHighlight[] }) {
+  if (highlights.length === 0) return <>{text}</>;
+  return <>{splitByHighlights(text, offset, highlights).map((part, index) => part.highlight
+    ? <mark key={index} data-category={part.highlight} title={HIGHLIGHT_LABEL[part.highlight]}
+      className={part.highlight === "station" ? "rounded-sm bg-seeker/20 text-inherit" : "rounded-sm bg-ink/15 text-inherit"}>
+      {part.text}
+    </mark>
+    : <span key={index}>{part.text}</span>)}</>;
+}
 
 function XLogo() {
   return (
@@ -59,12 +74,17 @@ export type XPostCardProps = {
   readonly author: XAuthor;
   readonly display: XPostDisplay;
   readonly synthetic: boolean;
+  /** 集計しない表示（X_INFO_VIEW=highlight）で色を付ける範囲。コードポイント単位 */
+  readonly highlights?: readonly XHighlight[];
 };
 
-export function XPostCard({ post, author, display, synthetic }: XPostCardProps) {
+export function XPostCard({ post, author, display, synthetic, highlights = [] }: XPostCardProps) {
   const profileUrl = synthetic ? null : author.profile_url;
   const permalink = synthetic ? null : display.permalink;
-  const segments = synthetic ? [{ kind: "text" as const, text: post.text }] : segmentXText(post.text, display.entities);
+  const segments = segmentXText(post.text, synthetic ? [] : display.entities);
+  // 各断片が本文の何文字目（コードポイント）から始まるか
+  const offsets = segments.reduce<number[]>((acc, segment, index) =>
+    [...acc, index === 0 ? 0 : acc[index - 1] + Array.from(segments[index - 1].text).length], []);
   const when = TIME_FORMAT.format(new Date(post.created_at));
   return (
     <article aria-label={`${author.name}の投稿`} className="rounded-sm border border-ink/20 bg-paper p-4">
@@ -80,9 +100,12 @@ export function XPostCard({ post, author, display, synthetic }: XPostCardProps) 
       </header>
       <p className="mt-3 whitespace-pre-wrap break-words">
         {segments.map((segment, index) => segment.kind === "text"
-          ? <span key={index}>{segment.text}</span>
+          ? <Marked key={index} text={segment.text} offset={offsets[index]} highlights={highlights} />
           : <a key={index} href={segment.href} className="text-seeker underline-offset-2 hover:underline" {...LINK_ATTRS}>
-            {segment.label}
+            {/* URL は display_url を出すので色は付けない */}
+            {segment.kind === "url"
+              ? segment.label
+              : <Marked text={segment.text} offset={offsets[index]} highlights={highlights} />}
           </a>)}
       </p>
       <footer className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-ink/60">
