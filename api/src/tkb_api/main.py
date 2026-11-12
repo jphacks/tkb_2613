@@ -7,6 +7,7 @@ from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
@@ -92,6 +93,11 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        # 体験デモの診断は起動時に一度だけ計算する。テストで設定や地名の表を差し替えたときは、
+        # 差し替え前の値で計算しても使われないので、最初の要求のときに計算する
+        overrides = app.dependency_overrides
+        if get_settings not in overrides and diagnose.get_gazetteer not in overrides:
+            await run_in_threadpool(demo.warm_diagnosis_cache, settings)
         yield
         store = cast(SessionStore | None, getattr(app.state, "sessions", None))
         if store is not None:

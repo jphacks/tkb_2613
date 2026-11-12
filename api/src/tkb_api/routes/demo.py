@@ -7,14 +7,22 @@
   GET  /api/demo/diagnosis  → {"demo": true, "posts", "clues", "conclusions", "plan"}
   POST /api/demo/simulate   {"delete": [投稿ID]} → {"delete", "broken", "after"}
     after の clue_indices は、GET /api/demo/diagnosis の clues での番号
+
+GET /api/demo/diagnosis の応答は、表（DEMO_FIXTURE_PATH）と地名の表（Gazetteer）が同じなら
+毎回同じなので、一度だけ計算して JSON のバイト列のまま使い回す。起動時（lifespan）に
+warm_diagnosis_cache で計算しておき、要求ごとには推理も計画も計算しない。
+バイト列は変更できないので、要求の間で中身が書き換わることはない。
 """
 
 import json
+import logging
+import threading
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 
 from tkb_api.config import Settings, get_settings
 from tkb_api.pipeline import conclusions_json, plan_json, simulate_json
@@ -49,18 +57,76 @@ def get_demo_data(
 DemoData = Annotated[tuple[tuple[Post, ...], tuple[Clue, ...]], Depends(get_demo_data)]
 
 
-@router.get("/diagnosis")
-def diagnosis(
-    data: DemoData, gazetteer: Annotated[Gazetteer, Depends(get_gazetteer)]
-) -> dict[str, Any]:
-    posts, clues = data
-    return {
+@dataclass(frozen=True)
+class _CachedDiagnosis:
+    fixture_path: Path
+    gazetteer: Gazetteer
+    body: bytes
+
+
+_cache_lock = threading.Lock()
+_cached: _CachedDiagnosis | None = None
+
+
+def _render_diagnosis(
+    posts: tuple[Post, ...], clues: tuple[Clue, ...], gazetteer: Gazetteer
+) -> bytes:
+    doc = {
         "demo": True,
         "posts": [post.model_dump(mode="json") for post in posts],
         "clues": [clue.model_dump(mode="json") for clue in clues],
         "conclusions": conclusions_json(clues, posts, gazetteer),
         "plan": plan_json(clues, posts, gazetteer),
     }
+    # FastAPI の JSONResponse と同じ書き出し方
+    return json.dumps(doc, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode()
+
+
+def _diagnosis_body(
+    fixture_path: Path, data: tuple[tuple[Post, ...], tuple[Clue, ...]], gazetteer: Gazetteer
+) -> bytes:
+    """表のパスと Gazetteer（同じオブジェクトか）が前回と同じなら、前回の応答を返す。
+
+    テストで設定や Gazetteer を差し替えたときは、古い応答を返さずに計算し直す。
+    同時に来た最初の要求で何度も計算しないよう、計算はロックの中で1回だけにする。
+    """
+    global _cached
+
+    def hit(entry: _CachedDiagnosis | None) -> bytes | None:
+        if entry is None or entry.fixture_path != fixture_path or entry.gazetteer is not gazetteer:
+            return None
+        return entry.body
+
+    body = hit(_cached)
+    if body is not None:
+        return body
+    with _cache_lock:
+        body = hit(_cached)
+        if body is None:
+            posts, clues = data
+            body = _render_diagnosis(posts, clues, gazetteer)
+            _cached = _CachedDiagnosis(fixture_path, gazetteer, body)
+        return body
+
+
+def warm_diagnosis_cache(settings: Settings) -> None:
+    """起動時に体験デモの診断を計算しておく。表が読めなくても起動は止めない（要求には503）。"""
+    try:
+        data = get_demo_data(settings)
+    except HTTPException:
+        logging.getLogger(__name__).warning("体験デモのデータを読み込めませんでした")
+        return
+    _diagnosis_body(settings.demo_fixture_path, data, get_gazetteer(settings))
+
+
+@router.get("/diagnosis")
+def diagnosis(
+    data: DemoData,
+    settings: Annotated[Settings, Depends(get_settings)],
+    gazetteer: Annotated[Gazetteer, Depends(get_gazetteer)],
+) -> Response:
+    body = _diagnosis_body(settings.demo_fixture_path, data, gazetteer)
+    return Response(content=body, media_type="application/json")
 
 
 @router.post("/simulate")
