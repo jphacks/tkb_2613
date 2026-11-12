@@ -40,6 +40,15 @@ class Paths:
         """国土数値情報「行政区域（N03）」2026年1月1日時点の都道府県ごとの zip。"""
         return self.raw_dir / "ksj" / f"N03-20260101_{pref_code}_GML.zip"
 
+    def ksj_school_district_zip(self, prefix: str, pref_code: str) -> Path:
+        """国土数値情報「小学校区（A27）」「中学校区（A32）」令和3年度版の都道府県ごとの zip。"""
+        return self.raw_dir / "ksj" / f"{prefix}-21_{pref_code}_GML.zip"
+
+    @property
+    def ksj_school_terms_xlsx(self) -> Path:
+        """小学校区・中学校区の、自治体ごとの利用条件の一覧。"""
+        return self.raw_dir / "ksj" / "R3_Terms_of_use_municipality_data.xlsx"
+
     @property
     def estat_dir(self) -> Path:
         return self.raw_dir / "estat"

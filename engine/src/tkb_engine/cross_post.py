@@ -27,6 +27,7 @@ from tkb_engine.cross_post_facts import forbidden_context as _forbidden_context
 from tkb_engine.gazetteer import Gazetteer
 from tkb_engine.open_data import infer_registry_employer_claim, shelter_home_facts
 from tkb_engine.open_data_bus import bus_stop_home_facts
+from tkb_engine.open_data_school import add_school_district_residence
 
 __all__ = ["CrossPostFact", "FactRole"]
 
@@ -568,6 +569,8 @@ def infer_owner_claims(
         regular_station = infer_regular_station_claim(posts, clues, gazetteer)
         if regular_station is not None:
             claims.append(regular_station)
+        # 子どもの学校の推定があれば、その学区の区市町村を居住地域の経路に足す
+        claims = add_school_district_residence(claims, gazetteer)
     return claims
 
 
