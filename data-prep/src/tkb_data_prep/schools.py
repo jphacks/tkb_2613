@@ -1,7 +1,8 @@
 """学校の一覧（大学・短期大学・高等専門学校・高等学校・中等教育学校）。
 
-入力は文部科学省「学校コード」の CSV（data-prep/raw/mext/*.csv）。1行目が見出しで、
-見出しの名前で列を探す（見出しのセルに改行が入っていることがある）。見出しのないファイル
+入力は文部科学省「学校コード」の CSV（data-prep/raw/mext/*.csv）。1行目が見出しで
+（表題の行があれば2行目）、見出しの名前で列を探す（見出しのセルに改行が入っていることがある）。
+見出しのないファイル
 （同じ表の続き）は、前のファイルの見出しを使う。廃止された学校と、1都3県の外の学校は落とす。
 所在地の市区町村は、郵便番号の表（postal）で引く。引けなければ所在地の文字から探す。
 
@@ -20,7 +21,19 @@ from tkb_data_prep.errors import DataPrepError
 from tkb_data_prep.io import read_csv, write_parquet
 from tkb_data_prep.postal import Postal
 
+# 2026年5月版から、見出しの上に「文部科学省　学校コード一覧」の表題の行がある。
+# 見出しはファイルの先頭からこの行数までの中で探す
+HEADER_SEARCH_ROWS = 2
+TITLE_SUFFIX = "学校コード一覧"
+
 KINDS = frozenset({"大学", "短期大学", "高等専門学校", "高等学校", "中等教育学校"})
+# 2026年5月版から、学校種は「D1(高校)」のような略称で書かれる。表には正式名で入れる
+SHORT_KINDS = {
+    "短大": "短期大学",
+    "高専": "高等専門学校",
+    "高校": "高等学校",
+    "中等": "中等教育学校",
+}
 COLUMNS = {
     "code": "学校コード",
     "kind": "学校種",
@@ -63,7 +76,9 @@ def parse(files: Iterable[tuple[str, list[list[str]]]], postals: list[Postal]) -
     schools: dict[str, School] = {}
     for source, rows in files:
         for line_no, row in enumerate(rows, start=1):
-            if line_no == 1 and _is_header(row):
+            if line_no <= HEADER_SEARCH_ROWS and _is_title(row):
+                continue
+            if line_no <= HEADER_SEARCH_ROWS and _is_header(row):
                 header = _header(row, source)
                 continue
             if header is None:
@@ -72,6 +87,10 @@ def parse(files: Iterable[tuple[str, list[list[str]]]], postals: list[Postal]) -
             if school is not None:
                 schools[school.school_code] = school
     return list(schools.values())
+
+
+def _is_title(row: list[str]) -> bool:
+    return bool(row) and _clean(row[0]).endswith(TITLE_SUFFIX)
 
 
 def _is_header(row: list[str]) -> bool:
@@ -98,7 +117,8 @@ def _school(
     def cell(key: str) -> str:
         return row[header[key]].strip()
 
-    kind = _inside_parens(cell("kind"))
+    short = _inside_parens(cell("kind"))
+    kind = SHORT_KINDS.get(short, short)
     pref = cell("pref")[:2]
     if kind not in KINDS or pref not in PREFECTURES or cell("closed"):
         return None

@@ -70,6 +70,60 @@ def test_parse_keeps_target_kinds_and_prefectures_and_finds_the_city() -> None:
     ]
 
 
+def test_parse_skips_the_title_row_above_the_header() -> None:
+    # 2026年5月版から、見出しの上に「文部科学省　学校コード一覧」の表題の行がある
+    title = [
+        "文部科学省　学校コード一覧",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "更新日：",
+        "2026/5/20",
+    ]
+    first = [
+        title,
+        HEADER,
+        _row("F1", "F1(大学)", "13(東京)", "中央大学", "東京都八王子市東中野７４２－１", "1920393"),
+    ]
+    rest = [
+        title,
+        HEADER,
+        _row("D1", "D1(高等学校)", "13(東京)", "東京都立立川高等学校", "東京都立川市錦町２", ""),
+    ]
+
+    rows = schools.parse([("a.csv", first), ("b.csv", rest)], POSTALS)
+
+    assert [r.name for r in rows] == ["中央大学", "東京都立立川高等学校"]
+
+
+def test_parse_reads_the_short_kind_names() -> None:
+    # 2026年5月版から、学校種が「D1(高校)」「F2(短大)」のような略称になった
+    rows = schools.parse(
+        [
+            (
+                "a.csv",
+                [
+                    HEADER,
+                    _row("D1", "D1(高校)", "13(東京)", "立川高等学校", "東京都立川市錦町２", ""),
+                    _row("D2", "D2(中等)", "13(東京)", "九段中等教育学校", "東京都立川市", ""),
+                    _row("F2", "F2(短大)", "13(東京)", "立川短期大学", "東京都立川市", ""),
+                    _row("G1", "G1(高専)", "13(東京)", "立川高専", "東京都立川市", ""),
+                    _row("C1", "C1(中学校)", "13(東京)", "立川中学校", "東京都立川市", ""),
+                ],
+            )
+        ],
+        POSTALS,
+    )
+
+    assert [r.kind for r in rows] == ["高等学校", "中等教育学校", "短期大学", "高等専門学校"]
+
+
 def test_parse_needs_a_header() -> None:
     with pytest.raises(DataPrepError):
         schools.parse([("a.csv", [_row("F1", "F1(大学)", "13(東京)", "x", "y", "z")])], POSTALS)
