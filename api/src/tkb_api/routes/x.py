@@ -1,14 +1,13 @@
-"""X 専用の本人認証・テキスト診断。実 X 投稿の処理は用途と費用の承認で閉じる。"""
+"""X 専用の本人認証・明記情報チェック。実投稿は用途と費用の承認で閉じる。"""
 
 import base64
 import hashlib
 import logging
 import secrets
 import time
-from collections.abc import AsyncIterator
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from threading import RLock
-from typing import Any, Literal
+from typing import Any
 from urllib.parse import urlencode, urlparse
 
 import httpx
@@ -17,24 +16,11 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, ConfigDict
 
 from tkb_api.config import Settings
-from tkb_api.errors import refusal
-from tkb_api.limits import AlreadyRunningError, BusyError, DailyLimitError, DiagnoseLimiter, Lease
 from tkb_api.origin import check_origin
-from tkb_api.pipeline import (
-    diagnose_events,
-    plan_json,
-    real_extractions,
-    simulation_json,
-)
-from tkb_api.routes.diagnose import get_gazetteer
 from tkb_api.schemas import SimulateRequest
 from tkb_api.x_poc import XPocError, fetch_posts_for_owner, get_my_user, to_post
-from tkb_common.schemas import Clue, ClueSource, ClueType, Post
-from tkb_detect.batch import PostExtraction
-from tkb_detect.errors import DetectError
-from tkb_detect.extract import build_extractor
-from tkb_engine.planner import simulate as simulate_deletion
-from tkb_engine.rules import infer
+from tkb_api.x_public_info import public_information_json
+from tkb_common.schemas import Post
 
 router = APIRouter(prefix="/api/x", tags=["x"])
 SESSION_COOKIE = "x_tkb_session"
@@ -74,10 +60,8 @@ class XSession:
     expires_at: float
     snapshot: dict[str, Any] | None = None
     posts: list[Post] = field(default_factory=list)
-    clues: list[Clue] = field(default_factory=list)
     busy: bool = False
     fetched: bool = False
-    demo_backend: Literal["preset", "vlm"] = "preset"
 
 
 class XSessionStore:
@@ -124,7 +108,6 @@ class XSessionStore:
         token: str | None,
         owner_id: str,
         username: str,
-        demo_backend: Literal["preset", "vlm"] = "preset",
     ) -> str:
         session_id = secrets.token_urlsafe(32)
         with self.lock:
@@ -133,7 +116,6 @@ class XSessionStore:
                 owner_id,
                 username,
                 time.monotonic() + self.ttl_s,
-                demo_backend=demo_backend,
             )
             self._purge()
         return session_id
@@ -169,28 +151,6 @@ def _store(request: Request) -> XSessionStore:
     return store
 
 
-def _acquire_model_slot(request: Request) -> Lease:
-    """モデルを呼ぶ X 診断は、本体の診断と同じ同時実行の枠を取る（1日の回数は数えない）。
-
-    架空アカウントはどのセッションも owner_id が同じなので、枠の鍵はセッション ID から作る。
-    """
-    limiter: DiagnoseLimiter = request.app.state.diagnose_limiter
-    session_id = request.cookies.get(SESSION_COOKIE, "")
-    try:
-        return limiter.acquire(session_id, f"x-session:{session_id}")
-    except AlreadyRunningError:
-        raise HTTPException(status.HTTP_409_CONFLICT, "診断中です") from None
-    except (BusyError, DailyLimitError):
-        retry_after = _settings(request).diagnose_busy_retry_after_seconds
-        raise refusal(
-            status.HTTP_503_SERVICE_UNAVAILABLE,
-            "busy",
-            "混雑しています",
-            headers={"Retry-After": str(retry_after)},
-            retry_after=retry_after,
-        ) from None
-
-
 def _origin(request: Request) -> None:
     check_origin(request, [_settings(request).x_public_origin])
 
@@ -201,6 +161,7 @@ def _live_ready(settings: Settings) -> bool:
         and settings.x_paid_reads_approved
         and settings.x_query_logs_redacted
         and settings.x_client_id
+        and settings.x_client_secret.get_secret_value()
         and not settings.x_mock_mode
     )
 
@@ -234,7 +195,6 @@ async def config(request: Request) -> dict[str, bool | int]:
     settings = _settings(request)
     return {
         "mock_enabled": settings.x_mock_mode,
-        "gpu_demo_enabled": settings.x_mock_mode and settings.x_gpu_demo_enabled,
         "live_enabled": _live_ready(settings),
         "max_posts": settings.x_max_posts,
     }
@@ -250,24 +210,6 @@ async def mock_session(
         raise HTTPException(status.HTTP_403_FORBIDDEN, "同意またはモック設定がありません")
     _store(request).delete(request.cookies.get(SESSION_COOKIE))
     _cookie(response, settings, _store(request).create(None, "0", "架空のXアカウント"))
-    return {"username": "架空のXアカウント", "mock": True}
-
-
-@router.post("/mock/gpu-session")
-async def mock_gpu_session(
-    body: StartRequest, request: Request, response: Response
-) -> dict[str, str | bool]:
-    """架空投稿だけを既存VLMに送る専用セッション。X APIには接続しない。"""
-    _origin(request)
-    settings = _settings(request)
-    if not (settings.x_mock_mode and settings.x_gpu_demo_enabled and body.consent):
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "GPU デモは利用できません")
-    _store(request).delete(request.cookies.get(SESSION_COOKIE))
-    _cookie(
-        response,
-        settings,
-        _store(request).create(None, "0", "架空のXアカウント", demo_backend="vlm"),
-    )
     return {"username": "架空のXアカウント", "mock": True}
 
 
@@ -409,39 +351,17 @@ async def logout(request: Request, response: Response) -> None:
     response.delete_cookie(SESSION_COOKIE, path="/api/x")
 
 
-def _mock_data() -> tuple[list[Post], list[Clue]]:
+def _mock_data() -> list[Post]:
     raw = [
-        ("9001", "毎週火曜はジムに行く", "2026-11-03T18:00:00+09:00"),
-        ("9002", "今週も火曜のジムを終えた", "2026-11-10T18:00:00+09:00"),
+        ("9001", "渋谷駅、日曜10時に集合", "2026-11-03T18:00:00+09:00"),
+        ("9002", "渋谷駅 日曜日10時、東京都渋谷区、青空大学へ", "2026-11-10T18:00:00+09:00"),
+        ("9003", "青空大学の学園祭を見に行った", "2026-11-11T18:00:00+09:00"),
     ]
     posts = [
         to_post({"id": id_, "author_id": "0", "text": text, "created_at": when}, "0")
         for id_, text, when in raw
     ]
-    valid_posts = [post for post in posts if post is not None]
-    clues = [
-        Clue(
-            post_id=post.post_id,
-            image_index=None,
-            type=ClueType.ROUTINE_TEXT,
-            value=quote,
-            region=None,
-            confidence=0.9,
-            source=ClueSource.TEXT,
-            quote=quote,
-        )
-        for post, quote in zip(valid_posts, ("毎週火曜はジム", "火曜のジム"), strict=True)
-    ]
-    return valid_posts, clues
-
-
-async def _preset_extractions(
-    posts: list[Post], clues: list[Clue]
-) -> AsyncIterator[PostExtraction]:
-    for post in posts:
-        yield PostExtraction(
-            post_id=post.post_id, clues=[c for c in clues if c.post_id == post.post_id]
-        )
+    return [post for post in posts if post is not None]
 
 
 @router.post("/diagnose")
@@ -455,58 +375,13 @@ async def diagnose(request: Request) -> dict[str, Any]:
         if current.busy:
             raise HTTPException(status.HTTP_409_CONFLICT, "診断中です")
         current.busy = True
-    lease: Lease | None = None
     try:
-        if current.token is not None or current.demo_backend == "vlm":
-            lease = _acquire_model_slot(request)
         if current.token is None:
             if not settings.x_mock_mode:
                 raise HTTPException(status.HTTP_403_FORBIDDEN, "モック診断は無効です")
-            posts, preset_clues = _mock_data()
-            if current.demo_backend == "vlm":
-                try:
-                    extractor = build_extractor(
-                        mock_mode=False,
-                        vlm_base_url=settings.vlm_base_url,
-                        vlm_api_key=settings.vlm_api_key.get_secret_value(),
-                        vlm_model=settings.vlm_model,
-                        ocr_base_url="",
-                        allowed_hosts=settings.model_allowed_host_suffixes.split(","),
-                        text_backend="vlm",
-                    )
-                except DetectError:
-                    raise HTTPException(
-                        status.HTTP_503_SERVICE_UNAVAILABLE, "GPU モデルの設定を確認してください"
-                    ) from None
-                if not await extractor.model_reachable(settings.model_probe_timeout_seconds):
-                    raise HTTPException(
-                        status.HTTP_503_SERVICE_UNAVAILABLE, "GPU モデルを利用できません"
-                    )
-                extractions = real_extractions(extractor, posts)
-            else:
-                extractions = _preset_extractions(posts, preset_clues)
+            posts = _mock_data()
         else:
             _require_live(settings)
-            try:
-                extractor = build_extractor(
-                    mock_mode=False,
-                    vlm_base_url="",
-                    vlm_api_key="",
-                    vlm_model="",
-                    ocr_base_url="",
-                    allowed_hosts=[],
-                    text_backend="ollama",
-                    ollama_base_url=settings.ollama_base_url,
-                    ollama_model=settings.ollama_model,
-                )
-            except DetectError:
-                raise HTTPException(
-                    status.HTTP_503_SERVICE_UNAVAILABLE, "ローカルモデルを利用できません"
-                ) from None
-            if not await extractor.model_reachable(settings.model_probe_timeout_seconds):
-                raise HTTPException(
-                    status.HTTP_503_SERVICE_UNAVAILABLE, "ローカルモデルを利用できません"
-                )
             if current.fetched:
                 posts = current.posts
             else:
@@ -518,34 +393,16 @@ async def diagnose(request: Request) -> dict[str, Any]:
                     raise _x_error(exc) from None
                 current.posts = posts
                 current.fetched = True
-            extractions = real_extractions(extractor, posts)
-        gazetteer = get_gazetteer(settings)
         started = time.monotonic()
-        events = [event async for event in diagnose_events(posts, extractions, gazetteer)]
-        results = {name: data for name, data in events if name in {"conclusions", "plan"}}
-        # 抽出に失敗した投稿があっても、全体は成功にする。失敗した投稿は理由つきで返す
-        # （理由は pipeline が作る固定の文言で、投稿の本文は入らない）
-        post_errors = [
-            {"post_id": data["post_id"], "error": data["error"]}
-            for name, data in events
-            if name == "clues" and data["error"]
-        ]
-        conclusion = results["conclusions"]
         current.posts = posts
-        current.clues = [Clue.model_validate(item) for item in conclusion["clues"]]
         current.snapshot = {
             "posts": [post.model_dump(mode="json") for post in posts],
-            "clues": conclusion["clues"],
-            "conclusions": conclusion["conclusions"],
-            "plan": results["plan"],
-            "post_errors": post_errors,
+            "information": public_information_json(posts),
             "elapsed_ms": round((time.monotonic() - started) * 1000),
             "mock": current.token is None,
         }
         return current.snapshot
     finally:
-        if lease is not None:
-            lease.release()
         with _store(request).lock:
             current.busy = False
 
@@ -563,26 +420,29 @@ async def simulate(body: SimulateRequest, request: Request) -> dict[str, Any]:
     _origin(request)
     current = _session(request)
     _selected(body, current)
-    gazetteer = get_gazetteer(_settings(request))
-    return simulation_json(
-        simulate_deletion(current.clues, current.posts, gazetteer, body.delete), current.clues
-    )
+    gone = set(body.delete)
+    kept = [post for post in current.posts if post.post_id not in gone]
+    before = public_information_json(current.posts)
+    after = public_information_json(kept)
+    after_keys = {(item["category"], item["value"]) for item in after}
+    removed = [
+        {"category": item["category"], "value": item["value"]}
+        for item in before
+        if (item["category"], item["value"]) not in after_keys
+    ]
+    return {"delete": body.delete, "before": before, "after": after, "removed": removed}
 
 
 @router.post("/rediagnose")
 async def rediagnose(body: SimulateRequest, request: Request) -> dict[str, Any]:
-    """仮除外後の投稿・手がかりだけから推論し直す。X API とモデルは再呼出ししない。"""
+    """仮除外後の投稿だけを再集計する。X API や外部モデルは呼ばない。"""
     _origin(request)
     current = _session(request)
     _selected(body, current)
     gone = set(body.delete)
     posts = [post for post in current.posts if post.post_id not in gone]
-    clues = [clue for clue in current.clues if clue.post_id not in gone]
-    gazetteer = get_gazetteer(_settings(request))
     return {
         "posts": [post.model_dump(mode="json") for post in posts],
-        "clues": [clue.model_dump(mode="json") for clue in clues],
-        "conclusions": [asdict(c) for c in infer(clues, posts, gazetteer)],
-        "plan": plan_json(clues, posts, gazetteer),
+        "information": public_information_json(posts),
         "mock": current.token is None,
     }
