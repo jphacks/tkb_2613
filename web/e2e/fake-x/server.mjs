@@ -18,10 +18,13 @@ const PORT = Number(process.env.FAKE_X_PORT ?? 4010);
 const CLIENT_ID = process.env.FAKE_X_CLIENT_ID ?? "fake-x-client";
 const CLIENT_SECRET = process.env.FAKE_X_CLIENT_SECRET ?? "fake-x-secret";
 const CODE_TTL_MS = 30_000;
-const USER = { id: "1000000000000000001", name: "架空のテスター", username: "fictional_x_tester" };
+const USER = { id: "1000000000000000001", name: "架空のテスター", username: "fictional_xtest" };
+// user.fields=profile_image_url を求められたときだけ返す（E2E では Playwright が画像を差し替える）
+const PROFILE_IMAGE_URL = "https://pbs.twimg.com/profile_images/1000000000000000001/fictional_normal.png";
+const FAKE_LINK = "https://t.co/fakeLink01";
 const POSTS = [
-  "新宿駅で待ち合わせ、土曜11時",
-  "東京都新宿区の図書館へ行った",
+  "新宿駅で待ち合わせ、土曜11時 #新宿",
+  `@friend_xx と東京都新宿区の図書館へ ${FAKE_LINK}`,
   "土曜日は新宿駅から歩く",
   "みどり大学のオープンキャンパス",
   "今日は晴れ",
@@ -35,9 +38,33 @@ const POSTS = [
     author_id: USER.id,
     text,
     created_at: new Date(Date.UTC(2026, 10, 10 - index, 3)).toISOString().replace(".000", ""),
-    edit_history_tweet_ids: [id],
+    // 2件目は編集済み（編集前の ID が先、最新の ID が最後）
+    edit_history_tweet_ids: index === 1 ? [String(BigInt(id) - 50n), id] : [id],
+    entities: entitiesOf(text),
   };
 });
+
+// X の entities と同じく、start・end はコードポイント単位
+function span(text, part) {
+  const at = text.indexOf(part);
+  const start = Array.from(text.slice(0, at)).length;
+  return { start, end: start + Array.from(part).length };
+}
+
+function entitiesOf(text) {
+  const entities = {};
+  const hashtags = [...text.matchAll(/#(\p{L}+)/gu)].map((m) => ({ ...span(text, m[0]), tag: m[1] }));
+  const mentions = [...text.matchAll(/@(\w+)/g)].map((m) => ({ ...span(text, m[0]), username: m[1] }));
+  if (hashtags.length) entities.hashtags = hashtags;
+  if (mentions.length) entities.mentions = mentions;
+  if (text.includes(FAKE_LINK)) {
+    entities.urls = [{
+      ...span(text, FAKE_LINK), url: FAKE_LINK,
+      expanded_url: "https://library.example/fictional", display_url: "library.example/fictional",
+    }];
+  }
+  return Object.keys(entities).length ? entities : undefined;
+}
 
 const codes = new Map();
 const tokens = new Set();
@@ -120,9 +147,11 @@ function tweets(url, response) {
   const page = POSTS.slice(start, start + max);
   const fields = new Set((q.get("post.fields") ?? "").split(",").filter(Boolean));
   const data = page.map((post) => ({
+    // id・text・edit_history_tweet_ids は X v2 の既定の項目で、常に返る
     id: post.id, text: post.text, edit_history_tweet_ids: post.edit_history_tweet_ids,
     ...(fields.has("author_id") ? { author_id: post.author_id } : {}),
     ...(fields.has("created_at") ? { created_at: post.created_at } : {}),
+    ...(fields.has("entities") && post.entities ? { entities: post.entities } : {}),
   }));
   calls.tweets += 1;
   calls.resources += data.length;
@@ -143,7 +172,9 @@ const server = createServer(async (request, response) => {
   if (request.method === "GET" && url.pathname === "/2/users/me") {
     calls.me += 1;
     calls.resources += 1;
-    return json(response, 200, { data: USER });
+    const userFields = new Set((url.searchParams.get("user.fields") ?? "").split(","));
+    const data = userFields.has("profile_image_url") ? { ...USER, profile_image_url: PROFILE_IMAGE_URL } : USER;
+    return json(response, 200, { data });
   }
   if (request.method === "GET" && url.pathname === `/2/users/${USER.id}/tweets`) return tweets(url, response);
   return problem(response, 404, "Not Found Error", "Could not find the requested resource");

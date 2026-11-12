@@ -23,6 +23,11 @@ test("偽のX APIでOAuthから仮除外・ログアウトでの破棄まで通�
     outside.push(url.origin);
     await route.abort();
   });
+  // プロフィール画像の取得先（pbs.twimg.com）も本物へは出さず、1x1 の画像で返す
+  await context.route("https://pbs.twimg.com/**", (route) => route.fulfill({
+    contentType: "image/png",
+    body: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=", "base64"),
+  }));
   const before = await fakeCalls();
 
   await page.goto("/x");
@@ -33,13 +38,28 @@ test("偽のX APIでOAuthから仮除外・ログアウトでの破棄まで通�
 
   // コールバックで code と state を消費し、クエリのない /x に戻る
   await page.waitForURL((url) => url.pathname === "/x" && url.search === "");
-  await expect(page.getByText("fictional_x_tester")).toBeVisible();
+  await expect(page.getByText("fictional_xtest")).toBeVisible();
 
   await page.getByRole("button", { name: "公開情報を確認する" }).click();
   await expect(page.getByText("公開情報チェック結果", { exact: true })).toBeVisible();
   await expect(page.getByText("投稿 5 件", { exact: false })).toBeVisible();
   await expect(page.getByText("駅名：新宿駅")).toBeVisible();
   await expect(page.getByText("6件目以降は")).toHaveCount(0);
+
+  // X の表示要件：投稿者・ロゴ・本文のリンク・permalink・編集済み
+  const cards = page.getByRole("article", { name: "架空のテスターの投稿" });
+  await expect(cards).toHaveCount(5);
+  const first = cards.first();
+  await expect(first.getByRole("img", { name: "X" })).toBeVisible();
+  await expect(first.getByRole("link", { name: "@fictional_xtest" })).toHaveAttribute("href", "https://x.com/fictional_xtest");
+  await expect(first.getByRole("link", { name: "Xで見る" }))
+    .toHaveAttribute("href", "https://x.com/fictional_xtest/status/1900000000000000099");
+  await expect(first.getByRole("link", { name: "#新宿" })).toHaveAttribute("href", "https://x.com/search?q=%23新宿");
+  const second = cards.nth(1);
+  await expect(second.getByRole("link", { name: "@friend_xx" })).toHaveAttribute("href", "https://x.com/friend_xx");
+  await expect(second.getByRole("link", { name: "library.example/fictional" })).toHaveAttribute("href", "https://t.co/fakeLink01");
+  await expect(second.getByText("編集済み")).toBeVisible();
+  await expect(page.getByText("架空の投稿（Xの投稿ではありません）")).toHaveCount(0);
 
   await page.getByRole("checkbox", { name: "仮除外する" }).first().check();
   await page.getByRole("button", { name: "仮除外後を比べる" }).click();

@@ -122,10 +122,10 @@ def test_callback_query_is_not_logged_on_state_mismatch_and_x_failures(
     caplog.set_level(logging.DEBUG)
     token = x_mock.post("https://api.x.com/2/oauth2/token")
 
-    async def broken_user(*_: Any, **__: Any) -> tuple[str, str]:
+    async def broken_user(*_: Any, **__: Any) -> dict[str, Any]:
         raise RuntimeError("synthetic unexpected failure")
 
-    monkeypatch.setattr(x_routes, "get_my_user", broken_user)
+    monkeypatch.setattr(x_routes, "get_my_profile", broken_user)
     with (
         _serve(**LIVE) as origin,
         httpx.Client(base_url=origin, follow_redirects=False) as client,
