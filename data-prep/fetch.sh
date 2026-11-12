@@ -22,6 +22,7 @@ KSJ_N03_URL="https://nlftp.mlit.go.jp/ksj/gml/data/N03/N03-2026"
 KSJ_GML_URL="https://nlftp.mlit.go.jp/ksj/gml/data"
 # 国土数値情報「駅別乗降客数（S12）」2025年度整備版（全国1ファイル。2024年度までの乗降客数）
 KSJ_S12_URL="https://nlftp.mlit.go.jp/ksj/gml/data/S12/S12-25/S12-25_GML.zip"
+BUNKYO_COLLECTION_URL="https://www.city.bunkyo.lg.jp/documents/6059/syusyubi.csv"
 KSJ_SCHOOL_TERMS_URL="https://nlftp.mlit.go.jp/ksj/gml/codelist/R3_Terms_of_use_municipality_data.xlsx"
 # 国土地理院「指定緊急避難場所・指定避難所データ」の都道府県別 CSV（_2 が指定緊急避難場所、_1 が指定避難所）
 GSI_SHELTER_URL="https://hinanmap.gsi.go.jp/hinanjocp/defaultFtpData/csv"
@@ -80,4 +81,6 @@ for pref in "${PREFECTURES[@]}"; do
   done
 done
 fetch "$KSJ_S12_URL" "$RAW/ksj/S12-25_GML.zip"
+# 文京区オープンデータ「ごみと資源の収集日」（知識表の収集地区に変換する。make data では変換しない）
+fetch "$BUNKYO_COLLECTION_URL" "$RAW/bunkyo/syusyubi.csv"
 fetch "$KSJ_SCHOOL_TERMS_URL" "$RAW/ksj/R3_Terms_of_use_municipality_data.xlsx"

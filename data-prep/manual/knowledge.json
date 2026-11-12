@@ -1132,6 +1132,303 @@
         "東中野（多摩ニュータウン東山・218-10番地・293-12～45番地を除く）"
       ],
       "source": "八王子市「2026年度版 家庭用ごみ・資源物収集カレンダー 町名一覧」の町名（https://www.city.hachioji.tokyo.jp/kurashi/gomi/kateigomi/shushubi/p029891.html）。燃やすごみの曜日は未記入。市のカレンダーPDFは画像なので、人が見て転記する"
+    },
+    {
+      "city": "文京区",
+      "area": "後楽1丁目",
+      "burnable_days": "火金",
+      "towns": [
+        "後楽1丁目"
+      ],
+      "source": "文京区オープンデータ「ごみと資源の収集日」（https://www.city.bunkyo.lg.jp/documents/6059/syusyubi.csv、CC BY 4.0、2026-03-23 更新のファイルを 2026-11-12 に取得）を加工して作成。町丁目ごとの可燃ごみの曜日"
+    },
+    {
+      "city": "文京区",
+      "area": "後楽2丁目",
+      "burnable_days": "火金",
+      "towns": [
+        "後楽2丁目"
+      ],
+      "source": "文京区オープンデータ「ごみと資源の収集日」（https://www.city.bunkyo.lg.jp/documents/6059/syusyubi.csv、CC BY 4.0、2026-03-23 更新のファイルを 2026-11-12 に取得）を加工して作成。町丁目ごとの可燃ごみの曜日"
+    },
+    {
+      "city": "文京区",
+      "area": "春日1丁目",
+      "burnable_days": "火金",
+      "towns": [
+        "春日1丁目"
+      ],
+      "source": "文京区オープンデータ「ごみと資源の収集日」（https://www.city.bunkyo.lg.jp/documents/6059/syusyubi.csv、CC BY 4.0、2026-03-23 更新のファイルを 2026-11-12 に取得）を加工して作成。町丁目ごとの可燃ごみの曜日"
+    },
+    {
+      "city": "文京区",
+      "area": "春日2丁目",
+      "burnable_days": "月木",
+      "towns": [
+        "春日2丁目"
+      ],
+      "source": "文京区オープンデータ「ごみと資源の収集日」（https://www.city.bunkyo.lg.jp/documents/6059/syusyubi.csv、CC BY 4.0、2026-03-23 更新のファイルを 2026-11-12 に取得）を加工して作成。町丁目ごとの可燃ごみの曜日"
+    },
+    {
+      "city": "文京区",
+      "area": "小石川1丁目1～16番",
+      "burnable_days": "月木",
+      "towns": [
+        "小石川1丁目1～16番"
+      ],
+      "source": "文京区オープンデータ「ごみと資源の収集日」（https://www.city.bunkyo.lg.jp/documents/6059/syusyubi.csv、CC BY 4.0、2026-03-23 更新のファイルを 2026-11-12 に取得）を加工して作成。町丁目ごとの可燃ごみの曜日"
+    },
+    {
+      "city": "文京区",
+      "area": "小石川1丁目17～28番",
+      "burnable_days": "水土",
+      "towns": [
+        "小石川1丁目17～28番"
+      ],
+      "source": "文京区オープンデータ「ごみと資源の収集日」（https://www.city.bunkyo.lg.jp/documents/6059/syusyubi.csv、CC BY 4.0、2026-03-23 更新のファイルを 2026-11-12 に取得）を加工して作成。町丁目ごとの可燃ごみの曜日"
+    },
+    {
+      "city": "文京区",
+      "area": "小石川2・3丁目",
+      "burnable_days": "月木",
+      "towns": [
+        "小石川2・3丁目"
+      ],
+      "source": "文京区オープンデータ「ごみと資源の収集日」（https://www.city.bunkyo.lg.jp/documents/6059/syusyubi.csv、CC BY 4.0、2026-03-23 更新のファイルを 2026-11-12 に取得）を加工して作成。町丁目ごとの可燃ごみの曜日"
+    },
+    {
+      "city": "文京区",
+      "area": "小石川4丁目1～14番",
+      "burnable_days": "月木",
+      "towns": [
+        "小石川4丁目1～14番"
+      ],
+      "source": "文京区オープンデータ「ごみと資源の収集日」（https://www.city.bunkyo.lg.jp/documents/6059/syusyubi.csv、CC BY 4.0、2026-03-23 更新のファイルを 2026-11-12 に取得）を加工して作成。町丁目ごとの可燃ごみの曜日"
+    },
+    {
+      "city": "文京区",
+      "area": "小石川4丁目15～22番",
+      "burnable_days": "月木",
+      "towns": [
+        "小石川4丁目15～22番"
+      ],
+      "source": "文京区オープンデータ「ごみと資源の収集日」（https://www.city.bunkyo.lg.jp/documents/6059/syusyubi.csv、CC BY 4.0、2026-03-23 更新のファイルを 2026-11-12 に取得）を加工して作成。町丁目ごとの可燃ごみの曜日"
+    },
+    {
+      "city": "文京区",
+      "area": "小石川5丁目",
+      "burnable_days": "月木",
+      "towns": [
+        "小石川5丁目"
+      ],
+      "source": "文京区オープンデータ「ごみと資源の収集日」（https://www.city.bunkyo.lg.jp/documents/6059/syusyubi.csv、CC BY 4.0、2026-03-23 更新のファイルを 2026-11-12 に取得）を加工して作成。町丁目ごとの可燃ごみの曜日"
+    },
+    {
+      "city": "文京区",
+      "area": "白山1丁目",
+      "burnable_days": "月木",
+      "towns": [
+        "白山1丁目"
+      ],
+      "source": "文京区オープンデータ「ごみと資源の収集日」（https://www.city.bunkyo.lg.jp/documents/6059/syusyubi.csv、CC BY 4.0、2026-03-23 更新のファイルを 2026-11-12 に取得）を加工して作成。町丁目ごとの可燃ごみの曜日"
+    },
+    {
+      "city": "文京区",
+      "area": "白山2・5丁目",
+      "burnable_days": "水土",
+      "towns": [
+        "白山2・5丁目"
+      ],
+      "source": "文京区オープンデータ「ごみと資源の収集日」（https://www.city.bunkyo.lg.jp/documents/6059/syusyubi.csv、CC BY 4.0、2026-03-23 更新のファイルを 2026-11-12 に取得）を加工して作成。町丁目ごとの可燃ごみの曜日"
+    },
+    {
+      "city": "文京区",
+      "area": "白山3・4丁目",
+      "burnable_days": "水土",
+      "towns": [
+        "白山3・4丁目"
+      ],
+      "source": "文京区オープンデータ「ごみと資源の収集日」（https://www.city.bunkyo.lg.jp/documents/6059/syusyubi.csv、CC BY 4.0、2026-03-23 更新のファイルを 2026-11-12 に取得）を加工して作成。町丁目ごとの可燃ごみの曜日"
+    },
+    {
+      "city": "文京区",
+      "area": "千石1～4丁目",
+      "burnable_days": "水土",
+      "towns": [
+        "千石1～4丁目"
+      ],
+      "source": "文京区オープンデータ「ごみと資源の収集日」（https://www.city.bunkyo.lg.jp/documents/6059/syusyubi.csv、CC BY 4.0、2026-03-23 更新のファイルを 2026-11-12 に取得）を加工して作成。町丁目ごとの可燃ごみの曜日"
+    },
+    {
+      "city": "文京区",
+      "area": "水道1・2丁目",
+      "burnable_days": "火金",
+      "towns": [
+        "水道1・2丁目"
+      ],
+      "source": "文京区オープンデータ「ごみと資源の収集日」（https://www.city.bunkyo.lg.jp/documents/6059/syusyubi.csv、CC BY 4.0、2026-03-23 更新のファイルを 2026-11-12 に取得）を加工して作成。町丁目ごとの可燃ごみの曜日"
+    },
+    {
+      "city": "文京区",
+      "area": "小日向1～4丁目",
+      "burnable_days": "火金",
+      "towns": [
+        "小日向1～4丁目"
+      ],
+      "source": "文京区オープンデータ「ごみと資源の収集日」（https://www.city.bunkyo.lg.jp/documents/6059/syusyubi.csv、CC BY 4.0、2026-03-23 更新のファイルを 2026-11-12 に取得）を加工して作成。町丁目ごとの可燃ごみの曜日"
+    },
+    {
+      "city": "文京区",
+      "area": "大塚1・2丁目",
+      "burnable_days": "火金",
+      "towns": [
+        "大塚1・2丁目"
+      ],
+      "source": "文京区オープンデータ「ごみと資源の収集日」（https://www.city.bunkyo.lg.jp/documents/6059/syusyubi.csv、CC BY 4.0、2026-03-23 更新のファイルを 2026-11-12 に取得）を加工して作成。町丁目ごとの可燃ごみの曜日"
+    },
+    {
+      "city": "文京区",
+      "area": "大塚3～6丁目",
+      "burnable_days": "月木",
+      "towns": [
+        "大塚3～6丁目"
+      ],
+      "source": "文京区オープンデータ「ごみと資源の収集日」（https://www.city.bunkyo.lg.jp/documents/6059/syusyubi.csv、CC BY 4.0、2026-03-23 更新のファイルを 2026-11-12 に取得）を加工して作成。町丁目ごとの可燃ごみの曜日"
+    },
+    {
+      "city": "文京区",
+      "area": "関口1～3丁目",
+      "burnable_days": "火金",
+      "towns": [
+        "関口1～3丁目"
+      ],
+      "source": "文京区オープンデータ「ごみと資源の収集日」（https://www.city.bunkyo.lg.jp/documents/6059/syusyubi.csv、CC BY 4.0、2026-03-23 更新のファイルを 2026-11-12 に取得）を加工して作成。町丁目ごとの可燃ごみの曜日"
+    },
+    {
+      "city": "文京区",
+      "area": "目白台1～3丁目",
+      "burnable_days": "火金",
+      "towns": [
+        "目白台1～3丁目"
+      ],
+      "source": "文京区オープンデータ「ごみと資源の収集日」（https://www.city.bunkyo.lg.jp/documents/6059/syusyubi.csv、CC BY 4.0、2026-03-23 更新のファイルを 2026-11-12 に取得）を加工して作成。町丁目ごとの可燃ごみの曜日"
+    },
+    {
+      "city": "文京区",
+      "area": "音羽1・2丁目",
+      "burnable_days": "火金",
+      "towns": [
+        "音羽1・2丁目"
+      ],
+      "source": "文京区オープンデータ「ごみと資源の収集日」（https://www.city.bunkyo.lg.jp/documents/6059/syusyubi.csv、CC BY 4.0、2026-03-23 更新のファイルを 2026-11-12 に取得）を加工して作成。町丁目ごとの可燃ごみの曜日"
+    },
+    {
+      "city": "文京区",
+      "area": "本郷1・2丁目",
+      "burnable_days": "火金",
+      "towns": [
+        "本郷1・2丁目"
+      ],
+      "source": "文京区オープンデータ「ごみと資源の収集日」（https://www.city.bunkyo.lg.jp/documents/6059/syusyubi.csv、CC BY 4.0、2026-03-23 更新のファイルを 2026-11-12 に取得）を加工して作成。町丁目ごとの可燃ごみの曜日"
+    },
+    {
+      "city": "文京区",
+      "area": "本郷3～7丁目",
+      "burnable_days": "火金",
+      "towns": [
+        "本郷3～7丁目"
+      ],
+      "source": "文京区オープンデータ「ごみと資源の収集日」（https://www.city.bunkyo.lg.jp/documents/6059/syusyubi.csv、CC BY 4.0、2026-03-23 更新のファイルを 2026-11-12 に取得）を加工して作成。町丁目ごとの可燃ごみの曜日"
+    },
+    {
+      "city": "文京区",
+      "area": "湯島1丁目",
+      "burnable_days": "火金",
+      "towns": [
+        "湯島1丁目"
+      ],
+      "source": "文京区オープンデータ「ごみと資源の収集日」（https://www.city.bunkyo.lg.jp/documents/6059/syusyubi.csv、CC BY 4.0、2026-03-23 更新のファイルを 2026-11-12 に取得）を加工して作成。町丁目ごとの可燃ごみの曜日"
+    },
+    {
+      "city": "文京区",
+      "area": "湯島2～4丁目",
+      "burnable_days": "火金",
+      "towns": [
+        "湯島2～4丁目"
+      ],
+      "source": "文京区オープンデータ「ごみと資源の収集日」（https://www.city.bunkyo.lg.jp/documents/6059/syusyubi.csv、CC BY 4.0、2026-03-23 更新のファイルを 2026-11-12 に取得）を加工して作成。町丁目ごとの可燃ごみの曜日"
+    },
+    {
+      "city": "文京区",
+      "area": "西片1・2丁目",
+      "burnable_days": "月木",
+      "towns": [
+        "西片1・2丁目"
+      ],
+      "source": "文京区オープンデータ「ごみと資源の収集日」（https://www.city.bunkyo.lg.jp/documents/6059/syusyubi.csv、CC BY 4.0、2026-03-23 更新のファイルを 2026-11-12 に取得）を加工して作成。町丁目ごとの可燃ごみの曜日"
+    },
+    {
+      "city": "文京区",
+      "area": "向丘1・2丁目",
+      "burnable_days": "月木",
+      "towns": [
+        "向丘1・2丁目"
+      ],
+      "source": "文京区オープンデータ「ごみと資源の収集日」（https://www.city.bunkyo.lg.jp/documents/6059/syusyubi.csv、CC BY 4.0、2026-03-23 更新のファイルを 2026-11-12 に取得）を加工して作成。町丁目ごとの可燃ごみの曜日"
+    },
+    {
+      "city": "文京区",
+      "area": "弥生1・2丁目",
+      "burnable_days": "月木",
+      "towns": [
+        "弥生1・2丁目"
+      ],
+      "source": "文京区オープンデータ「ごみと資源の収集日」（https://www.city.bunkyo.lg.jp/documents/6059/syusyubi.csv、CC BY 4.0、2026-03-23 更新のファイルを 2026-11-12 に取得）を加工して作成。町丁目ごとの可燃ごみの曜日"
+    },
+    {
+      "city": "文京区",
+      "area": "根津1・2丁目",
+      "burnable_days": "月木",
+      "towns": [
+        "根津1・2丁目"
+      ],
+      "source": "文京区オープンデータ「ごみと資源の収集日」（https://www.city.bunkyo.lg.jp/documents/6059/syusyubi.csv、CC BY 4.0、2026-03-23 更新のファイルを 2026-11-12 に取得）を加工して作成。町丁目ごとの可燃ごみの曜日"
+    },
+    {
+      "city": "文京区",
+      "area": "千駄木1・2丁目",
+      "burnable_days": "月木",
+      "towns": [
+        "千駄木1・2丁目"
+      ],
+      "source": "文京区オープンデータ「ごみと資源の収集日」（https://www.city.bunkyo.lg.jp/documents/6059/syusyubi.csv、CC BY 4.0、2026-03-23 更新のファイルを 2026-11-12 に取得）を加工して作成。町丁目ごとの可燃ごみの曜日"
+    },
+    {
+      "city": "文京区",
+      "area": "千駄木3～5丁目",
+      "burnable_days": "水土",
+      "towns": [
+        "千駄木3～5丁目"
+      ],
+      "source": "文京区オープンデータ「ごみと資源の収集日」（https://www.city.bunkyo.lg.jp/documents/6059/syusyubi.csv、CC BY 4.0、2026-03-23 更新のファイルを 2026-11-12 に取得）を加工して作成。町丁目ごとの可燃ごみの曜日"
+    },
+    {
+      "city": "文京区",
+      "area": "本駒込1・2丁目",
+      "burnable_days": "水土",
+      "towns": [
+        "本駒込1・2丁目"
+      ],
+      "source": "文京区オープンデータ「ごみと資源の収集日」（https://www.city.bunkyo.lg.jp/documents/6059/syusyubi.csv、CC BY 4.0、2026-03-23 更新のファイルを 2026-11-12 に取得）を加工して作成。町丁目ごとの可燃ごみの曜日"
+    },
+    {
+      "city": "文京区",
+      "area": "本駒込3～6丁目",
+      "burnable_days": "水土",
+      "towns": [
+        "本駒込3～6丁目"
+      ],
+      "source": "文京区オープンデータ「ごみと資源の収集日」（https://www.city.bunkyo.lg.jp/documents/6059/syusyubi.csv、CC BY 4.0、2026-03-23 更新のファイルを 2026-11-12 に取得）を加工して作成。町丁目ごとの可燃ごみの曜日"
     }
   ],
   "universities": [

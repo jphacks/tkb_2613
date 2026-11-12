@@ -55,6 +55,11 @@ class Paths:
         return self.raw_dir / "ksj" / "S12-25_GML.zip"
 
     @property
+    def bunkyo_collection_csv(self) -> Path:
+        """文京区オープンデータ「ごみと資源の収集日」。"""
+        return self.raw_dir / "bunkyo" / "syusyubi.csv"
+
+    @property
     def estat_dir(self) -> Path:
         return self.raw_dir / "estat"
 

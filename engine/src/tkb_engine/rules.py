@@ -350,25 +350,39 @@ def _cities(cities: set[str]) -> str:
     return "・".join(sorted(cities))
 
 
-def rule_r5(clues: Sequence[Clue], gaz: Gazetteer, r4: list[Conclusion]) -> list[Conclusion]:
-    """R5 収集地区（home_district）：集積所の掲示の燃やすごみの曜日と、住所の町名。
+def rule_r5(
+    clues: Sequence[Clue],
+    gaz: Gazetteer,
+    r4: list[Conclusion],
+    posts: Sequence[Post] = (),
+) -> list[Conclusion]:
+    """R5 収集地区（home_district）：燃やすごみの曜日と、住所の町名。
 
+    燃やすごみの曜日は、集積所の掲示や本文に書かれた曜日（「燃やすごみ 月・木」）か、
+    朝の「燃えるゴミ出し忘れた」「燃えるゴミ出した」の投稿の曜日（投稿の時刻から1日だけ）で読む。
+    区市町村は R4 の結論。R4 がなければ（23区のように指定ゴミ袋がないところ）、住所・郵便番号の
+    手がかりで1つに決まる区市町村を使う。
     曜日が分からない地区は、どの曜日にも合うとみなす（表が埋まるほど絞れる）。
     地区が1つに決まらなければ「燃やすごみが月・木の地区」までにする。
     """
-    if not r4:
+    found_city = _r5_city(clues, gaz, r4)
+    if found_city is None:
         return []
-    city = r4[0].value
+    city, city_evidence, city_note = found_city
     in_city = [a for a in gaz.knowledge.collection_areas if a.city == city]
+    by_post = {p.post_id: p for p in posts}
     for i, c in enumerate(clues):
-        if c.type not in {ClueType.NOTICE, ClueType.ROUTINE_TEXT} or not (
-            days := _burnable_days(c.value)
-        ):
+        days, exact, day_note = _observed_burnable_days(c, by_post)
+        if not days:
             continue
-        label = "・".join(d for d in WEEKDAYS if d in days)
-        candidates = [a for a in in_city if not a.burnable_days or set(a.burnable_days) == days]
-        evidence = {i, *r4[0].clue_indices}
-        note = f"燃やすごみの曜日（{label}）が合う地区"
+        candidates = [
+            a
+            for a in in_city
+            if not a.burnable_days
+            or (set(a.burnable_days) == days if exact else days <= set(a.burnable_days))
+        ]
+        evidence = {i, *city_evidence}
+        note = "。".join(n for n in (city_note, day_note) if n)
         # 郵便物や住所表示の町名で、候補の地区をさらに絞る
         for j, town in _home_towns(clues, gaz, city):
             narrowed = [a for a in candidates if _has_town(a, town)]
@@ -380,11 +394,68 @@ def rule_r5(clues: Sequence[Clue], gaz: Gazetteer, r4: list[Conclusion]) -> list
         if len(candidates) == 1:
             value = f"{city} {candidates[0].area}"
         elif candidates:
-            value = f"{city} 燃やすごみが{label}の地区"
+            value = f"{city} 燃やすごみが{_days_label(candidates, days)}の地区"
         else:
             continue
         return [Conclusion("R5", "home_district", value, sorted(evidence), note)]
     return []
+
+
+# 「燃えるゴミ出し忘れた」の投稿を、その朝が燃やすごみの日だった手がかりとみなす時間帯（時）
+GARBAGE_MORNING = (5, 11)
+PUT_OUT = re.compile(r"出し(?:た|忘れ|そびれ|に行|てき)|捨て(?:た|に行|てき)")
+
+
+def _r5_city(
+    clues: Sequence[Clue], gaz: Gazetteer, r4: list[Conclusion]
+) -> tuple[str, set[int], str] | None:
+    """(区市町村, 根拠の手がかりの番号, メモ)。決められなければ None。"""
+    if r4:
+        return r4[0].value, set(r4[0].clue_indices), ""
+    hits = {
+        i: munis
+        for i, c in enumerate(clues)
+        if c.type in {ClueType.ADDRESS_TEXT, ClueType.POSTAL_CODE} and (munis := gaz.area(c)[0])
+    }
+    if not hits:
+        return None
+    munis = set.intersection(*hits.values())
+    cities = {r["city"] for r in gaz.postal if r["muni_code"] in munis}
+    if len(cities) != 1:
+        return None
+    city = next(iter(cities))
+    return city, set(hits), f"住所・郵便番号の手がかりで{city}"
+
+
+def _observed_burnable_days(clue: Clue, by_post: dict[str, Post]) -> tuple[set[str], bool, str]:
+    """(燃やすごみの曜日, 曜日がすべて分かったか, メモ)。読めなければ空の集合。"""
+    if clue.type not in {ClueType.NOTICE, ClueType.ROUTINE_TEXT}:
+        return set(), True, ""
+    if days := _burnable_days(clue.value):
+        label = "・".join(d for d in WEEKDAYS if d in days)
+        return days, True, f"燃やすごみの曜日（{label}）が合う地区"
+    post = by_post.get(clue.post_id)
+    if (
+        post is None
+        or clue.type is not ClueType.ROUTINE_TEXT
+        or not any(m[0] in BURNABLE for m in GARBAGE_KINDS.finditer(clue.value))
+        or not PUT_OUT.search(clue.value)
+        or not GARBAGE_MORNING[0] <= _hour(post) < GARBAGE_MORNING[1]
+    ):
+        return set(), True, ""
+    day = WEEKDAYS[_local(post).weekday()]
+    return (
+        {day},
+        False,
+        f"投稿の時刻（{day}曜の朝）の燃やすごみの話から、{day}曜が燃やすごみの日の地区",
+    )
+
+
+def _days_label(candidates: Sequence[CollectionArea], observed: set[str]) -> str:
+    """候補の地区の曜日がそろっていればその曜日、そろっていなければ読めた曜日。"""
+    known = {a.burnable_days for a in candidates}
+    days = set(next(iter(known))) if len(known) == 1 and "" not in known else observed
+    return "・".join(d for d in WEEKDAYS if d in days)
 
 
 def _home_towns(clues: Sequence[Clue], gaz: Gazetteer, city: str) -> list[tuple[int, str]]:
@@ -738,8 +809,9 @@ def infer(clues: Sequence[Clue], posts: Sequence[Post], gaz: Gazetteer) -> list[
     from tkb_engine.links import link
 
     r4 = rule_r4(clues, gaz, posts)
-    r5 = rule_r5(clues, gaz, r4)
-    r1 = rule_r1(clues, gaz, [*r4, *r5])
+    r5 = rule_r5(clues, gaz, r4, posts)
+    # R1 は先頭を R4 の市区町村として使う。R4 がないとき（R5 が住所から区を決めたとき）は渡さない
+    r1 = rule_r1(clues, gaz, [*r4, *r5] if r4 else [])
     base = [
         *r4,
         *r5,
