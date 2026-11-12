@@ -41,5 +41,9 @@ class Paths:
         return self.raw_dir / "mext"
 
     @property
+    def gsi_dir(self) -> Path:
+        return self.raw_dir / "gsi"
+
+    @property
     def area_codes_csv(self) -> Path:
         return self.manual_dir / "area_codes.csv"

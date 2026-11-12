@@ -137,6 +137,21 @@ describe("ConclusionBoard", () => {
     expect(section).not.toHaveTextContent("%");
   });
 
+  it("shows the citation of public open data under the estimate", () => {
+    const reference = { post_id: CLUE.post_id, clue_index: null, required: true, source: "post_text" as const, excerpt: "自宅近くの架空小学校" };
+    const cited = { post_id: null, clue_index: null, required: true, source: "open_data" as const, excerpt: "架空小学校は架空の区の指定避難所（出典：国土地理院。最新でない場合があります）" };
+    const claim: ProfileItem = {
+      attribute: "residential_area", value: "架空の区", confidence: 0.65, status: "weak",
+      evidence: [reference, cited, cited],
+    };
+    render(<ConclusionBoard clues={[CLUE]} conclusions={[CONCLUSION]} profileClaims={[claim]} />);
+
+    const section = screen.getByRole("region", { name: "投稿を横断したプロフィール推定" });
+    const item = within(section).getByRole("listitem");
+    expect(within(item).getAllByText(/出典：国土地理院/)).toHaveLength(1);
+    expect(item).toHaveTextContent("最新でない場合があります");
+  });
+
   const REFERENCE = { post_id: CLUE.post_id, clue_index: null, required: true, source: "post_text" as const, excerpt: "架空の記述" };
 
   it("folds the per-path what-if comparison so the board stays short", () => {

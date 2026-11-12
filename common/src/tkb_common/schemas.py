@@ -319,6 +319,9 @@ class EvidenceSource(StrEnum):
     PROFILE_TEXT = "profile_text"
     IMAGE_ALT = "image_alt"
     PUBLIC_WEB = "public_web"
+    # 事前に取得した公的な公開データ（国土地理院の避難所など）。本人についての事実ではなく、
+    # 「X は Y」という一般的な知識。excerpt に出典と注記を書き、投稿は指さない
+    OPEN_DATA = "open_data"
 
 
 class WebSourceKind(StrEnum):
@@ -497,6 +500,13 @@ class ProfileEvidence(BaseModel):
             or self.excerpt is not None
         ):
             raise ValueError("public_web evidence requires only web_fact_id")
+        elif self.source is EvidenceSource.OPEN_DATA and (
+            self.post_id is not None
+            or self.clue_index is not None
+            or self.image_index is not None
+            or not self.excerpt
+        ):
+            raise ValueError("open_data evidence requires only excerpt (the citation)")
         return self
 
 

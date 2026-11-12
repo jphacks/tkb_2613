@@ -7,9 +7,11 @@
 """
 
 import dataclasses
+import functools
 import json
 import math
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -122,6 +124,9 @@ class Gazetteer:
     knowledge: Knowledge = field(default_factory=Knowledge)
     # 学校ごとに {"name", "kind"（大学・高等学校など）, "city", ...}。表がなければ空
     schools: list[dict[str, str]] = field(default_factory=list)
+    # 国土地理院の指定緊急避難場所・指定避難所。{"name", "kind", "muni_code", "city", ...}。
+    # 表がなければ空
+    shelters: list[dict[str, Any]] = field(default_factory=list)
 
     @classmethod
     def load(cls, data_dir: Path = DATA_DIR, knowledge: Knowledge | None = None) -> "Gazetteer":
@@ -133,11 +138,8 @@ class Gazetteer:
             postal=pq.read_table(data_dir / "postal.parquet").to_pylist(),
             muni_meshes=meshes,
             knowledge=Knowledge.load() if knowledge is None else knowledge,
-            schools=(
-                pq.read_table(data_dir / "schools.parquet").to_pylist()
-                if (data_dir / "schools.parquet").is_file()
-                else []
-            ),
+            schools=_optional_table(data_dir / "schools.parquet"),
+            shelters=_optional_table(data_dir / "shelters.parquet"),
         )
 
     def city_munis(self, city: str) -> set[str]:
@@ -163,6 +165,43 @@ class Gazetteer:
         longest = max((len(v) for v, _ in hits), default=0)
         found = {s["name"]: s for v, s in hits if len(v) == longest}
         return list(found.values())
+
+    @functools.cached_property
+    def _shelters_by_variant(self) -> dict[str, list[dict[str, Any]]]:
+        by_variant: dict[str, list[dict[str, Any]]] = {}
+        for row in self.shelters:
+            for variant in shelter_name_variants(str(row["name"])):
+                by_variant.setdefault(variant, []).append(row)
+        return by_variant
+
+    def shelters_named_at(self, text: str) -> dict[str, list[dict[str, Any]]]:
+        """文字の先頭に名前が書かれた避難所。名前の核（shelter_core_name）→ 同じ核の施設の行。
+        先頭の「指定避難所」などの見出しと「〇〇区立」は飛ばす。長い名前の一部
+        （「新宿中央公園」の「中央公園」）には合わせないよう、先頭からの一致だけを見て、
+        いちばん長い名前を返す。同じ名前の施設が別の区市町村にもあるときは、その行がすべて入る
+        （使う側で競合として捨てる）。"""
+        normalized = _SHELTER_LABEL.sub("", _normalize_name(text))
+        heads = {normalized, _MUNICIPAL_PREFIX.sub("", normalized)}
+        found = {
+            v: rows
+            for v, rows in self._shelters_by_variant.items()
+            if any(head.startswith(v) for head in heads)
+        }
+        longest = max((len(v) for v in found), default=0)
+        cores = {
+            shelter_core_name(str(row["name"]))
+            for v, rows in found.items()
+            if len(v) == longest
+            for row in rows
+        }
+        return {core: self._shelters_by_core[core] for core in cores}
+
+    @functools.cached_property
+    def _shelters_by_core(self) -> dict[str, list[dict[str, Any]]]:
+        by_core: dict[str, list[dict[str, Any]]] = {}
+        for row in self.shelters:
+            by_core.setdefault(shelter_core_name(str(row["name"])), []).append(row)
+        return by_core
 
     def postal_rows(self, code: str) -> list[dict[str, str]]:
         """ハイフンなし7桁の郵便番号の行。"""
@@ -244,6 +283,45 @@ def school_name_variants(name: str) -> set[str]:
             if name.startswith(("東京都立", "都立")):
                 variants.add("都立" + stem + short)
     return {v for v in variants if len(v) > 2}
+
+
+# 避難所の名前から取り除く、建物や場所の部分（「〇〇小学校体育館」→「〇〇小学校」）
+_SHELTER_PART = re.compile(
+    r"(?:の)?(?:第?[0-9一二三]?体育館|屋内運動場|校庭|グラウンド|グランド|校舎|講堂|運動場|プール)$"
+)
+_MUNICIPAL_PREFIX = re.compile(r"^(?:.{1,6}?[都道府県区市町村]立)")
+# 掲示などで名前の前に書かれる見出し（「指定避難所 〇〇小学校」）
+_SHELTER_LABEL = re.compile(r"^(?:[指定広域緊急一時]{0,6}避難(?:場所|所)[:：・]?)+")
+# 手がかりの文字に合わせる名前の最短の長さ（「西公園」のような短い名前は合わせない）
+MIN_SHELTER_NAME_LENGTH = 4
+
+
+def shelter_core_name(name: str) -> str:
+    """括弧書き、建物の部分、「〇〇区立」を落とした名前。同じ施設の書き方の違いをまとめる。"""
+    base = _normalize_name(re.sub(r"[（(].*?[）)]", "", name))
+    return _MUNICIPAL_PREFIX.sub("", _SHELTER_PART.sub("", base))
+
+
+def shelter_name_variants(name: str) -> set[str]:
+    """避難所の名前から、投稿や写真に出てきそうな書き方。括弧書き、「〇〇区立」、
+    「体育館」などの建物の部分を落とした形も入れる。短すぎるものは入れない。"""
+    base = _normalize_name(re.sub(r"[（(].*?[）)]", "", name))
+    variants = {base}
+    for v in list(variants):
+        variants.add(_SHELTER_PART.sub("", v))
+    for v in list(variants):
+        variants.add(_MUNICIPAL_PREFIX.sub("", v))
+    return {v for v in variants if len(v) >= MIN_SHELTER_NAME_LENGTH}
+
+
+def _normalize_name(text: str) -> str:
+    """互換漢字、「ヶ」と「ケ」、空白をそろえる。"""
+    return re.sub(r"\s", "", unicodedata.normalize("NFKC", text)).replace("ヶ", "ケ")
+
+
+def _optional_table(path: Path) -> list[dict[str, Any]]:
+    """公開データの表は、ないとき（テスト、CI、取得前）は空として扱う。"""
+    return pq.read_table(path).to_pylist() if path.is_file() else []
 
 
 # 同じ名前の駅をまとめるとき、中心からこれより離れた行があれば別の場所の駅とみなす
