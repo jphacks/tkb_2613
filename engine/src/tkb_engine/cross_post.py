@@ -22,8 +22,13 @@ from tkb_common.schemas import (
     WebSourceKind,
     WebVerificationStatus,
 )
+from tkb_engine.child_school import BRIDGE_PREFIX as CHILD_SCHOOL_BRIDGE
+from tkb_engine.child_school import child_school_facts
 from tkb_engine.cross_post_facts import CrossPostFact, FactRole
 from tkb_engine.cross_post_facts import forbidden_context as _forbidden_context
+from tkb_engine.cross_post_facts import is_distinctive_bridge as _is_distinctive_bridge
+from tkb_engine.cross_post_facts import matching_text_clue as _matching_text_clue
+from tkb_engine.cross_post_facts import normalize_bridge as _normalize_bridge
 from tkb_engine.gazetteer import Gazetteer
 from tkb_engine.open_data import infer_registry_employer_claim, shelter_home_facts
 from tkb_engine.open_data_bus import bus_stop_home_facts
@@ -42,11 +47,14 @@ def infer_cross_post_claim(
     different posts, joined by the same explicit bridge. Any competing value invalidates the
     claim instead of choosing one. Confidence is the weakest fact on the AND path.
     """
-    if attribute not in {ProfileAttribute.RESIDENTIAL_AREA, ProfileAttribute.REGULAR_STATION}:
-        raise ValueError("cross-post gate is only defined for residential_area and regular_station")
+    if attribute not in CROSS_POST_BRIDGES:
+        raise ValueError(
+            "cross-post gate is only defined for residential_area, regular_station and child_school"
+        )
     expected_bridge = {
         ProfileAttribute.RESIDENTIAL_AREA: "home:",
         ProfileAttribute.REGULAR_STATION: "regular_station:",
+        ProfileAttribute.CHILD_SCHOOL: CHILD_SCHOOL_BRIDGE,
     }[attribute]
     eligible = [
         f
@@ -147,6 +155,38 @@ def infer_cross_post_claim(
             minimal_scope=EvidenceScope.BLUESKY,
             harm_status="unknown",
         ),
+    )
+
+
+CROSS_POST_BRIDGES = {
+    ProfileAttribute.RESIDENTIAL_AREA,
+    ProfileAttribute.REGULAR_STATION,
+    ProfileAttribute.CHILD_SCHOOL,
+}
+
+
+def infer_child_school_claim(
+    posts: list[Post], clues: list[Clue], gazetteer: Gazetteer
+) -> ProfileItem | None:
+    """子どもの学校。本人との関係と学校名が別々の投稿にあり、同じ橋渡しでつながるときだけ。"""
+    claim = infer_cross_post_claim(
+        ProfileAttribute.CHILD_SCHOOL, child_school_facts(posts, clues, gazetteer)
+    )
+    if claim is None:
+        return None
+    return claim.model_copy(
+        update={
+            "assessment": ClaimAssessment(
+                minimal_scope=EvidenceScope.BLUESKY,
+                harm_status="prerequisites_unmet",
+                harm_scenario="子どもの通う学校がわかると、登下校の時間や場所で子どもに近づく、"
+                "学校を名乗って保護者をだますなどの材料になりうる",
+                harm_prerequisites=[
+                    "子どもを識別できる情報が別途得られる",
+                    "攻撃者がその情報を悪用する",
+                ],
+            )
+        }
     )
 
 
@@ -569,6 +609,9 @@ def infer_owner_claims(
         regular_station = infer_regular_station_claim(posts, clues, gazetteer)
         if regular_station is not None:
             claims.append(regular_station)
+        child_school = infer_child_school_claim(posts, clues, gazetteer)
+        if child_school is not None:
+            claims.append(child_school)
         # 子どもの学校の推定があれば、その学区の区市町村を居住地域の経路に足す
         claims = add_school_district_residence(claims, gazetteer)
     return claims
@@ -879,52 +922,6 @@ def _mentions_station_name(text: str, station: str) -> bool:
 
 def _regions_overlap(left: tuple[int, int, int, int], right: tuple[int, int, int, int]) -> bool:
     return left[0] < right[2] and right[0] < left[2] and left[1] < right[3] and right[1] < left[3]
-
-
-def _normalize_bridge(value: str) -> str:
-    return " ".join(unicodedata.normalize("NFKC", value).casefold().split())
-
-
-def _is_distinctive_bridge(value: str) -> bool:
-    """Require a named bridge, rejecting generic nouns such as 研修 or 商店街."""
-    bridge = _normalize_bridge(value)
-    generic_suffixes = (
-        "商店街",
-        "ショッピングモール",
-        "モール",
-        "研修",
-        "研修会",
-        "駅",
-        "商店",
-        "店",
-        "会社",
-        "ビル",
-        "オフィス",
-        "病院",
-        "学校",
-        "公園",
-        "通り",
-        "施設",
-    )
-    for suffix in generic_suffixes:
-        if bridge.endswith(suffix):
-            name = bridge[: -len(suffix)]
-            return len(name) >= 2 and any(ch.isalnum() or "\u3040" <= ch <= "\u9fff" for ch in name)
-    return len(bridge) >= 3 and any(ch.isalpha() for ch in bridge)
-
-
-def _matching_text_clue(
-    clues: list[Clue], post_id: str, value: str, clue_type: ClueType
-) -> tuple[int, Clue] | None:
-    for index, clue in enumerate(clues):
-        if (
-            clue.post_id == post_id
-            and clue.source is ClueSource.TEXT
-            and clue.type is clue_type
-            and _normalize_bridge(clue.value) == _normalize_bridge(value)
-        ):
-            return index, clue
-    return None
 
 
 def _matching_profile_clue(clues: list[Clue], value: str, clue_type: ClueType) -> Clue | None:
