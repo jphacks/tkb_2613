@@ -7,6 +7,7 @@ from tkb_data_prep.households import Household
 from tkb_data_prep.muni_mesh import MuniMesh
 from tkb_data_prep.postal import Postal
 from tkb_data_prep.schools import School
+from tkb_data_prep.shelters import Shelter
 from tkb_data_prep.stations import Station
 
 
@@ -20,6 +21,7 @@ class Tables:
     area_codes: list[AreaCode]
     area_code_problems: list[Problem]
     schools: list[School]
+    shelters: list[Shelter]
 
 
 def report(t: Tables) -> list[str]:
@@ -40,6 +42,8 @@ def report(t: Tables) -> list[str]:
         f"（うち一部だけが対象 {sum(a.partial for a in t.area_codes):,}）",
         f"schools          {len(t.schools):>9,} 行"
         f"（市区町村が引けない {sum(not s.city for s in t.schools):,}）",
+        f"shelters         {len(t.shelters):>9,} 行"
+        f"（2つ以上の区市町村にある名前 {_shared_names(t.shelters):,}）",
         "",
         "== 世帯数 ==",
         f"世帯数の合計 {sum(h.households for h in t.households):,}",
@@ -55,3 +59,10 @@ def report(t: Tables) -> list[str]:
         for p in t.area_code_problems
     ]
     return lines
+
+
+def _shared_names(rows: list[Shelter]) -> int:
+    munis: dict[str, set[str]] = {}
+    for r in rows:
+        munis.setdefault(r.name, set()).add(r.muni_code)
+    return sum(len(m) > 1 for m in munis.values())

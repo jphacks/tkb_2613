@@ -5,7 +5,7 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { messages } from "@/lib/messages";
 import type { Clue } from "@/types/clue";
 import { confidenceLevel, type Conclusion } from "@/types/diagnose";
-import { PROFILE_ATTRIBUTE_CATALOG, type ExternalLookupStatus, type ExternalProfileResult, type ProfileItem, type WebFact } from "@/types/profile";
+import { openDataCitations, PROFILE_ATTRIBUTE_CATALOG, type ExternalLookupStatus, type ExternalProfileResult, type ProfileItem, type WebFact } from "@/types/profile";
 import type { Post } from "@/types/post";
 import { ProfileClaimWhatIf, whatIfEvidencePostIds } from "./ProfileClaimWhatIf";
 import { ReasoningChain } from "./ReasoningChain";
@@ -215,6 +215,9 @@ export function ConclusionBoard({
                   {claim.status === "weak" && <WeakMark />}
                 </p>
                 <p className="mt-1 text-xl font-bold">{claim.value}</p>
+                {openDataCitations(claim).map((citation) => (
+                  <p key={citation} className="mt-1 text-xs text-ink/70">{citation}</p>
+                ))}
               </li>
             ))}
           </ul>

@@ -139,7 +139,8 @@ export interface ProfileEvidence {
   readonly post_id: string | null;
   readonly clue_index: number | null;
   readonly required: boolean;
-  readonly source?: "clue" | "post_text" | "profile_text" | "image_alt" | "public_web";
+  /** open_data は事前に取得した公的な公開データ。excerpt に出典と注記が入り、投稿は指さない */
+  readonly source?: "clue" | "post_text" | "profile_text" | "image_alt" | "public_web" | "open_data";
   readonly image_index?: number | null;
   readonly excerpt?: string | null;
   readonly web_fact_id?: string | null;
@@ -228,12 +229,13 @@ function isProfileEvidence(value: unknown): value is ProfileEvidence {
       ["post_id", "clue_index", "required", "source", "image_index", "excerpt", "web_fact_id"].includes(key),
     ) &&
     typeof value.required === "boolean" &&
-    ["clue", "post_text", "profile_text", "image_alt", "public_web"].includes(source as string) &&
+    ["clue", "post_text", "profile_text", "image_alt", "public_web", "open_data"].includes(source as string) &&
     (source === "public_web" || value.web_fact_id === null || value.web_fact_id === undefined) &&
     ((source === "clue" && typeof value.post_id === "string" && Number.isInteger(value.clue_index) && (value.clue_index as number) >= 0 && (value.image_index === null || value.image_index === undefined)) ||
       (source === "post_text" && typeof value.post_id === "string" && value.clue_index === null && (value.image_index === null || value.image_index === undefined) && typeof value.excerpt === "string") ||
       (source === "profile_text" && value.post_id === null && value.clue_index === null && typeof value.excerpt === "string") ||
       (source === "image_alt" && typeof value.post_id === "string" && value.clue_index === null && Number.isInteger(value.image_index) && typeof value.excerpt === "string") ||
+      (source === "open_data" && value.post_id === null && value.clue_index === null && (value.image_index === null || value.image_index === undefined) && typeof value.excerpt === "string" && value.excerpt.length > 0) ||
       (source === "public_web" && value.post_id === null && value.clue_index === null && (value.image_index === null || value.image_index === undefined) && (value.excerpt === null || value.excerpt === undefined) && typeof value.web_fact_id === "string" && value.web_fact_id.length > 0))
   );
 }
@@ -287,4 +289,11 @@ export function isProfileItem(value: unknown): value is ProfileItem {
     typeof value.value === "string" &&
     value.value.trim().length > 0
   );
+}
+
+/** 推定の根拠に使った公開データの出典（重複を除く）。画面で推定の下に出す */
+export function openDataCitations(item: ProfileItem): string[] {
+  return [...new Set(item.evidence.flatMap((reference) =>
+    reference.source === "open_data" && reference.excerpt ? [reference.excerpt] : [],
+  ))];
 }

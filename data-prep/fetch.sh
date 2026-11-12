@@ -14,6 +14,8 @@ MEXT_URLS=(
   "https://www.mext.go.jp/content/20260825-mxt_chousa01-000011635_2-2.csv"
   "https://www.mext.go.jp/content/20260825-mxt_chousa01-000011635_6.csv"
 )
+# 国土地理院「指定緊急避難場所・指定避難所データ」の都道府県別 CSV（_2 が指定緊急避難場所、_1 が指定避難所）
+GSI_SHELTER_URL="https://hinanmap.gsi.go.jp/hinanjocp/defaultFtpData/csv"
 PREFECTURES=(11 12 13 14)
 
 if ! compgen -G "$RAW/estat/*.zip" >/dev/null; then
@@ -45,4 +47,9 @@ done
 fetch "$KSJ_N02_URL" "$RAW/ksj/N02-24_GML.zip"
 for url in "${MEXT_URLS[@]}"; do
   fetch "$url" "$RAW/mext/$(basename "$url")"
+done
+for pref in "${PREFECTURES[@]}"; do
+  for kind in 1 2; do
+    fetch "$GSI_SHELTER_URL/${pref}000_${kind}.csv" "$RAW/gsi/${pref}000_${kind}.csv"
+  done
 done
