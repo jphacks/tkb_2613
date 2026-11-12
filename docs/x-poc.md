@@ -116,3 +116,52 @@ Developer Policy の geo-data 条項（位置情報を Post から切り離し�
 用途確認が未完了の間は `X_MOCK_MODE=1` の合成デモだけを提供する。来場者は地名・駅名・曜日・時刻・学校名の根拠と件数、元投稿、仮除外前後を操作できるが、自分のXアカウントでログインしたり実投稿を取得したりはできない。
 
 実試験へ進む前提は、Xの用途確認、チームの課金承認、ConsoleのWeb App設定、creditとspending limit、HTTPS callback、Secretの安全な注入、全段のqueryログ伏せ、本人同意文面、削除・変更への運用方針を揃えること。最初の実試験はチーム所有のテストアカウント1件、`X_MAX_POSTS=5`、監視下で行い、その後フラグを戻してメモリ・ログ・請求を確認する。
+
+## 承認が届いた日にやること
+
+前提：X からの書面の回答で、用途（本人の投稿の自己点検）、geo-data 条項（地名・駅名の扱い。集計表示か `X_INFO_VIEW=highlight` か）、ハイライトが本文の改変に当たらないこと、の3点が確認できていること。チームで費用（最大概算と上限）を承認していること。どれかが欠けていれば、この先へ進まず `X_MOCK_MODE=1` のままにする。
+
+### 1. Developer Console（人が画面で行う。リポジトリからは変えない）
+
+1. 上の「Developer Consoleで設定する項目」の表どおりに、App permissions を Read、Type of App を Web App、Callback URI を `https://<公開オリジン>/api/x/callback`（完全一致）、Website・利用規約・プライバシーポリシーの URL を設定する。
+2. OAuth 2.0 の scope が `tweet.read users.read` だけであることを確かめる。
+3. Client Secret を再生成し、表示された値をその場で次の「秘密の置き場所」へ入れる。画面のコピーやメモを残さない。
+4. Billing で最新の単価、credit 残高を確認し、**spending limit を小さく設定**する（例：数ドル）。auto-recharge は切ったままにする。
+
+### 2. 秘密の置き場所
+
+- `X_CLIENT_SECRET` は API サーバーだけに置く。Git、チャット、ブラウザ、`NEXT_PUBLIC_*`、`/opt/tkb_2613/.env` には書かない。
+- 置き場所は、VLM の鍵と同じく AWS Secrets Manager（例：`tkb_2613/x-client-secret`）。`infra/tkb-app-start.sh` が起動時に読み、tmpfs の `/run/tkb_2613/api-secrets.env` にだけ書いて compose に渡し、終了時に消す形にする。そのために、Terraform で secret と EC2 ロールの `secretsmanager:GetSecretValue` を足し、起動スクリプトに `X_CLIENT_SECRET=` の行を足す変更を PR にする（承認日の作業。今はまだ入れていない）。
+- `X_CLIENT_ID` は秘密ではないが、Secret と同じ経路か `.env` に置く。
+- 値を入れた後、`docker compose exec api env` などで中身を画面に出さない。確かめるのは `GET /api/x/config` の `live_enabled` だけにする。
+
+### 3. 設定を入れる順番（アプリの EC2 の `.env`）
+
+1. `X_PUBLIC_ORIGIN=https://<公開オリジン>`、`X_CALLBACK_URL=https://<公開オリジン>/api/x/callback`、`COOKIE_SECURE=1` を確かめる。`X_FAKE_API_BASE_URL` は書かない（書くと起動に失敗する）。
+2. `X_MAX_POSTS=5`、`X_DAILY_RESOURCE_LIMIT=12`（本人確認1＋投稿5の2回分）にする。
+3. X の回答に合わせて `X_INFO_VIEW` を決める（geo-data の回答が集計を認めない場合は `highlight`）。
+4. CloudFront のアクセスログ・リアルタイムログが無効のままか（有効なら `cs-uri-query` を外したか）を確かめてから `X_QUERY_LOGS_REDACTED=1`。
+5. `X_USE_CASE_APPROVED=1`、`X_PAID_READS_APPROVED=1`、`X_MOCK_MODE=0` にして再起動する。
+6. `GET /api/x/config` が `live_enabled: true`、`max_posts: 5` を返すことを確かめる。
+
+### 4. チームのテストアカウントで試す
+
+- 使うのはチームが持つテスト用の X アカウント1つだけ。投稿は架空の内容で、自宅周辺や他人の顔が分かるものを含めない。最初は投稿を5件程度にしておく。
+- 2人以上で、画面とサーバーのログを見ながら1回だけ行う：同意 → Xでログイン → 認可 → `/x` に戻る → 公開情報を確認する → 仮除外 → ログアウトしてデータを破棄。
+
+### 5. 確認項目
+
+- [ ] 認可画面に出る scope が読み取りだけ（`tweet.read users.read`）
+- [ ] コールバック後の URL にクエリが残らず `/x` に戻る
+- [ ] api・web・CloudFront のログに `code`・`state`・トークン・投稿本文が出ていない（`/api/x/callback` の行がクエリなしで出ている）
+- [ ] 取得した投稿が5件以下で、すべて本人の投稿（リポストを含まない）
+- [ ] 投稿の表示が表示要件どおり（アイコン・表示名・@ユーザー名のリンク、X ロゴ、日時の permalink、「Xで見る」、メンション・ハッシュタグ・URL のリンク、編集済み）
+- [ ] 仮除外・再集計（または再表示）で X を再び呼んでいない（Console の使用量が増えない）
+- [ ] ログアウト後、`/api/x/session` と `/api/x/diagnosis` が 401
+- [ ] 2回目のログインが `X_DAILY_RESOURCE_LIMIT` で429になる（上限が効いている）
+- [ ] Console の使用量・請求が、本人確認1＋投稿5程度のリソース数と一致する
+
+### 6. 終わったら戻す
+
+- `X_MOCK_MODE=1`、`X_USE_CASE_APPROVED=0`、`X_PAID_READS_APPROVED=0` に戻して再起動し、`live_enabled: false` を確かめる。API プロセスの再起動でメモリ上のトークン・投稿・結果も消える。
+- 結果（件数・所要時間・請求額・気づいたこと）を記録し、件数を増やすか、公開するかはチームで決め直す。
