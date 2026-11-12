@@ -6,6 +6,8 @@ import respx
 
 from tkb_api.x_poc import X_API, XPocError, fetch_own_posts, to_post
 
+POST_FIELDS = "author_id,created_at,entities,edit_history_tweet_ids"
+
 
 def test_to_post_keeps_text_and_time_without_images() -> None:
     post = to_post(
@@ -86,7 +88,10 @@ async def test_fetches_only_me_with_fixed_host_and_pagination() -> None:
     assert [post.post_id for post in posts] == ["x:1", "x:3"]
     assert me.calls[0].request.headers["authorization"] == "Bearer dummy-token"
     assert pages.calls[0].request.url.params["max_results"] == "7"
-    assert pages.calls[0].request.url.params["post.fields"] == "author_id,created_at"
+    assert (
+        pages.calls[0].request.url.params["post.fields"]
+        == "author_id,created_at,entities,edit_history_tweet_ids"
+    )
     cursor = "safe-cursor"
     assert pages.calls[1].request.url.params["pagination_token"] == cursor
 

@@ -14,6 +14,7 @@ from tkb_api.config import Settings
 from tkb_api.main import create_app
 from tkb_api.routes.x import XCallbackAccessFilter
 
+POST_FIELDS = "author_id,created_at,entities,edit_history_tweet_ids"
 ORIGIN = "http://testserver"
 HEADERS = {"Origin": ORIGIN}
 
@@ -79,6 +80,10 @@ async def test_mock_public_information_exclusion_and_logout() -> None:
         )
         assert not {"clues", "conclusions", "plan"} & snapshot.keys()
         assert snapshot["post_errors"] == []
+        # 合成デモは X に存在しない投稿なので、X へのリンクを作らない
+        assert snapshot["x_display"]["synthetic"] is True
+        assert snapshot["x_display"]["author"]["profile_url"] is None
+        assert all(item["permalink"] is None for item in snapshot["x_display"]["posts"].values())
 
         preview = await client.post("/api/x/simulate", json={"delete": ["x:9001"]}, headers=HEADERS)
         assert preview.status_code == 200
@@ -219,7 +224,16 @@ async def test_oauth_pkce_state_owner_check_and_direct_only_aggregation() -> Non
                 ("weekday", "金曜日"),
                 ("time", "19時"),
             }
-            assert posts.calls[0].request.url.params["post.fields"] == "author_id,created_at"
+            display = result.json()["x_display"]
+            assert display["synthetic"] is False
+            assert display["author"]["profile_url"] == "https://x.com/fictional_demo"
+            assert display["posts"]["x:123"]["permalink"] == (
+                "https://x.com/fictional_demo/status/123"
+            )
+            assert (
+                posts.calls[0].request.url.params["post.fields"]
+                == "author_id,created_at,entities,edit_history_tweet_ids"
+            )
             assert b"code_verifier=" in token.calls[0].request.content
             assert len(posts.calls) == 1
             assert not any("ollama" in str(call.request.url) for call in router.calls)

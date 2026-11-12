@@ -93,8 +93,11 @@ async def fetch_own_posts(
         return owner_id, await _fetch_posts(client, owner_id, limit)
 
 
-async def get_my_user(token: str, base_url: str = X_API) -> tuple[str, str]:
-    """認証された本人の ID とユーザー名だけを返す。User Read の課金対象。"""
+async def get_my_profile(token: str, base_url: str = X_API) -> dict[str, Any]:
+    """認証された本人の ID・ユーザー名と、表示要件に使う表示名・アイコンを返す。
+
+    User Read 1 リソースの課金対象（user.fields を足しても読むリソースは同じ1件）。
+    """
     if not token.strip():
         raise XPocError("X の OAuth 2.0 User Access Token が設定されていません")
     async with httpx.AsyncClient(
@@ -104,17 +107,28 @@ async def get_my_user(token: str, base_url: str = X_API) -> tuple[str, str]:
         follow_redirects=False,
         trust_env=False,
     ) as client:
-        data = _object((await _get(client, "/2/users/me")).get("data"))
+        page = await _get(client, "/2/users/me", {"user.fields": "profile_image_url"})
+        data = _object(page.get("data"))
     owner_id, username = data.get("id"), data.get("username")
     if not isinstance(owner_id, str) or not owner_id.isascii() or not owner_id.isdecimal():
         raise XPocError("X の本人 ID を確認できませんでした")
     if not isinstance(username, str) or not username:
         raise XPocError("X の本人名を確認できませんでした")
-    return owner_id, username
+    return data
+
+
+async def get_my_user(token: str, base_url: str = X_API) -> tuple[str, str]:
+    """認証された本人の ID とユーザー名だけを返す。User Read の課金対象。"""
+    data = await get_my_profile(token, base_url)
+    return data["id"], data["username"]
 
 
 async def fetch_posts_for_owner(
-    token: str, owner_id: str, limit: int = MAX_POSTS, base_url: str = X_API
+    token: str,
+    owner_id: str,
+    limit: int = MAX_POSTS,
+    base_url: str = X_API,
+    raw_out: list[dict[str, Any]] | None = None,
 ) -> list[Post]:
     """認証時に /me で確認した本人 ID に限り、本文付き投稿を取得する。"""
     if not token.strip() or not owner_id.isascii() or not owner_id.isdecimal():
@@ -128,10 +142,16 @@ async def fetch_posts_for_owner(
         follow_redirects=False,
         trust_env=False,
     ) as client:
-        return await _fetch_posts(client, owner_id, limit)
+        return await _fetch_posts(client, owner_id, limit, raw_out)
 
 
-async def _fetch_posts(client: httpx.AsyncClient, owner_id: str, limit: int) -> list[Post]:
+async def _fetch_posts(
+    client: httpx.AsyncClient,
+    owner_id: str,
+    limit: int,
+    raw_out: list[dict[str, Any]] | None = None,
+) -> list[Post]:
+    """raw_out を渡すと、採用した投稿の元の応答（表示要件に使う entities など）も入れる。"""
     posts: list[Post] = []
     # X は返されたリソースに課金する。本文なしや重複があっても読み取り件数を増やさない。
     read_budget = max(MIN_PAGE_SIZE, limit)
@@ -145,7 +165,8 @@ async def _fetch_posts(client: httpx.AsyncClient, owner_id: str, limit: int) -> 
             break
         params: dict[str, Any] = {
             "max_results": remaining,
-            "post.fields": "author_id,created_at",
+            # entities と edit_history_tweet_ids は表示要件（リンク・編集の表記）に使う
+            "post.fields": "author_id,created_at,entities,edit_history_tweet_ids",
             "exclude": "retweets",
         }
         if cursor is not None:
@@ -156,9 +177,12 @@ async def _fetch_posts(client: httpx.AsyncClient, owner_id: str, limit: int) -> 
             raise XPocError("X の投稿一覧の形式が不正です")
         resources_read += len(items)
         for raw in items:
-            post = to_post(_object(raw), owner_id)
+            item = _object(raw)
+            post = to_post(item, owner_id)
             if post is not None and post.post_id not in seen_ids:
                 posts.append(post)
+                if raw_out is not None:
+                    raw_out.append(item)
                 seen_ids.add(post.post_id)
                 if len(posts) == limit:
                     break

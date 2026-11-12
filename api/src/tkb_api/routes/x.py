@@ -25,7 +25,15 @@ from tkb_api.x_budget import (
     one_check_cost,
     posts_read_cost,
 )
-from tkb_api.x_poc import X_API, XPocError, fetch_posts_for_owner, get_my_user, to_post
+from tkb_api.x_display import (
+    XAuthor,
+    XPostDisplay,
+    author_from_profile,
+    post_display,
+    synthetic_author,
+    synthetic_display,
+)
+from tkb_api.x_poc import X_API, XPocError, fetch_posts_for_owner, get_my_profile, to_post
 from tkb_api.x_public_info import public_information_json, public_information_report
 from tkb_common.schemas import Post
 
@@ -78,6 +86,9 @@ class XSession:
     posts: list[Post] = field(default_factory=list)
     busy: bool = False
     fetched: bool = False
+    # X の表示要件に使う投稿者と投稿ごとの表示情報（合成デモは架空の値）
+    author: XAuthor | None = None
+    display: dict[str, XPostDisplay] = field(default_factory=dict)
 
 
 class XSessionStore:
@@ -124,6 +135,7 @@ class XSessionStore:
         token: str | None,
         owner_id: str,
         username: str,
+        author: XAuthor | None = None,
     ) -> str:
         session_id = secrets.token_urlsafe(32)
         with self.lock:
@@ -132,6 +144,7 @@ class XSessionStore:
                 owner_id,
                 username,
                 time.monotonic() + self.ttl_s,
+                author=author,
             )
             self._purge()
         return session_id
@@ -357,12 +370,17 @@ async def callback(request: Request, state: str = "", code: str = "") -> Respons
     token = await _exchange(code, verifier, settings)
     _reserve(request, USER_READ_RESOURCES)
     try:
-        owner_id, username = await get_my_user(token, base_url=_x_api(settings))
+        profile = await get_my_profile(token, base_url=_x_api(settings))
     except XPocError as exc:
         raise _x_error(exc) from None
+    owner_id, username = profile["id"], profile["username"]
     result = RedirectResponse("/x", status_code=303)
     _store(request).delete(request.cookies.get(SESSION_COOKIE))
-    _cookie(result, settings, _store(request).create(token, owner_id, username))
+    _cookie(
+        result,
+        settings,
+        _store(request).create(token, owner_id, username, author_from_profile(profile)),
+    )
     result.delete_cookie(START_COOKIE, path="/api/x")
     return result
 
@@ -413,6 +431,22 @@ def _mock_data() -> list[Post]:
     return [post for post in posts if post is not None]
 
 
+def _display_json(current: XSession, posts: list[Post]) -> dict[str, Any]:
+    """表示要件の情報。合成デモは synthetic=true で、X へのリンクやロゴを出さない。"""
+    synthetic = current.token is None
+    author = current.author or synthetic_author(current.username)
+    return {
+        "synthetic": synthetic,
+        "author": author.model_dump(mode="json"),
+        "posts": {
+            post.post_id: current.display.get(post.post_id, synthetic_display()).model_dump(
+                mode="json"
+            )
+            for post in posts
+        },
+    }
+
+
 @router.post("/diagnose")
 async def diagnose(request: Request) -> dict[str, Any]:
     _origin(request)
@@ -429,21 +463,26 @@ async def diagnose(request: Request) -> dict[str, Any]:
             if not settings.x_mock_mode:
                 raise HTTPException(status.HTTP_403_FORBIDDEN, "モック診断は無効です")
             posts = _mock_data()
+            current.display = {post.post_id: synthetic_display() for post in posts}
         else:
             _require_live(settings)
             if current.fetched:
                 posts = current.posts
             else:
                 _reserve(request, posts_read_cost(settings.x_max_posts))
+                raw: list[dict[str, Any]] = []
                 try:
                     posts = await fetch_posts_for_owner(
                         current.token,
                         current.owner_id,
                         settings.x_max_posts,
                         base_url=_x_api(settings),
+                        raw_out=raw,
                     )
                 except XPocError as exc:
                     raise _x_error(exc) from None
+                author = current.author or synthetic_author(current.username)
+                current.display = {f"x:{item['id']}": post_display(item, author) for item in raw}
                 current.posts = posts
                 current.fetched = True
         started = time.monotonic()
@@ -454,6 +493,7 @@ async def diagnose(request: Request) -> dict[str, Any]:
             "information": information,
             # 読み取りに失敗した投稿。理由は固定の文言で、投稿の本文は入らない
             "post_errors": post_errors,
+            "x_display": _display_json(current, posts),
             "elapsed_ms": round((time.monotonic() - started) * 1000),
             "mock": current.token is None,
         }

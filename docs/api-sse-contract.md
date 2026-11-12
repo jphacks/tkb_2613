@@ -148,7 +148,7 @@ Bluesky の `/api/session`・`/api/diagnose`・`/api/simulate`、Threadsの診�
 | `GET /api/x/callback` | X の `state,code` と開始 Cookie | state/PKCE を照合し、トークン交換と本人確認の後 `/x` へ 303。本人確認の前に1日の上限から1を予約し、足りなければ429。 |
 | `GET /api/x/session` | X セッション Cookie | `username, mock`。未認証401。 |
 | `DELETE /api/x/session` | X セッション Cookie | セッション・結果をメモリから削除、204。 |
-| `POST /api/x/diagnose` | X セッション Cookie | `posts, information, post_errors, elapsed_ms, mock`。`post_errors` は読み取りに失敗した投稿の `{post_id, error}` で、`error` は固定文言（本文を含めない）。1件の失敗で全体は失敗にしない。実経路は本人投稿を最大30リソース読み、限定カテゴリだけをローカルで集計する。2回目はメモリの結果を返し再課金しない。投稿取得の前に `max(5, X_MAX_POSTS)` を1日の上限から予約し、足りなければ X を呼ばずに429。 |
+| `POST /api/x/diagnose` | X セッション Cookie | `posts, information, post_errors, x_display, elapsed_ms, mock`。`x_display` は X の表示要件用の `{synthetic, author:{username,name,profile_image_url,profile_url}, posts:{<post_id>:{permalink,edited,entities:[{kind,start,end,href,display}]}}}`。`start`・`end` はコードポイント単位。合成デモは `synthetic=true` で `profile_url`・`permalink` は null、`entities` は空。`post_errors` は読み取りに失敗した投稿の `{post_id, error}` で、`error` は固定文言（本文を含めない）。1件の失敗で全体は失敗にしない。実経路は本人投稿を最大30リソース読み、限定カテゴリだけをローカルで集計する。2回目はメモリの結果を返し再課金しない。投稿取得の前に `max(5, X_MAX_POSTS)` を1日の上限から予約し、足りなければ X を呼ばずに429。 |
 | `GET /api/x/diagnosis` | X セッション Cookie | 直近の完了結果。なければ404。 |
 | `POST /api/x/simulate` | `{"delete":[診断済み投稿ID]}` | `delete, before, after, removed`。X APIは再呼出ししない。 |
 | `POST /api/x/rediagnose` | 同上 | 除外後の `posts, information, mock` を再集計。X APIは再呼出ししない。 |

@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { PostCard } from "@/components/post-list/PostCard";
+import { XPostCard } from "@/components/x/XPostCard";
+import { isXDisplay, type XDisplay, type XPostDisplay } from "@/lib/xDisplay";
 import { isPost, type Post } from "@/types/post";
 
 type PublicInfoCategory = "place" | "station" | "weekday" | "time" | "school";
@@ -19,6 +21,7 @@ type XDiagnosis = {
   readonly posts: readonly Post[];
   readonly information: readonly PublicInfoItem[];
   readonly post_errors?: readonly PostError[];
+  readonly x_display?: XDisplay;
   readonly elapsed_ms?: number;
   readonly mock?: boolean;
 };
@@ -39,6 +42,7 @@ const CATEGORY_LABEL: Record<PublicInfoCategory, string> = {
   school: "学校名",
 };
 const CATEGORIES = new Set(Object.keys(CATEGORY_LABEL));
+const NO_DISPLAY: XPostDisplay = { permalink: null, edited: false, entities: [] };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -69,7 +73,8 @@ function isPostErrors(value: unknown): value is readonly PostError[] {
 function requireDiagnosis(value: unknown): XDiagnosis {
   if (!isRecord(value) || !Array.isArray(value.posts) || !value.posts.every(isPost) ||
       !Array.isArray(value.information) || !value.information.every(isPublicInfo) ||
-      !isPostErrors(value.post_errors)) {
+      !isPostErrors(value.post_errors) ||
+      (value.x_display !== undefined && !isXDisplay(value.x_display))) {
     throw new Error("公開情報チェックの結果を読み取れませんでした。");
   }
   const diagnosis = value as XDiagnosis;
@@ -270,7 +275,11 @@ export default function XPage() {
               <input type="checkbox" checked={selected.includes(post.post_id)} onChange={() => toggle(post.post_id)} />
               仮除外する
             </label>
-            <PostCard post={post} />
+            {original.x_display
+              ? <XPostCard post={post} author={original.x_display.author}
+                display={original.x_display.posts[post.post_id] ?? NO_DISPLAY}
+                synthetic={original.x_display.synthetic} />
+              : <PostCard post={post} />}
           </li>)}</ol>
           <div className="flex flex-wrap gap-3">
             <button type="button" disabled={!selected.length || busy} className="rounded-sm border border-ink px-4 py-2 disabled:opacity-50"

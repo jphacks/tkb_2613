@@ -118,4 +118,28 @@ describe("X public information page", () => {
       "/api/x/rediagnose", expect.objectContaining({ method: "POST" }),
     );
   });
+
+  it("renders posts with the X display card when the API sends display information", async () => {
+    const xDisplay = {
+      synthetic: true,
+      author: { username: "架空のXアカウント", name: "架空のXアカウント", profile_image_url: null, profile_url: null },
+      posts: Object.fromEntries(posts.map((post) => [post.post_id, { permalink: null, edited: false, entities: [] }])),
+    };
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request): Promise<Response> => {
+      const path = String(input);
+      if (path.endsWith("/config")) return response({ mock_enabled: true, live_enabled: false, max_posts: 30 });
+      if (path.endsWith("/mock/session")) return response({ username: "架空のXアカウント", mock: true });
+      if (path.endsWith("/session")) return response({}, 401);
+      if (path.endsWith("/diagnose")) return response({ ...snapshot, x_display: xDisplay });
+      throw new Error(`unexpected path ${path}`);
+    }));
+    render(<XPage />);
+
+    fireEvent.click(await screen.findByRole("checkbox", { name: /利用目的を確認し/ }));
+    fireEvent.click(screen.getByRole("button", { name: "架空のX投稿で試す" }));
+    fireEvent.click(await screen.findByRole("button", { name: "公開情報を確認する" }));
+
+    expect(await screen.findAllByText("架空の投稿（Xの投稿ではありません）")).toHaveLength(2);
+    expect(screen.queryByRole("img", { name: "X" })).not.toBeInTheDocument();
+  });
 });
