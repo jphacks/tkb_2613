@@ -19,7 +19,7 @@ from tkb_api.config import Settings
 from tkb_api.origin import check_origin
 from tkb_api.schemas import SimulateRequest
 from tkb_api.x_poc import XPocError, fetch_posts_for_owner, get_my_user, to_post
-from tkb_api.x_public_info import public_information_json
+from tkb_api.x_public_info import public_information_json, public_information_report
 from tkb_common.schemas import Post
 
 router = APIRouter(prefix="/api/x", tags=["x"])
@@ -395,9 +395,12 @@ async def diagnose(request: Request) -> dict[str, Any]:
                 current.fetched = True
         started = time.monotonic()
         current.posts = posts
+        information, post_errors = public_information_report(posts)
         current.snapshot = {
             "posts": [post.model_dump(mode="json") for post in posts],
-            "information": public_information_json(posts),
+            "information": information,
+            # 読み取りに失敗した投稿。理由は固定の文言で、投稿の本文は入らない
+            "post_errors": post_errors,
             "elapsed_ms": round((time.monotonic() - started) * 1000),
             "mock": current.token is None,
         }

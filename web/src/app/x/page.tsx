@@ -14,9 +14,11 @@ type PublicInfoItem = {
   readonly count: number;
   readonly evidence: readonly PublicInfoEvidence[];
 };
+type PostError = { readonly post_id: string; readonly error: string };
 type XDiagnosis = {
   readonly posts: readonly Post[];
   readonly information: readonly PublicInfoItem[];
+  readonly post_errors?: readonly PostError[];
   readonly elapsed_ms?: number;
   readonly mock?: boolean;
 };
@@ -59,9 +61,15 @@ function isPublicInfo(value: unknown): value is PublicInfoItem {
       typeof item.quote === "string");
 }
 
+function isPostErrors(value: unknown): value is readonly PostError[] {
+  return value === undefined || (Array.isArray(value) && value.every((item) =>
+    isRecord(item) && typeof item.post_id === "string" && typeof item.error === "string"));
+}
+
 function requireDiagnosis(value: unknown): XDiagnosis {
   if (!isRecord(value) || !Array.isArray(value.posts) || !value.posts.every(isPost) ||
-      !Array.isArray(value.information) || !value.information.every(isPublicInfo)) {
+      !Array.isArray(value.information) || !value.information.every(isPublicInfo) ||
+      !isPostErrors(value.post_errors)) {
     throw new Error("公開情報チェックの結果を読み取れませんでした。");
   }
   const diagnosis = value as XDiagnosis;
@@ -226,6 +234,9 @@ export default function XPage() {
         <div aria-live="polite" className="border-l-4 border-seeker bg-paper-deep p-4">
           <p className="font-bold">{view === original ? "公開情報チェック結果" : "仮除外後の再集計"}</p>
           <p className="text-sm text-ink/70">投稿 {current.posts.length} 件・明記情報 {current.information.length} 種類</p>
+          {(original.post_errors?.length ?? 0) > 0 && <p className="mt-2 text-sm">
+            {original.post_errors?.length} 件の投稿は読み取れなかったため、集計に含めていません。
+          </p>}
         </div>
 
         <section aria-labelledby="x-information-heading" className="space-y-4">

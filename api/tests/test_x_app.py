@@ -78,6 +78,7 @@ async def test_mock_public_information_exclusion_and_logout() -> None:
             for evidence in item["evidence"]
         )
         assert not {"clues", "conclusions", "plan"} & snapshot.keys()
+        assert snapshot["post_errors"] == []
 
         preview = await client.post("/api/x/simulate", json={"delete": ["x:9001"]}, headers=HEADERS)
         assert preview.status_code == 200
@@ -98,6 +99,36 @@ async def test_mock_public_information_exclusion_and_logout() -> None:
         assert (await client.delete("/api/x/session", headers=HEADERS)).status_code == 204
         assert (await client.get("/api/x/session")).status_code == 401
         assert (await client.get("/api/x/diagnosis")).status_code == 401
+
+
+@pytest.mark.anyio
+async def test_x_check_succeeds_and_reports_posts_whose_extraction_failed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tkb_api import x_public_info
+
+    original = x_public_info._post_matches
+
+    def flaky(post: Any) -> Any:
+        if post.post_id == "x:9002":
+            raise RuntimeError(f"本文を含む失敗: {post.text}")
+        return original(post)
+
+    monkeypatch.setattr(x_public_info, "_post_matches", flaky)
+    async with _client(x_mock_mode=True) as client:
+        await client.post("/api/x/mock/session", json={"consent": True}, headers=HEADERS)
+        result = await client.post("/api/x/diagnose", headers=HEADERS)
+
+    assert result.status_code == 200
+    snapshot = result.json()
+    assert len(snapshot["posts"]) == 3
+    assert [e["post_id"] for e in snapshot["post_errors"]] == ["x:9002"]
+    assert snapshot["post_errors"][0]["error"]
+    assert "渋谷" not in snapshot["post_errors"][0]["error"]  # 理由に本文を入れない
+    evidence_posts = {
+        evidence["post_id"] for item in snapshot["information"] for evidence in item["evidence"]
+    }
+    assert "x:9002" not in evidence_posts
 
 
 @pytest.mark.anyio
