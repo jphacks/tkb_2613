@@ -150,7 +150,7 @@ Python は `common/` の Pydantic モデル（`tkb_common.schemas`）、TypeScri
 
 既存：`MOCK_MODE`、`VLM_BASE_URL`、`VLM_API_KEY`、`VLM_MODEL`、`OCR_BASE_URL`。鍵を `NEXT_PUBLIC_` で始まる変数に入れない。
 
-プロフィール推定は現在 `residential_area`、`regular_station`、`employer_name`、`child_age` の限定ルールのみ。`residential_area` には、事前に取得した国土地理院の避難所の表と、国土数値情報のバス停留所（令和4年度版）を「X は Y にある」という知識として使う経路がある（`engine/src/tkb_engine/open_data.py`、`open_data_bus.py`）。子どもの学校の推定があれば、小学校区・中学校区の区市町村も居住地域の経路に足す（`open_data_school.py`。今は子どもの学校の推定がないので働かない）。`employer_name` には、本人が明示した勤務先の名前を国税庁の法人番号の表（`data/processed/corporations.sqlite`。api のメモリに載せず、引くたびにディスクから読む）で正式名称に結ぶ経路がある。公開データの根拠は `source=open_data` で、画面に出典を出す。投稿ごとの観測手がかりと、投稿を横断した推定を区別し、根拠経路は `docs/profile-classification-v2.md` に合わせる。ProfileItem用の仮除外候補と、mainのConclusion向けplan/simulate/deleteは別フローとして維持する。
+プロフィール推定は現在 `residential_area`、`regular_station`、`employer_name`、`child_age`、`child_school` の限定ルールのみ。`residential_area` には、事前に取得した国土地理院の避難所の表と、国土数値情報のバス停留所（令和4年度版）を「X は Y にある」という知識として使う経路がある（`engine/src/tkb_engine/open_data.py`、`open_data_bus.py`）。`child_school` は、本人の子どもの学校の X（「娘の小学校のひまわり祭り」）と別の投稿の「X は〇〇小学校」が同じ X でつながり、学区の表で学校が1つに決まるときだけ推定し（`child_school.py`）、その学区の区市町村を居住地域の経路に足す（`open_data_school.py`）。`employer_name` には、本人が明示した勤務先の名前を国税庁の法人番号の表（`data/processed/corporations.sqlite`。api のメモリに載せず、引くたびにディスクから読む）で正式名称に結ぶ経路がある。公開データの根拠は `source=open_data` で、画面に出典を出す。投稿ごとの観測手がかりと、投稿を横断した推定を区別し、根拠経路は `docs/profile-classification-v2.md` に合わせる。ProfileItem用の仮除外候補と、mainのConclusion向けplan/simulate/deleteは別フローとして維持する。
 
 OAuth：`AUTH_MODE`（ローカル既定 `app_password`、本番は採用試験を通れば `oauth`）、`PUBLIC_URL`（公開の HTTPS オリジン）、`OAUTH_WEB_ORIGIN`（api から web への Docker 内部 URL）、`API_INTERNAL_ORIGIN`（web から api への Docker 内部 URL）、`INTERNAL_AUTH_SECRET`（起動時に生成し、両コンテナへ別の一時ファイルで渡す）。
 
