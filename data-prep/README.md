@@ -40,7 +40,7 @@ e-Stat はコマンドで取得できないので、ブラウザで落として�
 make data
 ```
 
-1. `fetch.sh` が郵便番号、市区町村別メッシュ・コード一覧、鉄道データ、学校コード、避難所、バス停留所のデータを curl で `raw/` に取得する。取得済みのファイルは取り直さない（取り直すときは `raw/` の中の該当ファイルを消す）
+1. `fetch.sh` が郵便番号、市区町村別メッシュ・コード一覧、鉄道データ、学校コード、避難所、バス停留所、行政区域、小学校区・中学校区（と自治体ごとの利用条件）のデータを curl で `raw/` に取得する。取得済みのファイルは取り直さない（取り直すときは `raw/` の中の該当ファイルを消す）
 2. `python -m tkb_data_prep` が `data/processed/` に表を書き出し、最後に件数を表示する
 
 e-Stat の zip がないときは、置き場所を案内して止まる。
@@ -75,6 +75,7 @@ area_codes             276 行（うち一部だけが対象 47）
 | `area_codes.parquet` | area_code, section_code, muni_code, partial, note | 市外局番（先頭の 0 付き）と番号区画コード、市区町村。一部だけが対象なら partial が true で、note に但し書き |
 | `shelters.parquet` | name, kind, muni_code, city, lat, lon, mesh_1km | 1都3県の指定緊急避難場所・指定避難所（国土地理院）。同じ区市町村の同じ名前の施設は 1 行にまとめ、kind は「指定緊急避難場所・指定避難所」のように並べる。区市町村は住所から引き、共通IDの市区町村と合う行だけ（隣の県にある施設は落とす）。lat, lon は 1km メッシュのためだけに持ち、画面には出さない |
 | `bus_stops.parquet` | name, operator, muni_codes, cities, lat, lon, mesh_1km | 1都3県のバス停留所（国土数値情報 P11、令和4年度版）。operator は事業者名（コミュニティバスは自治体名）。区市町村の属性はないので、国土数値情報「行政区域（N03）」の境界で点が入る区市町村を引いて muni_codes・cities（リスト）に入れる。境界に入らないとき（N03 がない、海沿いなど）は、1km メッシュにかかる区市町村をすべて候補にする（メッシュだけだと都区部では 4 割が 2 つ以上になる）。2026-11-12 の実行で 43,977 行、候補が 2 つ以上のものは 1 行 |
+| `school_districts.parquet` | kind, school_code, name, muni_code, city, meshes, terms, note | 1都3県の公立の小学校区・中学校区（国土数値情報 A27・A32、令和3年度版）。kind は小学校・中学校。meshes は学区の多角形にかかる 1km メッシュ（リスト）。terms は自治体ごとの利用条件（オープンデータ公開・商用利用不可・条件公開）、note は特記条件の原文。「再配布・再利用不可」の自治体は入れない。政令市は行政区域（N03）の境界で区を引く。2026-11-12 の実行で 5,136 行（242 区市町村） |
 | `corporations.sqlite` | corporations(corporate_number, name, normalized_name, furigana, pref_code)、meta(key, value) | 1都3県に本店がある法人（国税庁「法人番号公表サイト」の全件データ。最新履歴で、閉鎖と検索対象除外を除く）。normalized_name に索引。meta の as_of がデータの時点。本店所在地は入れない。約 192 万行、約 230MB。api はメモリに載せず、引くたびに読み取り専用で開く |
 | `schools.parquet` | school_code, kind, name, address, postal_code, muni_code, city | 1都3県の大学・短期大学・高等専門学校・高等学校・中等教育学校（文部科学省「学校コード」、廃止を除く）。大学は本部の所在地だけ |
 

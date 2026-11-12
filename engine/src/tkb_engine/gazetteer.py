@@ -133,6 +133,9 @@ class Gazetteer:
     # 国土数値情報のバス停留所（令和4年度版）。{"name", "operator", "cities"（1km メッシュに
     # かかる区市町村の候補）, ...}。表がなければ空
     bus_stops: list[dict[str, Any]] = field(default_factory=list)
+    # 国土数値情報の小学校区・中学校区（令和3年度版）。{"kind"（小学校・中学校）, "name", "city",
+    # "terms"（自治体ごとの利用条件）, "note"（条件の原文）}。表がなければ空
+    school_districts: list[dict[str, Any]] = field(default_factory=list)
     # 法人番号の公表データの SQLite（data-prep の corporations.sqlite）。行はメモリに載せず、
     # 引くたびに読み取り専用で開く。なければ None
     corporations_path: Path | None = None
@@ -150,6 +153,9 @@ class Gazetteer:
             schools=_optional_table(data_dir / "schools.parquet"),
             shelters=_optional_table(data_dir / "shelters.parquet", SHELTER_COLUMNS),
             bus_stops=_optional_table(data_dir / "bus_stops.parquet", BUS_STOP_COLUMNS),
+            school_districts=_optional_table(
+                data_dir / "school_districts.parquet", SCHOOL_DISTRICT_COLUMNS
+            ),
             corporations_path=(
                 data_dir / "corporations.sqlite"
                 if (data_dir / "corporations.sqlite").is_file()
@@ -236,6 +242,18 @@ class Gazetteer:
             return {}
         name = max(found, key=len)
         return {name: self._bus_stops_by_name[name]}
+
+    @functools.cached_property
+    def _districts_by_name(self) -> dict[str, list[dict[str, Any]]]:
+        by_name: dict[str, list[dict[str, Any]]] = {}
+        for row in self.school_districts:
+            by_name.setdefault(_school_key(str(row["name"])), []).append(row)
+        return by_name
+
+    def districts_of_school(self, name: str) -> list[dict[str, Any]]:
+        """学校名（「文京区立根津小学校」「根津小」も）の学区の行。同じ名前の学校がほかの
+        区市町村にもあれば、その行もすべて入る（使う側で競合として捨てる）。"""
+        return self._districts_by_name.get(_school_key(name), [])
 
     def corporations_named(self, name: str) -> list[tuple[str, str]]:
         """正規化した名前が一致する法人の (法人番号, 商号)。表がなければ空。部分一致はしない。"""
@@ -388,6 +406,16 @@ def _optional_table(path: Path, columns: list[str] | None = None) -> list[dict[s
 # 公開データの表から読む列（推定に使うものだけ）
 SHELTER_COLUMNS = ["name", "kind", "city"]
 BUS_STOP_COLUMNS = ["name", "operator", "cities"]
+SCHOOL_DISTRICT_COLUMNS = ["kind", "name", "city", "terms", "note"]
+
+
+def _school_key(name: str) -> str:
+    """学校名を引くための形。「〇〇区立」を落とし、「根津小」「根津中」は「〜学校」にそろえる。"""
+    key = _MUNICIPAL_PREFIX.sub("", _normalize_name(name))
+    if key.endswith(("小", "中")):
+        key += "学校"
+    return key
+
 
 # 同じ名前の駅をまとめるとき、中心からこれより離れた行があれば別の場所の駅とみなす
 STATION_SPREAD_KM = 3.0

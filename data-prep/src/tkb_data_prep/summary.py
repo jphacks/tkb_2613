@@ -8,6 +8,7 @@ from tkb_data_prep.corporations import BuildResult
 from tkb_data_prep.households import Household
 from tkb_data_prep.muni_mesh import MuniMesh
 from tkb_data_prep.postal import Postal
+from tkb_data_prep.school_districts import District
 from tkb_data_prep.schools import School
 from tkb_data_prep.shelters import Shelter
 from tkb_data_prep.stations import Station
@@ -24,6 +25,7 @@ class Tables:
     area_code_problems: list[Problem]
     schools: list[School]
     shelters: list[Shelter]
+    school_districts: list[District]
     bus_stops: list[BusStop]
     corporations: BuildResult
 
@@ -50,6 +52,8 @@ def report(t: Tables) -> list[str]:
         f"（2つ以上の区市町村にある名前 {_shared_names(t.shelters):,}）",
         f"bus_stops        {len(t.bus_stops):>9,} 行"
         f"（2つ以上の区市町村にかかる {sum(len(b.cities) > 1 for b in t.bus_stops):,}）",
+        f"school_districts {len(t.school_districts):>9,} 行"
+        f"（取り込んだ自治体 {len({d.muni_code for d in t.school_districts}):,}）",
         _corporations_line(t.corporations),
         "",
         "== 世帯数 ==",

@@ -89,6 +89,7 @@ def test_run_writes_every_table_and_reports_counts(tmp_path: Path) -> None:
         "households_500m.parquet",
         "muni_mesh.parquet",
         "postal.parquet",
+        "school_districts.parquet",
         "schools.parquet",
         "shelters.parquet",
         "stations.parquet",
@@ -97,6 +98,7 @@ def test_run_writes_every_table_and_reports_counts(tmp_path: Path) -> None:
     assert "shelters                 1 行" in text
     assert "corporations     作っていません" in text
     assert "bus_stops                0 行" in text
+    assert "school_districts         0 行" in text
     assert "世帯数の合計 70" in text
     assert "人口の合計   130" in text
     assert "世帯数の行がない 1km メッシュ 4 / 5" in text
