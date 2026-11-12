@@ -28,6 +28,7 @@ from tkb_api.routes import (
     x,
 )
 from tkb_api.shares import ShareStore
+from tkb_api.x_budget import DailyResourceBudget
 
 
 class NoStoreMiddleware:
@@ -151,6 +152,7 @@ def create_app(
     app.include_router(x.router)
     app.state.x_sessions = x.XSessionStore(settings.session_ttl_minutes * 60)
     app.state.x_settings = settings
+    app.state.x_budget = DailyResourceBudget(settings.x_daily_resource_limit)
     app.include_router(draft_check.router)
 
     @app.get("/health")

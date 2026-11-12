@@ -13,6 +13,8 @@ from tkb_common.schemas import Post
 
 X_API = "https://api.x.com"
 MAX_POSTS = 30
+# GET /2/users/:id/tweets の max_results の下限
+MIN_PAGE_SIZE = 5
 
 
 class XPocError(Exception):
@@ -128,14 +130,14 @@ async def fetch_posts_for_owner(token: str, owner_id: str, limit: int = MAX_POST
 async def _fetch_posts(client: httpx.AsyncClient, owner_id: str, limit: int) -> list[Post]:
     posts: list[Post] = []
     # X は返されたリソースに課金する。本文なしや重複があっても読み取り件数を増やさない。
-    read_budget = max(5, limit)  # API の max_results は最低 5
+    read_budget = max(MIN_PAGE_SIZE, limit)
     resources_read = 0
     seen_ids: set[str] = set()
     seen_cursors: set[str] = set()
     cursor: str | None = None
     while resources_read < read_budget:
         remaining = read_budget - resources_read
-        if remaining < 5:
+        if remaining < MIN_PAGE_SIZE:
             break
         params: dict[str, Any] = {
             "max_results": remaining,

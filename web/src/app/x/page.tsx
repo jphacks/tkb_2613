@@ -111,6 +111,7 @@ async function call(path: string, method: "GET" | "POST" | "DELETE" = "GET", bod
   if (!response.ok) {
     if (response.status === 403) throw new Error("実X連携は用途承認と安全設定の確認が完了するまで利用できません。");
     if (response.status === 401) throw new Error("Xにログインし直してください。");
+    if (response.status === 429) throw new Error("本日のXの取得上限に達しました。日付が変わってから（UTC）お試しください。");
     throw new Error("操作に失敗しました。再度お試しください。");
   }
   if (response.status === 204) return null;

@@ -50,6 +50,7 @@ test("認証失敗を画面で説明する", async ({ page }) => {
   const cases = [
     { status: 401, message: "Xにログインし直してください。" },
     { status: 403, message: "実X連携は用途承認と安全設定の確認が完了するまで利用できません。" },
+    { status: 429, message: "本日のXの取得上限に達しました。日付が変わってから（UTC）お試しください。" },
   ];
   for (const item of cases) {
     await page.route("**/api/x/diagnose", (route) => route.fulfill({ status: item.status, json: {} }), { times: 1 });
