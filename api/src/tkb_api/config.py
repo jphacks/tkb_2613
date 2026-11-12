@@ -89,8 +89,6 @@ class Settings(BaseSettings):
     x_paid_reads_approved: bool = False
     x_query_logs_redacted: bool = False
     x_mock_mode: bool = True
-    # 架空のX投稿だけを既存VLMへ送る実験経路。実X投稿は常にOllama経路のまま。
-    x_gpu_demo_enabled: bool = False
     x_max_posts: int = Field(default=30, ge=1, le=30)
 
 

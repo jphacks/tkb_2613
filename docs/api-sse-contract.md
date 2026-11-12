@@ -134,25 +134,26 @@ SSEブロックは `event: <name>\ndata: <JSON>\n\n`。JSONはUTF-8で送られ�
 
 これらはAGENTS.mdの目標やIssueの後続範囲であり、この文書の現行契約には含めない。
 
-## X 専用の読み取り診断（`poc/x-local-text`）
+## X 専用の公開情報チェック
 
-Bluesky の `/api/session`・`/api/diagnose`・`/api/simulate` とは独立した `/api/x/*`。X の OAuth と診断は専用の HttpOnly `x_tkb_session` Cookie（Path `/api/x`）を使う。X の実投稿は用途承認・費用承認・上流クエリログ対策の設定がそろうまで拒否する。実X投稿の本文は loopback の Ollama のみに送る。`X_GPU_DEMO_ENABLED=1` で許可した場合に限り、固定の架空X投稿を既存VLMへ送る別セッションを作れる。結果はプロセスメモリだけに置き、X 投稿の実削除・結果共有は行わない。X のセッションと認可開始の情報は、作るたびに期限切れを捨て、それぞれ500件を超えたら古い順に捨てる。
+Bluesky の `/api/session`・`/api/diagnose`・`/api/simulate`、Threadsの診断とは独立した `/api/x/*`。X の OAuth と結果は専用の HttpOnly `x_tkb_session` Cookie（Path `/api/x`）を使う。X の実投稿は用途承認・費用承認・上流クエリログ対策がそろうまで拒否する。本文にそのまま現れる地名・駅名・曜日・時刻・学校名だけをX専用の決定的な抽出器で集計し、既存のプロフィール推定・外部モデル・外部検索は呼ばない。結果はプロセスメモリだけに置き、実投稿の変更・削除・結果共有は行わない。
+
+`information` の1項目は `{"category":"station","value":"渋谷駅","count":2,"evidence":[{"post_id":"x:9001","quote":"渋谷駅"}, ...]}`。`category` は `place | station | weekday | time | school`。`quote` は必ず該当投稿本文の部分文字列で、`count` は同じ値を明記した投稿数（同一投稿内の反復は1件）とする。
 
 | メソッド・パス | 入力 | 応答・動作 |
 | --- | --- | --- |
-| `GET /api/x/config` | なし | `mock_enabled, gpu_demo_enabled, live_enabled, max_posts`。秘密設定は返さない。 |
+| `GET /api/x/config` | なし | `mock_enabled, live_enabled, max_posts`。秘密設定は返さない。 |
 | `POST /api/x/mock/session` | `{"consent":true}` | `X_MOCK_MODE=1` のときだけ架空アカウントのセッションを発行。 |
-| `POST /api/x/mock/gpu-session` | `{"consent":true}` | `X_MOCK_MODE=1` と `X_GPU_DEMO_ENABLED=1` のときだけ、固定の架空投稿をVLMで診断するセッションを発行。送信先は既存ガードを通す。X APIには接続しない。 |
 | `POST /api/x/start` | `{"consent":true}` | 用途・費用承認が有効なときだけ PKCE S256 の `authorize_url` と開始 Cookie を返す。 |
 | `GET /api/x/callback` | X の `state,code` と開始 Cookie | state/PKCE を照合し、トークン交換と本人確認の後 `/x` へ 303。 |
 | `GET /api/x/session` | X セッション Cookie | `username, mock`。未認証401。 |
 | `DELETE /api/x/session` | X セッション Cookie | セッション・結果をメモリから削除、204。 |
-| `POST /api/x/diagnose` | X セッション Cookie | `DiagnosisSnapshot` と `post_errors, elapsed_ms, mock`。抽出に失敗した投稿があっても全体は200で、失敗した投稿は `post_errors: [{"post_id","error"}]`（理由は固定の文言で本文を含まない）に入れ、その投稿の手がかりは空。実経路は本人の投稿を最大30リソース読み、Ollama本文抽出→既存推論。2回目はメモリの結果を返し再課金しない。モデルを呼ぶ経路（GPUデモ・実経路）は本体の診断と同じ同時実行枠（`MAX_CONCURRENT_DIAGNOSES`）を使い、埋まっていれば503 `busy`（`Retry-After` つき）。1日の回数には数えない。プリセットのモックは枠を使わない。 |
+| `POST /api/x/diagnose` | X セッション Cookie | `posts, information, post_errors, elapsed_ms, mock`。`post_errors` は読み取りに失敗した投稿の `{post_id, error}` で、`error` は固定文言（本文を含めない）。1件の失敗で全体は失敗にしない。実経路は本人投稿を最大30リソース読み、限定カテゴリだけをローカルで集計する。2回目はメモリの結果を返し再課金しない。 |
 | `GET /api/x/diagnosis` | X セッション Cookie | 直近の完了結果。なければ404。 |
-| `POST /api/x/simulate` | `{"delete":[診断済み投稿ID]}` | 既存 `Simulation`。X API・モデルは再呼出ししない。 |
-| `POST /api/x/rediagnose` | 同上 | 除外後の `posts, clues, conclusions, plan, mock` を再計算。X API・モデルは再呼出ししない。 |
+| `POST /api/x/simulate` | `{"delete":[診断済み投稿ID]}` | `delete, before, after, removed`。X APIは再呼出ししない。 |
+| `POST /api/x/rediagnose` | 同上 | 除外後の `posts, information, mock` を再集計。X APIは再呼出ししない。 |
 
-X の状態変更 API は同一オリジンの `Origin` ヘッダーを要求する。投稿IDは `x:<numeric id>`、画像は空配列。`clues` と `conclusions` の根拠番号は既存の形を再利用する。429は503と `Retry-After` を返す。詳細な設定・規約・費用は [x-poc.md](x-poc.md)。
+X の状態変更 API は同一オリジンの `Origin` ヘッダーを要求する。投稿IDは `x:<numeric id>`、画像は空配列。429は503と `Retry-After` を返す。詳細な設定・規約・費用は [x-poc.md](x-poc.md)。
 
 ### Threads 読み取り専用経路（実認証は既定無効）
 

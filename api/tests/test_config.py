@@ -52,3 +52,32 @@ def test_session_ttl_minutes_sets_the_session_store_lifetime(
     assert settings.session_ttl_minutes == 60
     assert app.state.sessions._ttl == 60 * 60
     app.state.sessions.close()
+
+
+def test_aws_env_example_keeps_live_x_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tkb_api.routes.x import _live_ready
+
+    env_file = Path(__file__).resolve().parents[2] / "infra" / "aws.env.example"
+    for line in env_file.read_text(encoding="utf-8").splitlines():
+        key, sep, value = line.partition("=")
+        if sep and key.startswith("X_") and not line.startswith("#"):
+            monkeypatch.setenv(key, value)
+
+    settings = Settings()
+
+    assert settings.x_use_case_approved is False
+    assert settings.x_paid_reads_approved is False
+    assert settings.x_mock_mode is True
+    assert _live_ready(settings) is False
+
+
+def test_x_live_flags_default_to_off() -> None:
+    from tkb_api.routes.x import _live_ready
+
+    settings = Settings(_env_file=None)
+
+    assert settings.x_use_case_approved is False
+    assert settings.x_paid_reads_approved is False
+    assert settings.x_query_logs_redacted is False
+    assert settings.x_mock_mode is True
+    assert _live_ready(settings) is False
