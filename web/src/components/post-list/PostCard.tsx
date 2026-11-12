@@ -18,6 +18,17 @@ const TIME_FORMAT = new Intl.DateTimeFormat("ja-JP", {
   minute: "2-digit",
 });
 
+/** 英語表示（Threads 画面の審査用）。時刻は日本時間のまま、タイムゾーン名を添える */
+const TIME_FORMAT_EN = new Intl.DateTimeFormat("en-US", {
+  timeZone: "Asia/Tokyo",
+  month: "short",
+  day: "numeric",
+  weekday: "short",
+  hour: "numeric",
+  minute: "2-digit",
+  timeZoneName: "short",
+});
+
 function PostPhoto({ image, clues }: { image: PostImage; clues: readonly Clue[] }) {
   const [failed, setFailed] = useState(false);
   // 手がかりの位置は、api が解析した元の写真のピクセル座標。読み込んだ写真の実寸で割って重ねる
@@ -66,14 +77,14 @@ export interface PostClues {
 }
 
 /** 診断で読んだ投稿 1 件。本文・投稿時刻・写真と、取り出した手がかりを出す。 */
-export function PostCard({ post, found }: { post: Post; found?: PostClues }) {
+export function PostCard({ post, found, locale = "ja" }: { post: Post; found?: PostClues; locale?: "ja" | "en" }) {
   // 手がかりが届いた瞬間にクラスが付き、そのとき 1 回だけ揺れる
   const clues = found?.clues ?? [];
   const hit = clues.length > 0;
   return (
     <article className={`space-y-3 border-b border-dashed border-ink/25 pb-5 ${hit ? "clue-hit" : ""}`}>
       <time dateTime={post.created_at} className="block text-xs tracking-widest text-ink/60">
-        {TIME_FORMAT.format(new Date(post.created_at))}
+        {(locale === "en" ? TIME_FORMAT_EN : TIME_FORMAT).format(new Date(post.created_at))}
       </time>
       {post.text && <p className="whitespace-pre-wrap">{post.text}</p>}
       {post.images.length > 0 && (

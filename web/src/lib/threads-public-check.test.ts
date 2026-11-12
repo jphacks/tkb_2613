@@ -16,6 +16,7 @@ describe("checkThreadsPublicText", () => {
 
     expect(finding).toEqual({
       postId: "threads:1",
+      kinds: ["url", "email", "phone", "handle"],
       labels: [
         "URLらしき文字列",
         "メールアドレスらしき文字列",
@@ -27,7 +28,7 @@ describe("checkThreadsPublicText", () => {
 
   it("does not infer personal information from ordinary text", () => {
     expect(checkThreadsPublicText([post("threads:2", "今日は公園へ行きました")])).toEqual([
-      { postId: "threads:2", labels: [] },
+      { postId: "threads:2", kinds: [], labels: [] },
     ]);
   });
 

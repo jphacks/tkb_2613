@@ -16,6 +16,25 @@ test("審査フロー：本人投稿の一覧・詳細とAIを使わないセル
   await expect(page.getByRole("button", { name: "架空のThreads投稿で試す" })).toBeVisible();
 });
 
+test("英語表示：審査フローを英語のまま通し、再読み込みしても英語が保たれる", async ({ page }) => {
+  await page.goto("/threads?lang=en");
+  await expect(page.getByRole("heading", { name: "Miitsuketa for Threads" })).toBeVisible();
+  await page.getByRole("checkbox", { name: /I agree that this app retrieves my own Threads post IDs/ }).check();
+  await page.getByRole("button", { name: "Try with fictional Threads posts" }).click();
+  await expect(page.getByText("架空のThreadsアカウント")).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Review my posts" })).toBeVisible();
+  await page.getByRole("button", { name: "Review my posts" }).click();
+  await expect(page.getByText(/Retrieved 2 of your own posts\./)).toBeVisible();
+  await expect(page.getByText("毎週火曜はジムに行く")).toBeVisible();
+  await page.getByText("Retrieved data details").first().click();
+  await expect(page.getByText("Post ID:").first()).toBeVisible();
+  await page.getByRole("button", { name: "Check visible public information" }).click();
+  await expect(page.getByRole("status")).toContainText("not an AI diagnosis");
+  await page.getByRole("button", { name: "Log out" }).click();
+  await expect(page.getByRole("button", { name: "Try with fictional Threads posts" })).toBeVisible();
+});
+
 test("任意機能：合成Threads投稿をAI診断し、根拠を見て仮除外・再診断する", async ({ page }) => {
   await page.goto("/threads");
   await expect(page.getByRole("heading", { name: "Threadsで、みーつけた" })).toBeVisible();
