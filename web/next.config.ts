@@ -7,6 +7,9 @@ export const CONTENT_SECURITY_POLICY = "frame-ancestors 'none'; object-src 'none
 const nextConfig: NextConfig = {
   // 応答に x-powered-by: Next.js を付けない（使っている仕組みを外に出さない）
   poweredByHeader: false,
+  // 開発サーバーの受信ログに X OAuth のコールバックのクエリ（code・state）を出さない。
+  // 本番ビルドは受信ログを出さず、中継失敗のログは app/api/x/callback/route.ts で抑える
+  logging: { incomingRequests: { ignore: [/\/api\/x\/callback/] } },
   async headers() {
     return [{ source: "/:path*", headers: [{ key: "Content-Security-Policy", value: CONTENT_SECURITY_POLICY }] }];
   },

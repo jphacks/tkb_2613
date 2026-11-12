@@ -6,7 +6,17 @@
 
 X専用の公開情報チェックは、投稿本文にそのまま現れる `place`（都道府県・市区町村）、`station`、`weekday`、`time`、`school` だけを保守的な正規表現で抽出する。値ごとに根拠投稿と記載件数を返し、仮除外後はメモリ内の投稿から再集計する。Bluesky・Threadsの `Clue`、`Conclusion`、推論ルール、モデルは呼ばない。
 
-X専用セッション、OAuth state、PKCE verifier、アクセストークン、投稿、結果はAPIプロセスのメモリだけに置く。CookieにはランダムなセッションIDまたは認可開始nonceだけを入れ、`HttpOnly`、`SameSite=Lax`、X API専用Pathを設定する。セッションは既定30分で失効し、ログアウト時には投稿・結果・トークンを即座に破棄する。コールバックの `code` と `state` はuvicornアクセスログから伏せる。上流プロキシでもクエリ文字列を記録しない設定が必要。
+X専用セッション、OAuth state、PKCE verifier、アクセストークン、投稿、結果はAPIプロセスのメモリだけに置く。CookieにはランダムなセッションIDまたは認可開始nonceだけを入れ、`HttpOnly`、`SameSite=Lax`、X API専用Pathを設定する。セッションは既定30分で失効し、ログアウト時には投稿・結果・トークンを即座に破棄する。コールバックの `code` と `state` は次のとおりログから伏せる。
+
+| 経路 | 対応 | 確認 |
+| --- | --- | --- |
+| uvicorn のアクセスログ | `XCallbackAccessFilter` が `/api/x` 配下のクエリを丸ごと落とす（末尾スラッシュ・`//`・%エンコードの変形も） | `api/tests/test_x_log_redaction.py`：実 uvicorn に偽のコールバックを送り、403・400・502・500 のどれでもサーバー側のログと標準出力に残らない |
+| FastAPI のエラーログ | 例外の文言・トレースバックにクエリは入らない | 同上（予期しない例外の 500 を含む） |
+| Next.js の中継 | `/api/x/callback` だけ rewrites を使わず `app/api/x/callback/route.ts` で中継する。rewrites は api に届かないとき `Failed to proxy <URL>` とクエリごと出すため | `route.test.ts` と `scripts/check-x-callback-log-redaction.mjs`（本番ビルドで api 正常・500・停止の3通り。CI で実行） |
+| Next.js 開発サーバーの受信ログ | `logging.incomingRequests.ignore` で除く（本番は受信ログを出さない） | — |
+| CloudFront | 2026-11-12 時点でアクセスログ・リアルタイムログとも未設定。有効にすると `cs-uri-query` にクエリが入るので、有効にする場合はクエリの項目を外す | Terraform の状態で確認 |
+
+`X_QUERY_LOGS_REDACTED=1` は、本番の経路（CloudFront の設定を含む）を承認日に見直してから設定する。
 
 `X_MOCK_MODE=1`（既定）は固定の架空投稿だけを使い、X APIやモデルへ接続しない。実OAuthと実投稿取得は次の全条件を満たすときだけ開始できる。
 
