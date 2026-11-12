@@ -1,11 +1,15 @@
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Self
+from urllib.parse import urlparse
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from tkb_api.limits import PublicWindow
+
+# 偽の X API を許す手元のホスト
+LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
 
 class Settings(BaseSettings):
@@ -93,6 +97,31 @@ class Settings(BaseSettings):
     # X API で1日（UTC）に読んでよいリソース数の上限。超えたら X を呼ばずに断る。
     # 既定は本人確認1件と投稿30件の1回分に少し余裕を足した数。0 なら実取得をすべて断る
     x_daily_resource_limit: int = Field(default=40, ge=0, le=10000)
+    # E2E テスト専用：偽の X API の向き先（例 http://127.0.0.1:4010）。空なら本物の https://api.x.com。
+    # 手元の http の loopback だけを許し、COOKIE_SECURE=1 や公開オリジンが loopback でない設定
+    # （本番）では起動時に失敗させる（_fake_x_api_only_in_local_tests）
+    x_fake_api_base_url: str = ""
+
+    @model_validator(mode="after")
+    def _fake_x_api_only_in_local_tests(self) -> Self:
+        if not self.x_fake_api_base_url:
+            return self
+        fake = urlparse(self.x_fake_api_base_url)
+        public = urlparse(self.x_public_origin)
+        if (
+            fake.scheme != "http"
+            or fake.hostname not in LOOPBACK_HOSTS
+            or fake.path not in ("", "/")
+            or fake.query
+            or self.cookie_secure
+            or public.scheme != "http"
+            or public.hostname not in LOOPBACK_HOSTS
+        ):
+            raise ValueError(
+                "X_FAKE_API_BASE_URL は手元の E2E テスト専用です"
+                "（http の loopback、COOKIE_SECURE=0）"
+            )
+        return self
 
 
 @lru_cache

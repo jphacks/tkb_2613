@@ -66,6 +66,12 @@ Native AppからWeb Appへ変更しても、Authorization Code + PKCE、S256 cha
 
 同じ診断結果はセッションメモリから返し、投稿取得を繰り返さない。
 
+### 偽の X API での E2E
+
+`pnpm -C web test:e2e:x-fake`（CI の「X 偽API E2E」ジョブ）は、`web/e2e/fake-x/server.mjs` の偽の X（127.0.0.1:4010）、承認フラグをすべて1にした api（127.0.0.1:8011）、画面（localhost:3100）を立て、OAuth → 投稿の取得（`X_MAX_POSTS=5`）→ 集計 → 仮除外・再集計 → ログアウトでの破棄を Playwright で通す。X の認可画面は Playwright が偽の X へ差し替え、それ以外の x.com への通信は止めて0件であることを確かめる。偽の X は PKCE（S256）・Basic 認証・redirect_uri・30秒の認可コード・Bearer トークンを検証し、応答の形は公式ドキュメントの例（`/2/users/me`、ページ送りの `meta`）に合わせる。
+
+api の向き先は `X_FAKE_API_BASE_URL` で変えるが、http の loopback で `COOKIE_SECURE=0`、`X_PUBLIC_ORIGIN` も loopback のときだけ起動でき、それ以外（本番の設定例を含む）では起動時に失敗する（`api/tests/test_x_fake_api_guard.py`）。偽の X は本番イメージに入れない（`web/.dockerignore`）。
+
 ### 1日の取得件数の上限（`X_DAILY_RESOURCE_LIMIT`）
 
 既定は40。X を呼ぶ前に、読む可能性のある最大リソース数を予約する（OAuth 後の `/2/users/me` は1、投稿一覧は `max(5, X_MAX_POSTS)`）。上限を超えるなら X を呼ばずに429（`Retry-After` は次の UTC 0時まで）で断る。`/start` の時点で「本人確認＋1回の投稿取得」の分が残っていなければ認可画面へ進ませない。実際に返った件数が少なくても返金せず、保守的に数える。0 にすると実取得をすべて断る。
