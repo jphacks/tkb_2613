@@ -84,7 +84,10 @@ jobs:
           cache-dependency-path: web/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install --with-deps chromium
-      - run: pnpm test:e2e:x-fake
+      - run: pnpm test:e2e:x-fake 2>&1 | tee x-fake-e2e.log
+        shell: bash -o pipefail {0}
+      # api・画面のログに X OAuth のコールバックのクエリが残っていないこと
+      - run: node scripts/check-x-e2e-log.mjs x-fake-e2e.log
 
   docker:
     name: Docker イメージのビルド
