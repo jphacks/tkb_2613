@@ -6,7 +6,9 @@ Threads の本人投稿の本文と投稿時刻を読む。画像は診断しな
 
 ## 確認済みの公開経路
 
-2026-11-11 に AWS の CloudFront 配信 `d2qyby5y8mc03f.cloudfront.net` を読み取り確認した。登録する URL は **`https://d2qyby5y8mc03f.cloudfront.net/api/threads/callback`**。`/api/*` は HTTPS 強制、非キャッシュ、全 viewer ヘッダー・Cookie・クエリを VPC origin の web:3000 に転送し、Next.js の rewrite が api:8001 に中継する。CloudFront 標準アクセスログは無効、FastAPI の本番コンテナは `--no-access-log` で動く。現行 WAF はリクエストサンプリングが有効で、認可コードを含むクエリがサンプルに残る可能性がある。`infra/terraform/edge.tf` にサンプリングを無効化する差分を用意したが、AWS にはまだ適用していない。Next.js とコンテナのリクエスト時ログも配備後の実測が必要。2026-11-11 現在の公開 `/threads` は 404（このブランチは未配備）。
+登録する URL は **`https://d2qyby5y8mc03f.cloudfront.net/api/threads/callback`**。`/api/*` は HTTPS 強制、非キャッシュ、全 viewer ヘッダー・Cookie・クエリを VPC origin の web:3000 に転送し、Next.js の rewrite が api:8001 に中継する。CloudFront 標準アクセスログは無効、FastAPI の本番コンテナは `--no-access-log` で動く。Terraformと保存済みstateではWAFのリクエストサンプリングは無効で、保存ログの出力先も作らない。Next.jsとコンテナのリクエスト時ログに秘密情報がないことは、実投稿の通し試験で引き続き確認する。
+
+2026-11-12 に公開URLを外部から再確認し、`/threads` と `/api/threads/config` は200、設定応答は `live_enabled: true`、`mock_enabled: false`、`max_posts: 30` だった。`/privacy` と `/terms` も認証なしで200。App Review用の公開文書と残る確認事項は [threads-app-review.md](threads-app-review.md) にまとめる。
 
 ## Meta 管理画面で必要な設定
 
@@ -19,8 +21,8 @@ Threads の本人投稿の本文と投稿時刻を読む。画像は診断しな
 
 ## AWS 側の最小設定差分
 
-`infra/aws.env.example` に必要なキーを追加した。実配備時に `THREADS_PUBLIC_ORIGIN=https://d2qyby5y8mc03f.cloudfront.net`、`THREADS_CALLBACK_URL=https://d2qyby5y8mc03f.cloudfront.net/api/threads/callback`、Threads 専用 App ID/Secret、`COOKIE_SECURE=1` を設定する。WAF サンプリング停止の Terraform 差分をレビューして適用し、ログを検証するまで `THREADS_ENABLED` と `THREADS_QUERY_LOGS_REDACTED` は 0 のまま。実診断には API と同じホストから Ollama の `qwen3:4b-instruct` が必要。AWS の既存 compose に Ollama はないため、CPU 経路を配備するか、チーム管理 GPU の送信先・アクセス制御・ログ・保存条件を確認して別途実装する。GPU は承認前に起動しない。
+`infra/aws.env.example` に必要なキーを記載している。本番では `THREADS_PUBLIC_ORIGIN=https://d2qyby5y8mc03f.cloudfront.net`、`THREADS_CALLBACK_URL=https://d2qyby5y8mc03f.cloudfront.net/api/threads/callback`、Threads専用App ID/Secret、`COOKIE_SECURE=1` が必要。公開応答上は実Threadsログインが有効だが、秘密値そのものは表示・記録しない。実診断にはAPIから到達できるOllamaの `qwen3:4b-instruct` が必要である。本番Ollamaの実際の実行場所、アクセス制御、本文・応答ログの設定は、審査提出前にEC2上で読み取り確認する。
 
 ## 検証状況
 
-既存テスタートークンで `/me` と本人の本文付き投稿3件を取得でき、ローカル CPU/Ollama で手がかり3件・推定1件を抽出できた（本文、トークン、推定値は出力していない）。合成投稿のブラウザーE2Eと、OAuth の state・Cookie・一回限りのコールバックの API テストは成功した。2026-11-11 にテスターから Meta のコールバック設定を保存できたとの報告を受けた。登録値の読み取り確認と、実 Meta の認可画面・コード交換、公開 CloudFront 経由のコールバックは、このブランチの配備前なので未検証。
+既存テスタートークンで `/me` と本人の本文付き投稿3件を取得でき、ローカル CPU/Ollama で手がかり3件・推定1件を抽出できた（本文、トークン、推定値は出力していない）。合成投稿のブラウザーE2Eと、OAuth の state・Cookie・一回限りのコールバックの API テストは成功した。2026-11-11 にテスターから Meta のコールバック設定を保存できたとの報告を受けた。2026-11-12に公開画面とlive設定は確認したが、審査員用アカウントでの実Meta認可→投稿取得→Ollama診断→ログアウト、公開CloudFront経由の認証解除・データ削除callback、実リクエストのログ確認は未検証。
