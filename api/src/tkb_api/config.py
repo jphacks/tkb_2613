@@ -90,6 +90,9 @@ class Settings(BaseSettings):
     x_query_logs_redacted: bool = False
     x_mock_mode: bool = True
     x_max_posts: int = Field(default=30, ge=1, le=30)
+    # X API で1日（UTC）に読んでよいリソース数の上限。超えたら X を呼ばずに断る。
+    # 既定は本人確認1件と投稿30件の1回分に少し余裕を足した数。0 なら実取得をすべて断る
+    x_daily_resource_limit: int = Field(default=40, ge=0, le=10000)
 
 
 @lru_cache

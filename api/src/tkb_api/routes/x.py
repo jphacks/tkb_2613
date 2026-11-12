@@ -19,6 +19,12 @@ from pydantic import BaseModel, ConfigDict
 from tkb_api.config import Settings
 from tkb_api.origin import check_origin
 from tkb_api.schemas import SimulateRequest
+from tkb_api.x_budget import (
+    USER_READ_RESOURCES,
+    DailyResourceBudget,
+    one_check_cost,
+    posts_read_cost,
+)
 from tkb_api.x_poc import XPocError, fetch_posts_for_owner, get_my_user, to_post
 from tkb_api.x_public_info import public_information_json, public_information_report
 from tkb_common.schemas import Post
@@ -161,6 +167,30 @@ def _store(request: Request) -> XSessionStore:
     return store
 
 
+def _budget(request: Request) -> DailyResourceBudget:
+    budget: DailyResourceBudget = request.app.state.x_budget
+    return budget
+
+
+def _seconds_until_utc_midnight() -> int:
+    now = time.time()
+    return max(60, 86400 - int(now) % 86400)
+
+
+def _daily_limit_reached() -> HTTPException:
+    return HTTPException(
+        status.HTTP_429_TOO_MANY_REQUESTS,
+        "本日の X の取得上限に達しました",
+        headers={"Retry-After": str(_seconds_until_utc_midnight())},
+    )
+
+
+def _reserve(request: Request, amount: int) -> None:
+    """X を呼ぶ前に、読む可能性のある最大リソース数を予約する。足りなければ X を呼ばない。"""
+    if not _budget(request).reserve(amount):
+        raise _daily_limit_reached()
+
+
 def _origin(request: Request) -> None:
     check_origin(request, [_settings(request).x_public_origin])
 
@@ -230,6 +260,9 @@ async def start(body: StartRequest, request: Request, response: Response) -> dic
     _require_live(settings)
     if not body.consent:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "診断への同意が必要です")
+    # 本人確認と1回の投稿取得の分が残っていなければ、X の認可画面へ進ませない
+    if not _budget(request).can_afford(one_check_cost(settings.x_max_posts)):
+        raise _daily_limit_reached()
     callback = urlparse(settings.x_callback_url)
     public = urlparse(settings.x_public_origin)
     if (
@@ -317,6 +350,7 @@ async def callback(request: Request, state: str = "", code: str = "") -> Respons
     if not verifier or not code:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "X の認証状態が一致しません")
     token = await _exchange(code, verifier, settings)
+    _reserve(request, USER_READ_RESOURCES)
     try:
         owner_id, username = await get_my_user(token)
     except XPocError as exc:
@@ -395,6 +429,7 @@ async def diagnose(request: Request) -> dict[str, Any]:
             if current.fetched:
                 posts = current.posts
             else:
+                _reserve(request, posts_read_cost(settings.x_max_posts))
                 try:
                     posts = await fetch_posts_for_owner(
                         current.token, current.owner_id, settings.x_max_posts
