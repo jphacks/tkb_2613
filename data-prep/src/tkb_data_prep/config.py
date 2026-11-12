@@ -41,6 +41,11 @@ class Paths:
         return self.raw_dir / "mext"
 
     @property
+    def houjin_dir(self) -> Path:
+        """法人番号公表サイトの全件データ（ブラウザで取得して手で置く）。"""
+        return self.raw_dir / "houjin"
+
+    @property
     def gsi_dir(self) -> Path:
         return self.raw_dir / "gsi"
 

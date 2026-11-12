@@ -11,13 +11,16 @@ import functools
 import json
 import math
 import re
+import sqlite3
 import unicodedata
+from contextlib import closing
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import pyarrow.parquet as pq
 
+from tkb_common.corporate_name import normalize_corporate_name
 from tkb_common.schemas import Clue, ClueType
 
 DATA_DIR = Path(__file__).resolve().parents[3] / "data" / "processed"
@@ -127,6 +130,9 @@ class Gazetteer:
     # 国土地理院の指定緊急避難場所・指定避難所。{"name", "kind", "muni_code", "city", ...}。
     # 表がなければ空
     shelters: list[dict[str, Any]] = field(default_factory=list)
+    # 法人番号の公表データの SQLite（data-prep の corporations.sqlite）。行はメモリに載せず、
+    # 引くたびに読み取り専用で開く。なければ None
+    corporations_path: Path | None = None
 
     @classmethod
     def load(cls, data_dir: Path = DATA_DIR, knowledge: Knowledge | None = None) -> "Gazetteer":
@@ -140,6 +146,11 @@ class Gazetteer:
             knowledge=Knowledge.load() if knowledge is None else knowledge,
             schools=_optional_table(data_dir / "schools.parquet"),
             shelters=_optional_table(data_dir / "shelters.parquet"),
+            corporations_path=(
+                data_dir / "corporations.sqlite"
+                if (data_dir / "corporations.sqlite").is_file()
+                else None
+            ),
         )
 
     def city_munis(self, city: str) -> set[str]:
@@ -202,6 +213,30 @@ class Gazetteer:
         for row in self.shelters:
             by_core.setdefault(shelter_core_name(str(row["name"])), []).append(row)
         return by_core
+
+    def corporations_named(self, name: str) -> list[tuple[str, str]]:
+        """正規化した名前が一致する法人の (法人番号, 商号)。表がなければ空。部分一致はしない。"""
+        normalized = normalize_corporate_name(name)
+        if not normalized:
+            return []
+        rows = self._query_corporations(
+            "SELECT DISTINCT corporate_number, name FROM corporations WHERE normalized_name = ?",
+            (normalized,),
+        )
+        return [(str(number), str(legal)) for number, legal in rows]
+
+    def corporations_as_of(self) -> str:
+        """法人番号の表の時点（「2026-10-30」）。わからなければ空。"""
+        rows = self._query_corporations("SELECT value FROM meta WHERE key = 'as_of'", ())
+        return str(rows[0][0]) if rows else ""
+
+    def _query_corporations(self, sql: str, params: tuple[str, ...]) -> list[tuple[Any, ...]]:
+        if self.corporations_path is None:
+            return []
+        # 本番では読み取り専用でマウントされるので、immutable で開く（ロックのファイルを作らない）
+        uri = f"{self.corporations_path.resolve().as_uri()}?mode=ro&immutable=1"
+        with closing(sqlite3.connect(uri, uri=True)) as db:
+            return db.execute(sql, params).fetchall()
 
     def postal_rows(self, code: str) -> list[dict[str, str]]:
         """ハイフンなし7桁の郵便番号の行。"""

@@ -25,7 +25,7 @@ from tkb_common.schemas import (
 from tkb_engine.cross_post_facts import CrossPostFact, FactRole
 from tkb_engine.cross_post_facts import forbidden_context as _forbidden_context
 from tkb_engine.gazetteer import Gazetteer
-from tkb_engine.open_data import shelter_home_facts
+from tkb_engine.open_data import infer_registry_employer_claim, shelter_home_facts
 
 __all__ = ["CrossPostFact", "FactRole"]
 
@@ -391,7 +391,13 @@ def infer_owner_claims_with_web(
         gazetteer,
         diagnosis_date=diagnosis_date,
     )
-    web_claim = infer_web_employer_claim(posts, web_facts, owner_profile_text)
+    # 手元の法人番号の表で確かめられたときは、そちらを使う（公開Webの WebFact の経路の代わり）
+    registry_claim = (
+        infer_registry_employer_claim(posts, owner_profile_text, gazetteer)
+        if gazetteer is not None
+        else None
+    )
+    web_claim = registry_claim or infer_web_employer_claim(posts, web_facts, owner_profile_text)
     if web_claim is None:
         return claims
     direct = next(
