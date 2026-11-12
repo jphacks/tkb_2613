@@ -24,7 +24,17 @@ e-Stat はコマンドで取得できないので、ブラウザで落として�
 
 `3036` `3641` `3653` `3741` `3841` `3942` `4040` `4042` `4142` `4440` `4540` `4739` `4740` `4839` `4939` `5038` `5039` `5139`
 
-### 2. 取得と変換
+### 2. 法人番号の全件データを置く（任意、ブラウザで）
+
+勤務先の正式名称を確かめる表（`corporations.sqlite`）に使う。置かなければ、この表だけ作らずに進む。
+
+1. 国税庁「法人番号公表サイト」の [全件データのダウンロード](https://www.houjin-bangou.nta.go.jp/download/zenken/) を開く
+2. 「CSV形式・Shift-JIS」の行から、埼玉県・千葉県・東京都（2つに分かれている）・神奈川県の zip を落とす
+3. 展開せずに `data-prep/raw/houjin/` に置く（例：`13_tokyo_all_20261030_01.zip`）。同じ日付の版をそろえる
+
+月末ごとに新しい版が出る。入れ替えるときは古い zip を消してから置き、`make data` をやり直す。
+
+### 3. 取得と変換
 
 ```bash
 make data
@@ -64,6 +74,7 @@ area_codes             276 行（うち一部だけが対象 47）
 | `stations.parquet` | station_name, line_name, operator, lat, lon, mesh_1km | 駅 × 路線ごとに 1 行。lat, lon はホームの線の中心。1都3県の 1km メッシュにある駅だけ |
 | `area_codes.parquet` | area_code, section_code, muni_code, partial, note | 市外局番（先頭の 0 付き）と番号区画コード、市区町村。一部だけが対象なら partial が true で、note に但し書き |
 | `shelters.parquet` | name, kind, muni_code, city, lat, lon, mesh_1km | 1都3県の指定緊急避難場所・指定避難所（国土地理院）。同じ区市町村の同じ名前の施設は 1 行にまとめ、kind は「指定緊急避難場所・指定避難所」のように並べる。区市町村は住所から引き、共通IDの市区町村と合う行だけ（隣の県にある施設は落とす）。lat, lon は 1km メッシュのためだけに持ち、画面には出さない |
+| `corporations.sqlite` | corporations(corporate_number, name, normalized_name, furigana, pref_code)、meta(key, value) | 1都3県に本店がある法人（国税庁「法人番号公表サイト」の全件データ。最新履歴で、閉鎖と検索対象除外を除く）。normalized_name に索引。meta の as_of がデータの時点。本店所在地は入れない。約 192 万行、約 230MB。api はメモリに載せず、引くたびに読み取り専用で開く |
 | `schools.parquet` | school_code, kind, name, address, postal_code, muni_code, city | 1都3県の大学・短期大学・高等専門学校・高等学校・中等教育学校（文部科学省「学校コード」、廃止を除く）。大学は本部の所在地だけ |
 
 ### 知っておくこと

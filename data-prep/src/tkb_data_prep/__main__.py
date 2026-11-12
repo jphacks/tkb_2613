@@ -5,7 +5,16 @@ uv run python -m tkb_data_prep
 
 import sys
 
-from tkb_data_prep import area_codes, households, muni_mesh, postal, schools, shelters, stations
+from tkb_data_prep import (
+    area_codes,
+    corporations,
+    households,
+    muni_mesh,
+    postal,
+    schools,
+    shelters,
+    stations,
+)
 from tkb_data_prep.config import Paths
 from tkb_data_prep.errors import DataPrepError
 from tkb_data_prep.summary import Tables, report
@@ -29,6 +38,7 @@ def run(paths: Paths) -> Tables:
     area_codes.write(converted.rows, out / "area_codes.parquet")
     schools.write(school_rows, out / "schools.parquet")
     shelters.write(shelter_rows, out / "shelters.parquet")
+    corporation_result = corporations.build(paths, out / "corporations.sqlite")
 
     return Tables(
         muni_mesh=munis,
@@ -40,6 +50,7 @@ def run(paths: Paths) -> Tables:
         area_code_problems=converted.problems,
         schools=school_rows,
         shelters=shelter_rows,
+        corporations=corporation_result,
     )
 
 

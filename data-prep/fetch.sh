@@ -28,6 +28,16 @@ EOF
   exit 1
 fi
 
+if ! compgen -G "$RAW/houjin/*.zip" >/dev/null; then
+  cat >&2 <<EOF
+法人番号の全件データがないので、法人の表（corporations.sqlite）は作らずに進みます。
+  作るときは、法人番号公表サイトの「全件データ」から CSV 形式・Shift-JIS の
+  埼玉・千葉・東京・神奈川の zip を落とし、展開せずに
+  $RAW/houjin/
+  に置いてから、もう一度 make data を実行してください。手順は data-prep/README.md にあります。
+EOF
+fi
+
 fetch() {
   local url="$1" dest="$2"
   if [[ -s "$dest" ]]; then

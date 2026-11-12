@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 
 from tkb_data_prep.area_codes import AreaCode, Problem
+from tkb_data_prep.corporations import BuildResult
 from tkb_data_prep.households import Household
 from tkb_data_prep.muni_mesh import MuniMesh
 from tkb_data_prep.postal import Postal
@@ -22,6 +23,7 @@ class Tables:
     area_code_problems: list[Problem]
     schools: list[School]
     shelters: list[Shelter]
+    corporations: BuildResult
 
 
 def report(t: Tables) -> list[str]:
@@ -44,6 +46,7 @@ def report(t: Tables) -> list[str]:
         f"（市区町村が引けない {sum(not s.city for s in t.schools):,}）",
         f"shelters         {len(t.shelters):>9,} 行"
         f"（2つ以上の区市町村にある名前 {_shared_names(t.shelters):,}）",
+        _corporations_line(t.corporations),
         "",
         "== 世帯数 ==",
         f"世帯数の合計 {sum(h.households for h in t.households):,}",
@@ -66,3 +69,9 @@ def _shared_names(rows: list[Shelter]) -> int:
     for r in rows:
         munis.setdefault(r.name, set()).add(r.muni_code)
     return sum(len(m) > 1 for m in munis.values())
+
+
+def _corporations_line(result: BuildResult) -> str:
+    if not result.rows:
+        return "corporations     作っていません（raw/houjin/ に法人番号の zip がない）"
+    return f"corporations     {result.rows:>9,} 行（{result.as_of} 時点、SQLite）"

@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = "==3.13.*"
 
 [manifest]
@@ -792,12 +792,14 @@ source = { editable = "data-prep" }
 dependencies = [
     { name = "jismesh" },
     { name = "pyarrow" },
+    { name = "tkb-common" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "jismesh", specifier = ">=2.1" },
     { name = "pyarrow", specifier = ">=18.0" },
+    { name = "tkb-common", editable = "common" },
 ]
 
 [[package]]
