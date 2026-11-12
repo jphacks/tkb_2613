@@ -3,12 +3,13 @@
 import base64
 import hashlib
 import logging
+import re
 import secrets
 import time
 from dataclasses import dataclass, field
 from threading import RLock
 from typing import Any
-from urllib.parse import urlencode, urlparse
+from urllib.parse import unquote, urlencode, urlparse
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request, Response, status
@@ -31,16 +32,25 @@ MAX_PENDING = 500
 MAX_SESSIONS = 500
 
 
+def _is_x_path(path: str) -> bool:
+    """/api/x 配下か。末尾スラッシュ・重ねたスラッシュ・%エンコードの変形も含めて判定する。"""
+    plain = re.sub(r"/+", "/", unquote(path.split("?", 1)[0])).lower()
+    return plain == "/api/x" or plain.startswith("/api/x/")
+
+
 class XCallbackAccessFilter(logging.Filter):
-    """uvicorn のアクセスログから OAuth code と state のクエリを除く。"""
+    """uvicorn のアクセスログから、/api/x 配下のクエリ（OAuth の code・state）を除く。
+
+    X の API はクエリを使わないので、コールバック以外も含めて /api/x 配下はクエリを丸ごと落とす。
+    """
 
     def filter(self, record: logging.LogRecord) -> bool:
         args = record.args
         if isinstance(args, tuple) and len(args) >= 3:
             path = args[2]
-            if isinstance(path, str) and path.startswith("/api/x/callback?"):
+            if isinstance(path, str) and "?" in path and _is_x_path(path):
                 clean = list(args)
-                clean[2] = "/api/x/callback"
+                clean[2] = path.split("?", 1)[0]
                 record.args = tuple(clean)
         return True
 

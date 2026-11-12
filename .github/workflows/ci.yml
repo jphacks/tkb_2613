@@ -54,6 +54,8 @@ jobs:
       - run: pnpm test
       - run: pnpm build
       - run: node scripts/check-oauth-routes.mjs
+      # X OAuth のコールバックのクエリが Next.js のログに残らないこと（偽の api で確認、X には接続しない）
+      - run: node scripts/check-x-callback-log-redaction.mjs
 
   docker:
     name: Docker イメージのビルド
