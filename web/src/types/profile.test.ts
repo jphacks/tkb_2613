@@ -77,6 +77,13 @@ describe("isProfileItem", () => {
     expect(isProfileItem({ ...base, value: "青空社", status: "weak", evidence: [webEvidence] })).toBe(true);
     expect(isProfileItem({ ...base, value: "青空社", status: "weak", evidence: [{ ...webEvidence, post_id: "post" }] })).toBe(false);
   });
+  it("accepts open-data evidence only with a citation and no post reference", () => {
+    const cited = { post_id: null, clue_index: null, required: true, source: "open_data", excerpt: "架空の施設は架空の区の指定避難所（出典：国土地理院）" };
+    expect(isProfileItem({ ...base, value: "架空の区", status: "weak", evidence: [cited] })).toBe(true);
+    expect(isProfileItem({ ...base, value: "架空の区", status: "weak", evidence: [{ ...cited, post_id: "post" }] })).toBe(false);
+    expect(isProfileItem({ ...base, value: "架空の区", status: "weak", evidence: [{ ...cited, excerpt: "" }] })).toBe(false);
+    expect(isProfileItem({ ...base, value: "架空の区", status: "weak", evidence: [{ ...cited, web_fact_id: "w" }] })).toBe(false);
+  });
   it.each([
     ["unknown with a value", { ...base, value: "会社名", status: "unknown" }],
     ["negative clue index", { ...base, value: "会社名", status: "found", evidence: [{ ...base.evidence[0], clue_index: -1 }] }],

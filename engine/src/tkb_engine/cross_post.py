@@ -3,9 +3,7 @@
 import re
 import unicodedata
 from collections.abc import Sequence
-from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
-from enum import StrEnum
 from itertools import combinations
 
 from tkb_common.schemas import (
@@ -24,30 +22,12 @@ from tkb_common.schemas import (
     WebSourceKind,
     WebVerificationStatus,
 )
+from tkb_engine.cross_post_facts import CrossPostFact, FactRole
+from tkb_engine.cross_post_facts import forbidden_context as _forbidden_context
 from tkb_engine.gazetteer import Gazetteer
+from tkb_engine.open_data import shelter_home_facts
 
-
-class FactRole(StrEnum):
-    OWNER_RELATION = "owner_relation"
-    SPECIFIC_VALUE = "specific_value"
-    BRIDGE = "bridge"
-
-
-@dataclass(frozen=True)
-class CrossPostFact:
-    post_id: str | None
-    clue_index: int | None
-    role: FactRole
-    value: str
-    confidence: float
-    # An explicit phrase, identifier, or other observed bridge connecting this fact to the
-    # same owner-related entity. Do not use a mere visit, logo, or location coincidence.
-    bridge_id: str | None
-    owner_relation_explicit: bool = False
-    context: str = ""
-    excerpt: str = ""
-    related_evidence: tuple[ProfileEvidence, ...] = ()
-    source: str = "post_text"
+__all__ = ["CrossPostFact", "FactRole"]
 
 
 def infer_cross_post_claim(
@@ -434,29 +414,6 @@ def infer_owner_claims_with_web(
     return [merged if item is direct else item for item in claims]
 
 
-def _forbidden_context(context: str) -> bool:
-    value = context.casefold()
-    return any(
-        token in value
-        for token in (
-            "visitor",
-            "logo-only",
-            "visit-only",
-            "guest",
-            "訪問",
-            "見学",
-            "遊びに",
-            "客として",
-            "来場",
-            "参加者として",
-            "取引先",
-            "委託",
-            "外注",
-            "派遣先",
-        )
-    )
-
-
 def infer_owner_claims(
     posts: list[Post],
     clues: list[Clue],
@@ -589,6 +546,8 @@ def infer_owner_claims(
                             )
                         )
 
+    if gazetteer is not None:
+        facts.extend(shelter_home_facts(posts, clues, owner_profile_text, gazetteer))
     claims = [
         item
         for item in [infer_cross_post_claim(ProfileAttribute.RESIDENTIAL_AREA, facts)]

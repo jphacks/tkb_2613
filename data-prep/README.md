@@ -30,8 +30,8 @@ e-Stat はコマンドで取得できないので、ブラウザで落として�
 make data
 ```
 
-1. `fetch.sh` が郵便番号、市区町村別メッシュ・コード一覧、鉄道データを curl で `raw/` に取得する。取得済みのファイルは取り直さない（取り直すときは `raw/` の中の該当ファイルを消す）
-2. `python -m tkb_data_prep` が `data/processed/` に 5 つの表を書き出し、最後に件数を表示する
+1. `fetch.sh` が郵便番号、市区町村別メッシュ・コード一覧、鉄道データ、学校コード、避難所のデータを curl で `raw/` に取得する。取得済みのファイルは取り直さない（取り直すときは `raw/` の中の該当ファイルを消す）
+2. `python -m tkb_data_prep` が `data/processed/` に表を書き出し、最後に件数を表示する
 
 e-Stat の zip がないときは、置き場所を案内して止まる。
 
@@ -63,6 +63,7 @@ area_codes             276 行（うち一部だけが対象 47）
 | `postal.parquet` | postal_code, muni_code, pref, city, town | 郵便番号（7 桁）と市区町村。町域名は「以下に掲載がない場合」なども含めてそのまま |
 | `stations.parquet` | station_name, line_name, operator, lat, lon, mesh_1km | 駅 × 路線ごとに 1 行。lat, lon はホームの線の中心。1都3県の 1km メッシュにある駅だけ |
 | `area_codes.parquet` | area_code, section_code, muni_code, partial, note | 市外局番（先頭の 0 付き）と番号区画コード、市区町村。一部だけが対象なら partial が true で、note に但し書き |
+| `shelters.parquet` | name, kind, muni_code, city, lat, lon, mesh_1km | 1都3県の指定緊急避難場所・指定避難所（国土地理院）。同じ区市町村の同じ名前の施設は 1 行にまとめ、kind は「指定緊急避難場所・指定避難所」のように並べる。区市町村は住所から引き、共通IDの市区町村と合う行だけ（隣の県にある施設は落とす）。lat, lon は 1km メッシュのためだけに持ち、画面には出さない |
 | `schools.parquet` | school_code, kind, name, address, postal_code, muni_code, city | 1都3県の大学・短期大学・高等専門学校・高等学校・中等教育学校（文部科学省「学校コード」、廃止を除く）。大学は本部の所在地だけ |
 
 ### 知っておくこと
