@@ -40,7 +40,7 @@ e-Stat はコマンドで取得できないので、ブラウザで落として�
 make data
 ```
 
-1. `fetch.sh` が郵便番号、市区町村別メッシュ・コード一覧、鉄道データ、学校コード、避難所のデータを curl で `raw/` に取得する。取得済みのファイルは取り直さない（取り直すときは `raw/` の中の該当ファイルを消す）
+1. `fetch.sh` が郵便番号、市区町村別メッシュ・コード一覧、鉄道データ、学校コード、避難所、バス停留所のデータを curl で `raw/` に取得する。取得済みのファイルは取り直さない（取り直すときは `raw/` の中の該当ファイルを消す）
 2. `python -m tkb_data_prep` が `data/processed/` に表を書き出し、最後に件数を表示する
 
 e-Stat の zip がないときは、置き場所を案内して止まる。
@@ -74,6 +74,7 @@ area_codes             276 行（うち一部だけが対象 47）
 | `stations.parquet` | station_name, line_name, operator, lat, lon, mesh_1km | 駅 × 路線ごとに 1 行。lat, lon はホームの線の中心。1都3県の 1km メッシュにある駅だけ |
 | `area_codes.parquet` | area_code, section_code, muni_code, partial, note | 市外局番（先頭の 0 付き）と番号区画コード、市区町村。一部だけが対象なら partial が true で、note に但し書き |
 | `shelters.parquet` | name, kind, muni_code, city, lat, lon, mesh_1km | 1都3県の指定緊急避難場所・指定避難所（国土地理院）。同じ区市町村の同じ名前の施設は 1 行にまとめ、kind は「指定緊急避難場所・指定避難所」のように並べる。区市町村は住所から引き、共通IDの市区町村と合う行だけ（隣の県にある施設は落とす）。lat, lon は 1km メッシュのためだけに持ち、画面には出さない |
+| `bus_stops.parquet` | name, operator, muni_codes, cities, lat, lon, mesh_1km | 1都3県のバス停留所（国土数値情報 P11、令和4年度版）。operator は事業者名（コミュニティバスは自治体名）。区市町村の属性はないので、国土数値情報「行政区域（N03）」の境界で点が入る区市町村を引いて muni_codes・cities（リスト）に入れる。境界に入らないとき（N03 がない、海沿いなど）は、1km メッシュにかかる区市町村をすべて候補にする（メッシュだけだと都区部では 4 割が 2 つ以上になる）。2026-11-12 の実行で 43,977 行、候補が 2 つ以上のものは 1 行 |
 | `corporations.sqlite` | corporations(corporate_number, name, normalized_name, furigana, pref_code)、meta(key, value) | 1都3県に本店がある法人（国税庁「法人番号公表サイト」の全件データ。最新履歴で、閉鎖と検索対象除外を除く）。normalized_name に索引。meta の as_of がデータの時点。本店所在地は入れない。約 192 万行、約 230MB。api はメモリに載せず、引くたびに読み取り専用で開く |
 | `schools.parquet` | school_code, kind, name, address, postal_code, muni_code, city | 1都3県の大学・短期大学・高等専門学校・高等学校・中等教育学校（文部科学省「学校コード」、廃止を除く）。大学は本部の所在地だけ |
 
@@ -83,6 +84,7 @@ area_codes             276 行（うち一部だけが対象 47）
 - e-Stat の秘匿処理（`HTKSYORI` が 1 か 2 の行）でも、「人口（総数）」と「世帯総数」は秘匿されず、そのメッシュ自身の値が入っている（合算されるのは内訳の列だけ）。そのまま足しても二重に数えない
 - `muni_mesh` には市区町村コード `12999` `13199` `13999`（境界未定地域）がある。市区町村ではないので市外局番はない
 - 駅は国土数値情報の路線名（例：「4号線丸ノ内線」）。同じ駅コード・同じ路線が複数の線に分かれているものは 1 行にまとめ、線の長さで重み付けした中心を取る
+- 区市町村の境界（N03）の多角形の処理は shapely（data-prep だけの依存）。engine には多角形を渡さず、バス停の区市町村のような変換済みの値だけを渡す
 - メッシュのコードと緯度経度の変換は jismesh。配列を渡す版は要素が 1 つのとき numpy 2 で失敗するので、1 件ずつ呼んでいる
 
 ## 市外局番の表（manual/area_codes.csv）

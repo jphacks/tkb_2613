@@ -32,6 +32,14 @@ class Paths:
     def stations_zip(self) -> Path:
         return self.raw_dir / "ksj" / "N02-24_GML.zip"
 
+    def ksj_bus_stop_zip(self, pref_code: str) -> Path:
+        """国土数値情報「バス停留所（P11）」令和4年度版の都道府県ごとの zip。"""
+        return self.raw_dir / "ksj" / f"P11-22_{pref_code}_SHP.zip"
+
+    def ksj_boundary_zip(self, pref_code: str) -> Path:
+        """国土数値情報「行政区域（N03）」2026年1月1日時点の都道府県ごとの zip。"""
+        return self.raw_dir / "ksj" / f"N03-20260101_{pref_code}_GML.zip"
+
     @property
     def estat_dir(self) -> Path:
         return self.raw_dir / "estat"

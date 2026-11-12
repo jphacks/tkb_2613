@@ -14,6 +14,10 @@ MEXT_URLS=(
   "https://www.mext.go.jp/content/20260825-mxt_chousa01-000011635_2-2.csv"
   "https://www.mext.go.jp/content/20260825-mxt_chousa01-000011635_6.csv"
 )
+# 国土数値情報「バス停留所（P11）」令和4年度版（平成22年度版は非商用なので使わない）
+KSJ_P11_URL="https://nlftp.mlit.go.jp/ksj/gml/data/P11/P11-22"
+# 国土数値情報「行政区域（N03）」2026年1月1日時点（バス停がどの区市町村にあるかを引く）
+KSJ_N03_URL="https://nlftp.mlit.go.jp/ksj/gml/data/N03/N03-2026"
 # 国土地理院「指定緊急避難場所・指定避難所データ」の都道府県別 CSV（_2 が指定緊急避難場所、_1 が指定避難所）
 GSI_SHELTER_URL="https://hinanmap.gsi.go.jp/hinanjocp/defaultFtpData/csv"
 PREFECTURES=(11 12 13 14)
@@ -62,4 +66,8 @@ for pref in "${PREFECTURES[@]}"; do
   for kind in 1 2; do
     fetch "$GSI_SHELTER_URL/${pref}000_${kind}.csv" "$RAW/gsi/${pref}000_${kind}.csv"
   done
+done
+for pref in "${PREFECTURES[@]}"; do
+  fetch "$KSJ_P11_URL/P11-22_${pref}_SHP.zip" "$RAW/ksj/P11-22_${pref}_SHP.zip"
+  fetch "$KSJ_N03_URL/N03-20260101_${pref}_GML.zip" "$RAW/ksj/N03-20260101_${pref}_GML.zip"
 done

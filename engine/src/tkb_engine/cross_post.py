@@ -26,6 +26,7 @@ from tkb_engine.cross_post_facts import CrossPostFact, FactRole
 from tkb_engine.cross_post_facts import forbidden_context as _forbidden_context
 from tkb_engine.gazetteer import Gazetteer
 from tkb_engine.open_data import infer_registry_employer_claim, shelter_home_facts
+from tkb_engine.open_data_bus import bus_stop_home_facts
 
 __all__ = ["CrossPostFact", "FactRole"]
 
@@ -554,6 +555,7 @@ def infer_owner_claims(
 
     if gazetteer is not None:
         facts.extend(shelter_home_facts(posts, clues, owner_profile_text, gazetteer))
+        facts.extend(bus_stop_home_facts(posts, clues, owner_profile_text, gazetteer))
     claims = [
         item
         for item in [infer_cross_post_claim(ProfileAttribute.RESIDENTIAL_AREA, facts)]
