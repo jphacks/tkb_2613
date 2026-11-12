@@ -29,6 +29,9 @@ export default defineConfig({
       url: `${API}/health`,
       timeout: 120_000,
       reuseExistingServer: false,
+      // ログに callback のクエリが出ないことを CI で確かめるため、出力を残す
+      stdout: "pipe",
+      stderr: "pipe",
       env: {
         MOCK_MODE: "1",
         SHARE_ENABLED: "0",
@@ -51,6 +54,8 @@ export default defineConfig({
       url: `${WEB}/x`,
       timeout: 180_000,
       reuseExistingServer: false,
+      stdout: "pipe",
+      stderr: "pipe",
       env: { API_ORIGIN: API, API_INTERNAL_ORIGIN: API },
     },
   ],
