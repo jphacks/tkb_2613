@@ -19,6 +19,7 @@ import re
 import sqlite3
 import zipfile
 from collections.abc import Iterable, Iterator
+from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -84,7 +85,7 @@ def build(paths: Paths, out: Path) -> BuildResult:
     out.parent.mkdir(parents=True, exist_ok=True)
     tmp = out.with_suffix(".sqlite.part")
     tmp.unlink(missing_ok=True)
-    with sqlite3.connect(tmp) as db:
+    with closing(sqlite3.connect(tmp)) as db:
         db.executescript(
             """
             CREATE TABLE corporations (
@@ -102,7 +103,7 @@ def build(paths: Paths, out: Path) -> BuildResult:
             count += _insert(db, parse(_read_rows(path)))
         db.execute("CREATE INDEX corporations_normalized_name ON corporations (normalized_name)")
         db.execute("INSERT INTO meta VALUES ('as_of', ?)", (as_of,))
-    db.close()
+        db.commit()
     tmp.replace(out)
     return BuildResult(count, as_of)
 
