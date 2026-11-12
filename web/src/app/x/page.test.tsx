@@ -142,4 +142,42 @@ describe("X public information page", () => {
     expect(await screen.findAllByText("架空の投稿（Xの投稿ではありません）")).toHaveLength(2);
     expect(screen.queryByRole("img", { name: "X" })).not.toBeInTheDocument();
   });
+
+  it("highlights places and stations without counting values when the API uses the highlight view", async () => {
+    const xDisplay = {
+      synthetic: true,
+      author: { username: "架空のXアカウント", name: "架空のXアカウント", profile_image_url: null, profile_url: null },
+      posts: Object.fromEntries(posts.map((post) => [post.post_id, { permalink: null, edited: false, entities: [] }])),
+    };
+    const highlightSnapshot = {
+      ...snapshot, view: "highlight", information: [], x_display: xDisplay,
+      highlights: { "x:9001": [{ category: "station", start: 0, end: 3 }], "x:9002": [{ category: "station", start: 0, end: 3 }] },
+    };
+    const fetchMock = vi.fn(async (input: string | URL | Request): Promise<Response> => {
+      const path = String(input);
+      if (path.endsWith("/config")) return response({ mock_enabled: true, live_enabled: false, max_posts: 30, info_view: "highlight" });
+      if (path.endsWith("/mock/session")) return response({ username: "架空のXアカウント", mock: true });
+      if (path.endsWith("/session")) return response({}, 401);
+      if (path.endsWith("/diagnose")) return response(highlightSnapshot);
+      if (path.endsWith("/rediagnose")) return response({ ...highlightSnapshot, posts: [posts[1]], highlights: { "x:9002": highlightSnapshot.highlights["x:9002"] } });
+      throw new Error(`unexpected path ${path}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { container } = render(<XPage />);
+
+    fireEvent.click(await screen.findByRole("checkbox", { name: /利用目的を確認し/ }));
+    fireEvent.click(screen.getByRole("button", { name: "架空のX投稿で試す" }));
+    fireEvent.click(await screen.findByRole("button", { name: "公開情報を確認する" }));
+
+    expect(await screen.findByText(/件数は数えません/)).toBeInTheDocument();
+    expect(Array.from(container.querySelectorAll("article mark")).map((m) => m.textContent)).toEqual(["渋谷駅", "渋谷駅"]);
+    expect(screen.queryByText("駅名：渋谷駅")).not.toBeInTheDocument();
+    expect(screen.queryByText(/件の投稿に記載/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "仮除外後を比べる" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getAllByRole("checkbox", { name: /仮除外する/ })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "選択した投稿を除いて表示" }));
+    expect(await screen.findByText("（表示から除外中）")).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalledWith("/api/x/simulate", expect.anything());
+  });
 });

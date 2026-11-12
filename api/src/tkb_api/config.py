@@ -97,6 +97,9 @@ class Settings(BaseSettings):
     # X API で1日（UTC）に読んでよいリソース数の上限。超えたら X を呼ばずに断る。
     # 既定は本人確認1件と投稿30件の1回分に少し余裕を足した数。0 なら実取得をすべて断る
     x_daily_resource_limit: int = Field(default=40, ge=0, le=10000)
+    # X の結果の出し方。aggregate は地名・駅名などを値ごとに数える今の表示、
+    # highlight は本文中の地名・駅名に色を付けるだけで、値ごとに数えない
+    x_info_view: Literal["aggregate", "highlight"] = "aggregate"
     # E2E テスト専用：偽の X API の向き先（例 http://127.0.0.1:4010）。空なら本物の https://api.x.com。
     # 手元の http の loopback だけを許し、COOKIE_SECURE=1 や公開オリジンが loopback でない設定
     # （本番）では起動時に失敗させる（_fake_x_api_only_in_local_tests）

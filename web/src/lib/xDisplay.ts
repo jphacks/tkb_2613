@@ -92,3 +92,37 @@ export function segmentXText(text: string, entities: readonly XEntity[]): XTextS
   if (cursor < chars.length) segments.push({ kind: "text", text: chars.slice(cursor).join("") });
   return segments;
 }
+
+export type XHighlightCategory = "station" | "place";
+export type XHighlight = { readonly category: XHighlightCategory; readonly start: number; readonly end: number };
+export type XTextPart = { readonly text: string; readonly highlight: XHighlightCategory | null };
+
+const HIGHLIGHT_CATEGORIES = new Set<string>(["station", "place"]);
+
+export function isHighlights(value: unknown): value is Readonly<Record<string, readonly XHighlight[]>> {
+  return isRecord(value) && Object.values(value).every((items) => Array.isArray(items) && items.every((item) =>
+    isRecord(item) && typeof item.category === "string" && HIGHLIGHT_CATEGORIES.has(item.category) &&
+    Number.isInteger(item.start) && Number.isInteger(item.end)));
+}
+
+/**
+ * 本文の一部（本文の offset コードポイント目から始まる text）を、ハイライトの範囲で分ける。
+ * 文字は変えない。範囲がはみ出す・重なる場合は、その部分に収まる分だけ色を付ける。
+ */
+export function splitByHighlights(text: string, offset: number, highlights: readonly XHighlight[]): XTextPart[] {
+  const chars = Array.from(text);
+  const marks: (XHighlightCategory | null)[] = chars.map(() => null);
+  for (const item of highlights) {
+    if (item.end <= item.start) continue;
+    for (let i = Math.max(item.start, offset); i < Math.min(item.end, offset + chars.length); i += 1) {
+      marks[i - offset] ??= item.category;
+    }
+  }
+  const parts: XTextPart[] = [];
+  chars.forEach((char, i) => {
+    const last = parts.at(-1);
+    if (last && last.highlight === marks[i]) parts[parts.length - 1] = { ...last, text: last.text + char };
+    else parts.push({ text: char, highlight: marks[i] });
+  });
+  return parts;
+}

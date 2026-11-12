@@ -34,7 +34,11 @@ from tkb_api.x_display import (
     synthetic_display,
 )
 from tkb_api.x_poc import X_API, XPocError, fetch_posts_for_owner, get_my_profile, to_post
-from tkb_api.x_public_info import public_information_json, public_information_report
+from tkb_api.x_public_info import (
+    highlights_report,
+    public_information_json,
+    public_information_report,
+)
 from tkb_common.schemas import Post
 
 router = APIRouter(prefix="/api/x", tags=["x"])
@@ -249,12 +253,13 @@ def _cookie(response: Response, settings: Settings, session_id: str) -> None:
 
 
 @router.get("/config")
-async def config(request: Request) -> dict[str, bool | int]:
+async def config(request: Request) -> dict[str, bool | int | str]:
     settings = _settings(request)
     return {
         "mock_enabled": settings.x_mock_mode,
         "live_enabled": _live_ready(settings),
         "max_posts": settings.x_max_posts,
+        "info_view": settings.x_info_view,
     }
 
 
@@ -487,12 +492,9 @@ async def diagnose(request: Request) -> dict[str, Any]:
                 current.fetched = True
         started = time.monotonic()
         current.posts = posts
-        information, post_errors = public_information_report(posts)
         current.snapshot = {
             "posts": [post.model_dump(mode="json") for post in posts],
-            "information": information,
-            # 読み取りに失敗した投稿。理由は固定の文言で、投稿の本文は入らない
-            "post_errors": post_errors,
+            **_result_json(settings.x_info_view, posts),
             "x_display": _display_json(current, posts),
             "elapsed_ms": round((time.monotonic() - started) * 1000),
             "mock": current.token is None,
@@ -501,6 +503,29 @@ async def diagnose(request: Request) -> dict[str, Any]:
     finally:
         with _store(request).lock:
             current.busy = False
+
+
+def _result_json(view: str, posts: list[Post]) -> dict[str, Any]:
+    """結果の本体。highlight は投稿ごとの地名・駅名の位置だけで、値ごとに数えない。
+
+    post_errors は読み取りに失敗した投稿。理由は固定の文言で、投稿の本文は入らない。
+    """
+    if view == "highlight":
+        highlights, post_errors = highlights_report(posts)
+        return {
+            "view": "highlight",
+            "information": [],
+            "highlights": highlights,
+            "post_errors": post_errors,
+        }
+    information, post_errors = public_information_report(posts)
+    return {"view": "aggregate", "information": information, "post_errors": post_errors}
+
+
+def _view(current: XSession) -> str:
+    """そのセッションで診断したときの表示。設定を途中で変えても混ざらない。"""
+    snapshot = current.snapshot or {}
+    return str(snapshot.get("view", "aggregate"))
 
 
 def _selected(body: SimulateRequest, current: XSession) -> None:
@@ -516,6 +541,9 @@ async def simulate(body: SimulateRequest, request: Request) -> dict[str, Any]:
     _origin(request)
     current = _session(request)
     _selected(body, current)
+    if _view(current) == "highlight":
+        # 集計しない表示では、値ごとの件数の比較を作らない
+        raise HTTPException(status.HTTP_409_CONFLICT, "この表示では比較を使いません")
     gone = set(body.delete)
     kept = [post for post in current.posts if post.post_id not in gone]
     before = public_information_json(current.posts)
@@ -539,6 +567,6 @@ async def rediagnose(body: SimulateRequest, request: Request) -> dict[str, Any]:
     posts = [post for post in current.posts if post.post_id not in gone]
     return {
         "posts": [post.model_dump(mode="json") for post in posts],
-        "information": public_information_json(posts),
+        **_result_json(_view(current), posts),
         "mock": current.token is None,
     }

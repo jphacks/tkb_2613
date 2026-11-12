@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { isAllowedXHref, isXDisplay, segmentXText, type XEntity } from "./xDisplay";
+import { isAllowedXHref, isHighlights, isXDisplay, segmentXText, splitByHighlights, type XEntity } from "./xDisplay";
 
 const mention = (start: number, end: number, href = "https://x.com/friend_1"): XEntity =>
   ({ kind: "mention", start, end, href, display: null });
@@ -61,5 +61,35 @@ describe("isXDisplay", () => {
     expect(isXDisplay(valid)).toBe(true);
     expect(isXDisplay({ ...valid, synthetic: "no" })).toBe(false);
     expect(isXDisplay({ ...valid, posts: { "x:1": { permalink: 1, edited: false, entities: [] } } })).toBe(false);
+  });
+});
+
+describe("splitByHighlights", () => {
+  it("marks code point ranges without changing the text", () => {
+    const text = "🍜 渋谷駅 と東京都渋谷区";
+    const parts = splitByHighlights(text, 0, [
+      { category: "station", start: 2, end: 5 },
+      { category: "place", start: 7, end: 13 },
+    ]);
+    expect(parts).toEqual([
+      { text: "🍜 ", highlight: null },
+      { text: "渋谷駅", highlight: "station" },
+      { text: " と", highlight: null },
+      { text: "東京都渋谷区", highlight: "place" },
+    ]);
+    expect(parts.map((p) => p.text).join("")).toBe(text);
+  });
+
+  it("clips ranges to a piece that starts in the middle of the text", () => {
+    expect(splitByHighlights("駅前", 4, [{ category: "station", start: 2, end: 5 }]))
+      .toEqual([{ text: "駅", highlight: "station" }, { text: "前", highlight: null }]);
+    expect(splitByHighlights("abc", 0, [{ category: "place", start: 2, end: 1 }]))
+      .toEqual([{ text: "abc", highlight: null }]);
+  });
+
+  it("validates the API shape", () => {
+    expect(isHighlights({ "x:1": [{ category: "station", start: 0, end: 2 }] })).toBe(true);
+    expect(isHighlights({ "x:1": [{ category: "time", start: 0, end: 2 }] })).toBe(false);
+    expect(isHighlights([])).toBe(false);
   });
 });
