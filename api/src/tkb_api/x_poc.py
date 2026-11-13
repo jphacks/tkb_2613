@@ -167,7 +167,8 @@ async def _fetch_posts(
             "max_results": remaining,
             # entities と edit_history_tweet_ids は表示要件（リンク・編集の表記）に使う
             "post.fields": "author_id,created_at,entities,edit_history_tweet_ids",
-            "exclude": "retweets",
+            # 返信には別の表示要件があるため、最小の原文表示では通常投稿だけを扱う
+            "exclude": "retweets,replies",
         }
         if cursor is not None:
             params["pagination_token"] = cursor

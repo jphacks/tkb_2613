@@ -1,6 +1,6 @@
 import { expect, test } from "playwright/test";
 
-// 偽の X API で OAuth → 投稿の取得 → 集計 → 仮除外 → ログアウトでの破棄を通す。
+// 偽の X API で OAuth → 本人投稿の原文表示 → ログアウトでの破棄を通す。
 // 設定は playwright.fake-x.config.ts。ブラウザから本物の X へは1件も出さない。
 const FAKE_X = "http://127.0.0.1:4010";
 
@@ -10,7 +10,7 @@ async function fakeCalls(): Promise<Calls> {
   return (await (await fetch(`${FAKE_X}/__calls`)).json()) as Calls;
 }
 
-test("偽のX APIでOAuthから仮除外・ログアウトでの破棄まで通す", async ({ page, context }) => {
+test("偽のX APIでOAuthから本人投稿表示・ログアウトでの破棄まで通す", async ({ page, context }) => {
   const outside: string[] = [];
   // X の認可画面だけを偽の X に差し替える。それ以外の x.com への通信は止めて記録する
   await context.route(/^https:\/\/([a-z0-9-]+\.)*x\.com\//, async (route) => {
@@ -40,11 +40,12 @@ test("偽のX APIでOAuthから仮除外・ログアウトでの破棄まで通�
   await page.waitForURL((url) => url.pathname === "/x" && url.search === "");
   await expect(page.getByText("fictional_xtest")).toBeVisible();
 
-  await page.getByRole("button", { name: "公開情報を確認する" }).click();
-  await expect(page.getByText("公開情報チェック結果", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "自分の投稿を読み込む" }).click();
+  await expect(page.getByText("本人投稿の取得結果", { exact: true })).toBeVisible();
   await expect(page.getByText("投稿 5 件", { exact: false })).toBeVisible();
-  await expect(page.getByText("駅名：新宿駅")).toBeVisible();
-  await expect(page.getByText("6件目以降は")).toHaveCount(0);
+  await expect(page.getByText("原文表示のみ", { exact: false })).toBeVisible();
+  await expect(page.getByText("本文に書かれている情報")).toHaveCount(0);
+  await expect(page.getByRole("checkbox", { name: "仮除外する" })).toHaveCount(0);
 
   // X の表示要件：投稿者・ロゴ・本文のリンク・permalink・編集済み
   const cards = page.getByRole("article", { name: "架空のテスターの投稿" });
@@ -61,18 +62,11 @@ test("偽のX APIでOAuthから仮除外・ログアウトでの破棄まで通�
   await expect(second.getByText("編集済み")).toBeVisible();
   await expect(page.getByText("架空の投稿（Xの投稿ではありません）")).toHaveCount(0);
 
-  await page.getByRole("checkbox", { name: "仮除外する" }).first().check();
-  await page.getByRole("button", { name: "仮除外後を比べる" }).click();
-  await expect(page.getByRole("status")).toContainText("明記情報");
-  await page.getByRole("button", { name: "選択した投稿を除いて再集計" }).click();
-  await expect(page.getByText("仮除外後の再集計")).toBeVisible();
-  await expect(page.getByText("投稿 4 件", { exact: false })).toBeVisible();
-
   const used = await fakeCalls();
   expect(used.authorize - before.authorize).toBe(1);
   expect(used.token - before.token).toBe(1);
   expect(used.me - before.me).toBe(1);
-  expect(used.tweets - before.tweets).toBe(1); // 仮除外・再集計で X を再び呼ばない
+  expect(used.tweets - before.tweets).toBe(1);
 
   const session = (await context.cookies()).find((cookie) => cookie.name === "x_tkb_session");
   expect(session?.httpOnly).toBe(true);

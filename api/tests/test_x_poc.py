@@ -92,6 +92,7 @@ async def test_fetches_only_me_with_fixed_host_and_pagination() -> None:
         pages.calls[0].request.url.params["post.fields"]
         == "author_id,created_at,entities,edit_history_tweet_ids"
     )
+    assert pages.calls[0].request.url.params["exclude"] == "retweets,replies"
     cursor = "safe-cursor"
     assert pages.calls[1].request.url.params["pagination_token"] == cursor
 
@@ -104,3 +105,16 @@ async def test_http_failure_hides_token_and_response_body() -> None:
             await fetch_own_posts("secret-dummy-token")
     assert "secret-dummy-token" not in str(exc.value)
     assert "401" in str(exc.value)
+
+
+@pytest.mark.anyio
+async def test_empty_timeline_returns_no_posts() -> None:
+    with respx.mock as router:
+        router.get(f"{X_API}/2/users/me").respond(json={"data": {"id": "42"}})
+        router.get(f"{X_API}/2/users/42/tweets").respond(
+            json={"data": [], "meta": {"result_count": 0}}
+        )
+        owner_id, posts = await fetch_own_posts("dummy-token", limit=5)
+
+    assert owner_id == "42"
+    assert posts == []

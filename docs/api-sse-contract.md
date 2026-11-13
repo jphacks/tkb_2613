@@ -135,9 +135,9 @@ SSEブロックは `event: <name>\ndata: <JSON>\n\n`。JSONはUTF-8で送られ�
 
 これらはAGENTS.mdの目標やIssueの後続範囲であり、この文書の現行契約には含めない。
 
-## X 専用の公開情報チェック
+## X の本人投稿表示と合成デモ
 
-Bluesky の `/api/session`・`/api/diagnose`・`/api/simulate`、Threadsの診断とは独立した `/api/x/*`。X の OAuth と結果は専用の HttpOnly `x_tkb_session` Cookie（Path `/api/x`）を使う。X の実投稿は用途承認・費用承認・上流クエリログ対策がそろうまで拒否する。本文にそのまま現れる地名・駅名・曜日・時刻・学校名だけをX専用の決定的な抽出器で集計し、既存のプロフィール推定・外部モデル・外部検索は呼ばない。結果はプロセスメモリだけに置き、実投稿の変更・削除・結果共有は行わない。
+Bluesky の `/api/session`・`/api/diagnose`・`/api/simulate`、Threadsの診断とは独立した `/api/x/*`。X の OAuth と結果は専用の HttpOnly `x_tkb_session` Cookie（Path `/api/x`）を使う。X の実投稿は用途承認・費用承認・上流クエリログ対策がそろうまで拒否する。実アカウントでは本人投稿を最大5件取得して原文表示するだけで、抽出・集計・プロフィール推定・外部モデル・外部検索を呼ばない。地名・駅名などの決定的な抽出と仮除外は架空の合成投稿デモにだけ残す。結果はプロセスメモリだけに置き、実投稿の変更・削除・結果共有は行わない。
 
 `information` の1項目は `{"category":"station","value":"渋谷駅","count":2,"evidence":[{"post_id":"x:9001","quote":"渋谷駅"}, ...]}`。`category` は `place | station | weekday | time | school`。`quote` は必ず該当投稿本文の部分文字列で、`count` は同じ値を明記した投稿数（同一投稿内の反復は1件）とする。
 
@@ -149,10 +149,11 @@ Bluesky の `/api/session`・`/api/diagnose`・`/api/simulate`、Threadsの診�
 | `GET /api/x/callback` | X の `state,code` と開始 Cookie | state/PKCE を照合し、トークン交換と本人確認の後 `/x` へ 303。本人確認の前に1日の上限から1を予約し、足りなければ429。 |
 | `GET /api/x/session` | X セッション Cookie | `username, mock`。未認証401。 |
 | `DELETE /api/x/session` | X セッション Cookie | セッション・結果をメモリから削除、204。 |
-| `POST /api/x/diagnose` | X セッション Cookie | `posts, view, information, post_errors, x_display, elapsed_ms, mock`。`view` は `X_INFO_VIEW`（`aggregate` 既定／`highlight`）。`highlight` のときは `information` を空にし、`highlights: {<post_id>: [{category: station|place, start, end}]}`（コードポイント単位）を返す。`x_display` は X の表示要件用の `{synthetic, author:{username,name,profile_image_url,profile_url}, posts:{<post_id>:{permalink,edited,entities:[{kind,start,end,href,display}]}}}`。`start`・`end` はコードポイント単位。合成デモは `synthetic=true` で `profile_url`・`permalink` は null、`entities` は空。`post_errors` は読み取りに失敗した投稿の `{post_id, error}` で、`error` は固定文言（本文を含めない）。1件の失敗で全体は失敗にしない。実経路は本人投稿を最大30リソース読み、限定カテゴリだけをローカルで集計する。2回目はメモリの結果を返し再課金しない。投稿取得の前に `max(5, X_MAX_POSTS)` を1日の上限から予約し、足りなければ X を呼ばずに429。 |
+| `POST /api/x/posts` | 実Xセッション Cookie | 本人投稿を最大 `X_MAX_POSTS`（既定5）件取得し、`posts, view:"posts", information:[], post_errors:[], x_display, mock:false` を返す。本文は抽出・集計・推論へ渡さない。2回目はメモリの結果を返し再課金しない。投稿取得前に `max(5, X_MAX_POSTS)` を1日の上限から予約し、足りなければXを呼ばず429。 |
+| `POST /api/x/diagnose` | 合成デモのXセッション Cookie | 架空投稿にだけ `posts, view, information, post_errors, x_display, elapsed_ms, mock` を返す。`view` は `X_INFO_VIEW`（`aggregate`／`highlight`）。実トークンのセッションは409。 |
 | `GET /api/x/diagnosis` | X セッション Cookie | 直近の完了結果。なければ404。 |
-| `POST /api/x/simulate` | `{"delete":[診断済み投稿ID]}` | `delete, before, after, removed`。X APIは再呼出ししない。`view=highlight` で診断したセッションでは件数の比較を作らず409。 |
-| `POST /api/x/rediagnose` | 同上 | 除外後の `posts, view, information（highlight では空と highlights）, post_errors, mock` を作り直す。X APIは再呼出ししない。 |
+| `POST /api/x/simulate` | `{"delete":[診断済み投稿ID]}` | 合成デモだけ。`delete, before, after, removed`。`view=highlight` と実アカウントの `view=posts` は409。 |
+| `POST /api/x/rediagnose` | 同上 | 合成デモだけ。除外後の結果を作り直す。実アカウントの `view=posts` は409。 |
 
 X の状態変更 API は同一オリジンの `Origin` ヘッダーを要求する。投稿IDは `x:<numeric id>`、画像は空配列。429は503と `Retry-After` を返す。詳細な設定・規約・費用は [x-poc.md](x-poc.md)。
 

@@ -50,6 +50,7 @@ make up
 | `VLM_BASE_URL`・`OCR_BASE_URL` | 手元か RunPod | GPU のプライベート IP | GPU はインターネットから届かない |
 | `MODEL_ALLOWED_HOST_SUFFIXES` | 空（localhost だけ） | GPU のプライベート IP | 送り先の許可リスト。IP は完全一致 |
 | `VLM_API_KEY` | `.env` | Secrets Manager から起動時に渡す | キーをファイルに残さない |
+| `X_CLIENT_SECRET` | `.env`（手元だけ） | Secrets Manager の `tkb_2613/x-client-secret` からAPIだけへ渡す | Git・`.env`・webコンテナにOAuth Secretを残さない |
 | `SHARE_ENABLED` | 1 | 0 | 公開中は閲覧リンクの機能をオフにし、診断結果を保存しない。画面にボタンを出さず、API は 404、保存先のファイルも作らない |
 
 - api の 8001 番は `127.0.0.1` のままにする。外から届くのは web だけで、api は compose のネットワークの中で web から呼ばれる

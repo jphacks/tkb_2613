@@ -41,7 +41,7 @@ describe("X public information page", () => {
   it("explains consent and keeps live X disabled", async () => {
     const fetchMock = vi.fn(async (input: string | URL | Request): Promise<Response> => {
       const path = String(input);
-      if (path.endsWith("/config")) return response({ mock_enabled: true, live_enabled: false, max_posts: 30 });
+      if (path.endsWith("/config")) return response({ mock_enabled: true, live_enabled: false, max_posts: 5 });
       if (path.endsWith("/session")) return response({}, 401);
       throw new Error(`unexpected path ${path}`);
     });
@@ -50,7 +50,7 @@ describe("X public information page", () => {
 
     expect(await screen.findByText("現在は架空の合成投稿だけを使います")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Xでログイン" })).not.toBeInTheDocument();
-    expect(screen.getByText(/住所、勤務先、居住地域、健康や政治信条などは推定しません/)).toBeInTheDocument();
+    expect(screen.getByText(/AI推論、個人情報や位置情報の抽出・集計は行いません/)).toBeInTheDocument();
   });
 
   function stubConfig(config: unknown, status = 200) {
@@ -81,6 +81,74 @@ describe("X public information page", () => {
 
     expect(await screen.findByRole("button", { name: "Xでログイン" })).toBeDisabled();
     expect(screen.getByText(/X APIの読み取りは課金対象です/)).toBeInTheDocument();
+  });
+
+  it("loads a live account through the raw posts endpoint without analysis controls", async () => {
+    const xDisplay = {
+      synthetic: false,
+      author: { username: "owner", name: "Owner", profile_image_url: null, profile_url: "https://x.com/owner" },
+      posts: Object.fromEntries(posts.map((post) => [post.post_id, {
+        permalink: `https://x.com/owner/status/${post.post_id.slice(2)}`, edited: false, entities: [],
+      }])),
+    };
+    const fetchMock = vi.fn(async (input: string | URL | Request): Promise<Response> => {
+      const path = String(input);
+      if (path.endsWith("/config")) return response({ mock_enabled: false, live_enabled: true, max_posts: 5 });
+      if (path.endsWith("/session")) return response({ username: "owner", mock: false });
+      if (path.endsWith("/diagnosis")) return response({}, 404);
+      if (path.endsWith("/posts")) return response({
+        posts, information: [], post_errors: [], view: "posts", mock: false, x_display: xDisplay,
+      });
+      throw new Error(`unexpected path ${path}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<XPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "自分の投稿を読み込む" }));
+
+    expect(await screen.findByText("本人投稿の取得結果")).toBeInTheDocument();
+    expect(screen.getByText("投稿 2 件・原文表示のみ")).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: "仮除外する" })).not.toBeInTheDocument();
+    expect(screen.queryByText("本文に書かれている情報")).not.toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith("/api/x/posts", expect.objectContaining({ method: "POST" }));
+    expect(fetchMock).not.toHaveBeenCalledWith("/api/x/diagnose", expect.anything());
+  });
+
+  it("shows an empty state when the live account has no posts", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request): Promise<Response> => {
+      const path = String(input);
+      if (path.endsWith("/config")) return response({ mock_enabled: false, live_enabled: true, max_posts: 5 });
+      if (path.endsWith("/session")) return response({ username: "owner", mock: false });
+      if (path.endsWith("/diagnosis")) return response({}, 404);
+      if (path.endsWith("/posts")) return response({
+        posts: [], information: [], post_errors: [], view: "posts", mock: false,
+        x_display: {
+          synthetic: false,
+          author: { username: "owner", name: "Owner", profile_image_url: null, profile_url: "https://x.com/owner" },
+          posts: {},
+        },
+      });
+      throw new Error(`unexpected path ${path}`);
+    }));
+    render(<XPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "自分の投稿を読み込む" }));
+    expect(await screen.findByText("表示できる投稿はありません。")).toBeInTheDocument();
+  });
+
+  it("shows a safe message when the X API request fails", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request): Promise<Response> => {
+      const path = String(input);
+      if (path.endsWith("/config")) return response({ mock_enabled: false, live_enabled: true, max_posts: 5 });
+      if (path.endsWith("/session")) return response({ username: "owner", mock: false });
+      if (path.endsWith("/diagnosis")) return response({}, 404);
+      if (path.endsWith("/posts")) return response({}, 502);
+      throw new Error(`unexpected path ${path}`);
+    }));
+    render(<XPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "自分の投稿を読み込む" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("X APIから投稿を取得できませんでした");
   });
 
   it("shows literal evidence, source posts, exclusion, and reaggregation", async () => {
