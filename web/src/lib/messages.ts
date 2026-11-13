@@ -117,6 +117,10 @@ export const messages = {
     searching: (searched: number, posts: number) => `手がかりを探しています…（${searched} / ${posts} 件）`,
     done: (posts: number) => `${posts} 件の投稿を読みました`,
     failed: "診断できませんでした",
+    /** 公開Web検索の同意欄。api が使えると答えたとき（Brave のキーがあるか、モック）だけ出す */
+    publicWebConsentLabel: "公開Webで外部SNS・ブログ・記事の候補を検索する（この診断のみ）",
+    publicWebConsentNote:
+      "同意すると、実モードではログイン中の公開BlueskyハンドルだけをBraveへ送ります。検索の費用は運営が負担します。あなたに料金が請求されることはなく、支払情報の登録も要りません。検索語は最大90日保持されます。投稿文・プロフィール文・写真は送りません。候補だけでは同一人物と判断しません。モックモードは固定の架空結果を使い、外部通信しません。",
     deletedBadge: "削除済み",
     postsLabel: "読んだ投稿",
     /** 結果が出たあと、読んだ投稿の一覧を折りたたむときの見出し */

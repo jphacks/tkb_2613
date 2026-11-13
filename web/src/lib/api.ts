@@ -236,11 +236,13 @@ export async function getDiagnosis({
 export interface Features {
   readonly share_enabled: boolean;
   readonly auth_mode?: "oauth" | "app_password";
+  /** 公開Web検索（Brave）が使えるか。キーの値は返らない。ないときは使えない側に倒す */
+  readonly public_web_lookup_available?: boolean;
 }
 
 /**
- * 機能のオン・オフを読む。ログインは不要。読めなかったときは、閲覧リンクを出さない側に倒す
- * （公開中の本番ではオフにしているため）。
+ * 機能のオン・オフを読む。ログインは不要。読めなかったときは、閲覧リンクと公開Web検索の同意欄を
+ * 出さない側に倒す（公開中の本番ではオフにしているため）。
  */
 export async function getFeatures({ baseUrl = DEFAULT_BASE_URL, signal }: RequestOptions = {}): Promise<Features> {
   const off: Features = { share_enabled: false };
@@ -251,7 +253,13 @@ export async function getFeatures({ baseUrl = DEFAULT_BASE_URL, signal }: Reques
     if (typeof data === "object" && data !== null && "share_enabled" in data && typeof data.share_enabled === "boolean") {
       const mode = "auth_mode" in data && (data.auth_mode === "oauth" || data.auth_mode === "app_password")
         ? data.auth_mode : undefined;
-      return mode ? { share_enabled: data.share_enabled, auth_mode: mode } : { share_enabled: data.share_enabled };
+      const publicWeb = "public_web_lookup_available" in data && typeof data.public_web_lookup_available === "boolean"
+        ? data.public_web_lookup_available : undefined;
+      return {
+        share_enabled: data.share_enabled,
+        ...(mode ? { auth_mode: mode } : {}),
+        ...(publicWeb === undefined ? {} : { public_web_lookup_available: publicWeb }),
+      };
     }
     return off;
   } catch {

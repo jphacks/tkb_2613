@@ -409,6 +409,16 @@ describe("getFeatures", () => {
     expect(fetchFn.mock.calls[0][0]).toBe("http://api.test/api/features");
   });
 
+  it("reads whether public web lookup is available", async () => {
+    mockFetch(new Response(JSON.stringify({ share_enabled: false, auth_mode: "oauth", public_web_lookup_available: true })));
+    expect(await getFeatures()).toEqual({ share_enabled: false, auth_mode: "oauth", public_web_lookup_available: true });
+  });
+
+  it("ignores a public web lookup flag that is not a boolean", async () => {
+    mockFetch(new Response(JSON.stringify({ share_enabled: true, public_web_lookup_available: "yes" })));
+    expect(await getFeatures()).toEqual({ share_enabled: true });
+  });
+
   it.each([
     ["an error status", new Response("", { status: 500 })],
     ["a wrong shape", new Response(JSON.stringify({ share_enabled: "yes" }))],

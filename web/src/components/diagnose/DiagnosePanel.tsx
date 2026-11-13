@@ -10,7 +10,7 @@ import { Reveal } from "@/components/reveal/Reveal";
 import { RiskyPosts } from "@/components/risky-posts/RiskyPosts";
 import { useSession } from "@/components/session/SessionProvider";
 import { ResultShare } from "@/components/diagnose/ResultShare";
-import { ApiError, diagnose, getDiagnosis } from "@/lib/api";
+import { ApiError, diagnose, getDiagnosis, getFeatures } from "@/lib/api";
 import { messages } from "@/lib/messages";
 import { validNameConclusions } from "@/lib/reveal";
 import type { Clue } from "@/types/clue";
@@ -86,6 +86,8 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
   // 開き直したときに api から受け取る、診断のあとに消した投稿。一覧では「削除済み」と示し、候補と身元カードから外す
   const [deleted, setDeleted] = useState<ReadonlySet<string>>(() => new Set());
   const [publicWebLookupConsent, setPublicWebLookupConsent] = useState(false);
+  // api が「公開Web検索を使える」と答えたときだけ同意欄を出す（Brave のキーがない実モードでは出さない）
+  const [publicWebLookupAvailable, setPublicWebLookupAvailable] = useState(false);
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   const controller = useRef<AbortController | null>(null);
   const restoreController = useRef<AbortController | null>(null);
@@ -94,6 +96,14 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
   useEffect(() => () => {
     controller.current?.abort();
     restoreController.current?.abort();
+  }, []);
+
+  useEffect(() => {
+    const current = new AbortController();
+    getFeatures({ signal: current.signal }).then((features) => {
+      if (!current.signal.aborted) setPublicWebLookupAvailable(features.public_web_lookup_available === true);
+    });
+    return () => current.abort();
   }, []);
 
   // 同じログインセッションで画面を開き直した場合は、再解析せず直近の結果へ戻す。
@@ -142,7 +152,7 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
   if (session.status !== "authenticated") return null;
 
   async function start() {
-    const consentForThisRun = publicWebLookupConsent;
+    const consentForThisRun = publicWebLookupAvailable && publicWebLookupConsent;
     setPublicWebLookupConsent(false);
     restoreController.current?.abort();
     controller.current?.abort();
@@ -208,10 +218,12 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
   // afterResult のときは、赤い「診断する」の代わりに控えめな「もう一度診断する」と、回数を使う注意を出す。
   const controls = (afterResult: boolean) => (
     <div>
-        <label className="mb-4 flex max-w-2xl items-start gap-3 rounded-sm border border-ink/20 px-4 py-3 text-sm">
-          <input type="checkbox" checked={publicWebLookupConsent} onChange={(event) => setPublicWebLookupConsent(event.currentTarget.checked)} disabled={busy} className="mt-1 size-4 shrink-0 accent-seeker" />
-          <span><span className="block font-bold">公開Webで外部SNS・ブログ・記事の候補を検索する（この診断のみ）</span><span className="mt-1 block text-xs text-ink/70">同意すると、実モードではログイン中の公開BlueskyハンドルだけをBraveへ送ります。検索語は最大90日保持され、利用には有料プランと支払情報の登録が必要です。投稿文・プロフィール文・写真は送りません。候補だけでは同一人物と判断しません。モックモードは固定の架空結果を使い、外部通信しません。</span></span>
-        </label>
+        {publicWebLookupAvailable && (
+          <label className="mb-4 flex max-w-2xl items-start gap-3 rounded-sm border border-ink/20 px-4 py-3 text-sm">
+            <input type="checkbox" checked={publicWebLookupConsent} onChange={(event) => setPublicWebLookupConsent(event.currentTarget.checked)} disabled={busy} className="mt-1 size-4 shrink-0 accent-seeker" />
+            <span><span className="block font-bold">{t.publicWebConsentLabel}</span><span className="mt-1 block text-xs text-ink/70">{t.publicWebConsentNote}</span></span>
+          </label>
+        )}
         {afterResult ? (
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
             <button type="button" onClick={start} disabled={busy} aria-describedby="rediagnose-note" className="rounded-sm border border-ink/50 px-4 py-2 hover:bg-ink/10 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-ink disabled:cursor-not-allowed disabled:opacity-60">

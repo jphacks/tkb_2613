@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { LoginPanel } from "@/components/login/LoginPanel";
 import { SessionProvider } from "@/components/session/SessionProvider";
-import { ApiError, diagnose, getDiagnosis, getSession, simulate } from "@/lib/api";
+import { ApiError, diagnose, getDiagnosis, getFeatures, getSession, simulate } from "@/lib/api";
 import { messages } from "@/lib/messages";
 import type { Clue } from "@/types/clue";
 import type { DiagnoseEvent } from "@/types/diagnose";
@@ -421,5 +421,54 @@ describe("DiagnosePanel", () => {
     fireEvent.click(screen.getByRole("button", { name: messages.risky.reset }));
 
     expect(screen.getByRole("list", { name: b.conclusionsLabel })).toHaveTextContent("毎週火曜");
+  });
+});
+
+describe("DiagnosePanel public web lookup consent", () => {
+  const consent = () => screen.queryByRole("checkbox", { name: new RegExp(d.publicWebConsentLabel.slice(0, 8)) });
+
+  afterEach(() => {
+    vi.mocked(getFeatures).mockReset();
+    vi.mocked(getFeatures).mockResolvedValue({ share_enabled: false, auth_mode: "app_password" });
+  });
+
+  it("hides the consent checkbox and never sends consent when the api says lookup is unavailable", async () => {
+    vi.mocked(getFeatures).mockResolvedValue({ share_enabled: false, public_web_lookup_available: false });
+    vi.mocked(diagnose).mockImplementation(async function* () {});
+    const start = await renderLoggedIn();
+    await vi.waitFor(() => expect(getFeatures).toHaveBeenCalled());
+
+    expect(consent()).not.toBeInTheDocument();
+    expect(screen.queryByText(d.publicWebConsentNote)).not.toBeInTheDocument();
+
+    fireEvent.click(start);
+    await vi.waitFor(() => expect(diagnose).toHaveBeenCalled());
+    expect(vi.mocked(diagnose).mock.calls[0][0]).toMatchObject({ publicWebLookupConsent: false });
+  });
+
+  it("hides the consent checkbox when the features cannot be read", async () => {
+    vi.mocked(getFeatures).mockResolvedValue({ share_enabled: false });
+    await renderLoggedIn();
+    await vi.waitFor(() => expect(getFeatures).toHaveBeenCalled());
+
+    expect(consent()).not.toBeInTheDocument();
+  });
+
+  it("shows the consent checkbox with the no-charge note when lookup is available, and sends the choice", async () => {
+    vi.mocked(getFeatures).mockResolvedValue({ share_enabled: false, public_web_lookup_available: true });
+    vi.mocked(diagnose).mockImplementation(async function* () {});
+    const start = await renderLoggedIn();
+
+    const checkbox = await screen.findByRole("checkbox", { name: new RegExp(d.publicWebConsentLabel.slice(0, 8)) });
+    expect(checkbox).not.toBeChecked();
+    // 利用者は払わないこと、検索語の保持期間の注意の両方を出す
+    expect(d.publicWebConsentNote).toContain("料金が請求されることはなく");
+    expect(d.publicWebConsentNote).toContain("最大90日保持");
+    expect(screen.getByText(d.publicWebConsentNote)).toBeInTheDocument();
+
+    fireEvent.click(checkbox);
+    fireEvent.click(start);
+    await vi.waitFor(() => expect(diagnose).toHaveBeenCalled());
+    expect(vi.mocked(diagnose).mock.calls[0][0]).toMatchObject({ publicWebLookupConsent: true });
   });
 });
