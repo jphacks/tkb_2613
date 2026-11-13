@@ -104,7 +104,27 @@ describe("Reveal", () => {
     expect(screen.getByRole("article", { name: messages.identity.label }).compareDocumentPosition(cards[0]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(within(cards[0]).getByText("根x")).toBeInTheDocument();
     expect(within(cards[1]).getByText(t.used)).toBeInTheDocument();
-    expect(within(cards[1]).getByText("夜勤明け", { selector: "mark" })).toBeInTheDocument();
+    expect(within(cards[1]).getByText("夜勤明け", { selector: ".redaction-word" })).toBeInTheDocument();
+  });
+
+  it("hides the clue word in the post under a black bar that peels off after every card has landed", () => {
+    const second: Clue = { ...TEXT_CLUE, type: "age_text", value: "ラーメン" };
+    render(<Reveal posts={[{ ...POST, images: [] }]} clues={[TEXT_CLUE, second]} conclusions={[CONCLUSION]} />);
+
+    const cards = within(screen.getByRole("list", { name: t.evidenceLabel })).getAllByRole("listitem");
+    expect(cards).toHaveLength(2);
+    // 今までの <mark> の印は使わない
+    expect(document.querySelector("blockquote mark")).toBeNull();
+    const bars = cards.map((card) => card.querySelector(".redaction-bar") as HTMLElement);
+    for (const bar of bars) {
+      expect(bar).toHaveAttribute("aria-hidden", "true");
+      // 言葉そのものは読み上げにも残す
+      expect(bar.parentElement?.querySelector(".redaction-word")?.textContent).toBeTruthy();
+    }
+    // 2 枚目が叩きつけられ終わる（1.6 + 0.5 + 0.45 = 2.55 秒）まで待ち、上から順に 0.4 秒ずつずらしてはがす
+    expect(bars[0].getAttribute("style")).toContain("2.55s");
+    expect(bars[1].getAttribute("style")).toContain("2.95s");
+    expect(bars[0].getAttribute("style")).toContain("var(--stage-pace, 1)");
   });
 
   it("shows the clue as text until the full source photo has loaded", () => {

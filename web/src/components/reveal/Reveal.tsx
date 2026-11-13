@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 
 import { messages } from "@/lib/messages";
+import { paced, staggerDelay } from "@/lib/motion";
 import { identityName, pickFace, pickSpotlight, type RevealItem } from "@/lib/reveal";
 import { toPercentBox } from "@/lib/region";
 import { useLoadedSize } from "@/lib/useLoadedSize";
@@ -11,12 +12,19 @@ import type { Conclusion } from "@/types/diagnose";
 import type { Post } from "@/types/post";
 
 import { IdentityCard } from "./IdentityCard";
+import "./redaction.css";
 
 const t = messages.reveal;
 
 /** 1 枚ごとに叩きつける間隔（秒）。身元カードの数字が止まってから始める */
 const FIRST_DELAY = 1.6;
 const STEP = 0.5;
+
+/** 証拠のカードが叩きつけられる長さ（globals.css の .reveal-slam） */
+const SLAM = 0.45;
+
+/** 黒い帯がはがれる長さ（redaction.css の .redaction-bar） */
+const PEEL = 0.6;
 
 /** 身元カードに並べる強い手がかりの数 */
 const MAX_HIGHLIGHTS = 4;
@@ -26,11 +34,28 @@ function tilt(i: number): string {
   return `${[-3, 2.5, -1.5, 3.5, -2.5, 1.5, -3.5, 2][i % 8]}deg`;
 }
 
+/** 本文の中の手がかりの位置。見つからなければ -1（写真の手がかりも -1） */
+function textAt(item: RevealItem): number {
+  return item.clue.image_index === null ? item.post.text.indexOf(item.clue.value) : -1;
+}
+
+/**
+ * 黒い帯をはがす遅れ（秒）。証拠のカードがすべて叩きつけられてから、本文に手がかりのあるカードを上から順にはがす。
+ * 一度に動くのは帯だけにし、ずらしは 1 枚 0.4 秒前後で全体を 2 秒以内に収める。
+ */
+function peelDelays(items: readonly RevealItem[]): Map<number, number> {
+  const landed = FIRST_DELAY + (items.length - 1) * STEP + SLAM;
+  const peeled = items.filter((item) => textAt(item) >= 0);
+  return new Map(
+    peeled.map((item, k) => [item.clueIndex, landed + staggerDelay(k, peeled.length, { duration: PEEL })]),
+  );
+}
+
 /** 写真全体に手がかりの位置を示す。 */
-function PhotoEvidence({ item, label }: { item: RevealItem; label: string }) {
+function PhotoEvidence({ item, label, peelAt }: { item: RevealItem; label: string; peelAt?: number }) {
   const { image, clue } = item;
   const loaded = useLoadedSize(image && clue.region ? image.url : null);
-  if (!image || !clue.region || !loaded) return <TextEvidence item={item} label={label} />;
+  if (!image || !clue.region || !loaded) return <TextEvidence item={item} label={label} peelAt={peelAt} />;
   return (
     <figure className="space-y-4">
       <p className="text-xs tracking-widest text-ink/60">{t.originalPhoto}</p>
@@ -48,10 +73,15 @@ function PhotoEvidence({ item, label }: { item: RevealItem; label: string }) {
   );
 }
 
-/** 本文の手がかりは、投稿の本文の中で該当する言葉に印を付ける。写真が読めないときもここに来る */
-function TextEvidence({ item, label }: { item: RevealItem; label: string }) {
+/**
+ * 本文の手がかりは、投稿の本文の中で該当する言葉を黒い帯で隠しておき、カードが叩きつけられたあとに帯が
+ * 右から左へ縮んで消え、言葉が赤くなる（redaction.css）。動きを減らす設定では、はがれた赤い言葉だけを見せる。
+ * 写真が読めないときもここに来る
+ */
+function TextEvidence({ item, label, peelAt = 0 }: { item: RevealItem; label: string; peelAt?: number }) {
   const { clue, post } = item;
-  const at = clue.image_index === null ? post.text.indexOf(clue.value) : -1;
+  const at = textAt(item);
+  const delay = { animationDelay: paced(peelAt) };
   return (
     <div className="space-y-2">
       <span className="block text-xs tracking-widest text-ink/60">
@@ -62,7 +92,12 @@ function TextEvidence({ item, label }: { item: RevealItem; label: string }) {
       {at >= 0 && (
         <blockquote className="border-l-2 border-ink/30 pl-3 text-sm text-ink/80">
           {post.text.slice(0, at)}
-          <mark className="bg-seeker/30 text-ink">{clue.value}</mark>
+          <span className="redaction">
+            <span className="redaction-word" style={delay}>
+              {clue.value}
+            </span>
+            <span aria-hidden="true" className="redaction-bar" style={delay} />
+          </span>
           {post.text.slice(at + clue.value.length)}
         </blockquote>
       )}
@@ -89,6 +124,7 @@ export function Reveal({ posts, clues, conclusions, children }: RevealProps) {
   const postCount = new Set(clues.map((c) => c.post_id)).size;
 
   const identity = identityName(clues, conclusions);
+  const peels = peelDelays(items);
 
   return (
     <section aria-labelledby="reveal-heading" className="reveal space-y-10">
@@ -129,9 +165,9 @@ export function Reveal({ posts, clues, conclusions, children }: RevealProps) {
                   </span>
                 )}
                 {item.image ? (
-                  <PhotoEvidence item={item} label={label} />
+                  <PhotoEvidence item={item} label={label} peelAt={peels.get(item.clueIndex)} />
                 ) : (
-                  <TextEvidence item={item} label={label} />
+                  <TextEvidence item={item} label={label} peelAt={peels.get(item.clueIndex)} />
                 )}
               </li>
             );
