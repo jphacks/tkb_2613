@@ -302,6 +302,21 @@ describe("profile claims on the Threads diagnosis", () => {
     expect(await screen.findByRole("heading", { name: "投稿を横断したプロフィール推定" })).toBeInTheDocument();
     expect(within(profileSection()).getByText("林町小学校")).toBeInTheDocument();
   });
+
+  it("slams the Bluesky reveal on top of the full diagnosis and drops it for the rediagnosis", async () => {
+    stubDiagnosedApi();
+    render(<ThreadsPage />);
+
+    const reveal = (await screen.findByRole("heading", { name: "ぜんぶ、みえてる" })).closest("section") as HTMLElement;
+    // 身元カードに推定、証拠のカードに本文の手がかりが出る
+    expect(within(reveal).getByRole("article", { name: "推定した身元" })).toBeInTheDocument();
+    expect(within(reveal).getByText("毎週火曜（毎週火曜はジム）")).toBeInTheDocument();
+    expect(within(reveal).getByRole("list", { name: "見つかった証拠" })).toBeInTheDocument();
+
+    excludeSchoolPost();
+    fireEvent.click(screen.getByRole("button", { name: "選択した投稿を除いて再診断" }));
+    await waitFor(() => expect(screen.queryByRole("heading", { name: "ぜんぶ、みえてる" })).not.toBeInTheDocument());
+  });
 });
 
 describe("posts that could not be read", () => {
