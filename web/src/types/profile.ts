@@ -203,6 +203,23 @@ export function profileClaimAfterDeletion(item: ProfileItem, deletedPostIds: Rea
   };
 }
 
+/**
+ * 消した投稿（削除・仮除外）を根拠から除いたプロフィール推定。根拠がなくなった推定は返さない。
+ * api の claims_after_deletion（engine/src/tkb_engine/cross_post.py）と同じ規則にする。
+ * 経路のない推定と unknown は計算し直せないので、消した投稿を根拠に含むものだけを除く。
+ */
+export function profileClaimsAfterDeletion(claims: readonly ProfileItem[], deletedPostIds: ReadonlySet<string>): readonly ProfileItem[] {
+  if (deletedPostIds.size === 0) return claims;
+  return claims.flatMap((claim) => {
+    if ((claim.evidence_paths?.length ?? 0) > 0 && claim.status !== "unknown") {
+      const after = profileClaimAfterDeletion(claim, deletedPostIds);
+      return after ? [after] : [];
+    }
+    const lost = claim.evidence.some((reference) => reference.post_id != null && deletedPostIds.has(reference.post_id));
+    return lost ? [] : [claim];
+  });
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }

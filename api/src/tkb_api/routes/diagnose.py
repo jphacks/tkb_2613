@@ -75,6 +75,7 @@ from tkb_common.schemas import (
 from tkb_detect.batch import PostExtraction
 from tkb_detect.errors import DetectError
 from tkb_detect.extract import Extractor, build_extractor
+from tkb_engine.cross_post import claims_after_deletion
 from tkb_engine.gazetteer import Gazetteer
 
 router = APIRouter(prefix="/api")
@@ -304,6 +305,7 @@ def read_diagnosis(
 
     posts と clues は診断時のまま返す（手がかりの番号を変えない）。そのあとに消した投稿は
     deleted に入れ、conclusions と plan は消した投稿を除いて計算する（番号は clues での番号）。
+    profile_claims も消した投稿を根拠から除き、根拠がなくなった推定は返さない（画面と同じ規則）。
     """
     diagnosis = store.get_diagnosis(session_id)
     if diagnosis is None:
@@ -315,8 +317,13 @@ def read_diagnosis(
         "deleted": list(deleted),
         "conclusions": conclusions_json(clues, posts, gazetteer, deleted),
         "plan": plan_json(clues, posts, gazetteer, deleted),
-        "profile_claims": [claim.model_dump(mode="json") for claim in diagnosis.profile_claims],
-        "profile_claim_suggestions": list(diagnosis.profile_claim_suggestions),
+        "profile_claims": [
+            claim.model_dump(mode="json")
+            for claim in claims_after_deletion(diagnosis.profile_claims, deleted)
+        ],
+        "profile_claim_suggestions": [
+            post_id for post_id in diagnosis.profile_claim_suggestions if post_id not in deleted
+        ],
         "web_facts": [fact.model_dump(mode="json") for fact in diagnosis.web_facts],
         "web_lookup_status": diagnosis.web_lookup_status,
         "external_profile_results": [

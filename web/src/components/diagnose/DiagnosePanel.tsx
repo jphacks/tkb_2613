@@ -16,7 +16,7 @@ import { validNameConclusions } from "@/lib/reveal";
 import type { Clue } from "@/types/clue";
 import type { Conclusion, RiskyPost, Simulation } from "@/types/diagnose";
 import type { Post } from "@/types/post";
-import type { ExternalLookupStatus, ExternalProfileResult, ProfileItem, WebFact } from "@/types/profile";
+import { profileClaimsAfterDeletion, type ExternalLookupStatus, type ExternalProfileResult, type ProfileItem, type WebFact } from "@/types/profile";
 
 const t = messages.diagnose;
 
@@ -212,6 +212,10 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
   const busy = phase.kind === "connecting" || phase.kind === "reading" || phase.kind === "searching";
   const status = statusText(phase, posts.length, Object.keys(found).length);
   const livePosts = deleted.size === 0 ? posts : posts.filter((post) => !deleted.has(post.post_id));
+  // 消した投稿（開き直す前に消したもの＋いま消した・仮に除いたもの）。プロフィール推定もこれを除いて出す
+  const excluded = simulation ? new Set([...deleted, ...simulation.delete]) : deleted;
+  const profileClaims = profileClaimsAfterDeletion(result?.profileClaims ?? [], excluded);
+  const profileClaimSuggestions = (result?.profileClaimSuggestions ?? []).filter((id) => !excluded.has(id));
   const postList = <PostList posts={posts} found={found} deleted={deleted} />;
 
   // 結果が出たら再診断ボタンを下へ移し、身元カード→写真→捜査ボードを続けて見せる。
@@ -276,8 +280,8 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
           clues={result.clues}
           conclusions={simulation ? validNameConclusions(simulation.after) : result.conclusions}
           unknown={simulation?.broken}
-          profileClaims={result.profileClaims}
-          profileClaimSuggestions={result.profileClaimSuggestions}
+          profileClaims={profileClaims}
+          profileClaimSuggestions={profileClaimSuggestions}
           posts={posts}
           webFacts={result.webFacts}
           externalLookupStatus={result.externalLookupStatus}

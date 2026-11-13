@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { PROFILE_ATTRIBUTE_CATALOG, PROFILE_CATEGORIES, isExternalProfileResult, isProfileItem, isWebFact, profileClaimAfterDeletion, type ProfileAttribute, type ProfileItem } from "./profile";
+import { PROFILE_ATTRIBUTE_CATALOG, PROFILE_CATEGORIES, isExternalProfileResult, isProfileItem, isWebFact, profileClaimAfterDeletion, profileClaimsAfterDeletion, type ProfileAttribute, type ProfileItem } from "./profile";
 
 describe("profile metadata catalog", () => {
   it("contains the 25 candidate IDs and labels with unrated legacy fields", () => {
@@ -54,6 +54,33 @@ describe("profileClaimAfterDeletion", () => {
     expect(profileClaimAfterDeletion(item, new Set([a, c]))).toBeNull();
     const legacy: ProfileItem = { ...item, evidence_paths: undefined };
     expect(profileClaimAfterDeletion(legacy, new Set([a]))).toBeUndefined();
+  });
+});
+
+describe("profileClaimsAfterDeletion", () => {
+  const a = "at://did:plc:test/app.bsky.feed.post/a";
+  const b = "at://did:plc:test/app.bsky.feed.post/b";
+  const c = "at://did:plc:test/app.bsky.feed.post/c";
+  const ref = (post_id: string) => ({ post_id, clue_index: null, required: true, source: "post_text" as const, excerpt: post_id });
+  const withPath: ProfileItem = {
+    attribute: "residential_area", value: "架空の区", confidence: 0.85, status: "found",
+    evidence: [ref(a), ref(b)],
+    evidence_paths: [{ evidence: [ref(a), ref(b)], confidence: 0.85 }],
+  };
+  const legacy: ProfileItem = { attribute: "employer_name", value: "架空商事", confidence: 0.9, status: "found", evidence: [ref(c)] };
+
+  it("returns the claims as they are when nothing was deleted", () => {
+    const claims = [withPath, legacy];
+    expect(profileClaimsAfterDeletion(claims, new Set())).toBe(claims);
+  });
+
+  it("drops a claim whose evidence path was deleted", () => {
+    expect(profileClaimsAfterDeletion([withPath, legacy], new Set([a]))).toEqual([legacy]);
+  });
+
+  it("drops a claim without paths only when its own evidence was deleted", () => {
+    expect(profileClaimsAfterDeletion([legacy], new Set([a]))).toEqual([legacy]);
+    expect(profileClaimsAfterDeletion([legacy], new Set([c]))).toEqual([]);
   });
 });
 

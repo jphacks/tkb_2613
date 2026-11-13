@@ -15,7 +15,15 @@ from tkb_api.main import create_app
 from tkb_api.routes.delete import get_delete_posts
 from tkb_api.routes.diagnose import get_gazetteer
 from tkb_api.routes.session import SESSION_COOKIE, get_login
-from tkb_common.schemas import Clue, Post
+from tkb_common.schemas import (
+    Clue,
+    Post,
+    ProfileAttribute,
+    ProfileEvidence,
+    ProfileEvidencePath,
+    ProfileItem,
+    ProfileStatus,
+)
 from tkb_engine.gazetteer import Gazetteer
 
 # ブラウザは POST・DELETE に Origin を付ける（元に戻せない操作は Origin を確かめる）
@@ -154,6 +162,62 @@ def test_deleted_posts_stay_out_of_the_restored_diagnosis(client: TestClient) ->
     for conclusion in [*data["conclusions"], *data["plan"]["after"]]:
         for i in conclusion["clue_indices"]:
             assert data["clues"][i]["post_id"] != GYM_POST
+
+
+def _claim(attribute: ProfileAttribute, *paths: tuple[str, str]) -> ProfileItem:
+    """2件の投稿の手がかりを合わせた経路を、paths の数だけ持つプロフィール推定。"""
+    evidence_paths = [
+        ProfileEvidencePath(
+            evidence=[
+                ProfileEvidence(post_id=a, clue_index=0, required=True),
+                ProfileEvidence(post_id=b, clue_index=1, required=True),
+            ],
+            confidence=0.85,
+        )
+        for a, b in paths
+    ]
+    return ProfileItem(
+        attribute=attribute,
+        value="文京区",
+        confidence=0.85,
+        status=ProfileStatus.FOUND,
+        evidence=[e for path in evidence_paths for e in path.evidence],
+        evidence_paths=evidence_paths,
+    )
+
+
+def test_restored_profile_claims_drop_the_ones_whose_evidence_was_deleted(
+    client: TestClient,
+) -> None:
+    other = POST_IDS[0]
+    third = POST_IDS[2]
+    only_gym = _claim(ProfileAttribute.RESIDENTIAL_AREA, (GYM_POST, other))
+    two_ways = _claim(ProfileAttribute.REGULAR_STATION, (GYM_POST, other), (other, third))
+    _login(client)
+    store: SessionStore = client.app.state.sessions  # type: ignore[attr-defined]
+    store.set_diagnosis(
+        client.cookies[SESSION_COOKIE],
+        Diagnosis(
+            posts=tuple(POSTS),
+            clues=tuple(CLUES),
+            profile_claims=(only_gym, two_ways),
+            profile_claim_suggestions=(GYM_POST, other),
+        ),
+    )
+    before = client.get("/api/diagnosis").json()
+    assert len(before["profile_claims"]) == 2
+
+    client.post("/api/delete", json={"delete": [GYM_POST]})
+    data = client.get("/api/diagnosis").json()
+
+    # 消した投稿だけが根拠の推定は出さない。別の経路が残る推定は、残った経路だけで出す
+    assert [c["attribute"] for c in data["profile_claims"]] == ["regular_station"]
+    survivor = data["profile_claims"][0]
+    assert all(e["post_id"] != GYM_POST for e in survivor["evidence"])
+    assert len(survivor["evidence_paths"]) == 1
+    assert data["profile_claim_suggestions"] == [other]
+    # 開き直しても戻らない
+    assert client.get("/api/diagnosis").json()["profile_claims"] == data["profile_claims"]
 
 
 def test_restored_plan_numbers_match_the_simulation_from_the_remaining_posts(
