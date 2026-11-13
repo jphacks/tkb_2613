@@ -457,6 +457,12 @@ async def diagnose(request: Request) -> dict[str, Any]:
     _origin(request)
     settings = _settings(request)
     current = _session(request)
+    if current.token is not None:
+        _require_live(settings)
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "実Xアカウントでは投稿の原文表示だけを利用できます",
+        )
     if current.snapshot is not None:
         return current.snapshot
     with _store(request).lock:
@@ -464,32 +470,10 @@ async def diagnose(request: Request) -> dict[str, Any]:
             raise HTTPException(status.HTTP_409_CONFLICT, "診断中です")
         current.busy = True
     try:
-        if current.token is None:
-            if not settings.x_mock_mode:
-                raise HTTPException(status.HTTP_403_FORBIDDEN, "モック診断は無効です")
-            posts = _mock_data()
-            current.display = {post.post_id: synthetic_display() for post in posts}
-        else:
-            _require_live(settings)
-            if current.fetched:
-                posts = current.posts
-            else:
-                _reserve(request, posts_read_cost(settings.x_max_posts))
-                raw: list[dict[str, Any]] = []
-                try:
-                    posts = await fetch_posts_for_owner(
-                        current.token,
-                        current.owner_id,
-                        settings.x_max_posts,
-                        base_url=_x_api(settings),
-                        raw_out=raw,
-                    )
-                except XPocError as exc:
-                    raise _x_error(exc) from None
-                author = current.author or synthetic_author(current.username)
-                current.display = {f"x:{item['id']}": post_display(item, author) for item in raw}
-                current.posts = posts
-                current.fetched = True
+        if not settings.x_mock_mode:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "モック診断は無効です")
+        posts = _mock_data()
+        current.display = {post.post_id: synthetic_display() for post in posts}
         started = time.monotonic()
         current.posts = posts
         current.snapshot = {
@@ -498,6 +482,52 @@ async def diagnose(request: Request) -> dict[str, Any]:
             "x_display": _display_json(current, posts),
             "elapsed_ms": round((time.monotonic() - started) * 1000),
             "mock": current.token is None,
+        }
+        return current.snapshot
+    finally:
+        with _store(request).lock:
+            current.busy = False
+
+
+@router.post("/posts")
+async def live_posts(request: Request) -> dict[str, Any]:
+    """本人の投稿を取得し、加工・抽出・推論をせず表示用データだけを返す。"""
+    _origin(request)
+    settings = _settings(request)
+    current = _session(request)
+    if current.token is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "実Xアカウントでログインしてください")
+    _require_live(settings)
+    if current.snapshot is not None:
+        return current.snapshot
+    with _store(request).lock:
+        if current.busy:
+            raise HTTPException(status.HTTP_409_CONFLICT, "投稿を取得中です")
+        current.busy = True
+    try:
+        _reserve(request, posts_read_cost(settings.x_max_posts))
+        raw: list[dict[str, Any]] = []
+        try:
+            posts = await fetch_posts_for_owner(
+                current.token,
+                current.owner_id,
+                settings.x_max_posts,
+                base_url=_x_api(settings),
+                raw_out=raw,
+            )
+        except XPocError as exc:
+            raise _x_error(exc) from None
+        author = current.author or synthetic_author(current.username)
+        current.display = {f"x:{item['id']}": post_display(item, author) for item in raw}
+        current.posts = posts
+        current.fetched = True
+        current.snapshot = {
+            "posts": [post.model_dump(mode="json") for post in posts],
+            "view": "posts",
+            "information": [],
+            "post_errors": [],
+            "x_display": _display_json(current, posts),
+            "mock": False,
         }
         return current.snapshot
     finally:
@@ -531,6 +561,8 @@ def _view(current: XSession) -> str:
 def _selected(body: SimulateRequest, current: XSession) -> None:
     if current.snapshot is None:
         raise HTTPException(status.HTTP_409_CONFLICT, "先に診断してください")
+    if _view(current) == "posts":
+        raise HTTPException(status.HTTP_409_CONFLICT, "実Xアカウントでは原文表示だけを利用できます")
     known = {post.post_id for post in current.posts}
     if any(post_id not in known for post_id in body.delete):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "診断した投稿から選んでください")

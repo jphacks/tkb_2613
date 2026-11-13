@@ -96,10 +96,10 @@ class Settings(BaseSettings):
     x_paid_reads_approved: bool = False
     x_query_logs_redacted: bool = False
     x_mock_mode: bool = True
-    x_max_posts: int = Field(default=30, ge=1, le=30)
+    x_max_posts: int = Field(default=5, ge=1, le=30)
     # X API で1日（UTC）に読んでよいリソース数の上限。超えたら X を呼ばずに断る。
-    # 既定は本人確認1件と投稿30件の1回分に少し余裕を足した数。0 なら実取得をすべて断る
-    x_daily_resource_limit: int = Field(default=40, ge=0, le=10000)
+    # 既定は本人確認1件と投稿5件の2回分。0 なら実取得をすべて断る
+    x_daily_resource_limit: int = Field(default=12, ge=0, le=10000)
     # X の結果の出し方。aggregate は地名・駅名などを値ごとに数える今の表示、
     # highlight は本文中の地名・駅名に色を付けるだけで、値ごとに数えない
     x_info_view: Literal["aggregate", "highlight"] = "aggregate"

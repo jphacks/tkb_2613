@@ -8,7 +8,7 @@ data "aws_iam_policy_document" "ec2_assume" {
   }
 }
 
-# アプリと GPU のインスタンスロール：SSM で入れることと、VLM のキーを読むことだけ
+# アプリと GPU のインスタンスロール：SSM で入り、VLM のキーを読む。X Secret はアプリだけ
 data "aws_iam_policy_document" "read_vlm_key" {
   statement {
     actions   = ["secretsmanager:GetSecretValue"]
@@ -33,6 +33,19 @@ resource "aws_iam_role_policy" "read_vlm_key" {
   name     = "read-vlm-key"
   role     = each.value.name
   policy   = data.aws_iam_policy_document.read_vlm_key.json
+}
+
+data "aws_iam_policy_document" "read_x_client_secret" {
+  statement {
+    actions   = ["secretsmanager:GetSecretValue"]
+    resources = [aws_secretsmanager_secret.x_client_secret.arn]
+  }
+}
+
+resource "aws_iam_role_policy" "read_x_client_secret" {
+  name   = "read-x-client-secret"
+  role   = aws_iam_role.instance["app"].name
+  policy = data.aws_iam_policy_document.read_x_client_secret.json
 }
 
 resource "aws_iam_instance_profile" "instance" {

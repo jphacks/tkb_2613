@@ -35,7 +35,7 @@
 
 **起動スクリプトが Secrets Manager から読み、メモリ上のファイルでコンテナに渡す**（docs/aws-migration.md の 10.1 の案 A）。
 
-- アプリ：`tkb-app-start`（systemd の `tkb-app.service`）がインスタンスロールでキーを読み、`/run/tkb_2613/api-secrets.env`（`/run` は tmpfs＝メモリ）に書いて `docker compose up` し、終わったら消す。OAuth 用の内部共有秘密は起動のたびに生成し、api と web に別の一時ファイルで渡す。web には VLM キーを渡さない。後に読むほうが優先されるので、`.env` の空の `VLM_API_KEY` を上書きする
+- アプリ：`tkb-app-start`（systemd の `tkb-app.service`）がインスタンスロールでVLMキーと、設定済みならX Client Secretを読み、`/run/tkb_2613/api-secrets.env`（`/run` は tmpfs＝メモリ）に書いて `docker compose up` し、終わったら消す。OAuth 用の内部共有秘密は起動のたびに生成し、api と web に別の一時ファイルで渡す。web にはVLMキーもX Secretも渡さない。後に読むほうが優先されるので、`.env` の空の値を上書きする
 - GPU：`tkb-vllm.service` が起動のたびに同じようにキーを読み、`VLLM_API_KEY` として vLLM に渡す
 
 案 B（api が IAM ロールで Secrets Manager を直接読む）にしなかった理由：
@@ -111,6 +111,14 @@ aws secretsmanager put-secret-value --secret-id tkb_2613/vlm-api-key --secret-st
 unset VLM_KEY
 ```
 
+X連携を有効にする場合だけ、Developer Consoleで再生成したClient Secretを別のSecretへ入れる。値は `.env` やコマンドライン引数に書かない。
+
+```bash
+read -rs X_OAUTH_SECRET   # 貼り付けて Enter（画面に出ない）
+aws secretsmanager put-secret-value --secret-id tkb_2613/x-client-secret --secret-string "$X_OAUTH_SECRET"
+unset X_OAUTH_SECRET
+```
+
 ## アプリの .env を作る
 
 GPU のプライベート IP などは `terraform output` で出る。キーは `.env` に書かない。
@@ -134,7 +142,7 @@ vi .env   # <...> を terraform output の値に置き換える
           #   MODEL_ALLOWED_HOST_SUFFIXES=10.0.2.10
           #   CORS_ORIGINS=["https://<配信ID>.cloudfront.net"]
           #   PUBLIC_WINDOWS=[]（公開時間では制限しない）
-# VLM_API_KEY は空のまま（起動スクリプトが渡す）
+# VLM_API_KEY と X_CLIENT_SECRET は空のまま（起動スクリプトが渡す）
 # OAuth の場合は AUTH_MODE=oauth、PUBLIC_URL=https://<配信ID>.cloudfront.net、
 # OAUTH_WEB_ORIGIN=http://web:3000。INTERNAL_AUTH_SECRET は .env に書かない
 systemctl start tkb-app     # 初回はイメージのビルドで十数分かかる

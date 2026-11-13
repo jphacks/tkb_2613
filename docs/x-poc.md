@@ -1,10 +1,10 @@
-# X連携と公開情報チェックの実装・運用条件（2026-11-12）
+# X本人投稿表示と合成デモの実装・運用条件（2026-11-13）
 
 ## 実装範囲
 
-`/x` と `/api/x/*` は Bluesky・Threads のセッションや診断エンジンから独立している。X OAuth 2.0 Authorization Code Flow with PKCE（S256）で本人を認証し、`/2/users/me` の ID と一致する `/2/users/:id/tweets` の投稿だけを最大30件取得する。画像、外部検索、人物照合、推定、投稿の変更・削除は扱わない。
+`/x` と `/api/x/*` は Bluesky・Threads のセッションや診断エンジンから独立している。X OAuth 2.0 Authorization Code Flow with PKCE（S256）で本人を認証し、`/2/users/me` の ID と一致する `/2/users/:id/tweets` の投稿だけを最大5件取得する。実アカウントでは本文・日時・投稿者・元投稿リンクを原文のまま表示するだけで、画像、外部検索、人物照合、抽出、集計、推定、投稿の変更・削除は扱わない。
 
-X専用の公開情報チェックは、投稿本文にそのまま現れる `place`（都道府県・市区町村）、`station`、`weekday`、`time`、`school` だけを保守的な正規表現で抽出する。値ごとに根拠投稿と記載件数を返し、仮除外後はメモリ内の投稿から再集計する。Bluesky・Threadsの `Clue`、`Conclusion`、推論ルール、モデルは呼ばない。
+地名・駅名などの決定的な抽出と仮除外は、`X_MOCK_MODE=1` の架空の合成投稿デモにだけ残す。実トークンのセッションは `POST /api/x/posts` だけを使い、`POST /api/x/diagnose` は409で拒否する。Bluesky・Threadsの `Clue`、`Conclusion`、推論ルール、モデルも呼ばない。
 
 X専用セッション、OAuth state、PKCE verifier、アクセストークン、投稿、結果はAPIプロセスのメモリだけに置く。CookieにはランダムなセッションIDまたは認可開始nonceだけを入れ、`HttpOnly`、`SameSite=Lax`、X API専用Pathを設定する。セッションは既定30分で失効し、ログアウト時には投稿・結果・トークンを即座に破棄する。コールバックの `code` と `state` は次のとおりログから伏せる。
 
@@ -28,11 +28,11 @@ X専用セッション、OAuth state、PKCE verifier、アクセストークン�
 
 フラグは承認の代わりではない。現在はすべて有効化しない。
 
-どれか1つでも欠ければ（Client ID・Secret が空白だけの場合も）、`/api/x/config` の `live_enabled` は false になり画面に「Xでログイン」を出さない。`/start`・`/callback`・実トークンのセッションでの `/diagnose` も403で拒否し、X へは通信しない。`api/tests/test_x_approval_guard.py` と `web/src/app/x/page.test.tsx` で固定している。
+どれか1つでも欠ければ（Client ID・Secret が空白だけの場合も）、`/api/x/config` の `live_enabled` は false になり画面に「Xでログイン」を出さない。`/start`・`/callback`・実トークンのセッションでの `/posts` も403で拒否し、X へは通信しない。`api/tests/test_x_approval_guard.py` と `web/src/app/x/page.test.tsx` で固定している。
 
 ## OAuth実装とWeb Appへの変更
 
-X公式仕様では、Native AppとSingle Page Appはpublic client、Web AppとAutomated App or Botはconfidential clientである。このアプリはブラウザへ秘密を渡さず、FastAPIサーバーがcallbackとtoken exchangeを処理するため、Developer Consoleは **Web App** が適切。
+X公式の [OAuth 2.0 PKCE仕様](https://docs.x.com/fundamentals/authentication/oauth-2-0/authorization-code) では、Native AppとSingle Page Appはpublic client、Web AppとAutomated App or Botはconfidential clientである。このアプリはブラウザへ秘密を渡さず、FastAPIサーバーがcallbackとtoken exchangeを処理するため、Developer Consoleは **Web App** が適切。
 
 Native AppからWeb Appへ変更しても、Authorization Code + PKCE、S256 challenge、state、scope、callbackの基本フローは同じ。差分はWeb AppがClient Secretを持ち、token endpointでサーバーからclient authenticationを行う点。現行 `_exchange` はSecretがあるとHTTP Basic認証、ないpublic clientではbodyに`client_id`を入れるため、設定変更後も互換性がある。Web App運用ではSecretを必須としてサーバー環境変数にだけ置く。
 
@@ -62,29 +62,29 @@ Native AppからWeb Appへ変更しても、Authorization Code + PKCE、S256 cha
 - `GET /2/users/me`: 本人ID・usernameの確認。User Read 1 resource。
 - `GET /2/users/:id/tweets`: 本人投稿の取得。返されたPost resource数に応じる課金。`author_id`をセッション本人IDと再照合し、リポストを除外する。
 
-2026-11-12時点の公式料金表は通常のUser Readが `$0.010/resource`、Posts Readが `$0.005/resource`。本人確認1件と最大30投稿なら最大概算 `$0.16`（税等を除く）。Owned Readsの割引は「認証ユーザーがdeveloper appのownerでもある」場合なので、一般のEXPO来場者には前提としない。単価は変更されるため、試験直前にConsoleで最新価格、credit残高、spending limitを確認し、auto-rechargeは意図せず有効にしない。
+2026-11-13時点の[X公式料金表](https://developer.x.com/)は通常のUser Readが `$0.010/resource`、Posts Readが `$0.005/resource`。本人確認1件と最大5投稿なら最大概算 `$0.035`（税等を除く）。単価は変更されるため、試験直前にConsoleで最新価格、credit残高、spending limitを確認し、auto-rechargeは意図せず有効にしない。
 
 同じ診断結果はセッションメモリから返し、投稿取得を繰り返さない。
 
 ### 偽の X API での E2E
 
-`pnpm -C web test:e2e:x-fake`（CI の「X 偽API E2E」ジョブ）は、`web/e2e/fake-x/server.mjs` の偽の X（127.0.0.1:4010）、承認フラグをすべて1にした api（127.0.0.1:8011）、画面（localhost:3100）を立て、OAuth → 投稿の取得（`X_MAX_POSTS=5`）→ 集計 → 仮除外・再集計 → ログアウトでの破棄を Playwright で通す。X の認可画面は Playwright が偽の X へ差し替え、それ以外の x.com への通信は止めて0件であることを確かめる。偽の X は PKCE（S256）・Basic 認証・redirect_uri・30秒の認可コード・Bearer トークンを検証し、応答の形は公式ドキュメントの例（`/2/users/me`、ページ送りの `meta`）に合わせる。
+`pnpm -C web test:e2e:x-fake`（CI の「X 偽API E2E」ジョブ）は、`web/e2e/fake-x/server.mjs` の偽の X（127.0.0.1:4010）、承認フラグをすべて1にした api（127.0.0.1:8011）、画面（localhost:3100）を立て、OAuth → 本人投稿の原文表示（`X_MAX_POSTS=5`）→ ログアウトでの破棄を Playwright で通す。画面に抽出・集計・仮除外の操作が出ないことも確認する。X の認可画面は Playwright が偽の X へ差し替え、それ以外の x.com への通信は止めて0件であることを確かめる。偽の X は PKCE（S256）・Basic 認証・redirect_uri・30秒の認可コード・Bearer トークンを検証し、応答の形は公式ドキュメントの例（`/2/users/me`、ページ送りの `meta`）に合わせる。
 
 api の向き先は `X_FAKE_API_BASE_URL` で変えるが、http の loopback で `COOKIE_SECURE=0`、`X_PUBLIC_ORIGIN` も loopback のときだけ起動でき、それ以外（本番の設定例を含む）では起動時に失敗する（`api/tests/test_x_fake_api_guard.py`）。偽の X は本番イメージに入れない（`web/.dockerignore`）。
 
 ### 1日の取得件数の上限（`X_DAILY_RESOURCE_LIMIT`）
 
-既定は40。X を呼ぶ前に、読む可能性のある最大リソース数を予約する（OAuth 後の `/2/users/me` は1、投稿一覧は `max(5, X_MAX_POSTS)`）。上限を超えるなら X を呼ばずに429（`Retry-After` は次の UTC 0時まで）で断る。`/start` の時点で「本人確認＋1回の投稿取得」の分が残っていなければ認可画面へ進ませない。実際に返った件数が少なくても返金せず、保守的に数える。0 にすると実取得をすべて断る。
+既定は12。X を呼ぶ前に、読む可能性のある最大リソース数を予約する（OAuth 後の `/2/users/me` は1、投稿一覧は `max(5, X_MAX_POSTS)`）。上限を超えるなら X を呼ばずに429（`Retry-After` は次の UTC 0時まで）で断る。`/start` の時点で「本人確認＋1回の投稿取得」の分が残っていなければ認可画面へ進ませない。実際に返った件数が少なくても返金せず、保守的に数える。0 にすると実取得をすべて断る。
 
-カウンタはAPIプロセスのメモリだけにあり、再起動で0に戻る。アプリ側の上限は誤操作の歯止めであって、最終の歯止めは Developer Console の spending limit にする。既定の40で1日に通るのは本人確認＋30件の取得1回分で、概算は最大 `$0.16`。テストはHTTPモックだけを使い、実Xリクエストや課金を発生させない。
+カウンタはAPIプロセスのメモリだけにあり、再起動で0に戻る。アプリ側の上限は誤操作の歯止めであって、最終の歯止めは Developer Console の spending limit にする。既定の12で通るのは本人確認＋5件の取得2回分で、概算は最大 `$0.07`。テストはHTTPモックだけを使い、実Xリクエストや課金を発生させない。
 
 ## 利用規約上の判断
 
-Developer Policyは、何を収集しどう使うかを利用者に明確に説明して同意を得ることを求め、ログインだけを同意とは扱わない。画面には対象カテゴリ、保持時間、仮除外、非実施事項を表示して明示同意を求める。
+Xの [Developer Policy](https://docs.x.com/developer-terms/policy) は、何を収集しどう使うかを利用者に明確に説明して同意を得ることを求め、ログインだけを同意とは扱わない。画面には最大件数、原文表示、保持時間、非実施事項を表示して明示同意を求める。
 
-Restricted Usesはindividual profiling、センシティブ属性の推定、surveillance、facial recognitionなどを禁止する。Developer Policyのgeo-data条項は、X Contentに含まれる位置・地理情報をPostから切り離して保存・集計・キャッシュすることも禁止している。駅名・地名を値ごとに集計する今回の画面がこの禁止に該当しないとは判断できない。根拠Postへのリンクを維持し、住所等を導出しない設計でも未解決なので、Xからこの具体的な表示・一時メモリ保持を許可する書面回答を得るまで実投稿取得・分析を有効化しない。`X_USE_CASE_APPROVED=1` はこのgeo-data論点を含む回答を得た場合だけ設定する。
+実アカウント経路は原文表示だけに限定したため、individual profiling、センシティブ属性の推定、geo-dataの分離・集計を行わない。推論用途の承認待ちとは切り分けられる。ただしDeveloper Policyは登録したuse caseを拘束的なものとし、実質的な変更は事前承認を求めている。Developer Consoleの用途説明が「認証した本人の投稿を最大5件取得し、その本人に原文表示する。AI・抽出・集計・第三者提供・保存・変更はしない」を含むことを確認し、必要なら更新・承認を得るまで `X_USE_CASE_APPROVED=0` のままにする。
 
-X Contentの削除・変更・保護化への同期、第三者提供条件も未解決（Postの表示要件は下の「投稿の表示要件」で対応）。現実装は30分以内のメモリ保持・ログアウト削除・共有なしで影響を抑えているが、本番運用条件としてXへ確認する。
+X Contentの削除・変更・保護化への同期は、30分以内のメモリ保持、ログアウト時の即時削除、共有なしで影響を抑える。長期保存や第三者提供は行わない。本番運用前に登録した用途とプライバシーポリシーがこの動作と一致することを確認する。
 
 ## 投稿の表示要件
 
@@ -99,17 +99,16 @@ X Contentの削除・変更・保護化への同期、第三者提供条件も�
 | 返信・リポスト・いいねの操作を出す。日時の横の「View on X」で代えてよい | 「Xで見る」で代える。ほかの SNS やサードパーティの操作は付けない |
 | X のロゴを各投稿の右上に見える大きさで出す | 対応（各カードの右上に 20px） |
 | 編集された投稿は、編集を日時のところで示し、最新の投稿へリンクする | 「編集済み」を日時の横に出す。日時のリンク先は最新の ID の permalink |
-| タッチ端末では本文のまわりの余白も permalink へのリンクにする | 未対応（日時と「Xで見る」から開ける） |
-| リポスト | 取得時に `exclude=retweets` で除くので出ない |
-| 返信 | 別の要件（Display requirements: Replies）があり未確認。承認後の試験までに読む |
+| タッチ端末では本文・投稿者のまわりの余白も permalink へのリンクにする | 対応。本文・投稿者領域の既存リンク以外を押すとpermalinkを開く |
+| リポスト・返信 | 取得時に `exclude=retweets,replies` で除くので出ない |
 | 存在しない投稿のモックアップを使わない | 合成デモの架空投稿には X のロゴ・x.com へのリンクを付けず、「架空」「架空の投稿（Xの投稿ではありません）」と出す |
 | 投稿を製品の宣伝や推薦に使わない | 使わない |
 
 ## 集計しない表示（`X_INFO_VIEW=highlight`）
 
-既定は `aggregate`（今の表示：地名・駅名・曜日・時刻・学校名を値ごとに数え、根拠を並べる）。`highlight` にすると、api は値ごとの集計を作らず、投稿ごとに地名・駅名の位置（コードポイント単位の `start`・`end`）だけを返す。画面は本文の文字を変えずにその部分へ背景色を付けるだけで、値の一覧・件数・仮除外前後の件数の比較は出さない（`/api/x/simulate` は409）。仮除外は残りの投稿を出し直すだけになる。曜日・時刻・学校名には色を付けない。表示はセッションで診断したときの設定に固定し、途中で設定を変えても混ざらない。
+`X_INFO_VIEW` は架空の合成投稿デモにだけ使う。実アカウントの `POST /api/x/posts` はこの設定を読まず、常に原文表示だけを返す。
 
-Developer Policy の geo-data 条項（位置情報を Post から切り離して保存・集計しない）の論点を避けるための表示で、X への確認では `highlight` を基本の案として示す。ただし、ハイライトが表示要件の「本文を改変しない」に当たらないか（文字は変えず背景色だけ）は、あわせて X に確認する。
+合成デモの `aggregate` と `highlight` は X API由来のコンテンツではなく、Xロゴやx.comへのリンクも表示しない。
 
 ## EXPOで利用できる範囲
 
@@ -119,7 +118,7 @@ Developer Policy の geo-data 条項（位置情報を Post から切り離し�
 
 ## 承認が届いた日にやること
 
-前提：X からの書面の回答で、用途（本人の投稿の自己点検）、geo-data 条項（地名・駅名の扱い。集計表示か `X_INFO_VIEW=highlight` か）、ハイライトが本文の改変に当たらないこと、の3点が確認できていること。チームで費用（最大概算と上限）を承認していること。どれかが欠けていれば、この先へ進まず `X_MOCK_MODE=1` のままにする。
+前提：Developer Consoleで承認されたuse caseが「認証した本人の投稿を最大5件取得して原文表示する」用途を含み、チームで費用（最大概算と上限）を承認していること。どちらかが欠けていれば、この先へ進まず `X_MOCK_MODE=1` のままにする。
 
 ### 1. Developer Console（人が画面で行う。リポジトリからは変えない）
 
@@ -131,7 +130,7 @@ Developer Policy の geo-data 条項（位置情報を Post から切り離し�
 ### 2. 秘密の置き場所
 
 - `X_CLIENT_SECRET` は API サーバーだけに置く。Git、チャット、ブラウザ、`NEXT_PUBLIC_*`、`/opt/tkb_2613/.env` には書かない。
-- 置き場所は、VLM の鍵と同じく AWS Secrets Manager（例：`tkb_2613/x-client-secret`）。`infra/tkb-app-start.sh` が起動時に読み、tmpfs の `/run/tkb_2613/api-secrets.env` にだけ書いて compose に渡し、終了時に消す形にする。そのために、Terraform で secret と EC2 ロールの `secretsmanager:GetSecretValue` を足し、起動スクリプトに `X_CLIENT_SECRET=` の行を足す変更を PR にする（承認日の作業。今はまだ入れていない）。
+- 置き場所は AWS Secrets Manager の `tkb_2613/x-client-secret`。Terraformは入れ物とアプリEC2だけの読み取り権限を作り、`infra/tkb-app-start.sh` が起動時にtmpfsの `/run/tkb_2613/api-secrets.env` にだけ書いてAPIコンテナへ渡す。値はTerraform state、`.env`、webコンテナに入らない。
 - `X_CLIENT_ID` は秘密ではないが、Secret と同じ経路か `.env` に置く。
 - 値を入れた後、`docker compose exec api env` などで中身を画面に出さない。確かめるのは `GET /api/x/config` の `live_enabled` だけにする。
 
@@ -139,15 +138,14 @@ Developer Policy の geo-data 条項（位置情報を Post から切り離し�
 
 1. `X_PUBLIC_ORIGIN=https://<公開オリジン>`、`X_CALLBACK_URL=https://<公開オリジン>/api/x/callback`、`COOKIE_SECURE=1` を確かめる。`X_FAKE_API_BASE_URL` は書かない（書くと起動に失敗する）。
 2. `X_MAX_POSTS=5`、`X_DAILY_RESOURCE_LIMIT=12`（本人確認1＋投稿5の2回分）にする。
-3. X の回答に合わせて `X_INFO_VIEW` を決める（geo-data の回答が集計を認めない場合は `highlight`）。
-4. CloudFront のアクセスログ・リアルタイムログが無効のままか（有効なら `cs-uri-query` を外したか）を確かめてから `X_QUERY_LOGS_REDACTED=1`。
-5. `X_USE_CASE_APPROVED=1`、`X_PAID_READS_APPROVED=1`、`X_MOCK_MODE=0` にして再起動する。
-6. `GET /api/x/config` が `live_enabled: true`、`max_posts: 5` を返すことを確かめる。
+3. CloudFront のアクセスログ・リアルタイムログが無効のままか（有効なら `cs-uri-query` を外したか）を確かめてから `X_QUERY_LOGS_REDACTED=1`。
+4. `X_USE_CASE_APPROVED=1`、`X_PAID_READS_APPROVED=1`、`X_MOCK_MODE=0` にして再起動する。
+5. `GET /api/x/config` が `live_enabled: true`、`max_posts: 5` を返すことを確かめる。
 
 ### 4. チームのテストアカウントで試す
 
 - 使うのはチームが持つテスト用の X アカウント1つだけ。投稿は架空の内容で、自宅周辺や他人の顔が分かるものを含めない。最初は投稿を5件程度にしておく。
-- 2人以上で、画面とサーバーのログを見ながら1回だけ行う：同意 → Xでログイン → 認可 → `/x` に戻る → 公開情報を確認する → 仮除外 → ログアウトしてデータを破棄。
+- 2人以上で、画面とサーバーのログを見ながら1回だけ行う：同意 → Xでログイン → 認可 → `/x` に戻る → 本人投稿を最大5件表示 → ログアウトしてデータを破棄。
 
 ### 5. 確認項目
 
@@ -156,7 +154,7 @@ Developer Policy の geo-data 条項（位置情報を Post から切り離し�
 - [ ] api・web・CloudFront のログに `code`・`state`・トークン・投稿本文が出ていない（`/api/x/callback` の行がクエリなしで出ている）
 - [ ] 取得した投稿が5件以下で、すべて本人の投稿（リポストを含まない）
 - [ ] 投稿の表示が表示要件どおり（アイコン・表示名・@ユーザー名のリンク、X ロゴ、日時の permalink、「Xで見る」、メンション・ハッシュタグ・URL のリンク、編集済み）
-- [ ] 仮除外・再集計（または再表示）で X を再び呼んでいない（Console の使用量が増えない）
+- [ ] 実アカウント画面に抽出・集計・仮除外・AI診断の表示や操作がない
 - [ ] ログアウト後、`/api/x/session` と `/api/x/diagnosis` が 401
 - [ ] 2回目のログインが `X_DAILY_RESOURCE_LIMIT` で429になる（上限が効いている）
 - [ ] Console の使用量・請求が、本人確認1＋投稿5程度のリソース数と一致する

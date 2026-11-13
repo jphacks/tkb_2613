@@ -170,7 +170,16 @@ async def test_live_oauth_and_content_are_closed_without_all_approvals() -> None
 
 
 @pytest.mark.anyio
-async def test_oauth_pkce_state_owner_check_and_direct_only_aggregation() -> None:
+async def test_oauth_pkce_owner_posts_are_displayed_without_analysis(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tkb_api.routes import x as x_routes
+
+    def fail_if_analyzed(*_args: Any, **_kwargs: Any) -> Any:
+        pytest.fail("実Xアカウントの投稿を抽出・集計してはいけない")
+
+    monkeypatch.setattr(x_routes, "public_information_report", fail_if_analyzed)
+    monkeypatch.setattr(x_routes, "highlights_report", fail_if_analyzed)
     async with _client(
         x_mock_mode=False,
         x_client_id="public-id",
@@ -216,14 +225,13 @@ async def test_oauth_pkce_state_owner_check_and_direct_only_aggregation() -> Non
                 follow_redirects=False,
             )
             assert callback.status_code == 303
-            result = await client.post("/api/x/diagnose", headers=HEADERS)
+            assert (await client.post("/api/x/diagnose", headers=HEADERS)).status_code == 409
+            result = await client.post("/api/x/posts", headers=HEADERS)
             assert result.status_code == 200
-            information = result.json()["information"]
-            assert {(item["category"], item["value"]) for item in information} == {
-                ("station", "新宿駅"),
-                ("weekday", "金曜日"),
-                ("time", "19時"),
-            }
+            assert result.json()["view"] == "posts"
+            assert result.json()["information"] == []
+            assert result.json()["post_errors"] == []
+            assert result.json()["posts"][0]["text"] == "新宿駅、金曜19時に集合"
             display = result.json()["x_display"]
             assert display["synthetic"] is False
             assert display["author"]["profile_url"] == "https://x.com/fictional_demo"
@@ -238,11 +246,41 @@ async def test_oauth_pkce_state_owner_check_and_direct_only_aggregation() -> Non
             assert len(posts.calls) == 1
             assert not any("ollama" in str(call.request.url) for call in router.calls)
 
+            # 復元はメモリ内の同じ結果を返し、X APIを再び呼ばない
+            restored = await client.get("/api/x/diagnosis")
+            assert restored.json() == result.json()
+            assert (await client.post("/api/x/posts", headers=HEADERS)).json() == result.json()
+            assert len(posts.calls) == 1
+
         replay = await client.get(
             f"/api/x/callback?state={query['state'][0]}&code=synthetic-code",
             follow_redirects=False,
         )
         assert replay.status_code == 400  # state と開始Cookieは一回限り
+
+
+@pytest.mark.anyio
+async def test_live_posts_returns_a_safe_error_when_x_api_fails() -> None:
+    app = _app(
+        x_mock_mode=False,
+        x_client_id="public-id",
+        x_client_secret="synthetic-secret",  # noqa: S106 - HTTPモック用
+        x_use_case_approved=True,
+        x_paid_reads_approved=True,
+        x_query_logs_redacted=True,
+    )
+    session_id = app.state.x_sessions.create("synthetic-token", "42", "fictional_demo")
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url=ORIGIN) as client:
+        client.cookies.set("x_tkb_session", session_id)
+        with respx.mock as router:
+            router.get("https://api.x.com/2/users/42/tweets").respond(
+                500, json={"detail": "upstream secret must not escape"}
+            )
+            result = await client.post("/api/x/posts", headers=HEADERS)
+
+    assert result.status_code == 502
+    assert result.json() == {"detail": "X API に接続できませんでした"}
+    assert "upstream secret" not in result.text
 
 
 @pytest.mark.anyio

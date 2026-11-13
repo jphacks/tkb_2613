@@ -72,7 +72,7 @@ async def test_live_entry_and_api_are_closed_when_one_item_is_missing(
 ) -> None:
     key, value = missing
     app = _app(**{key: value})
-    # 承認前に何らかの経路で実トークンのセッションができていても、診断は拒否する
+    # 承認前に何らかの経路で実トークンのセッションができていても、取得は拒否する
     store: XSessionStore = app.state.x_sessions
     live_session = store.create("synthetic-token", "123", "synthetic_user")
     async with _client(app) as client:
@@ -82,9 +82,11 @@ async def test_live_entry_and_api_are_closed_when_one_item_is_missing(
             callback = await client.get("/api/x/callback?code=c&state=s")
             client.cookies.set(SESSION_COOKIE, live_session)
             diagnose = await client.post("/api/x/diagnose", headers=HEADERS)
+            posts = await client.post("/api/x/posts", headers=HEADERS)
     assert config["live_enabled"] is False
     assert start.status_code == 403
     assert "authorize_url" not in start.text
     assert callback.status_code == 403
     assert diagnose.status_code == 403
+    assert posts.status_code == 403
     assert not router.calls  # X へは通信しない

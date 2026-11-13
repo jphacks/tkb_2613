@@ -2,7 +2,7 @@ import { expect, test } from "playwright/test";
 
 test("合成X投稿の明記情報を確認し、仮除外・再集計する", async ({ page }) => {
   await page.goto("/x");
-  await expect(page.getByRole("heading", { name: "投稿に書いた情報を見直す" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "自分の投稿を確認する" })).toBeVisible();
   await page.getByRole("checkbox", { name: /利用目的を確認し/ }).check();
   await page.getByRole("button", { name: "架空のX投稿で試す" }).click();
   await expect(page.getByText("架空のXアカウント")).toBeVisible();
@@ -26,7 +26,7 @@ test("合成X投稿の明記情報を確認し、仮除外・再集計する", a
 
 test("X OAuthの開始先とPKCE導線を確認する。Xには接続しない", async ({ page }) => {
   await page.route("**/api/x/config", (route) => route.fulfill({
-    json: { mock_enabled: false, live_enabled: true, max_posts: 30 },
+    json: { mock_enabled: false, live_enabled: true, max_posts: 5 },
   }));
   await page.route(/\/api\/x\/session$/, (route) => route.fulfill({ status: 401, json: {} }));
   await page.route("**/api/x/start", async (route) => {

@@ -1,5 +1,5 @@
-import { render, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, render, screen, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { XAuthor, XPostDisplay } from "@/lib/xDisplay";
 
@@ -24,6 +24,8 @@ const display: XPostDisplay = {
 };
 
 describe("XPostCard", () => {
+  afterEach(() => vi.restoreAllMocks());
+
   it("meets the X display requirements for a real post", () => {
     render(<XPostCard post={post} author={author} display={display} synthetic={false} />);
     const card = screen.getByRole("article", { name: "架空のテスターの投稿" });
@@ -46,6 +48,18 @@ describe("XPostCard", () => {
     for (const link of within(card).getAllByRole("link")) {
       expect(link).toHaveAttribute("rel", "noopener noreferrer");
     }
+  });
+
+  it("opens the permalink from whitespace around the author and post text", () => {
+    const open = vi.spyOn(window, "open").mockImplementation(() => null);
+    const { container } = render(
+      <XPostCard post={post} author={author} display={display} synthetic={false} />,
+    );
+
+    fireEvent.click(container.querySelector("header") as HTMLElement);
+    fireEvent.click(container.querySelector("p") as HTMLElement);
+    expect(open).toHaveBeenCalledTimes(2);
+    expect(open).toHaveBeenCalledWith(display.permalink, "_blank", "noopener,noreferrer");
   });
 
   it("does not dress a synthetic post up as an X post", () => {

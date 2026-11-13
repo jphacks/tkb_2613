@@ -28,9 +28,10 @@ LIVE: dict[str, Any] = {
 
 def test_default_limit_is_small() -> None:
     settings = Settings(_env_file=None)
-    assert settings.x_daily_resource_limit == 40
-    # 既定の上限で、本人確認と30件の取得は1回だけできる
-    assert one_check_cost(settings.x_max_posts) <= 40 < 2 * one_check_cost(settings.x_max_posts)
+    assert settings.x_max_posts == 5
+    assert settings.x_daily_resource_limit == 12
+    # 既定の上限で、本人確認と5件の取得を2回だけできる
+    assert 2 * one_check_cost(settings.x_max_posts) == settings.x_daily_resource_limit
 
 
 def test_costs_follow_the_api_minimum_page_size() -> None:
@@ -128,9 +129,9 @@ async def test_reads_stop_at_the_daily_limit_without_calling_x() -> None:
         routes = _mock_x(router)
         async with _client(app) as first:
             assert (await _login(first)).status_code == 303
-            assert (await first.post("/api/x/diagnose", headers=HEADERS)).status_code == 200
+            assert (await first.post("/api/x/posts", headers=HEADERS)).status_code == 200
             # 同じセッションの2回目はメモリから返し、上限を使わない
-            assert (await first.post("/api/x/diagnose", headers=HEADERS)).status_code == 200
+            assert (await first.post("/api/x/posts", headers=HEADERS)).status_code == 200
         assert app.state.x_budget.remaining() == 2
 
         async with _client(app) as second:
@@ -149,9 +150,9 @@ async def test_posts_fetch_is_refused_when_the_budget_ran_out_after_login() -> N
         async with _client(app) as first, _client(app) as second:
             assert (await _login(first)).status_code == 303  # 使用 1
             assert (await _login(second)).status_code == 303  # 使用 2
-            assert (await first.post("/api/x/diagnose", headers=HEADERS)).status_code == 200
-            refused = await second.post("/api/x/diagnose", headers=HEADERS)  # 7 + 5 > 11
-            retry = await second.post("/api/x/diagnose", headers=HEADERS)
+            assert (await first.post("/api/x/posts", headers=HEADERS)).status_code == 200
+            refused = await second.post("/api/x/posts", headers=HEADERS)  # 7 + 5 > 11
+            retry = await second.post("/api/x/posts", headers=HEADERS)
     assert refused.status_code == 429
     assert "上限" in refused.json()["detail"]
     assert retry.status_code == 429  # 断られたセッションは busy のまま残らない

@@ -86,9 +86,14 @@ export function XPostCard({ post, author, display, synthetic, highlights = [] }:
   const offsets = segments.reduce<number[]>((acc, segment, index) =>
     [...acc, index === 0 ? 0 : acc[index - 1] + Array.from(segments[index - 1].text).length], []);
   const when = TIME_FORMAT.format(new Date(post.created_at));
+  function openPermalink(event: React.MouseEvent<HTMLElement>) {
+    if (!permalink || (event.target as Element).closest("a")) return;
+    window.open(permalink, "_blank", "noopener,noreferrer");
+  }
   return (
     <article aria-label={`${author.name}の投稿`} className="rounded-sm border border-ink/20 bg-paper p-4">
-      <header className="flex items-start gap-3">
+      <header className={permalink ? "flex cursor-pointer items-start gap-3" : "flex items-start gap-3"}
+        onClick={openPermalink}>
         <MaybeLink href={profileUrl} className="shrink-0"><Avatar author={author} /></MaybeLink>
         <div className="min-w-0 flex-1 leading-tight">
           <MaybeLink href={profileUrl} className="block truncate font-bold hover:underline">{author.name}</MaybeLink>
@@ -98,7 +103,8 @@ export function XPostCard({ post, author, display, synthetic, highlights = [] }:
           ? <span className="shrink-0 rounded-sm border border-ink/40 px-2 py-0.5 text-xs">架空</span>
           : <XLogo />}
       </header>
-      <p className="mt-3 whitespace-pre-wrap break-words">
+      <p className={`mt-3 whitespace-pre-wrap break-words ${permalink ? "cursor-pointer" : ""}`}
+        onClick={openPermalink}>
         {segments.map((segment, index) => segment.kind === "text"
           ? <Marked key={index} text={segment.text} offset={offsets[index]} highlights={highlights} />
           : <a key={index} href={segment.href} className="text-seeker underline-offset-2 hover:underline" {...LINK_ATTRS}>

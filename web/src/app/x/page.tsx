@@ -24,7 +24,7 @@ type XDiagnosis = {
   readonly post_errors?: readonly PostError[];
   readonly x_display?: XDisplay;
   // highlight は地名・駅名の位置だけで、値ごとに数えない（X_INFO_VIEW）
-  readonly view?: "aggregate" | "highlight";
+  readonly view?: "aggregate" | "highlight" | "posts";
   readonly highlights?: Readonly<Record<string, readonly XHighlight[]>>;
   readonly elapsed_ms?: number;
   readonly mock?: boolean;
@@ -80,11 +80,17 @@ function requireDiagnosis(value: unknown): XDiagnosis {
       !Array.isArray(value.information) || !value.information.every(isPublicInfo) ||
       !isPostErrors(value.post_errors) ||
       (value.x_display !== undefined && !isXDisplay(value.x_display)) ||
-      (value.view !== undefined && value.view !== "aggregate" && value.view !== "highlight") ||
+      (value.view !== undefined && value.view !== "aggregate" && value.view !== "highlight" &&
+        value.view !== "posts") ||
       (value.highlights !== undefined && !isHighlights(value.highlights))) {
     throw new Error("公開情報チェックの結果を読み取れませんでした。");
   }
   const diagnosis = value as XDiagnosis;
+  if (diagnosis.view === "posts" &&
+      (diagnosis.information.length > 0 || (diagnosis.highlights && Object.keys(diagnosis.highlights).length > 0) ||
+        !diagnosis.x_display || diagnosis.x_display.synthetic)) {
+    throw new Error("本人投稿の表示結果を読み取れませんでした。");
+  }
   const posts = new Map(diagnosis.posts.map((post) => [post.post_id, post]));
   if (diagnosis.information.some((item) => item.evidence.some((evidence) =>
     !posts.get(evidence.post_id)?.text.includes(evidence.quote)))) {
@@ -124,6 +130,8 @@ async function call(path: string, method: "GET" | "POST" | "DELETE" = "GET", bod
     if (response.status === 403) throw new Error("実X連携は用途承認と安全設定の確認が完了するまで利用できません。");
     if (response.status === 401) throw new Error("Xにログインし直してください。");
     if (response.status === 429) throw new Error("本日のXの取得上限に達しました。日付が変わってから（UTC）お試しください。");
+    if (response.status === 502) throw new Error("X APIから投稿を取得できませんでした。しばらくしてから再度お試しください。");
+    if (response.status === 503) throw new Error("X APIの回数制限中、または一時的に利用できません。しばらくしてから再度お試しください。");
     throw new Error("操作に失敗しました。再度お試しください。");
   }
   if (response.status === 204) return null;
@@ -181,27 +189,32 @@ export default function XPage() {
 
   const current = view ?? original;
   const highlightView = original?.view === "highlight";
+  const livePostView = original?.view === "posts";
   const shown = new Set(current?.posts.map((post) => post.post_id));
   return (
     <main className="mx-auto max-w-4xl px-5 py-12">
       <Link href="/" className="text-sm underline">みーつけたに戻る</Link>
       <header className="mt-8 border-b border-ink/30 pb-8">
-        <p className="text-sm tracking-widest text-ink/60">X / 公開情報チェック</p>
-        <h1 className="mt-3 font-display text-4xl">投稿に書いた情報を見直す</h1>
+        <p className="text-sm tracking-widest text-ink/60">X / 本人投稿</p>
+        <h1 className="mt-3 font-display text-4xl">自分の投稿を確認する</h1>
         <p className="mt-4 max-w-2xl text-ink/75">
-          投稿本文に直接書かれた地名・駅名・曜日・時刻・学校名だけを整理します。
-          住所、勤務先、居住地域、健康や政治信条などは推定しません。
+          Xで本人確認したアカウントから直近の投稿を最大{config?.max_posts ?? 5}件取得し、原文のまま表示します。
+          AI推論、個人情報や位置情報の抽出・集計は行いません。
         </p>
       </header>
 
       {!session && <section className="mt-10 max-w-2xl space-y-5" aria-label="X公開情報チェックの開始">
         <div className="rounded-sm border border-ink/30 bg-paper-deep p-4 text-sm">
-          <p className="font-bold">現在は架空の合成投稿だけを使います</p>
-          <p className="mt-2">Xの用途承認が確認できるまで、実投稿の取得と分析は有効になりません。外部検索・人物照合・モデル学習・投稿削除は行いません。</p>
+          <p className="font-bold">{config?.live_enabled ? "Xの本人投稿を読み取り専用で表示します" : "現在は架空の合成投稿だけを使います"}</p>
+          <p className="mt-2">{config?.live_enabled
+            ? "取得した本文と日時は、このブラウザの表示とサーバーの一時メモリだけで使います。AI、抽出、集計、外部検索、投稿の変更・削除は行いません。"
+            : "Xの利用目的と課金・安全設定が確認できるまで、実投稿の取得は有効になりません。"}</p>
         </div>
         <label className="flex gap-3 rounded-sm border border-ink/30 bg-paper-deep p-4">
           <input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} />
-          <span>利用目的を確認し、投稿本文に明記した限定カテゴリの集計と仮除外を行うことに同意します。データと結果はログアウトまたは30分で破棄されます。</span>
+          <span>{config?.live_enabled
+            ? `利用目的を確認し、本人の投稿を最大${config.max_posts}件取得して原文表示だけに使うことに同意します。データはログアウトまたは30分で破棄されます。`
+            : "利用目的を確認し、合成投稿の限定カテゴリ集計と仮除外を行うことに同意します。データと結果はログアウトまたは30分で破棄されます。"}</span>
         </label>
         <div className="flex flex-wrap gap-3">
           {config?.mock_enabled && <button type="button" disabled={!consent || busy}
@@ -238,16 +251,19 @@ export default function XPage() {
         {!original && <button type="button" disabled={busy}
           className="rounded-sm bg-seeker px-6 py-3 font-bold text-paper disabled:opacity-50"
           onClick={() => void perform(async () => {
-            const result = requireDiagnosis(await call("diagnose", "POST"));
+            const result = requireDiagnosis(await call(session.mock ? "diagnose" : "posts", "POST"));
             setOriginal(result); setView(result);
-          })}>{busy ? "確認中…" : "公開情報を確認する"}</button>}
+          })}>{busy ? "取得中…" : session.mock ? "公開情報を確認する" : "自分の投稿を読み込む"}</button>}
       </section>}
 
       {error && <p role="alert" className="mt-6 border-l-4 border-seeker p-3">{error}</p>}
 
       {original && current && <div className="mt-12 space-y-10">
         <div aria-live="polite" className="border-l-4 border-seeker bg-paper-deep p-4">
-          {highlightView ? <>
+          {livePostView ? <>
+            <p className="font-bold">本人投稿の取得結果</p>
+            <p className="text-sm text-ink/70">投稿 {current.posts.length} 件・原文表示のみ</p>
+          </> : highlightView ? <>
             <p className="font-bold">{view === original ? "公開情報チェック結果" : "仮除外後の表示"}</p>
             <p className="text-sm text-ink/70">投稿 {current.posts.length} 件・本文中の地名と駅名に色を付けています（件数は数えません）</p>
           </> : <>
@@ -267,7 +283,7 @@ export default function XPage() {
             値ごとにまとめたり数えたりはしません。</p>
         </section>}
 
-        {!highlightView && <section aria-labelledby="x-information-heading" className="space-y-4">
+        {!livePostView && !highlightView && <section aria-labelledby="x-information-heading" className="space-y-4">
           <h2 id="x-information-heading" className="font-display text-xl">本文に書かれている情報</h2>
           {current.information.length === 0 && <p>対象カテゴリの情報は見つかりませんでした。</p>}
           {current.information.map((item) => <article key={`${item.category}:${item.value}`}
@@ -289,19 +305,21 @@ export default function XPage() {
         </section>}
 
         <section aria-labelledby="x-posts-heading" className="space-y-4">
-          <h2 id="x-posts-heading" className="font-display text-xl">確認した投稿</h2>
-          <p className="text-sm text-ink/70">投稿を選んで{highlightView ? "表示" : "集計"}から仮除外できます。X上の投稿は変更・削除されません。</p>
+          <h2 id="x-posts-heading" className="font-display text-xl">{livePostView ? "取得した投稿" : "確認した投稿"}</h2>
+          {livePostView ? <p className="text-sm text-ink/70">Xから取得した原文です。X上の投稿は変更・削除されません。</p>
+            : <p className="text-sm text-ink/70">投稿を選んで{highlightView ? "表示" : "集計"}から仮除外できます。X上の投稿は変更・削除されません。</p>}
+          {livePostView && original.posts.length === 0 && <p>表示できる投稿はありません。</p>}
           <ol className="space-y-5">{original.posts.map((post, index) => <li id={`x-post-${index}`} key={post.post_id}
             className={[
               "scroll-mt-5 p-3",
               selected.includes(post.post_id) ? "rounded-sm border border-seeker" : "",
               highlightView && !shown.has(post.post_id) ? "opacity-50" : "",
             ].join(" ")}>
-            <label className="mb-3 flex items-center gap-2 text-sm">
+            {!livePostView && <label className="mb-3 flex items-center gap-2 text-sm">
               <input type="checkbox" checked={selected.includes(post.post_id)} onChange={() => toggle(post.post_id)} />
               仮除外する
               {highlightView && !shown.has(post.post_id) && <span className="ml-2 font-bold">（表示から除外中）</span>}
-            </label>
+            </label>}
             {original.x_display
               ? <XPostCard post={post} author={original.x_display.author}
                 display={original.x_display.posts[post.post_id] ?? NO_DISPLAY}
@@ -309,7 +327,7 @@ export default function XPage() {
                 highlights={highlightView ? original.highlights?.[post.post_id] ?? NO_HIGHLIGHTS : NO_HIGHLIGHTS} />
               : <PostCard post={post} />}
           </li>)}</ol>
-          <div className="flex flex-wrap gap-3">
+          {!livePostView && <div className="flex flex-wrap gap-3">
             {!highlightView && <button type="button" disabled={!selected.length || busy} className="rounded-sm border border-ink px-4 py-2 disabled:opacity-50"
               onClick={() => void perform(async () => setPreview(requireSimulation(
                 await call("simulate", "POST", { delete: selected }),
@@ -322,7 +340,7 @@ export default function XPage() {
             {view !== original && <button type="button" className="underline" onClick={() => {
               setView(original); setPreview(null); setSelected([]);
             }}>全投稿の結果に戻す</button>}
-          </div>
+          </div>}
           {preview && <div role="status" className="rounded-sm bg-paper-deep p-4 text-sm">
             <p>明記情報：{preview.before.length}種類 → {preview.after.length}種類</p>
             <p>表示から消える情報：{preview.removed.length
