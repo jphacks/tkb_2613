@@ -418,11 +418,11 @@ resource "aws_wafv2_web_acl" "main" {
         limit                 = var.rate_limit_diagnose
         evaluation_window_sec = 300
         aggregate_key_type    = "IP"
-        # GPU を使う診断の入口。X・Threads の診断も本体と同じ上限で数える
+        # GPU を使う診断の入口。X・Threads の診断と下書き確認も本体と同じ上限で数える
         scope_down_statement {
           or_statement {
             dynamic "statement" {
-              for_each = ["/api/diagnose", "/api/x/diagnose", "/api/threads/diagnose"]
+              for_each = ["/api/diagnose", "/api/x/diagnose", "/api/threads/diagnose", "/api/draft-check"]
               content {
                 byte_match_statement {
                   search_string         = statement.value

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   ApiError,
+  checkDraft,
   createSession,
   deleteSession,
   detectClues,
@@ -442,3 +443,23 @@ describe("getSharedResult", () => {
   });
 });
 
+
+describe("checkDraft", () => {
+  function refusal(status: number, detail: Record<string, unknown>): Response {
+    return new Response(JSON.stringify({ detail }), { status, headers: { "Content-Type": "application/json" } });
+  }
+
+  it.each([
+    [409, { code: "diagnosis_required", message: "…" }, messages.errors.diagnoseFirst],
+    [503, { code: "busy", message: "…", retry_after: 30 }, messages.errors.busy],
+    [503, { code: "model_unavailable", message: "…" }, messages.errors.modelUnavailable],
+  ])("explains why the draft could not be checked (%i %j)", async (status, detail, text) => {
+    mockFetch(refusal(status, detail));
+    await expect(checkDraft("根津駅")).rejects.toMatchObject({ kind: "server", code: detail.code, status, message: text });
+  });
+
+  it("falls back to the status for errors without a reason code", async () => {
+    mockFetch(refusal(502, { message: "コードなし" }));
+    await expect(checkDraft("根津駅")).rejects.toMatchObject({ message: "下書きを確認できませんでした（502）" });
+  });
+});
