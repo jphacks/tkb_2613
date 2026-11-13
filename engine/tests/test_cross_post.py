@@ -25,10 +25,12 @@ from tkb_engine.cross_post import (
     infer_combined_regular_line_claims,
     infer_explicit_observation_claims,
     infer_home_nearest_station_claims,
+    infer_owner_candidate_sets_with_web,
     infer_owner_claims,
     infer_owner_profile_relations,
     infer_realtime_location_claim,
     infer_regular_station_from_home_origin,
+    infer_rule_and_link_claims,
     plan_profile_candidate_deletion,
     plan_profile_claim_deletion,
     profile_relations_after_deletion,
@@ -1492,6 +1494,11 @@ def test_explicit_self_report_rules_emit_candidates_with_matching_typed_observat
             ProfileAttribute.CHILD_AGE,
             ProfileAttribute.REALTIME_LOCATION,
             ProfileAttribute.FREQUENT_SHOP,
+            ProfileAttribute.AGE,
+            ProfileAttribute.BIRTHDAY,
+            ProfileAttribute.OCCUPATION,
+            ProfileAttribute.ACTIVE_TIME,
+            ProfileAttribute.ROUTINE,
         }
     ]
     for attribute in generic_attributes:
@@ -1680,7 +1687,7 @@ def test_candidate_sets_cover_24_items_and_keep_equal_grounded_values_ambiguous(
         ],
     )
     sets = evaluate_profile_candidates(claims, [a, b, c])
-    assert len(sets) == 24
+    assert len(sets) == 29
     assert all(item.attribute is not ProfileAttribute.HOME_ROOM for item in sets)
     residence = next(item for item in sets if item.attribute is ProfileAttribute.RESIDENTIAL_AREA)
     assert residence.status is ProfileCandidateSetStatus.AMBIGUOUS
@@ -1916,7 +1923,7 @@ def test_mixed_direct_and_combined_paths_stay_one_candidate_and_deletion_reclass
 
 def test_missing_claims_remain_unknown_and_do_not_enter_candidate_pool() -> None:
     sets = evaluate_profile_candidates([], [])
-    assert len(sets) == 24
+    assert len(sets) == 29
     assert all(item.status is ProfileCandidateSetStatus.UNKNOWN for item in sets)
     assert all(not item.candidates and not item.candidate_pool for item in sets)
 
@@ -2090,3 +2097,176 @@ def test_planner_does_not_count_top_rank_change_as_broken_when_alternatives_surv
     )
     assert residence.status is ProfileCandidateSetStatus.CANDIDATE
     assert [item.value for item in residence.candidates] == ["候補B"]
+
+
+def test_rules_and_links_integrate_into_candidate_sets_and_collapse_on_deletion() -> None:
+    p1 = post("rx-1", "茗荷谷駅の近く").model_copy(
+        update={"created_at": datetime.fromisoformat("2026-10-05T08:10:00+09:00")}
+    )
+    p2 = post("rx-2", "10月5日が誕生日です。ケーキのプレートありがとう！").model_copy(
+        update={"created_at": datetime.fromisoformat("2026-10-05T19:00:00+09:00")}
+    )
+    p3 = post("rx-3", "25歳、コーヒーが好き").model_copy(
+        update={"created_at": datetime.fromisoformat("2026-10-12T12:00:00+09:00")}
+    )
+    p4 = post("rx-4", "夜勤終わり。火曜のジムに毎週通ってます").model_copy(
+        update={"created_at": datetime.fromisoformat("2026-10-19T08:15:00+09:00")}
+    )
+    p5 = post("rx-5", "青空カフェでバイトのシフト終わり").model_copy(
+        update={"created_at": datetime.fromisoformat("2026-10-21T20:00:00+09:00")}
+    )
+    p6 = post("rx-6", "来週から3泊で旅行に行くので家を空ける").model_copy(
+        update={"created_at": datetime.fromisoformat("2026-10-22T20:00:00+09:00")}
+    )
+    p7 = post("rx-7", "青空カフェのテラス席").model_copy(
+        update={"created_at": datetime.fromisoformat("2026-10-23T15:00:00+09:00")}
+    )
+    p8 = post("rx-8", "茗荷谷駅へ").model_copy(
+        update={"created_at": datetime.fromisoformat("2026-10-23T08:15:00+09:00")}
+    )
+    posts = [p1, p2, p3, p4, p5, p6, p7, p8]
+    clues = [
+        Clue(
+            post_id=p1.post_id,
+            image_index=0,
+            type=ClueType.ADDRESS_TEXT,
+            value="東京都文京区小日向",
+            region=(0, 0, 50, 50),
+            confidence=0.9,
+            source=ClueSource.OCR,
+        ),
+        Clue(
+            post_id=p1.post_id,
+            image_index=0,
+            type=ClueType.STATION_SIGN,
+            value="茗荷谷",
+            region=(60, 0, 120, 50),
+            confidence=0.9,
+            source=ClueSource.VLM,
+        ),
+        typed_clue(p8, "茗荷谷駅", ClueType.PLACE_TEXT),
+        Clue(
+            post_id=p2.post_id,
+            image_index=0,
+            type=ClueType.NAME_TEXT,
+            value="Happy Birthday さくら",
+            region=(0, 0, 50, 50),
+            confidence=0.9,
+            source=ClueSource.VLM,
+        ),
+        typed_clue(p2, "10月5日が誕生日", ClueType.AGE_TEXT),
+        typed_clue(p3, "25歳", ClueType.AGE_TEXT),
+        typed_clue(p4, "夜勤", ClueType.ROUTINE_TEXT),
+        typed_clue(p4, "毎週火曜はジム", ClueType.ROUTINE_TEXT),
+        Clue(
+            post_id=p4.post_id,
+            image_index=0,
+            type=ClueType.UNIFORM,
+            value="スクラブ",
+            region=(0, 0, 50, 50),
+            confidence=0.9,
+            source=ClueSource.VLM,
+        ),
+        typed_clue(p5, "青空カフェ", ClueType.PLACE_TEXT),
+        typed_clue(p5, "バイトのシフト", ClueType.ROUTINE_TEXT),
+        typed_clue(p6, "来週から3泊で旅行", ClueType.ROUTINE_TEXT),
+        typed_clue(p7, "青空カフェ", ClueType.PLACE_TEXT),
+    ]
+    gaz = Gazetteer(
+        stations=[{"station_name": "茗荷谷", "mesh_1km": "m-bunkyo"}],
+        postal=[
+            {"postal_code": "1120006", "muni_code": "13105", "city": "文京区", "town": "小日向"}
+        ],
+        muni_meshes={"13105": {"m-bunkyo"}},
+    )
+
+    claims = infer_rule_and_link_claims(posts, clues, gazetteer=gaz)
+    assert claims
+    assert all(len(path.evidence) >= 2 for claim in claims for path in claim.evidence_paths)
+
+    sets = infer_owner_candidate_sets_with_web(posts, clues, [], gazetteer=gaz)
+    assert len(sets) == 29
+    by_attr = {candidate_set.attribute: candidate_set for candidate_set in sets}
+
+    assert by_attr[ProfileAttribute.RESIDENTIAL_AREA].candidates[0].value == "小日向"
+    assert by_attr[ProfileAttribute.HOME_NEAREST_STATION].candidates[0].value == "茗荷谷駅"
+    assert by_attr[ProfileAttribute.ACTIVE_TIME].candidates
+    assert by_attr[ProfileAttribute.ROUTINE].candidates
+    assert by_attr[ProfileAttribute.GIVEN_NAME].candidates[0].value == "さくら"
+    assert by_attr[ProfileAttribute.AGE].candidates[0].value == "25歳"
+    assert by_attr[ProfileAttribute.BIRTHDAY].candidates[0].value == "2001年10月5日ごろ"
+    assert by_attr[ProfileAttribute.OCCUPATION].candidates[0].value == "シフトのある医療の仕事"
+    assert by_attr[ProfileAttribute.ANNOUNCED_LONG_ABSENCE].candidates
+    assert by_attr[ProfileAttribute.FREQUENT_SHOP].candidates[0].value == "青空カフェ"
+    assert (
+        by_attr[ProfileAttribute.EMPLOYER_NAME].candidates[0].value
+        == "青空カフェ（勤務先・バイト先の可能性）"
+    )
+
+    for candidate_set in by_attr.values():
+        for candidate in candidate_set.candidates:
+            for path in candidate.evidence_paths:
+                assert path.provenance is EvidencePathProvenance.COMBINED_INFERENCE
+                assert len(path.evidence) >= 2
+
+    suggested = plan_profile_candidate_deletion(sets, posts)
+    assert suggested
+    after = recalculate_profile_candidate_sets(
+        sets,
+        {p4.post_id},
+        [p for p in posts if p.post_id != p4.post_id],
+        clues=clues,
+    )
+    after_by_attr = {candidate_set.attribute: candidate_set for candidate_set in after}
+    assert after_by_attr[ProfileAttribute.OCCUPATION].status is ProfileCandidateSetStatus.UNKNOWN
+
+
+def test_rules_x1_emits_commute_destination_is_school_relation() -> None:
+    p_home = post("x1-home", "茗荷谷に住んでる")
+    p_home2 = post("x1-home2", "茗荷谷駅のホーム")
+    p_school = post("x1-school", "文京大学に通学")
+    p_commute = post("x1-commute", "自宅から大学まで通学してる")
+    posts = [p_home, p_home2, p_school, p_commute]
+    clues = [
+        Clue(
+            post_id=p_home.post_id,
+            image_index=0,
+            type=ClueType.ADDRESS_TEXT,
+            value="東京都文京区小日向",
+            region=(0, 0, 50, 50),
+            confidence=0.9,
+            source=ClueSource.OCR,
+        ),
+        Clue(
+            post_id=p_home2.post_id,
+            image_index=0,
+            type=ClueType.STATION_SIGN,
+            value="茗荷谷",
+            region=(60, 0, 120, 50),
+            confidence=0.9,
+            source=ClueSource.VLM,
+        ),
+        typed_clue(p_school, "文京大学", ClueType.ORG_TEXT),
+        typed_clue(p_commute, "自宅から大学まで通学", ClueType.ROUTINE_TEXT),
+    ]
+    gaz = Gazetteer(
+        stations=[{"station_name": "茗荷谷", "mesh_1km": "m-bunkyo"}],
+        postal=[
+            {"postal_code": "1120006", "muni_code": "13105", "city": "文京区", "town": "小日向"}
+        ],
+        muni_meshes={"13105": {"m-bunkyo"}},
+        schools=[{"name": "文京大学", "kind": "大学", "city": "文京区"}],
+    )
+
+    candidate_sets = infer_owner_candidate_sets_with_web(posts, clues, [], gazetteer=gaz)
+    relations = infer_owner_profile_relations(posts, candidate_sets, clues=clues, gazetteer=gaz)
+
+    assert len(relations) == 1
+    relation = relations[0]
+    assert relation.kind is ProfileRelationKind.COMMUTE_DESTINATION_IS_SCHOOL
+    assert relation.left.kind is ProfileRelationEndpointKind.COMMUTE_DESTINATION
+    assert relation.left.value == "文京大学（文京区）"
+    assert relation.right.kind is ProfileRelationEndpointKind.PROFILE_CANDIDATE
+    assert relation.right.attribute is ProfileAttribute.SCHOOL
+    assert relation.right.value == "文京大学（文京区）"
+    assert len(relation.evidence_paths[0].evidence) >= 2

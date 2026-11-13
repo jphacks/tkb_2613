@@ -13,6 +13,7 @@ from tkb_common.schemas import (
     ClueType,
     EvidencePathProvenance,
     EvidenceScope,
+    EvidenceSource,
     Post,
     ProfileAttribute,
     ProfileCandidate,
@@ -52,6 +53,7 @@ from tkb_engine.gazetteer import Gazetteer
 from tkb_engine.open_data import infer_registry_employer_claim, shelter_home_facts
 from tkb_engine.open_data_bus import bus_stop_home_facts
 from tkb_engine.open_data_school import add_school_district_residence
+from tkb_engine.rules import WEEKDAYS, Conclusion, infer, timestamps_usable
 
 
 def infer_cross_post_claim(
@@ -352,7 +354,7 @@ def evaluate_profile_candidates(
     conflict_reasons: Mapping[ProfileAttribute, str] | None = None,
     clues: Sequence[Clue] = (),
 ) -> list[ProfileCandidateSet]:
-    """Return all 24 attributes as bounded, grounded candidate sets.
+    """Return all 29 diagnosed attributes as bounded, grounded candidate sets.
 
     A singleton is explicitly a candidate, not a resolved truth. A weak leader keeps up
     to three evidence-sufficient candidates regardless of score gap. A found leader keeps
@@ -977,6 +979,137 @@ def infer_web_employer_claims(
     return list(by_value.values())
 
 
+_RULE_CONCLUSION_MAPPING: dict[tuple[str, str], tuple[ProfileAttribute, float]] = {
+    ("R1", "home_area"): (ProfileAttribute.RESIDENTIAL_AREA, 0.60),
+    ("R1", "station"): (ProfileAttribute.HOME_NEAREST_STATION, 0.58),
+    ("R2", "active_time"): (ProfileAttribute.ACTIVE_TIME, 0.58),
+    ("R3", "routine"): (ProfileAttribute.ROUTINE, 0.58),
+    ("R4", "home_city"): (ProfileAttribute.RESIDENTIAL_AREA, 0.56),
+    ("R5", "home_district"): (ProfileAttribute.RESIDENTIAL_AREA, 0.58),
+    ("R6", "home_block"): (ProfileAttribute.RESIDENTIAL_AREA, 0.62),
+    ("R7", "school"): (ProfileAttribute.SCHOOL, 0.58),
+    ("R8", "full_name"): (ProfileAttribute.FULL_NAME, 0.60),
+    ("R8", "given_name_or_nickname"): (ProfileAttribute.GIVEN_NAME, 0.60),
+    ("R9", "age"): (ProfileAttribute.AGE, 0.58),
+    ("R10", "occupation"): (ProfileAttribute.OCCUPATION, 0.58),
+    ("R11", "line"): (ProfileAttribute.REGULAR_LINE, 0.56),
+    ("R12", "birthday"): (ProfileAttribute.BIRTHDAY, 0.58),
+    ("X2", "birthday"): (ProfileAttribute.BIRTHDAY, 0.62),
+    ("X3", "long_term_home_absence"): (ProfileAttribute.ANNOUNCED_LONG_ABSENCE, 0.58),
+    ("X4", "frequent_shop"): (ProfileAttribute.FREQUENT_SHOP, 0.56),
+    ("X5", "workplace"): (ProfileAttribute.EMPLOYER_NAME, 0.56),
+}
+
+
+def _build_conclusion_evidence(
+    conclusion: Conclusion,
+    posts: Sequence[Post],
+    clues: Sequence[Clue],
+) -> list[ProfileEvidence]:
+    """Convert a RulesR/RulesX conclusion into >= 2 grounded ProfileEvidence entries."""
+    posts_by_id = {post.post_id: post for post in posts}
+    valid_indices = list(dict.fromkeys(i for i in conclusion.clue_indices if 0 <= i < len(clues)))
+    evidence: list[ProfileEvidence] = [
+        ProfileEvidence(
+            post_id=clues[i].post_id,
+            clue_index=i,
+            required=True,
+            source=EvidenceSource.CLUE,
+        )
+        for i in valid_indices
+    ]
+    if len(evidence) == 1:
+        clue = clues[valid_indices[0]]
+        post = posts_by_id.get(clue.post_id)
+        excerpt = (
+            (post.text.strip() if post is not None else "")
+            or clue.value.strip()
+            or conclusion.note.strip()
+            or conclusion.value.strip()
+        )[:200]
+        if excerpt:
+            evidence.append(
+                ProfileEvidence(
+                    post_id=clue.post_id,
+                    clue_index=None,
+                    required=True,
+                    source=EvidenceSource.POST_TEXT,
+                    excerpt=excerpt,
+                )
+            )
+    elif len(evidence) == 0:
+        weekday_match = re.search(rf"毎週([{WEEKDAYS}])曜", conclusion.value)
+        matching_posts: list[Post] = []
+        if weekday_match is not None:
+            target_day = WEEKDAYS.index(weekday_match.group(1))
+            jst = timezone(timedelta(hours=9))
+            matching_posts = [
+                post for post in posts if post.created_at.astimezone(jst).weekday() == target_day
+            ]
+        if len(matching_posts) < 2 and timestamps_usable(posts):
+            matching_posts = list(posts)[:5]
+        seen_post_ids: set[str] = set()
+        for post in matching_posts:
+            if post.post_id in seen_post_ids:
+                continue
+            seen_post_ids.add(post.post_id)
+            evidence.append(
+                ProfileEvidence(
+                    post_id=post.post_id,
+                    clue_index=None,
+                    required=True,
+                    source=EvidenceSource.POST_TEXT,
+                    excerpt=(post.text.strip() or post.created_at.isoformat())[:200],
+                )
+            )
+            if len(evidence) >= 5:
+                break
+    return evidence if len(evidence) >= 2 else []
+
+
+def infer_rule_and_link_claims(
+    posts: Sequence[Post],
+    clues: Sequence[Clue],
+    gazetteer: Gazetteer | None = None,
+) -> list[ProfileItem]:
+    """Convert RulesR (R1..R12) and RulesX (X2..X5) conclusions into ProfileItem candidates."""
+    conclusions = infer(list(clues), list(posts), gazetteer or Gazetteer())
+    grouped_paths: dict[tuple[ProfileAttribute, str], list[ProfileEvidencePath]] = {}
+    for conclusion in conclusions:
+        mapped = _RULE_CONCLUSION_MAPPING.get((conclusion.rule, conclusion.attribute))
+        if mapped is None:
+            continue
+        attribute, cap = mapped
+        value = conclusion.value.strip()
+        if not value:
+            continue
+        evidence = _build_conclusion_evidence(conclusion, posts, clues)
+        if len(evidence) < 2:
+            continue
+        path_confidence = round(max(0.55, min(cap, conclusion.confidence)), 2)
+        grouped_paths.setdefault((attribute, value), []).append(
+            ProfileEvidencePath(
+                evidence=evidence,
+                confidence=path_confidence,
+                provenance=EvidencePathProvenance.COMBINED_INFERENCE,
+            )
+        )
+    items: list[ProfileItem] = []
+    for (attribute, value), paths in grouped_paths.items():
+        items.append(
+            ProfileItem(
+                attribute=attribute,
+                value=value,
+                confidence=max(path.confidence for path in paths),
+                status=ProfileStatus.WEAK,
+                evidence=[ref for path in paths for ref in path.evidence],
+                evidence_paths=paths,
+                assessment=ClaimAssessment(minimal_scope=_minimal_scope(paths)),
+            )
+        )
+    return items
+
+
 def infer_owner_claims_with_web(
     posts: list[Post],
     clues: list[Clue],
@@ -987,6 +1120,7 @@ def infer_owner_claims_with_web(
     *,
     diagnosis_date: date | None = None,
     diagnosis_at: datetime | None = None,
+    include_heuristic_rules: bool = False,
 ) -> list[ProfileItem]:
     """Combine direct and Web-backed paths; reject conflicting employer names."""
     claims = infer_owner_claims(
@@ -997,6 +1131,7 @@ def infer_owner_claims_with_web(
         gazetteer,
         diagnosis_date=diagnosis_date,
         diagnosis_at=diagnosis_at,
+        include_heuristic_rules=include_heuristic_rules,
     )
     registry_claim = (
         infer_registry_employer_claim(posts, owner_profile_text, gazetteer)
@@ -1051,6 +1186,7 @@ def infer_owner_candidate_sets_with_web(
     *,
     diagnosis_date: date | None = None,
     diagnosis_at: datetime | None = None,
+    include_heuristic_rules: bool = True,
 ) -> list[ProfileCandidateSet]:
     """Public multi-candidate entry point; returns one set for each supported catalog item."""
     claims = infer_owner_claims_with_web(
@@ -1062,6 +1198,7 @@ def infer_owner_candidate_sets_with_web(
         gazetteer,
         diagnosis_date=diagnosis_date,
         diagnosis_at=diagnosis_at,
+        include_heuristic_rules=include_heuristic_rules,
     )
     return evaluate_profile_candidates(claims, posts, clues=clues)
 
@@ -1077,8 +1214,11 @@ _SCHOOL_DESTINATION_RE = re.compile(
 def infer_owner_profile_relations(
     posts: Sequence[Post],
     profile_claims: Sequence[ProfileCandidateSet],
+    *,
+    clues: Sequence[Clue] = (),
+    gazetteer: Gazetteer | None = None,
 ) -> list[ProfileRelation]:
-    """Create scoreless links only from explicit owner wording and independent candidate paths."""
+    """Create scoreless links from explicit owner wording, independent paths, and RulesX X1."""
     by_attribute = {claim.attribute: claim for claim in profile_claims}
     relations: list[ProfileRelation] = []
     posts_by_id = {post.post_id: post for post in posts}
@@ -1215,6 +1355,50 @@ def infer_owner_profile_relations(
                             ],
                         )
                     )
+    if clues:
+        rule_conclusions = infer(list(clues), list(posts), gazetteer or Gazetteer())
+        school_set = by_attribute.get(ProfileAttribute.SCHOOL)
+        if school_set is not None and school_set.candidates:
+            candidate_by_norm = {
+                unicodedata.normalize("NFKC", candidate.value).strip(): candidate
+                for candidate in school_set.candidates
+            }
+            for conclusion in rule_conclusions:
+                if conclusion.rule != "X1" or conclusion.attribute != "home_school_commute":
+                    continue
+                x1_match = re.fullmatch(
+                    r".+?付近から(.+)へ通学している可能性", conclusion.value.strip()
+                )
+                if x1_match is None:
+                    continue
+                school_norm = unicodedata.normalize("NFKC", x1_match.group(1)).strip()
+                matched_candidate = candidate_by_norm.get(school_norm)
+                if matched_candidate is None:
+                    continue
+                evidence = _build_conclusion_evidence(conclusion, posts, clues)
+                if len(evidence) < 2:
+                    continue
+                relations.append(
+                    ProfileRelation(
+                        kind=ProfileRelationKind.COMMUTE_DESTINATION_IS_SCHOOL,
+                        left=ProfileRelationEndpoint(
+                            kind=ProfileRelationEndpointKind.COMMUTE_DESTINATION,
+                            value=matched_candidate.value,
+                        ),
+                        right=ProfileRelationEndpoint(
+                            kind=ProfileRelationEndpointKind.PROFILE_CANDIDATE,
+                            attribute=ProfileAttribute.SCHOOL,
+                            value=matched_candidate.value,
+                        ),
+                        evidence_paths=[
+                            ProfileEvidencePath(
+                                evidence=evidence,
+                                confidence=round(max(0.55, min(0.60, conclusion.confidence)), 2),
+                                provenance=EvidencePathProvenance.COMBINED_INFERENCE,
+                            )
+                        ],
+                    )
+                )
     grouped: dict[tuple[str, str, str, str], list[ProfileEvidencePath]] = {}
     endpoints_by_key: dict[
         tuple[str, str, str, str],
@@ -1274,6 +1458,7 @@ def infer_owner_claims(
     *,
     diagnosis_date: date | None = None,
     diagnosis_at: datetime | None = None,
+    include_heuristic_rules: bool = False,
 ) -> list[ProfileItem]:
     """Infer only limited claims with explicit owner/context evidence.
 
@@ -1420,6 +1605,8 @@ def infer_owner_claims(
     if gazetteer is not None:
         claims.extend(infer_child_school_claims(posts, clues, gazetteer))
         claims = add_school_district_residence(claims, gazetteer)
+    if include_heuristic_rules:
+        claims.extend(infer_rule_and_link_claims(posts, clues, gazetteer))
     return claims
 
 

@@ -66,9 +66,15 @@ async def test_text_only_posts_infer_the_child_school_and_its_district() -> None
     claims = _claims(snapshot)
     assert claims["child_school"]["value"] == "林町小学校"
     assert claims["residential_area"]["value"] == "文京区"
+    assert claims["routine"]["value"].startswith("毎週火曜（")
     evidence_posts = {e["post_id"] for e in claims["child_school"]["evidence"]}
     assert evidence_posts == {"threads:9004", "threads:9005"}
-    assert set(snapshot["profile_claim_suggestions"]) <= evidence_posts
+    assert set(snapshot["profile_claim_suggestions"]) <= {
+        "threads:9001",
+        "threads:9002",
+        "threads:9004",
+        "threads:9005",
+    }
     assert snapshot["profile_claim_suggestions"]
     assert restored == snapshot
 
@@ -90,7 +96,11 @@ async def test_rediagnosis_keeps_claims_and_renumbers_their_clues() -> None:
             if evidence["clue_index"] is not None:
                 clue = body["clues"][evidence["clue_index"]]
                 assert clue["post_id"] == evidence["post_id"]
-                assert clue["value"] == "林町小学校"
+    assert all(
+        body["clues"][e["clue_index"]]["value"] == "林町小学校"
+        for e in claims["child_school"]["evidence"]
+        if e["clue_index"] is not None
+    )
 
 
 @pytest.mark.anyio
@@ -100,12 +110,18 @@ async def test_excluding_the_school_post_drops_the_claims_built_on_it() -> None:
         after = await client.post(
             "/api/threads/rediagnose", json={"delete": ["threads:9005"]}, headers=HEADERS
         )
+        after_all = await client.post(
+            "/api/threads/rediagnose",
+            json={"delete": ["threads:9001", "threads:9002", "threads:9005"]},
+            headers=HEADERS,
+        )
         restored = (await client.get("/api/threads/diagnosis")).json()
 
     body = after.json()
     assert "child_school" not in _claims(body)
     assert "residential_area" not in _claims(body)
     # 推定が残らなければ、その根拠だった投稿（9004）も削除候補に残さない
-    assert body["profile_claim_suggestions"] == []
+    assert not ({"threads:9004", "threads:9005"} & set(body["profile_claim_suggestions"]))
+    assert after_all.json()["profile_claim_suggestions"] == []
     # 仮除外はメモリ上の計算だけで、診断結果そのものは変えない
     assert restored == snapshot

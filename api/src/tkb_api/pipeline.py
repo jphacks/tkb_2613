@@ -307,7 +307,9 @@ async def diagnose_events(
         diagnosis_at=diagnosis_at,
     )
     profile_claim_suggestions = plan_profile_candidate_deletion(profile_claims, posts)
-    profile_relations = infer_owner_profile_relations(list(posts), profile_claims)
+    profile_relations = infer_owner_profile_relations(
+        list(posts), profile_claims, clues=all_clues, gazetteer=gazetteer
+    )
     yield (
         "conclusions",
         {

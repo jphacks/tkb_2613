@@ -187,6 +187,8 @@ class ProfileAttribute(StrEnum):
     GIVEN_NAME = "given_name"
     NICKNAME = "nickname"
     OTHER_SOCIAL_ACCOUNT = "other_social_account"
+    AGE = "age"
+    BIRTHDAY = "birthday"
     REALTIME_LOCATION = "realtime_location"
     HOME_BUILDING = "home_building"
     HOME_ROOM = "home_room"
@@ -200,9 +202,12 @@ class ProfileAttribute(StrEnum):
     WORKPLACE_BUILDING_CANDIDATE = "workplace_building_candidate"
     WORKPLACE_AREA = "workplace_area"
     SCHOOL = "school"
+    OCCUPATION = "occupation"
     FREQUENT_SHOP = "frequent_shop"
     VEHICLE_MODEL = "vehicle_model"
     PARTIAL_PLATE = "partial_plate"
+    ACTIVE_TIME = "active_time"
+    ROUTINE = "routine"
     PARTNER_STATUS = "partner_status"
     PARTNER_ATTRIBUTES = "partner_attributes"
     CHILD_AGE = "child_age"
@@ -252,6 +257,10 @@ PROFILE_ATTRIBUTE_CATALOG: dict[ProfileAttribute, ProfileAttributeMetadata] = {
         "別SNSのアカウント / 本垢",
         ProfileCategory.IDENTITY_AND_FACE,
     ),
+    ProfileAttribute.AGE: ProfileAttributeMetadata("年齢・年代", ProfileCategory.IDENTITY_AND_FACE),
+    ProfileAttribute.BIRTHDAY: ProfileAttributeMetadata(
+        "誕生日", ProfileCategory.IDENTITY_AND_FACE
+    ),
     ProfileAttribute.REALTIME_LOCATION: ProfileAttributeMetadata(
         "リアルタイムの現在地",
         ProfileCategory.HOME_AND_LOCATION,
@@ -295,6 +304,9 @@ PROFILE_ATTRIBUTE_CATALOG: dict[ProfileAttribute, ProfileAttributeMetadata] = {
         "通学先（大学・キャンパス・学校）",
         ProfileCategory.AFFILIATION_AND_WORK,
     ),
+    ProfileAttribute.OCCUPATION: ProfileAttributeMetadata(
+        "職種・属性", ProfileCategory.AFFILIATION_AND_WORK
+    ),
     ProfileAttribute.FREQUENT_SHOP: ProfileAttributeMetadata(
         "行きつけの店（ジム・美容院・カフェ）",
         ProfileCategory.ACTIVITY_AND_FAMILY,
@@ -304,6 +316,12 @@ PROFILE_ATTRIBUTE_CATALOG: dict[ProfileAttribute, ProfileAttributeMetadata] = {
     ),
     ProfileAttribute.PARTIAL_PLATE: ProfileAttributeMetadata(
         "ナンバーの一部", ProfileCategory.ACTIVITY_AND_FAMILY
+    ),
+    ProfileAttribute.ACTIVE_TIME: ProfileAttributeMetadata(
+        "主な活動時間帯", ProfileCategory.ACTIVITY_AND_FAMILY
+    ),
+    ProfileAttribute.ROUTINE: ProfileAttributeMetadata(
+        "定期行動・習慣", ProfileCategory.ACTIVITY_AND_FAMILY
     ),
     ProfileAttribute.PARTNER_STATUS: ProfileAttributeMetadata(
         "配偶者・交際相手の有無", ProfileCategory.ACTIVITY_AND_FAMILY

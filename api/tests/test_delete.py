@@ -212,7 +212,7 @@ def test_restored_profile_claims_drop_the_ones_whose_evidence_was_deleted(
         ),
     )
     before = client.get("/api/diagnosis").json()
-    assert len(before["profile_claims"]) == 24
+    assert len(before["profile_claims"]) == 29
     assert sum(bool(claim["candidate_pool"]) for claim in before["profile_claims"]) == 2
 
     client.post("/api/delete", json={"delete": [GYM_POST]})
