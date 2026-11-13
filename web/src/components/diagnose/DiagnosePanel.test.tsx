@@ -79,6 +79,9 @@ afterEach(() => {
   vi.mocked(diagnose).mockReset();
   vi.mocked(getSession).mockReset();
   vi.mocked(getDiagnosis).mockReset();
+  // 前のテストの画面の effect がリセット後に動いても undefined.then で落ちないよう、Promise を返す既定に戻す
+  vi.mocked(getSession).mockResolvedValue(null);
+  vi.mocked(getDiagnosis).mockResolvedValue(null);
 });
 
 describe("DiagnosePanel", () => {
