@@ -36,7 +36,7 @@ def test_profile_catalog_has_all_25_candidate_ids_and_metadata() -> None:
         "home_building": "自宅の建物候補",
         "home_room": "自宅の部屋・階・位置",
         "home_nearest_station": "自宅の最寄り駅",
-        "regular_station": "日常的に利用する駅",
+        "regular_station": "投稿時点の通勤利用駅候補",
         "regular_line": "日常的に利用する路線",
         "residential_area": "居住エリア（市区町村・町域）",
         "announced_long_absence": "予告された長期不在",

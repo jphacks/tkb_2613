@@ -28,6 +28,7 @@ from tkb_common.schemas import (
     Post,
     PostImage,
     ProfileCandidateSet,
+    ProfileRelation,
     WebFact,
 )
 
@@ -222,6 +223,7 @@ class Diagnosis:
     posts: tuple[Post, ...]
     clues: tuple[Clue, ...]
     profile_claims: tuple[ProfileCandidateSet, ...] = ()
+    profile_relations: tuple[ProfileRelation, ...] = ()
     profile_claim_suggestions: tuple[str, ...] = ()
     web_facts: tuple[WebFact, ...] = ()
     web_lookup_status: str = "not_run"

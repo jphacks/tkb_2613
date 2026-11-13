@@ -19,6 +19,8 @@ from tkb_engine.cross_post import (
     infer_child_age_claims,
     infer_explicit_observation_claims,
     infer_home_nearest_station_claims,
+    infer_regular_station_from_home_origin,
+    infer_owner_profile_relations,
     infer_owner_claims,
     infer_combined_regular_line_claims,
     infer_realtime_location_claim,
@@ -792,6 +794,144 @@ def test_regular_station_requires_habit_post_and_separate_usual_station_photo() 
     )
     assert recalculate_after_deletion(claim, {habit.post_id}) is None
     assert recalculate_after_deletion(claim, {photo.post_id}) is None
+
+
+def test_home_nearest_origin_plus_independent_routine_makes_weak_regular_station_path() -> None:
+    origin = post("origin", "私の自宅最寄り駅は根津駅です").model_copy(update={
+        "created_at": datetime.fromisoformat("2026-10-20T08:31:00+09:00")
+    })
+    routine = post("routine-origin", "私は毎朝、自宅最寄りから通勤しています").model_copy(update={
+        "created_at": datetime.fromisoformat("2026-10-21T08:31:00+09:00")
+    })
+    clues = [typed_clue(origin, "根津駅", ClueType.PLACE_TEXT),
+             typed_clue(routine, routine.text, ClueType.ROUTINE_TEXT)]
+    claims = infer_regular_station_from_home_origin([origin, routine], clues, STATIONS)
+    assert len(claims) == 1
+    claim = claims[0]
+    assert claim.value == "根津駅" and claim.confidence == 0.55 and claim.status is ProfileStatus.WEAK
+    path = claim.evidence_paths[0]
+    assert path.provenance is EvidencePathProvenance.COMBINED_INFERENCE
+    assert {ref.post_id for ref in path.evidence} == {origin.post_id, routine.post_id}
+    assert {ref.clue_index for ref in path.evidence if ref.clue_index is not None} == {0, 1}
+    duplicated = infer_regular_station_from_home_origin([origin, routine], [*clues, *clues], STATIONS)
+    assert len(duplicated) == 1 and duplicated[0].confidence == claim.confidence
+    assert recalculate_after_deletion(claim, {origin.post_id}) is None
+    assert recalculate_after_deletion(claim, {routine.post_id}) is None
+    ambiguous_origin = [*clues, typed_clue(origin, "湯島駅", ClueType.PLACE_TEXT)]
+    assert infer_regular_station_from_home_origin([origin, routine], ambiguous_origin, STATIONS) == []
+    pronoun_home = origin.model_copy(update={"text": "私は自宅最寄り駅は根津駅です"})
+    pronoun_clues = [typed_clue(pronoun_home, "根津駅", ClueType.PLACE_TEXT), clues[1]]
+    assert infer_regular_station_from_home_origin([pronoun_home, routine], pronoun_clues, STATIONS)
+    assert infer_regular_station_from_home_origin([origin], clues, STATIONS) == []
+    missing_time = routine.model_copy(update={"created_at": None})
+    assert infer_regular_station_from_home_origin([origin, missing_time], [clues[0], clues[1]], STATIONS) == []
+    naive_origin = origin.model_copy(update={"created_at": datetime(2026, 10, 20, 8, 31)})
+    assert infer_regular_station_from_home_origin([naive_origin, routine], clues, STATIONS) == []
+    naive_routine = routine.model_copy(update={"created_at": datetime(2026, 10, 21, 8, 31)})
+    assert infer_regular_station_from_home_origin([origin, naive_routine], clues, STATIONS) == []
+    intervening_move = post("intervening-move", "転居しました").model_copy(update={
+        "created_at": datetime.fromisoformat("2026-10-20T20:00:00+09:00")
+    })
+    assert infer_regular_station_from_home_origin([origin, intervening_move, routine], clues, STATIONS) == []
+    naive_intervening_move = intervening_move.model_copy(update={"created_at": datetime(2026, 10, 20, 20, 0)})
+    assert infer_regular_station_from_home_origin([origin, naive_intervening_move, routine], clues, STATIONS) == []
+    distant = routine.model_copy(update={"created_at": datetime.fromisoformat("2027-02-01T08:31:00+09:00")})
+    assert infer_regular_station_from_home_origin([origin, distant], clues, STATIONS) == []
+    moved = routine.model_copy(update={"text": "私は毎朝、自宅最寄りから通勤。転居しました"})
+    assert infer_regular_station_from_home_origin([origin, moved], [clues[0], typed_clue(moved, moved.text, ClueType.ROUTINE_TEXT)], STATIONS) == []
+    quoted = routine.model_copy(update={"text": "『私は毎朝、自宅最寄りから通勤しています』"})
+    assert infer_regular_station_from_home_origin([origin, quoted], [clues[0], typed_clue(quoted, quoted.text, ClueType.ROUTINE_TEXT)], STATIONS) == []
+    friend_a = origin.model_copy(update={"text": "友人の自宅最寄り駅は根津駅です"})
+    assert infer_regular_station_from_home_origin([friend_a, routine], [typed_clue(friend_a, "根津駅", ClueType.PLACE_TEXT), clues[1]], STATIONS) == []
+    friend_b = routine.model_copy(update={"text": "彼は毎朝、自宅最寄りから通勤しています"})
+    assert infer_regular_station_from_home_origin([origin, friend_b], [clues[0], typed_clue(friend_b, friend_b.text, ClueType.ROUTINE_TEXT)], STATIONS) == []
+    friend_home = routine.model_copy(update={"text": "私は毎朝、友人の自宅最寄りから通勤しています"})
+    assert infer_regular_station_from_home_origin([origin, friend_home], [clues[0], typed_clue(friend_home, friend_home.text, ClueType.ROUTINE_TEXT)], STATIONS) == []
+    partner_home = routine.model_copy(update={"text": "私は毎朝、彼の自宅最寄りから通勤しています"})
+    assert infer_regular_station_from_home_origin([origin, partner_home], [clues[0], typed_clue(partner_home, partner_home.text, ClueType.ROUTINE_TEXT)], STATIONS) == []
+    denied = routine.model_copy(update={"text": "私は毎朝、自宅最寄りから通勤しません"})
+    assert infer_regular_station_from_home_origin([origin, denied], [clues[0], typed_clue(denied, denied.text, ClueType.ROUTINE_TEXT)], STATIONS) == []
+    same_post = origin.model_copy(update={"text": "私の自宅最寄り駅は根津駅です。私は毎朝、自宅最寄りから通勤しています"})
+    same_clues = [typed_clue(same_post, "根津駅", ClueType.PLACE_TEXT), typed_clue(same_post, same_post.text, ClueType.ROUTINE_TEXT)]
+    assert infer_regular_station_from_home_origin([same_post], same_clues, STATIONS) == []
+    future = routine.model_copy(update={"created_at": datetime.fromisoformat("2027-01-01T08:31:00+09:00")})
+    fixed_now = datetime.fromisoformat("2026-11-13T12:00:00+09:00")
+    assert infer_regular_station_from_home_origin(
+        [origin, future], [clues[0], typed_clue(future, future.text, ClueType.ROUTINE_TEXT)], STATIONS,
+        diagnosis_at=fixed_now,
+    ) == []
+    assert infer_regular_station_from_home_origin(
+        [origin, routine], clues, STATIONS, diagnosis_at=datetime(2026, 11, 13, 12, 0, 0)
+    ) == []
+
+
+def test_profile_relations_require_independent_candidates_and_keep_complete_paths() -> None:
+    relation_posts = [
+        post("home-a", "私の自宅最寄り駅は根津駅です"),
+        post("routine-b", "私は毎朝、自宅最寄りから通勤しています"),
+        post("commute-dest", "私は毎朝通勤先は架空大学"),
+    ]
+    home_refs = [ProfileEvidence(post_id=relation_posts[0].post_id, clue_index=None, required=True, source="post_text", excerpt="私の自宅最寄り駅は根津駅です"),
+                 ProfileEvidence(post_id=relation_posts[0].post_id, clue_index=0, required=True)]
+    regular_refs = [*home_refs,
+        ProfileEvidence(post_id=relation_posts[1].post_id, clue_index=None, required=True, source="post_text", excerpt="私は毎朝、自宅最寄りから通勤しています"),
+        ProfileEvidence(post_id=relation_posts[1].post_id, clue_index=1, required=True)]
+    home_path = ProfileEvidencePath(evidence=home_refs, confidence=0.55, provenance=EvidencePathProvenance.DIRECT_DISCLOSURE)
+    regular_path = ProfileEvidencePath(evidence=regular_refs, confidence=0.55, provenance=EvidencePathProvenance.COMBINED_INFERENCE)
+    home_candidate = ProfileItem(attribute=ProfileAttribute.HOME_NEAREST_STATION, value="根津駅", confidence=0.55,
+        status=ProfileStatus.WEAK, evidence=home_refs, evidence_paths=[home_path])
+    regular_candidate = ProfileItem(attribute=ProfileAttribute.REGULAR_STATION, value="根津駅", confidence=0.55,
+        status=ProfileStatus.WEAK, evidence=regular_refs, evidence_paths=[regular_path])
+    claims = evaluate_profile_candidates([home_candidate, regular_candidate], [], clues=[])
+    relations = infer_owner_profile_relations(relation_posts, claims)
+    assert len(relations) == 1
+    edge = relations[0]
+    assert edge.kind.value == "home_nearest_is_commute_origin"
+    assert {ref.post_id for ref in edge.evidence_paths[0].evidence} == {relation_posts[0].post_id, relation_posts[1].post_id}
+    unsupported_regular = regular_candidate.model_copy(update={"evidence_paths": [home_path], "evidence": home_refs})
+    unsupported_claims = evaluate_profile_candidates([home_candidate, unsupported_regular], [], clues=[])
+    assert infer_owner_profile_relations(relation_posts, unsupported_claims) == []
+
+
+def test_destination_relations_require_matching_independent_school_observation() -> None:
+    observation = post("school-observation", "私は架空大学に通っています")
+    destination = post("school-destination", "私は通学先は架空大学です")
+    evidence = [
+        ProfileEvidence(post_id=observation.post_id, clue_index=None, required=True,
+            source="post_text", excerpt=observation.text),
+        ProfileEvidence(post_id=observation.post_id, clue_index=0, required=True),
+    ]
+    path = ProfileEvidencePath(evidence=evidence, confidence=0.65,
+        provenance=EvidencePathProvenance.DIRECT_DISCLOSURE)
+    school = ProfileItem(attribute=ProfileAttribute.SCHOOL, value="架空大学", confidence=0.65,
+        status=ProfileStatus.WEAK, evidence=evidence, evidence_paths=[path])
+    claims = evaluate_profile_candidates([school], [observation])
+    relations = infer_owner_profile_relations([observation, destination], claims)
+    assert len(relations) == 1
+    assert relations[0].kind.value == "commute_destination_is_school"
+    assert {ref.post_id for ref in relations[0].evidence_paths[0].evidence} == {observation.post_id, destination.post_id}
+    commuting = post("commuting-to-school", "私は通勤先は架空大学")
+    assert infer_owner_profile_relations([observation, commuting], claims) == []
+    same_post_claims = evaluate_profile_candidates([school], [observation])
+    assert infer_owner_profile_relations([observation], same_post_claims) == []
+
+
+def test_employer_destination_does_not_trim_name_ending_in_hiragana_su() -> None:
+    observation = post("employer-observation", "私は架空バス社の社員です")
+    destination = post("employer-destination", "私は勤務先は架空バスです")
+    evidence = [
+        ProfileEvidence(post_id=observation.post_id, clue_index=None, required=True,
+            source="post_text", excerpt=observation.text),
+        ProfileEvidence(post_id=observation.post_id, clue_index=0, required=True),
+    ]
+    path = ProfileEvidencePath(evidence=evidence, confidence=0.65,
+        provenance=EvidencePathProvenance.DIRECT_DISCLOSURE)
+    employer = ProfileItem(attribute=ProfileAttribute.EMPLOYER_NAME, value="架空バス", confidence=0.65,
+        status=ProfileStatus.WEAK, evidence=evidence, evidence_paths=[path])
+    claims = evaluate_profile_candidates([employer], [observation])
+    relations = infer_owner_profile_relations([observation, destination], claims)
+    assert len(relations) == 1
+    assert relations[0].right.value == "架空バス"
 
 
 def test_home_nearest_station_requires_owner_relation_routine_and_corroborated_sign() -> None:

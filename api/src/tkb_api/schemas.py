@@ -27,6 +27,10 @@ from tkb_common.schemas import (
     ProfileEvidence,
     ProfileEvidencePath,
     ProfileItem,
+    ProfileRelation,
+    ProfileRelationEndpoint,
+    ProfileRelationEndpointKind,
+    ProfileRelationKind,
     ProfileStatus,
     Region,
 )
@@ -55,6 +59,10 @@ __all__ = [
     "ProfileEvidence",
     "ProfileEvidencePath",
     "ProfileItem",
+    "ProfileRelation",
+    "ProfileRelationEndpoint",
+    "ProfileRelationEndpointKind",
+    "ProfileRelationKind",
     "ProfileStatus",
     "Region",
     # api の入出力

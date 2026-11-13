@@ -365,6 +365,7 @@ def read_diagnosis(
         "conclusions": [asdict(conclusion) for conclusion in infer(clues, posts, gazetteer)],
         "plan": plan_json(clues, posts, gazetteer),
         "profile_claims": [claim.model_dump(mode="json") for claim in diagnosis.profile_claims],
+        "profile_relations": [relation.model_dump(mode="json") for relation in diagnosis.profile_relations],
         "profile_claim_suggestions": list(diagnosis.profile_claim_suggestions),
         "web_facts": [fact.model_dump(mode="json") for fact in diagnosis.web_facts],
         "web_lookup_status": diagnosis.web_lookup_status,
@@ -516,6 +517,7 @@ async def diagnose(
                 posts=tuple(posts),
                 clues=tuple(clues),
                 profile_claims=tuple(profile_result.get("profile_claims", ())),
+                profile_relations=tuple(profile_result.get("profile_relations", ())),
                 profile_claim_suggestions=tuple(
                     profile_result.get("profile_claim_suggestions", ())
                 ),

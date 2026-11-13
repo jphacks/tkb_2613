@@ -74,6 +74,21 @@ describe("toDiagnoseEvent", () => {
     }))).toThrow(InvalidDiagnoseEventError);
   });
 
+  it("reads scoreless profile relations with complete evidence paths", () => {
+    const profile_relations = [{
+      kind: "home_nearest_is_commute_origin",
+      left: { kind: "profile_candidate", attribute: "home_nearest_station", value: "根津駅" },
+      right: { kind: "profile_candidate", attribute: "regular_station", value: "根津駅" },
+      evidence_paths: [{ confidence: 0.55, provenance: "combined_inference", evidence: [
+        { post_id: POST.post_id, clue_index: null, required: true, source: "post_text", excerpt: "私の自宅最寄り駅は根津駅です" },
+        { post_id: "at://did:plc:xxxx/app.bsky.feed.post/other", clue_index: null, required: true, source: "post_text", excerpt: "私は毎朝、自宅最寄りから通勤しています" },
+      ] }],
+    }];
+    expect(toDiagnoseEvent("conclusions", JSON.stringify({ clues: [], conclusions: [], profile_relations }))).toMatchObject({
+      event: "conclusions", profile_relations,
+    });
+  });
+
   it("reads a post event", () => {
     expect(toDiagnoseEvent("post", JSON.stringify({ post: POST }))).toEqual({
       event: "post",

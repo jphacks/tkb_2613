@@ -5,7 +5,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { messages } from "@/lib/messages";
 import type { Clue } from "@/types/clue";
 import type { Conclusion } from "@/types/diagnose";
-import { PROFILE_ATTRIBUTE_CATALOG, type ExternalLookupStatus, type ExternalProfileResult, type ProfileCandidateSet, type ProfileEvidence, type ProfileEvidencePath, type WebFact } from "@/types/profile";
+import { profileRelationsAfterDeletion, PROFILE_ATTRIBUTE_CATALOG, type ExternalLookupStatus, type ExternalProfileResult, type ProfileCandidateSet, type ProfileEvidence, type ProfileEvidencePath, type ProfileRelation, type WebFact } from "@/types/profile";
 import type { Post } from "@/types/post";
 import { ProfileClaimWhatIf } from "./ProfileClaimWhatIf";
 
@@ -20,6 +20,8 @@ interface ConclusionBoardProps {
   /** 消したらどうなるかで推定できなくなった項目（attribute）。「不明」のカードで出す */
   unknown?: readonly string[];
   profileClaims?: readonly ProfileCandidateSet[];
+  profileRelations?: readonly ProfileRelation[];
+  deletedPostIds?: readonly string[];
   profileClaimSuggestions?: readonly string[];
   posts?: readonly Post[];
   webFacts?: readonly WebFact[];
@@ -108,7 +110,7 @@ function layoutStrings(
  * 推定には根拠の手がかりも文字で添える（糸は飾りなので読み上げない）。
  */
 export function ConclusionBoard({
-  clues, conclusions, unknown = [], profileClaims = [], profileClaimSuggestions = [], posts = [],
+  clues, conclusions, unknown = [], profileClaims = [], profileRelations = [], deletedPostIds = [], profileClaimSuggestions = [], posts = [],
   webFacts = [], externalLookupStatus = "not_requested", externalProfileResults = [], ownerProfileText = "", selfReportClues = [],
 }: ConclusionBoardProps) {
   // R8 copies observed name text directly. Its legacy Conclusion has no provenance
@@ -129,10 +131,12 @@ export function ConclusionBoard({
   const [strings, setStrings] = useState<readonly RedString[]>([]);
   const [nowMs, setNowMs] = useState(0);
   const postNumbers = new Map(posts.map((post, index) => [post.post_id, index + 1]));
+  const postDates = new Map(posts.map((post) => [post.post_id, post.created_at]));
   const hasTimedLocationCandidate = profileClaims.some((set) =>
     set.attribute === "realtime_location" && set.candidates.some((candidate) => candidate.observed_at),
   );
   const visibleProfileClaims = profileClaims.filter((set) => set.candidates.length > 0);
+  const visibleRelations = profileRelationsAfterDeletion(profileRelations, new Set(deletedPostIds), profileClaims);
 
   useEffect(() => {
     setNowMs(Date.now());
@@ -152,7 +156,7 @@ export function ConclusionBoard({
       <p className="text-xs font-bold">{label}（{unique.length}）</p>
       <ul className="mt-1 list-disc pl-5 text-xs">
         {unique.map((reference) => <li key={profileEvidenceKey(reference)}>
-          {profileEvidenceLabel(reference, clues, webFacts)}{reference.post_id ? `（投稿 ${postNumbers.get(reference.post_id) ?? "?"}）` : ""}
+          {profileEvidenceLabel(reference, clues, webFacts)}{reference.post_id ? `（投稿 ${postNumbers.get(reference.post_id) ?? "?"}${postDates.has(reference.post_id) ? `・${new Date(postDates.get(reference.post_id)!).toLocaleDateString("ja-JP", { timeZone: "Asia/Tokyo" })}` : ""}）` : ""}
         </li>)}
       </ul>
     </div>;
@@ -263,7 +267,7 @@ export function ConclusionBoard({
         </div>
       )}
     </section>
-    {(profileClaims.length > 0 || ownerProfileText || externalProfileResults.length > 0 || externalLookupStatus !== "not_requested") && (
+    {(profileClaims.length > 0 || profileRelations.length > 0 || ownerProfileText || externalProfileResults.length > 0 || externalLookupStatus !== "not_requested") && (
       <section aria-labelledby="profile-claims-heading" className="mt-8 max-w-2xl space-y-4">
         <h3 id="profile-claims-heading" className="font-display text-2xl">プロフィール候補</h3>
         <p className="text-sm text-ink/70">表示するのは根拠経路のある候補だけです。値を本人が直接公開した経路と、投稿を組み合わせて導いた経路を分けて示します。候補スコアは正しさの確率ではありません。</p>
@@ -310,6 +314,7 @@ export function ConclusionBoard({
                     </li>;
                   })}
                 </ul>
+                {claimSet.attribute === "regular_station" && <p className="mt-2 text-xs text-ink/70">投稿時点の習慣候補です。現在も同じ駅を利用している保証はありません。根拠投稿の日付を確認してください。</p>}
                 {claimSet.candidates.length === 0 && claimSet.conflicting_evidence.length > 0 && (
                   <details className="mt-2 text-sm">
                     <summary className="cursor-pointer font-bold">矛盾を示す根拠を確認</summary>
@@ -320,7 +325,24 @@ export function ConclusionBoard({
             ))}
           </ul>
         )}
-        <ProfileClaimWhatIf claims={profileClaims} clues={clues} posts={posts} suggestions={profileClaimSuggestions} webFacts={webFacts} />
+        {visibleRelations.length > 0 && <div className="rounded border border-ink/20 px-3 py-3">
+          <h4 className="font-bold">投稿から結んだ関係候補</h4>
+          <ul className="mt-2 space-y-2 text-sm">
+            {visibleRelations.map((relation, index) => <li key={`${relation.kind}:${index}`}>
+              <span className="font-bold">
+                {relation.left.kind === "profile_candidate" ? PROFILE_ATTRIBUTE_CATALOG[relation.left.attribute].label : "投稿中の通勤・通学先"}：{relation.left.value}
+                {" → "}
+                {relation.right.kind === "profile_candidate" ? PROFILE_ATTRIBUTE_CATALOG[relation.right.attribute].label : "投稿中の通勤・通学先"}：{relation.right.value}
+              </span>
+              <span className="ml-2 text-ink/70">{relation.kind === "home_nearest_is_commute_origin" ? "自宅最寄りの本人投稿と、別投稿の反復通勤文を結んだ候補" : "投稿中の通勤・通学先と独立した所属候補の値が一致（雇用・在学の確定ではありません）"}</span>
+              <details className="mt-1 text-xs"><summary className="cursor-pointer">関係の根拠</summary>
+                {relation.evidence_paths.map((path, pathIndex) => <div key={pathIndex}>{profileEvidenceList("根拠経路", path.evidence)}</div>)}
+              </details>
+            </li>)}
+          </ul>
+          <p className="mt-2 text-xs text-ink/70">関係表示は独立した本人投稿の根拠を示すもので、候補の確率や正解を意味しません。</p>
+        </div>}
+        <ProfileClaimWhatIf claims={profileClaims} relations={profileRelations} clues={clues} posts={posts} suggestions={profileClaimSuggestions} webFacts={webFacts} />
         {ownerProfileText && <details><summary className="cursor-pointer font-bold">本人プロフィール文と自己申告の手がかり</summary><p className="mt-2 whitespace-pre-wrap text-sm">{ownerProfileText}</p><ul className="mt-2 list-disc pl-5 text-sm">{selfReportClues.map((clue, index) => <li key={`${clue.post_id}:${index}`}>{clue.value}</li>)}</ul></details>}
         {externalLookupStatus !== "not_requested" && <div className="rounded border border-ink/20 p-3">
           <h4 className="font-bold">公開Web上の外部ページ候補</h4>

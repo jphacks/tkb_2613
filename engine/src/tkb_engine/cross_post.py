@@ -20,6 +20,10 @@ from tkb_common.schemas import (
     ProfileCandidateSetStatus,
     ProfileEvidence,
     ProfileEvidencePath,
+    ProfileRelation,
+    ProfileRelationEndpoint,
+    ProfileRelationEndpointKind,
+    ProfileRelationKind,
     EvidencePathProvenance,
     ProfileItem,
     EvidenceScope,
@@ -807,6 +811,119 @@ def infer_owner_candidate_sets_with_web(
     return evaluate_profile_candidates(claims, posts, clues=clues)
 
 
+_COMMUTE_DESTINATION_RE = re.compile(r"(?:私|自分)(?:は|が)[^。！？\n]{0,20}(?:通勤先|勤務先)(?:は|が)(?P<value>[^、。\s]+)")
+_SCHOOL_DESTINATION_RE = re.compile(r"(?:私|自分)(?:は|が)[^。！？\n]{0,20}通学先(?:は|が)(?P<value>[^、。\s]+)")
+
+
+def infer_owner_profile_relations(
+    posts: Sequence[Post], profile_claims: Sequence[ProfileCandidateSet],
+) -> list[ProfileRelation]:
+    """Create scoreless links only from explicit owner wording and independent candidate paths."""
+    by_attribute = {claim.attribute: claim for claim in profile_claims}
+    relations: list[ProfileRelation] = []
+    posts_by_id = {post.post_id: post for post in posts}
+    home = by_attribute.get(ProfileAttribute.HOME_NEAREST_STATION)
+    regular = by_attribute.get(ProfileAttribute.REGULAR_STATION)
+    if home and regular:
+        for home_candidate in home.candidates:
+            for regular_candidate in regular.candidates:
+                if unicodedata.normalize("NFKC", home_candidate.value).strip() != unicodedata.normalize("NFKC", regular_candidate.value).strip():
+                    continue
+                for home_path in home_candidate.evidence_paths:
+                    if not any(
+                        ref.source.value == "post_text"
+                        and HOME_ORIGIN_CLAIM_RE.search(ref.excerpt or "")
+                        and ref.post_id in posts_by_id
+                        and HOME_ORIGIN_TEXT_RE.search(unicodedata.normalize("NFKC", posts_by_id[ref.post_id].text))
+                        for ref in home_path.evidence
+                    ):
+                        continue
+                    for regular_path in regular_candidate.evidence_paths:
+                        if not any(ref.source.value == "post_text" and HOME_ORIGIN_ROUTINE_RE.search(ref.excerpt or "")
+                                   for ref in regular_path.evidence):
+                            continue
+                        refs = _unique_relation_evidence([*home_path.evidence, *regular_path.evidence])
+                        if len({ref.post_id for ref in refs if ref.post_id}) < 2:
+                            continue
+                        relations.append(ProfileRelation(
+                            kind=ProfileRelationKind.HOME_NEAREST_IS_COMMUTE_ORIGIN,
+                            left=ProfileRelationEndpoint(kind=ProfileRelationEndpointKind.PROFILE_CANDIDATE,
+                                attribute=ProfileAttribute.HOME_NEAREST_STATION, value=home_candidate.value),
+                            right=ProfileRelationEndpoint(kind=ProfileRelationEndpointKind.PROFILE_CANDIDATE,
+                                attribute=ProfileAttribute.REGULAR_STATION, value=regular_candidate.value),
+                            evidence_paths=[ProfileEvidencePath(evidence=refs,
+                                confidence=min(home_path.confidence, regular_path.confidence),
+                                provenance=EvidencePathProvenance.COMBINED_INFERENCE)],
+                        ))
+
+    for post in posts:
+        destination_matches = (
+            (_COMMUTE_DESTINATION_RE.search(post.text), ProfileAttribute.EMPLOYER_NAME,
+             ProfileRelationKind.COMMUTE_DESTINATION_IS_EMPLOYER),
+            (_SCHOOL_DESTINATION_RE.search(post.text), ProfileAttribute.SCHOOL,
+             ProfileRelationKind.COMMUTE_DESTINATION_IS_SCHOOL),
+        )
+        for match, attribute, kind in destination_matches:
+            if (not match or _forbidden_context(post.text) or _has_quoted_or_fiction_context(post.text)
+                    or _third_party_context(post.text, attribute, match.start("value"))
+                    or _is_negated_claim(post.text, match.end("value"))):
+                continue
+            value = re.sub(r"(?:です|だ)$", "", match.group("value")).strip()
+            candidate_set = by_attribute.get(attribute)
+            if candidate_set is None:
+                continue
+            for candidate in candidate_set.candidates:
+                if unicodedata.normalize("NFKC", candidate.value).strip() != unicodedata.normalize("NFKC", value).strip():
+                    continue
+                relation_ref = ProfileEvidence(post_id=post.post_id, clue_index=None, required=True,
+                    source="post_text", excerpt=match.group(0))
+                for candidate_path in candidate.evidence_paths:
+                    # Destination wording cannot be the independent observation of the affiliation.
+                    if (any(ref.post_id == post.post_id for ref in candidate_path.evidence)
+                            or not any(ref.source.value == "clue" and ref.post_id is not None
+                                       and ref.post_id != post.post_id for ref in candidate_path.evidence)):
+                        continue
+                    refs = _unique_relation_evidence([relation_ref, *candidate_path.evidence])
+                    if len({ref.post_id for ref in refs if ref.post_id}) < 2:
+                        continue
+                    candidate_endpoint = ProfileRelationEndpoint(
+                        kind=ProfileRelationEndpointKind.PROFILE_CANDIDATE,
+                        attribute=attribute, value=candidate.value)
+                    destination_endpoint = ProfileRelationEndpoint(
+                        kind=ProfileRelationEndpointKind.COMMUTE_DESTINATION, value=value)
+                    relations.append(ProfileRelation(kind=kind, left=destination_endpoint,
+                        right=candidate_endpoint, evidence_paths=[ProfileEvidencePath(
+                            evidence=refs, confidence=min(0.55, candidate_path.confidence),
+                            provenance=EvidencePathProvenance.COMBINED_INFERENCE)]))
+    grouped: dict[tuple[str, str, str, str], list[ProfileEvidencePath]] = {}
+    endpoints_by_key: dict[tuple[str, str, str, str], tuple[ProfileRelationKind, ProfileRelationEndpoint, ProfileRelationEndpoint]] = {}
+    for relation in relations:
+        key = (relation.kind.value, relation.left.kind.value, relation.left.attribute.value if relation.left.attribute else "",
+               relation.left.value + "\0" + relation.right.kind.value + "\0" +
+               (relation.right.attribute.value if relation.right.attribute else "") + "\0" + relation.right.value)
+        grouped.setdefault(key, []).extend(relation.evidence_paths)
+        endpoints_by_key.setdefault(key, (relation.kind, relation.left, relation.right))
+    result: list[ProfileRelation] = []
+    for key, paths in grouped.items():
+        unique_paths: dict[str, ProfileEvidencePath] = {}
+        for path in paths:
+            path_key = path.model_dump_json(exclude_none=True)
+            unique_paths.setdefault(path_key, path)
+        kind, left, right = endpoints_by_key[key]
+        result.append(ProfileRelation(kind=kind, left=left, right=right,
+            evidence_paths=list(unique_paths.values())))
+    return result
+
+
+def _unique_relation_evidence(evidence: Sequence[ProfileEvidence]) -> list[ProfileEvidence]:
+    unique: dict[tuple[object, ...], ProfileEvidence] = {}
+    for reference in evidence:
+        key = (reference.source.value, reference.post_id, reference.clue_index,
+               reference.image_index, reference.web_fact_id, reference.excerpt)
+        unique.setdefault(key, reference)
+    return list(unique.values())
+
+
 def _forbidden_context(context: str) -> bool:
     value = context.lower()
     return any(
@@ -972,11 +1089,138 @@ def infer_owner_claims(
     claims.extend(infer_school_claims(posts, clues))
     if gazetteer is not None:
         claims.extend(infer_regular_station_claims(posts, clues, gazetteer))
+        claims.extend(infer_regular_station_from_home_origin(posts, clues, gazetteer, diagnosis_at=diagnosis_at))
         claims.extend(infer_combined_regular_line_claims(posts, clues, gazetteer))
         claims.extend(infer_home_nearest_station_claims(posts, clues, gazetteer))
     claims.extend(infer_realtime_location_claims(posts, clues, diagnosis_at=diagnosis_at))
     claims.extend(infer_explicit_observation_claims(posts, clues, diagnosis_at=diagnosis_at))
     claims.extend(infer_frequent_shop_claims(posts, clues))
+    return claims
+
+
+HOME_ORIGIN_TEXT_RE = re.compile(
+    r"(?:私|自分|僕|俺)(?:の|は|が)(?:自宅|家)(?:の)?最寄り(?:駅)?は(?P<station>[^、。\s]+?駅)(?:です|だ|$)"
+)
+HOME_ORIGIN_CLAIM_RE = re.compile(
+    r"(?:自宅|家)(?:の)?最寄り(?:駅)?は(?P<station>[^、。\s]+?駅)(?:です|だ|$)"
+)
+HOME_ORIGIN_ROUTINE_RE = re.compile(
+    r"(?:私|自分|僕|俺)(?:は|が)[^。！？\n]{0,35}(?:毎朝|毎日|平日は|普段)[^。！？\n]{0,35}(?:自宅|家)(?:の)?最寄り(?:駅)?から通勤"
+)
+THIRD_PARTY_HOME_CONTEXT_RE = re.compile(
+    r"(?:友人|友達|知人|同僚|他人|家族|彼女?|母|父|兄|姉|妹|弟)[^。！？\n]{0,30}(?:自宅|家)(?:の)?最寄り"
+)
+MOVE_CONTEXT_RE = re.compile(r"(?:引っ越|転居|転校|転職|異動|住み替え|最寄りが変わ|引越)")
+
+
+def infer_regular_station_from_home_origin(
+    posts: Sequence[Post], clues: Sequence[Clue], gazetteer: Gazetteer,
+    *, diagnosis_at: datetime | None = None,
+) -> list[ProfileItem]:
+    """Add a weak regular-station path only when separate dated owner posts link home origin to commute."""
+    known = {
+        unicodedata.normalize("NFKC", row["station_name"]).strip()
+        for row in gazetteer.stations
+        if isinstance(row.get("station_name"), str) and row["station_name"].strip()
+    }
+    eligible: list[tuple[Post, str, list[ProfileEvidence]]] = []
+    for post in posts:
+        text = unicodedata.normalize("NFKC", post.text)
+        match = HOME_ORIGIN_TEXT_RE.search(text)
+        if (not match or _forbidden_context(text) or _has_quoted_or_fiction_context(text)
+                or _third_party_context(text, ProfileAttribute.HOME_NEAREST_STATION, match.start())
+                or MOVE_CONTEXT_RE.search(text)):
+            continue
+        station = unicodedata.normalize("NFKC", match.group("station")).removesuffix("駅").strip()
+        if station not in known or _is_negated_claim(text, match.end("station")):
+            continue
+        station_signs = [clue for clue in clues
+                         if clue.post_id == post.post_id and clue.type is ClueType.STATION_SIGN]
+        if any("x" in unicodedata.normalize("NFKC", clue.value).lower() for clue in station_signs):
+            continue
+        observed_station_values = {
+            unicodedata.normalize("NFKC", clue.value).removesuffix("駅").strip()
+            for clue in clues
+            if clue.post_id == post.post_id and clue.type in {ClueType.PLACE_TEXT, ClueType.STATION_SIGN}
+            and unicodedata.normalize("NFKC", clue.value).removesuffix("駅").strip() in known
+        }
+        if observed_station_values and observed_station_values != {station}:
+            continue
+        typed = [(index, clue) for index, clue in enumerate(clues)
+                 if clue.post_id == post.post_id and clue.type in {ClueType.PLACE_TEXT, ClueType.STATION_SIGN}
+                 and clue.source in {ClueSource.TEXT, ClueSource.OCR, ClueSource.VLM}
+                 and unicodedata.normalize("NFKC", clue.value).removesuffix("駅").strip() == station
+                 and clue.confidence >= 0.5]
+        if not typed:
+            continue
+        evidence = [ProfileEvidence(post_id=post.post_id, clue_index=None, required=True,
+                                    source="post_text", excerpt=match.group(0))]
+        evidence.extend(ProfileEvidence(post_id=post.post_id, clue_index=index, required=True)
+                        for index, _ in typed)
+        eligible.append((post, station, evidence))
+
+    routines: list[tuple[Post, str, list[ProfileEvidence]]] = []
+    for post in posts:
+        text = unicodedata.normalize("NFKC", post.text)
+        match = HOME_ORIGIN_ROUTINE_RE.search(text)
+        if (not match or _forbidden_context(text) or _has_quoted_or_fiction_context(text)
+                or _third_party_context(text, ProfileAttribute.REGULAR_STATION, match.start())
+                or THIRD_PARTY_HOME_CONTEXT_RE.search(text) or MOVE_CONTEXT_RE.search(text)
+                or _is_negated_claim(text, match.end())):
+            continue
+        typed = [(index, clue) for index, clue in enumerate(clues)
+                 if clue.post_id == post.post_id and clue.type is ClueType.ROUTINE_TEXT
+                 and clue.source is ClueSource.TEXT and clue.value.strip() in text
+                 and HOME_ORIGIN_ROUTINE_RE.search(unicodedata.normalize("NFKC", clue.value))]
+        if not typed:
+            continue
+        evidence = [ProfileEvidence(post_id=post.post_id, clue_index=None, required=True,
+                                    source="post_text", excerpt=match.group(0))]
+        evidence.extend(ProfileEvidence(post_id=post.post_id, clue_index=index, required=True)
+                        for index, _ in typed)
+        routines.append((post, match.group(0), evidence))
+
+    claims: list[ProfileItem] = []
+    max_gap = timedelta(days=90)
+    now = diagnosis_at or datetime.now(timezone.utc)
+    if now.tzinfo is None or now.utcoffset() is None:
+        return []
+    for origin, station, origin_refs in eligible:
+        for routine_post, routine_excerpt, routine_refs in routines:
+            if origin.post_id == routine_post.post_id:
+                continue
+            if origin.created_at is None or routine_post.created_at is None:
+                continue
+            origin_at, routine_at = origin.created_at, routine_post.created_at
+            if (origin_at.tzinfo is None or routine_at.tzinfo is None
+                    or origin_at.utcoffset() is None or routine_at.utcoffset() is None):
+                continue
+            start, end = sorted((origin_at, routine_at))
+            if (end - start > max_gap
+                    or end.astimezone(timezone.utc) > now.astimezone(timezone.utc)):
+                continue
+            invalid_or_moving_context = False
+            for post in posts:
+                if not MOVE_CONTEXT_RE.search(post.text):
+                    continue
+                if post.created_at is None or post.created_at.tzinfo is None or post.created_at.utcoffset() is None:
+                    invalid_or_moving_context = True
+                    break
+                if start < post.created_at < end:
+                    invalid_or_moving_context = True
+                    break
+            if invalid_or_moving_context:
+                continue
+            evidence = _unique_relation_evidence([*origin_refs, *routine_refs])
+            # One evidence path is a conjunction of two independent dated owner posts.
+            if len({ref.post_id for ref in evidence if ref.post_id}) != 2:
+                continue
+            path = ProfileEvidencePath(evidence=evidence, confidence=0.55,
+                                      provenance=EvidencePathProvenance.COMBINED_INFERENCE)
+            claims.append(ProfileItem(attribute=ProfileAttribute.REGULAR_STATION,
+                value=f"{station}駅", confidence=0.55, status=ProfileStatus.WEAK,
+                evidence=evidence, evidence_paths=[path],
+                assessment=ClaimAssessment(minimal_scope=EvidenceScope.BLUESKY, harm_status="unknown")))
     return claims
 
 
@@ -1339,7 +1583,7 @@ _EXPLICIT_CLAIM_RULES: dict[ProfileAttribute, tuple[re.Pattern[str], frozenset[C
     ProfileAttribute.NICKNAME: (re.compile(r"(?:私のあだ名|ニックネーム|あだ名)は(?P<value>[^、。\s]+?)(?:です|だ|$)"), frozenset({ClueType.NAME_TEXT})),
     ProfileAttribute.OTHER_SOCIAL_ACCOUNT: (re.compile(r"(?:私の別垢|私の別アカウント|別垢|別アカウント)は(?P<value>[^、。\s]+?)(?:です|だ|$)"), frozenset({ClueType.HANDLE_TEXT})),
     ProfileAttribute.HOME_BUILDING: (re.compile(r"(?:私の自宅|自宅|私の家)は(?P<value>[^、。\s]+?)(?:です|だ|$)"), frozenset({ClueType.ADDRESS_TEXT, ClueType.LANDMARK})),
-    ProfileAttribute.HOME_NEAREST_STATION: (re.compile(r"(?:自宅|家)の最寄り駅は(?P<value>[^、。\s]+?)(?:です|だ|$)"), frozenset({ClueType.PLACE_TEXT, ClueType.STATION_SIGN})),
+    ProfileAttribute.HOME_NEAREST_STATION: (re.compile(r"(?:自宅|家)(?:の)?最寄り(?:駅)?は(?P<value>[^、。\s]+?)(?:です|だ|$)"), frozenset({ClueType.PLACE_TEXT, ClueType.STATION_SIGN})),
     ProfileAttribute.REGULAR_LINE: (re.compile(r"(?:私の|通勤|通学)(?:で使う)?路線は(?P<value>[^、。\s]+?)(?:です|だ|$)"), frozenset({ClueType.PLACE_TEXT})),
     ProfileAttribute.ANNOUNCED_LONG_ABSENCE: (re.compile(r"(?P<value>(?:来週|今週|今月|明日|あす|\d{1,2}月\d{1,2}日)[^。！？\n]{0,24}(?:家|自宅)を(?:空け|留守)[^。！？\n]*)"), frozenset({ClueType.ROUTINE_TEXT})),
     ProfileAttribute.ACTUAL_HOME_ABSENCE: (re.compile(r"(?P<value>(?:今|現在)(?:は)?(?:家|自宅)(?:にいません|を空けています))"), frozenset({ClueType.ROUTINE_TEXT})),

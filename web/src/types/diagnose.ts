@@ -15,7 +15,7 @@
 
 import { type Clue, isClue } from "./clue";
 import { isPost, type Post } from "./post";
-import { isExternalProfileResult, isProfileCandidateSetList, isWebFact, type ExternalLookupStatus, type ExternalProfileResult, type ProfileCandidateSet, type WebFact } from "./profile";
+import { isExternalProfileResult, isProfileCandidateSetList, isProfileRelationList, isWebFact, type ExternalLookupStatus, type ExternalProfileResult, type ProfileCandidateSet, type ProfileRelation, type WebFact } from "./profile";
 
 /** 推理ルールが出した結論 1 つ（engine の Conclusion） */
 export interface Conclusion {
@@ -64,6 +64,7 @@ export interface DiagnosisSnapshot {
   readonly conclusions: readonly Conclusion[];
   readonly plan: Simulation & { readonly posts: readonly RiskyPost[] };
   readonly profile_claims?: readonly ProfileCandidateSet[];
+  readonly profile_relations?: readonly ProfileRelation[];
   readonly profile_claim_suggestions?: readonly string[];
   readonly web_facts?: readonly WebFact[];
   readonly web_lookup_status?: "not_run" | "fixture";
@@ -87,6 +88,7 @@ export type DiagnoseEvent =
       readonly clues: readonly Clue[];
       readonly conclusions: readonly Conclusion[];
       readonly profile_claims?: readonly ProfileCandidateSet[];
+      readonly profile_relations?: readonly ProfileRelation[];
       /** Up to three diagnosis-order-stable post IDs selected by exact claim-path removal. */
       readonly profile_claim_suggestions?: readonly string[];
       readonly web_facts?: readonly WebFact[];
@@ -197,6 +199,7 @@ export function isDiagnosisSnapshot(value: unknown): value is DiagnosisSnapshot 
       clues: value.clues,
       conclusions: value.conclusions,
       ...(Object.hasOwn(value, "profile_claims") ? { profile_claims: value.profile_claims } : {}),
+      ...(Object.hasOwn(value, "profile_relations") ? { profile_relations: value.profile_relations } : {}),
       ...(Object.hasOwn(value, "profile_claim_suggestions") ? { profile_claim_suggestions: value.profile_claim_suggestions } : {}),
       ...(Object.hasOwn(value, "web_facts") ? { web_facts: value.web_facts } : {}),
       ...(Object.hasOwn(value, "web_lookup_status") ? { web_lookup_status: value.web_lookup_status } : {}),
@@ -243,6 +246,8 @@ export function toDiagnoseEvent(
     const clueCount = value.clues.length;
     const { conclusions } = value;
     const profileClaims = value.profile_claims ?? [];
+    const profileRelations = value.profile_relations ?? [];
+    const hasProfileRelations = Object.hasOwn(value, "profile_relations");
     const profileClaimSuggestions = Object.hasOwn(value, "profile_claim_suggestions")
       ? value.profile_claim_suggestions
       : [];
@@ -271,6 +276,7 @@ export function toDiagnoseEvent(
     if (
       Array.isArray(conclusions) && conclusions.every((c) => isConclusion(c, clueCount)) &&
       profileClaimsValid && typeof profileText === "string" &&
+      (!hasProfileRelations || isProfileRelationList(profileRelations)) &&
       Array.isArray(profileClaimSuggestions) && profileClaimSuggestions.length <= 3 &&
       profileClaimSuggestions.every((postId) => typeof postId === "string" && postId.length > 0) &&
       new Set(profileClaimSuggestions).size === profileClaimSuggestions.length &&
@@ -291,6 +297,7 @@ export function toDiagnoseEvent(
         clues: value.clues,
         conclusions: conclusions as Conclusion[],
         ...(Object.hasOwn(value, "profile_claims") ? { profile_claims: typedProfileClaims } : {}),
+        ...(hasProfileRelations ? { profile_relations: profileRelations as readonly ProfileRelation[] } : {}),
         ...(Object.hasOwn(value, "profile_claim_suggestions") ? { profile_claim_suggestions: profileClaimSuggestions } : {}),
         ...(Object.hasOwn(value, "web_facts") ? { web_facts: webFacts } : {}),
         ...(Object.hasOwn(value, "web_lookup_status") ? { web_lookup_status: webLookupStatus } : {}),

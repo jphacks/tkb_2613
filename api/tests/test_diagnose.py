@@ -92,6 +92,7 @@ def test_completed_diagnosis_can_be_read_again_only_in_its_session(client: TestC
     streamed_claims = _events(result.text)[-3][1]
     assert streamed_claims["external_lookup_status"] == "fixture"
     assert data["profile_claims"] == streamed_claims["profile_claims"]
+    assert data["profile_relations"] == streamed_claims["profile_relations"]
     evidence_paths = [
         path
         for claim in streamed_claims["profile_claims"]

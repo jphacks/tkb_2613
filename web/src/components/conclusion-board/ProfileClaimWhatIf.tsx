@@ -5,10 +5,11 @@ import { useEffect, useState } from "react";
 import { CLUE_LABELS } from "@/lib/clueLabels";
 import type { Clue } from "@/types/clue";
 import type { Post } from "@/types/post";
-import { PROFILE_ATTRIBUTE_CATALOG, profileCandidateAfterDeletion, type ProfileCandidate, type ProfileCandidateSet, type ProfileEvidence, type ProfileEvidencePath, type WebFact } from "@/types/profile";
+import { PROFILE_ATTRIBUTE_CATALOG, profileCandidateAfterDeletion, profileRelationsAfterDeletion, type ProfileCandidate, type ProfileCandidateSet, type ProfileEvidence, type ProfileEvidencePath, type ProfileRelation, type WebFact } from "@/types/profile";
 
 interface ProfileClaimWhatIfProps {
   claims: readonly ProfileCandidateSet[];
+  relations?: readonly ProfileRelation[];
   clues: readonly Clue[];
   posts: readonly Post[];
   suggestions: readonly string[];
@@ -61,7 +62,7 @@ function profileAttributeLabel(set: ProfileCandidateSet, nowMs: number): string 
 }
 
 /** Recalculate the full grounded candidate pool from existing evidence paths. No new inference is run. */
-export function ProfileClaimWhatIf({ claims, clues, posts, suggestions, webFacts }: ProfileClaimWhatIfProps) {
+export function ProfileClaimWhatIf({ claims, relations = [], clues, posts, suggestions, webFacts }: ProfileClaimWhatIfProps) {
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set(suggestions));
   const [nowMs, setNowMs] = useState(0);
   const hasTimedLocationCandidate = claims.some((set) =>
@@ -92,6 +93,7 @@ export function ProfileClaimWhatIf({ claims, clues, posts, suggestions, webFacts
   const after = comparableClaims.map((claimSet) => profileCandidateAfterDeletion(claimSet, deleted));
   const survivingAttributes = new Set(after.filter((set) => set.candidates.length > 0).map((set) => set.attribute));
   const broken = comparableClaims.filter((set) => !survivingAttributes.has(set.attribute));
+  const survivingRelations = profileRelationsAfterDeletion(relations, deleted, claims);
   const remainingPieces = broken.flatMap((claimSet) => claimSet.candidates.flatMap((candidate) =>
     candidate.evidence_paths.flatMap((path) => path.evidence)
       .filter((reference) => reference.post_id === null || !deleted.has(reference.post_id))
@@ -136,6 +138,17 @@ export function ProfileClaimWhatIf({ claims, clues, posts, suggestions, webFacts
           <ul className="mt-2 space-y-2">{otherEvidencePosts.map((postId) => <li key={postId}>{postChoice(postId, false)}</li>)}</ul>
         </details>}
       </fieldset>
+      {relations.length > 0 && <section aria-label="仮除外後に残る関係" className="rounded border border-ink/20 p-3">
+        <h5 className="font-bold">仮除外後に残る関係 ({survivingRelations.length})</h5>
+        {survivingRelations.length === 0 ? <p className="mt-1 text-sm text-ink/70">選んだ投稿を含まない完全な関係根拠は残りません。</p> :
+          <ul className="mt-1 list-disc pl-5 text-sm">{survivingRelations.map((relation, index) =>
+            <li key={`${relation.kind}:${index}`}>
+              {relation.left.kind === "profile_candidate" ? PROFILE_ATTRIBUTE_CATALOG[relation.left.attribute].label : "投稿中の通勤・通学先"}：{relation.left.value}
+              {" → "}
+              {relation.right.kind === "profile_candidate" ? PROFILE_ATTRIBUTE_CATALOG[relation.right.attribute].label : "投稿中の通勤・通学先"}：{relation.right.value}
+            </li>,
+          )}</ul>}
+      </section>}
       <div className="grid gap-4 sm:grid-cols-2">
         <section aria-label="仮除外後も根拠経路が残る候補" className="space-y-2">
           <h5 className="font-bold">仮除外後も支持される候補 ({after.filter((set) => set.candidates.length > 0).length})</h5>
@@ -149,6 +162,7 @@ export function ProfileClaimWhatIf({ claims, clues, posts, suggestions, webFacts
             });
             return <article key={set.attribute} className="rounded border border-ink/20 p-3 text-sm">
               <p className="font-bold">{profileAttributeLabel(set, nowMs)}：{set.candidates.map((candidate) => candidate.value).join(" / ")}</p>
+              {set.attribute === "regular_station" && <p className="mt-1 text-xs text-ink/70">投稿時点の習慣候補です。現在も同じ駅を利用している保証はありません。</p>}
               {set.candidates.map((candidate) => <p key={`provenance-${candidate.value}`} className="mt-1 text-xs text-ink/70">
                 {candidate.value} の根拠経路：{provenanceLabels(candidate).join("・")}
               </p>)}

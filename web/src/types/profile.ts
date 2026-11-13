@@ -42,7 +42,7 @@ export const PROFILE_ATTRIBUTE_CATALOG = {
   home_building: { label: "自宅の建物候補", category: "home_and_location", personalLevel: null, guessability: null },
   home_room: { label: "自宅の部屋・階・位置", category: "home_and_location", personalLevel: null, guessability: null },
   home_nearest_station: { label: "自宅の最寄り駅", category: "home_and_location", personalLevel: null, guessability: null },
-  regular_station: { label: "日常的に利用する駅", category: "home_and_location", personalLevel: null, guessability: null },
+  regular_station: { label: "投稿時点の通勤利用駅候補", category: "home_and_location", personalLevel: null, guessability: null },
   regular_line: { label: "日常的に利用する路線", category: "home_and_location", personalLevel: null, guessability: null },
   residential_area: {
     label: "居住エリア（市区町村・町域）",
@@ -216,6 +216,43 @@ export interface ProfileCandidateSet {
   readonly candidate_pool: readonly ProfileCandidate[];
   readonly reason: string | null;
   readonly conflicting_evidence: readonly ProfileEvidence[];
+}
+
+export type ProfileRelationKind =
+  | "home_nearest_is_commute_origin"
+  | "commute_destination_is_employer"
+  | "commute_destination_is_school";
+
+export type ProfileRelationEndpoint =
+  | { readonly kind: "profile_candidate"; readonly attribute: ProfileAttribute; readonly value: string }
+  | { readonly kind: "commute_destination"; readonly value: string };
+
+/** An evidence-backed relation; it carries no score and never changes candidate confidence. */
+export interface ProfileRelation {
+  readonly kind: ProfileRelationKind;
+  readonly left: ProfileRelationEndpoint;
+  readonly right: ProfileRelationEndpoint;
+  readonly evidence_paths: readonly ProfileEvidencePath[];
+}
+
+export function profileRelationsAfterDeletion(
+  relations: readonly ProfileRelation[],
+  deletedPostIds: ReadonlySet<string>,
+  claims: readonly ProfileCandidateSet[] = [],
+): readonly ProfileRelation[] {
+  return relations.flatMap((relation) => {
+    const evidence_paths = relation.evidence_paths.filter((path) =>
+      !path.evidence.some((reference) => reference.post_id !== null && deletedPostIds.has(reference.post_id)),
+    );
+    const endpointsSurvive = [relation.left, relation.right].every((endpoint) => {
+      if (endpoint.kind !== "profile_candidate" || claims.length === 0) return true;
+      const set = claims.find((candidateSet) => candidateSet.attribute === endpoint.attribute);
+      return Boolean(set && profileCandidateAfterDeletion(set, deletedPostIds).candidates.some(
+        (candidate) => candidate.value === endpoint.value,
+      ));
+    });
+    return evidence_paths.length > 0 && endpointsSurvive ? [{ ...relation, evidence_paths }] : [];
+  });
 }
 
 export function profileCandidateAfterDeletion(
@@ -492,4 +529,42 @@ export function isProfileCandidateSetList(value: unknown): value is readonly Pro
     !value.every(isProfileCandidateSet)) return false;
   const actual = new Set(value.map((set) => set.attribute));
   return actual.size === value.length && PROFILE_DIAGNOSED_ATTRIBUTES.every((attribute) => actual.has(attribute));
+}
+
+function isProfileRelationEndpoint(value: unknown): value is ProfileRelationEndpoint {
+  if (!isRecord(value) || typeof value.value !== "string" || !value.value.trim()) return false;
+  if (value.kind === "commute_destination") {
+    return Object.keys(value).every((key) => ["kind", "value", "attribute"].includes(key)) &&
+      (value.attribute === undefined || value.attribute === null);
+  }
+  return value.kind === "profile_candidate" &&
+    Object.keys(value).every((key) => ["kind", "value", "attribute"].includes(key)) &&
+    typeof value.attribute === "string" && Object.hasOwn(PROFILE_ATTRIBUTE_CATALOG, value.attribute);
+}
+
+export function isProfileRelation(value: unknown): value is ProfileRelation {
+  if (!isRecord(value) || !Object.keys(value).every((key) => ["kind", "left", "right", "evidence_paths"].includes(key)) ||
+    !["kind", "left", "right", "evidence_paths"].every((key) => Object.hasOwn(value, key)) ||
+    !["home_nearest_is_commute_origin", "commute_destination_is_employer", "commute_destination_is_school"].includes(value.kind as string) ||
+    !isProfileRelationEndpoint(value.left) || !isProfileRelationEndpoint(value.right) ||
+    !Array.isArray(value.evidence_paths) || value.evidence_paths.length === 0 ||
+    !value.evidence_paths.every(isProfileEvidencePath)) return false;
+  const endpoints = [value.left, value.right];
+  const candidates = endpoints.filter((endpoint) => endpoint.kind === "profile_candidate");
+  const destinations = endpoints.filter((endpoint) => endpoint.kind === "commute_destination");
+  if (value.kind === "home_nearest_is_commute_origin") {
+    return candidates.length === 2 && destinations.length === 0 &&
+      new Set(candidates.map((endpoint) => endpoint.attribute)).size === 2 &&
+      candidates.some((endpoint) => endpoint.attribute === "home_nearest_station") &&
+      candidates.some((endpoint) => endpoint.attribute === "regular_station") &&
+      candidates[0].value === candidates[1].value;
+  }
+  const expected = value.kind === "commute_destination_is_employer" ? "employer_name" : "school";
+  return candidates.length === 1 && destinations.length === 1 && candidates[0].attribute === expected &&
+    candidates[0].value === destinations[0].value;
+}
+
+export function isProfileRelationList(value: unknown): value is readonly ProfileRelation[] {
+  return Array.isArray(value) && value.length <= 48 && value.every(isProfileRelation) &&
+    new Set(value.map((relation) => JSON.stringify(relation))).size === value.length;
 }

@@ -154,11 +154,13 @@ async def test_events_keep_failed_posts_and_index_conclusions_into_all_clues() -
     result = events[3][1]
     assert result["clues"] == [clue.model_dump(mode="json")]
     assert len(result["profile_claims"]) == 24
+    assert result["profile_relations"] == []
     assert all(claim["status"] == "unknown" and claim["candidates"] == [] for claim in result["profile_claims"])
     assert "home_room" not in {claim["attribute"] for claim in result["profile_claims"]}
     assert result["profile_claim_suggestions"] == []
     assert saved_result["clues"] == [clue]
     assert len(saved_result["profile_claims"]) == 24
+    assert saved_result["profile_relations"] == []
     assert all(claim.status == "unknown" for claim in saved_result["profile_claims"])
     routine = next(c for c in result["conclusions"] if c["attribute"] == "routine")
     assert routine["clue_indices"] == [0]

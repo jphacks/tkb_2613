@@ -266,7 +266,7 @@ PROFILE_ATTRIBUTE_CATALOG: dict[ProfileAttribute, ProfileAttributeMetadata] = {
         "自宅の最寄り駅", ProfileCategory.HOME_AND_LOCATION
     ),
     ProfileAttribute.REGULAR_STATION: ProfileAttributeMetadata(
-        "日常的に利用する駅", ProfileCategory.HOME_AND_LOCATION
+        "投稿時点の通勤利用駅候補", ProfileCategory.HOME_AND_LOCATION
     ),
     ProfileAttribute.REGULAR_LINE: ProfileAttributeMetadata(
         "日常的に利用する路線", ProfileCategory.HOME_AND_LOCATION
@@ -529,6 +529,69 @@ class ProfileEvidencePath(BaseModel):
     # How the candidate value follows from this complete evidence path. A single
     # candidate may have both direct and derived alternative paths.
     provenance: EvidencePathProvenance = EvidencePathProvenance.UNCLASSIFIED
+
+
+class ProfileRelationKind(StrEnum):
+    HOME_NEAREST_IS_COMMUTE_ORIGIN = "home_nearest_is_commute_origin"
+    COMMUTE_DESTINATION_IS_EMPLOYER = "commute_destination_is_employer"
+    COMMUTE_DESTINATION_IS_SCHOOL = "commute_destination_is_school"
+
+
+class ProfileRelationEndpointKind(StrEnum):
+    PROFILE_CANDIDATE = "profile_candidate"
+    COMMUTE_DESTINATION = "commute_destination"
+
+
+class ProfileRelationEndpoint(BaseModel):
+    """A candidate endpoint or a directly stated commute destination."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: ProfileRelationEndpointKind
+    value: str = Field(min_length=1)
+    attribute: ProfileAttribute | None = None
+
+    @model_validator(mode="after")
+    def _check_attribute(self) -> Self:
+        if self.kind is ProfileRelationEndpointKind.PROFILE_CANDIDATE and self.attribute is None:
+            raise ValueError("profile candidate relation endpoint requires attribute")
+        if self.kind is ProfileRelationEndpointKind.COMMUTE_DESTINATION and self.attribute is not None:
+            raise ValueError("commute destination relation endpoint has no profile attribute")
+        return self
+
+
+class ProfileRelation(BaseModel):
+    """Evidence-backed link between existing candidates and an explicit commute relation."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: ProfileRelationKind
+    left: ProfileRelationEndpoint
+    right: ProfileRelationEndpoint
+    evidence_paths: list[ProfileEvidencePath] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _check_endpoints(self) -> Self:
+        endpoints = (self.left, self.right)
+        candidates = [endpoint for endpoint in endpoints
+                      if endpoint.kind is ProfileRelationEndpointKind.PROFILE_CANDIDATE]
+        destinations = [endpoint for endpoint in endpoints
+                        if endpoint.kind is ProfileRelationEndpointKind.COMMUTE_DESTINATION]
+        if self.kind is ProfileRelationKind.HOME_NEAREST_IS_COMMUTE_ORIGIN:
+            if len(candidates) != 2 or destinations:
+                raise ValueError("home-to-commute relation requires two candidate endpoints")
+            attrs = {endpoint.attribute for endpoint in candidates}
+            values = {endpoint.value for endpoint in candidates}
+            if attrs != {ProfileAttribute.HOME_NEAREST_STATION, ProfileAttribute.REGULAR_STATION} or len(values) != 1:
+                raise ValueError("home-to-commute relation requires the same station candidate")
+        else:
+            expected = (ProfileAttribute.EMPLOYER_NAME if self.kind is ProfileRelationKind.COMMUTE_DESTINATION_IS_EMPLOYER
+                        else ProfileAttribute.SCHOOL)
+            if len(candidates) != 1 or len(destinations) != 1:
+                raise ValueError("commute destination relation requires one destination and one candidate")
+            if candidates[0].attribute is not expected or candidates[0].value != destinations[0].value:
+                raise ValueError("commute destination must exactly match the linked affiliation candidate")
+        return self
 
 
 class EvidenceScope(StrEnum):

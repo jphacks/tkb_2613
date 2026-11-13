@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { PROFILE_ATTRIBUTE_CATALOG, PROFILE_CATEGORIES, PROFILE_DIAGNOSED_ATTRIBUTES, isExternalProfileResult, isProfileCandidateSet, isProfileCandidateSetList, isProfileItem, isWebFact, profileCandidateAfterDeletion, profileClaimAfterDeletion, type ClaimAssessment, type ProfileAttribute, type ProfileCandidate, type ProfileCandidateSet, type ProfileEvidence, type ProfileItem } from "./profile";
+import { PROFILE_ATTRIBUTE_CATALOG, PROFILE_CATEGORIES, PROFILE_DIAGNOSED_ATTRIBUTES, isExternalProfileResult, isProfileCandidateSet, isProfileCandidateSetList, isProfileItem, isProfileRelationList, isWebFact, profileCandidateAfterDeletion, profileClaimAfterDeletion, profileRelationsAfterDeletion, type ClaimAssessment, type ProfileAttribute, type ProfileCandidate, type ProfileCandidateSet, type ProfileEvidence, type ProfileItem, type ProfileRelation } from "./profile";
 
 describe("profile metadata catalog", () => {
   it("contains the 25 candidate IDs and labels with unrated legacy fields", () => {
@@ -8,7 +8,7 @@ describe("profile metadata catalog", () => {
       facial_appearance: "顔貌（自撮り・他撮り・反射）", full_name: "本名（フルネーム）",
       given_name: "下の名前", nickname: "呼ばれている名前", other_social_account: "別SNSのアカウント / 本垢",
       realtime_location: "リアルタイムの現在地", home_building: "自宅の建物候補", home_room: "自宅の部屋・階・位置",
-      home_nearest_station: "自宅の最寄り駅", regular_station: "日常的に利用する駅", regular_line: "日常的に利用する路線",
+      home_nearest_station: "自宅の最寄り駅", regular_station: "投稿時点の通勤利用駅候補", regular_line: "日常的に利用する路線",
       residential_area: "居住エリア（市区町村・町域）", announced_long_absence: "予告された長期不在",
       actual_home_absence: "実際の自宅不在", employer_name: "雇用主名の推定",
       workplace_building_candidate: "勤務先建物候補", workplace_area: "勤務先エリア（オフィス街）",
@@ -274,6 +274,20 @@ describe("profile candidate sets", () => {
     expect(after.status).toBe("candidate");
     expect(after.candidates).toHaveLength(1);
     expect(after.candidates[0].value).toBe("区B");
+  });
+
+  it("removes relationship edges when an evidence post or either endpoint candidate is deleted", () => {
+    const relation: ProfileRelation = {
+      kind: "home_nearest_is_commute_origin",
+      left: { kind: "profile_candidate", attribute: "home_nearest_station", value: "根津駅" },
+      right: { kind: "profile_candidate", attribute: "regular_station", value: "根津駅" },
+      evidence_paths: [{ evidence, confidence: 0.55, provenance: "combined_inference" }],
+    };
+    expect(isProfileRelationList([relation])).toBe(true);
+    expect(profileRelationsAfterDeletion([relation], new Set([evidence[0].post_id!]), [])).toEqual([]);
+    const homeSet = set("home_nearest_station", [candidate("根津駅")]);
+    const regularSet = set("regular_station", [candidate("根津駅")]);
+    expect(profileRelationsAfterDeletion([relation], new Set([evidence[0].post_id!]), [homeSet, regularSet])).toEqual([]);
   });
 
   it("removes a denial from an unknown set when its post is hypothetically excluded", () => {

@@ -29,7 +29,8 @@ from tkb_common.schemas import (
 )
 from tkb_detect.batch import PostExtraction, extract_posts
 from tkb_detect.extract import Extractor
-from tkb_engine.cross_post import infer_owner_candidate_sets_with_web, plan_profile_candidate_deletion
+from tkb_engine.cross_post import (infer_owner_candidate_sets_with_web,
+    infer_owner_profile_relations, plan_profile_candidate_deletion)
 from tkb_engine.gazetteer import Gazetteer, Knowledge
 from tkb_engine.planner import Simulation, plan, simulate
 from tkb_engine.rules import infer
@@ -242,12 +243,14 @@ async def diagnose_events(
         diagnosis_date=diagnosis_date,
     )
     profile_claim_suggestions = plan_profile_candidate_deletion(profile_claims, posts)
+    profile_relations = infer_owner_profile_relations(list(posts), profile_claims)
     yield (
         "conclusions",
         {
             "clues": [c.model_dump(mode="json") for c in all_clues],
             "conclusions": [asdict(c) for c in conclusions],
             "profile_claims": [item.model_dump(mode="json") for item in profile_claims],
+            "profile_relations": [item.model_dump(mode="json") for item in profile_relations],
             "profile_claim_suggestions": profile_claim_suggestions,
             "web_facts": [fact.model_dump(mode="json") for fact in web_facts],
             "web_lookup_status": web_lookup_status,
@@ -266,6 +269,7 @@ async def diagnose_events(
             {
                 "clues": all_clues,
                 "profile_claims": profile_claims,
+                "profile_relations": profile_relations,
                 "profile_claim_suggestions": profile_claim_suggestions,
                 "web_facts": list(web_facts),
                 "web_lookup_status": web_lookup_status,

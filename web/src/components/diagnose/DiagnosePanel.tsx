@@ -15,7 +15,7 @@ import { validNameConclusions } from "@/lib/reveal";
 import type { Clue } from "@/types/clue";
 import type { Conclusion, RiskyPost, Simulation } from "@/types/diagnose";
 import type { Post } from "@/types/post";
-import type { ExternalLookupStatus, ExternalProfileResult, ProfileCandidateSet, WebFact } from "@/types/profile";
+import type { ExternalLookupStatus, ExternalProfileResult, ProfileCandidateSet, ProfileRelation, WebFact } from "@/types/profile";
 
 const t = messages.diagnose;
 
@@ -35,6 +35,7 @@ interface Result {
   clues: readonly Clue[];
   conclusions: readonly Conclusion[];
   profileClaims?: readonly ProfileCandidateSet[];
+  profileRelations?: readonly ProfileRelation[];
   profileClaimSuggestions?: readonly string[];
   webFacts?: readonly WebFact[];
   externalLookupStatus?: ExternalLookupStatus;
@@ -103,6 +104,7 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
           clues: snapshot.clues,
           conclusions: validNameConclusions(snapshot.conclusions),
           profileClaims: snapshot.profile_claims ?? [],
+          profileRelations: snapshot.profile_relations ?? [],
           profileClaimSuggestions: snapshot.profile_claim_suggestions ?? [],
           webFacts: snapshot.web_facts ?? [],
           externalLookupStatus: snapshot.external_lookup_status ?? "not_requested",
@@ -157,6 +159,7 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
               clues: event.clues,
               conclusions: validNameConclusions(event.conclusions),
               profileClaims: event.profile_claims ?? [],
+              profileRelations: event.profile_relations ?? [],
               profileClaimSuggestions: event.profile_claim_suggestions ?? [],
               webFacts: event.web_facts ?? [],
               externalLookupStatus: event.external_lookup_status ?? "not_requested",
@@ -229,6 +232,8 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
           conclusions={simulation ? validNameConclusions(simulation.after) : result.conclusions}
           unknown={simulation?.broken}
           profileClaims={result.profileClaims}
+          profileRelations={result.profileRelations}
+          deletedPostIds={simulation?.delete ?? []}
           profileClaimSuggestions={result.profileClaimSuggestions}
           posts={posts}
           webFacts={result.webFacts}

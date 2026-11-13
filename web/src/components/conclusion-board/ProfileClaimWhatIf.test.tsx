@@ -2,7 +2,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import type { Post } from "@/types/post";
-import type { ProfileCandidateSet } from "@/types/profile";
+import type { ProfileCandidateSet, ProfileRelation } from "@/types/profile";
 
 import { ProfileClaimWhatIf } from "./ProfileClaimWhatIf";
 
@@ -96,6 +96,24 @@ describe("ProfileClaimWhatIf", () => {
     expect(screen.getByRole("region", { name: "仮除外後も根拠経路が残る候補" })).toHaveTextContent("架空の区");
     expect(screen.getByRole("region", { name: "仮除外後も根拠経路が残る候補" })).toHaveTextContent("表示候補数：1 → 1 件（根拠のある候補全体：1 → 1 件）");
     expect(screen.getByRole("region", { name: "仮除外で支持されなくなる候補" })).toHaveTextContent("0");
+  });
+
+  it("removes a home-to-commute relation when a selected post breaks its complete path", () => {
+    const homeClaim = { ...claim, attribute: "home_nearest_station" as const };
+    const regularClaim = { ...claim, attribute: "regular_station" as const };
+    const relation: ProfileRelation = {
+      kind: "home_nearest_is_commute_origin",
+      left: { kind: "profile_candidate", attribute: "home_nearest_station", value: "架空の区" },
+      right: { kind: "profile_candidate", attribute: "regular_station", value: "架空の区" },
+      evidence_paths: [{ evidence: [evidence(posts[0]), evidence(posts[1])], confidence: 0.55, provenance: "combined_inference" }],
+    };
+    render(<ProfileClaimWhatIf claims={[homeClaim, regularClaim]} relations={[relation]} clues={[]} posts={posts} suggestions={[]} webFacts={[]} />);
+    expect(screen.getByRole("region", { name: "仮除外後に残る関係" })).toHaveTextContent("自宅の最寄り駅：架空の区 → 投稿時点の通勤利用駅候補：架空の区");
+    const morePosts = screen.getByText(/ほかの根拠投稿/);
+    fireEvent.click(morePosts);
+    const [postA] = within(morePosts.closest("details")!).getAllByRole("checkbox");
+    fireEvent.click(postA);
+    expect(screen.getByRole("region", { name: "仮除外後に残る関係" })).toHaveTextContent("選んだ投稿を含まない完全な関係根拠は残りません。");
   });
 
   it("promotes a previously hidden grounded candidate and reports rank and count changes", () => {
