@@ -69,6 +69,15 @@ export const messages = {
   home: {
     tagline: "あなたの投稿、組み合わせると",
     lead: "Bluesky の自分の投稿を特定班AIが読み、1件ずつは無害な投稿の組み合わせから、何がわかるかを見せます。調べられるのはログインした本人のアカウントだけです。",
+    /** 体験デモのリンクの近くに並べる、対応している SNS。Bluesky はこのページでログインするのでリンクにしない */
+    sns: {
+      heading: "対応している SNS",
+      bluesky: "Bluesky",
+      threads: "Threads",
+      threadsNote: "（テスター限定）",
+      x: "X",
+      xNote: "（合成デモ・X の承認待ち）",
+    },
   },
   /** ログインなしの体験デモ（/demo）。架空アカウントの結果だけを見せる */
   demo: {
