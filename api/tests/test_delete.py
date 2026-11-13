@@ -6,7 +6,7 @@ from typing import Any, cast
 
 import pytest
 from atproto import AsyncClient
-from atproto_client.exceptions import AtProtocolError  # type: ignore[attr-defined]
+from atproto_client.exceptions import AtProtocolError
 from fastapi.testclient import TestClient
 
 from tkb_api.bluesky import Diagnosis, LoginResult, SessionStore, delete_own_posts, is_own_post_uri

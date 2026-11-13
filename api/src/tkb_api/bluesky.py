@@ -14,7 +14,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 
 from atproto import AsyncClient, models
-from atproto_client.exceptions import (  # type: ignore[attr-defined]
+from atproto_client.exceptions import (
     AtProtocolError,
     BadRequestError,
     RateLimitExceededError,
