@@ -3,13 +3,16 @@
 import json
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 import respx
 from fastapi.testclient import TestClient
 
+from tkb_api import pipeline
 from tkb_api.config import Settings, get_settings
 from tkb_api.main import create_app
+from tkb_api.routes import demo
 from tkb_api.routes.diagnose import get_gazetteer
 from tkb_engine.gazetteer import Gazetteer
 
@@ -108,3 +111,96 @@ def test_demo_reports_unavailable_without_the_fixture(tmp_path: Path) -> None:
 
     assert res.status_code == 503
     assert "missing" not in res.text
+
+
+class _Counter:
+    """demo の推理と計画の関数を包み、呼ばれた回数を数える。"""
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self.calls = {"conclusions": 0, "plan": 0}
+        conclusions = pipeline.conclusions_json
+        plan = pipeline.plan_json
+
+        def counted_conclusions(*args: Any, **kwargs: Any) -> Any:
+            self.calls["conclusions"] += 1
+            return conclusions(*args, **kwargs)
+
+        def counted_plan(*args: Any, **kwargs: Any) -> Any:
+            self.calls["plan"] += 1
+            return plan(*args, **kwargs)
+
+        monkeypatch.setattr(demo, "conclusions_json", counted_conclusions)
+        monkeypatch.setattr(demo, "plan_json", counted_plan)
+        monkeypatch.setattr(demo, "_cached", None)
+
+
+def _fixed_gazetteer_client(settings: Settings, gazetteer: Gazetteer) -> TestClient:
+    app = create_app(settings)
+    app.dependency_overrides[get_settings] = lambda: settings
+    app.dependency_overrides[get_gazetteer] = lambda: gazetteer
+    return TestClient(app)
+
+
+def test_demo_diagnosis_is_computed_once_and_reused(monkeypatch: pytest.MonkeyPatch) -> None:
+    counter = _Counter(monkeypatch)
+    settings = Settings(demo_fixture_path=FIXTURE, share_enabled=False)
+
+    with _fixed_gazetteer_client(settings, Gazetteer()) as client:
+        first = client.get("/api/demo/diagnosis")
+        second = client.get("/api/demo/diagnosis")
+
+    assert first.status_code == second.status_code == 200
+    assert first.headers["content-type"] == "application/json"
+    assert first.content == second.content
+    assert counter.calls == {"conclusions": 1, "plan": 1}
+
+
+def test_demo_diagnosis_cache_follows_the_settings_and_gazetteer(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    counter = _Counter(monkeypatch)
+    copy = tmp_path / "demo.json"
+    copy.write_text(FIXTURE.read_text(encoding="utf-8"), encoding="utf-8")
+    gazetteer = Gazetteer()
+
+    for path, gaz in [(FIXTURE, gazetteer), (copy, gazetteer), (copy, Gazetteer())]:
+        settings = Settings(demo_fixture_path=path, share_enabled=False)
+        with _fixed_gazetteer_client(settings, gaz) as client:
+            assert client.get("/api/demo/diagnosis").status_code == 200
+
+    # 表のパスか地名の表が変われば、前の応答を使わずに計算し直す
+    assert counter.calls == {"conclusions": 3, "plan": 3}
+
+
+def test_demo_diagnosis_is_computed_at_startup(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # 差し替えなしの本番と同じ形。設定は環境変数から読む
+    monkeypatch.setenv("DEMO_FIXTURE_PATH", str(FIXTURE))
+    monkeypatch.setenv("GAZETTEER_DIR", str(tmp_path))
+    monkeypatch.setenv("SHARE_ENABLED", "0")
+    counter = _Counter(monkeypatch)
+
+    with TestClient(create_app()) as client:
+        assert counter.calls == {"conclusions": 1, "plan": 1}
+        bodies = [client.get("/api/demo/diagnosis") for _ in range(3)]
+
+    assert all(res.status_code == 200 for res in bodies)
+    assert bodies[0].json()["demo"] is True
+    assert counter.calls == {"conclusions": 1, "plan": 1}
+
+
+def test_demo_startup_survives_a_missing_fixture(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("DEMO_FIXTURE_PATH", str(tmp_path / "missing.json"))
+    monkeypatch.setenv("GAZETTEER_DIR", str(tmp_path))
+    monkeypatch.setenv("SHARE_ENABLED", "0")
+    counter = _Counter(monkeypatch)
+
+    with TestClient(create_app()) as client:
+        res = client.get("/api/demo/diagnosis")
+
+    assert res.status_code == 503
+    assert "missing" not in res.text
+    assert counter.calls == {"conclusions": 0, "plan": 0}
