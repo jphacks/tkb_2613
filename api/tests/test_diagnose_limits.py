@@ -18,9 +18,15 @@ from tkb_api.config import Settings, get_settings
 from tkb_api.limits import JST, DiagnoseLimiter, PublicWindow
 from tkb_api.main import create_app
 from tkb_api.routes.delete import get_delete_posts
-from tkb_api.routes.diagnose import get_clock, get_extractor_factory, get_fetch_posts
+from tkb_api.routes.diagnose import (
+    get_clock,
+    get_extractor_factory,
+    get_fetch_posts,
+    get_fetch_profile_text,
+)
 from tkb_api.routes.session import MOCK_DID, SESSION_COOKIE, get_login
 from tkb_common.schemas import Post
+from tkb_detect.errors import DetectError
 from tkb_detect.extract import Extractor
 from tkb_detect.vlm_client import VlmClient, VlmConfig
 
@@ -294,6 +300,54 @@ def test_real_diagnosis_is_counted_when_it_starts() -> None:
         _login(client)
         assert client.post("/api/diagnose").status_code == 200
         assert _limiter(client).used_today(REAL_DID) == 1
+
+
+def test_profile_text_failure_does_not_stop_the_diagnosis() -> None:
+    async def fetch_profile(_client: AsyncClient, _did: str) -> str:
+        raise bluesky.BlueskyUnavailableError
+
+    async def one_post(_client: AsyncClient, _did: str, _limit: int) -> list[Post]:
+        return [DEMO_POSTS[0]]
+
+    with _real_client(one_post) as client:
+        client.app.dependency_overrides[get_fetch_profile_text] = lambda: fetch_profile  # type: ignore[attr-defined]
+        _login(client)
+        res = client.post("/api/diagnose")
+        limiter = _limiter(client)
+
+        assert res.status_code == 200
+        assert "event: done" in res.text
+        assert limiter.active == 0
+        # 枠は返っているので、同じアカウントですぐ次の診断を始められる
+        assert client.post("/api/diagnose").status_code == 200
+
+
+def test_slot_is_returned_when_starting_the_stream_fails_after_counting() -> None:
+    # 数えたあと・応答を返す前の失敗（ここではプロフィール文を読むモデルの準備）でも枠を返す
+    async def fetch_profile(_client: AsyncClient, _did: str) -> str:
+        return "東京の会社員です"
+
+    ready = Extractor(VlmClient(VlmConfig(base_url="", api_key="", model="")))
+    built: list[int] = []
+
+    def factory() -> Extractor:
+        built.append(1)
+        if len(built) % 2 == 0:  # 2回目（プロフィール文用）だけ失敗させる
+            raise DetectError("接続先がない")
+        return ready
+
+    with _real_client(_no_posts) as client:
+        overrides = client.app.dependency_overrides  # type: ignore[attr-defined]
+        overrides[get_fetch_profile_text] = lambda: fetch_profile
+        overrides[get_extractor_factory] = lambda: factory
+        _login(client)
+        res = client.post("/api/diagnose")
+        limiter = _limiter(client)
+
+        assert res.status_code == 503
+        assert limiter.active == 0
+        # 枠が残っていれば 409 になる。返っているので、また同じ理由（503）で断られる
+        assert client.post("/api/diagnose").status_code == 503
 
 
 def test_bluesky_rate_limit_at_login_returns_bluesky_busy() -> None:
