@@ -70,6 +70,7 @@ export interface ThreadsText {
   readonly resultRe: string;
   readonly resultCount: (posts: number, clues: number, conclusions: number) => string;
   readonly elapsed: (ms: number) => string;
+  readonly postErrors: (count: number) => string;
   readonly evidenceTitle: string;
   readonly postRef: (id: string, date: string) => string;
   readonly basis: (quote: string) => string;
@@ -134,6 +135,7 @@ const ja: ThreadsText = {
   resultRe: "仮除外後の再診断",
   resultCount: (posts, clues, conclusions) => `投稿 ${posts} 件・手がかり ${clues} 件・推定 ${conclusions} 件`,
   elapsed: (ms) => `・処理 ${ms} ms`,
+  postErrors: (count) => `${count} 件の投稿は読み取れなかったため、診断に含めていません。`,
   evidenceTitle: "推定の根拠投稿",
   postRef: (id, date) => `投稿 ${id}・${date}`,
   basis: (quote) => `根拠「${quote}」`,
@@ -216,6 +218,7 @@ const en: ThreadsText = {
   resultRe: "Re-diagnosis after provisional exclusion",
   resultCount: (posts, clues, conclusions) => `${posts} posts · ${clues} clues · ${conclusions} inferences`,
   elapsed: (ms) => ` · processed in ${ms} ms`,
+  postErrors: (count) => `${count} ${count === 1 ? "post" : "posts"} could not be read and ${count === 1 ? "was" : "were"} left out of the diagnosis.`,
   evidenceTitle: "Posts behind each inference",
   postRef: (id, date) => `Post ${id} · ${date}`,
   basis: (quote) => `Basis: “${quote}”`,

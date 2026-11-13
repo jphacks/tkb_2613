@@ -9,7 +9,7 @@ import json
 import logging
 import secrets
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from dataclasses import asdict, dataclass, field
 from threading import RLock
 from typing import Any, Literal
@@ -23,12 +23,13 @@ from pydantic import BaseModel, ConfigDict
 from tkb_api.config import Settings
 from tkb_api.origin import check_origin
 from tkb_api.pipeline import (
+    Event,
     diagnose_events,
-    load_gazetteer,
     plan_json,
     real_extractions,
     simulation_json,
 )
+from tkb_api.routes.diagnose import _cached_gazetteer
 from tkb_api.schemas import SimulateRequest
 from tkb_api.threads_poc import THREADS_API, ThreadsPocError, _get, fetch_own_posts, to_post
 from tkb_common.schemas import Clue, ClueSource, ClueType, Post, ProfileEvidence, ProfileItem
@@ -36,6 +37,7 @@ from tkb_detect.batch import PostExtraction
 from tkb_detect.errors import DetectError
 from tkb_detect.extract import Extractor, build_extractor
 from tkb_engine.cross_post import claims_after_deletion
+from tkb_engine.gazetteer import Gazetteer
 from tkb_engine.planner import simulate as simulate_deletion
 from tkb_engine.rules import infer
 
@@ -521,13 +523,34 @@ def _mock_data() -> tuple[list[Post], list[Clue]]:
     return valid_posts, clues
 
 
-async def _preset_extractions(
-    posts: list[Post], clues: list[Clue]
-) -> AsyncIterator[PostExtraction]:
-    for post in posts:
-        yield PostExtraction(
-            post_id=post.post_id, clues=[c for c in clues if c.post_id == post.post_id]
-        )
+def _preset_extractions(posts: list[Post], clues: list[Clue]) -> list[PostExtraction]:
+    return [
+        PostExtraction(post_id=post.post_id, clues=[c for c in clues if c.post_id == post.post_id])
+        for post in posts
+    ]
+
+
+async def _replayed(extractions: Sequence[PostExtraction]) -> AsyncIterator[PostExtraction]:
+    for extraction in extractions:
+        yield extraction
+
+
+POST_ERROR_MESSAGE = "この投稿は読み取れませんでした"
+
+
+def _infer_events(
+    posts: list[Post], extractions: list[PostExtraction], gazetteer: Gazetteer
+) -> list[Event]:
+    """推理（infer・プロフィールの推定・plan）を、Bluesky と同じ diagnose_events でまとめて行う。
+
+    手がかりの取り出しは済んでいるので、ここはモデルにも Threads API にも接続しない CPU の計算だけ。
+    呼び出し側が asyncio.to_thread で別のスレッドに出し、ほかの人の応答を止めない。
+    """
+
+    async def collect() -> list[Event]:
+        return [event async for event in diagnose_events(posts, _replayed(extractions), gazetteer)]
+
+    return asyncio.run(collect())
 
 
 def _text_extractor(settings: Settings) -> Extractor:
@@ -583,21 +606,30 @@ async def diagnose(request: Request) -> dict[str, Any]:
                 extractor = await _reachable_text_extractor(settings)
                 extractions = real_extractions(extractor, posts)
             else:
-                extractions = _preset_extractions(posts, preset_clues)
+                extractions = _replayed(_preset_extractions(posts, preset_clues))
         else:
             _require_live(settings)
             extractor = await _reachable_text_extractor(settings)
             posts = await _own_posts(current, settings)
             extractions = real_extractions(extractor, posts)
-        gazetteer = load_gazetteer(settings.gazetteer_dir)
+        gazetteer = _cached_gazetteer(settings.gazetteer_dir)
         started = time.monotonic()
-        events = [event async for event in diagnose_events(posts, extractions, gazetteer)]
+        extracted = [extraction async for extraction in extractions]
+        # 読み取りに失敗した投稿は全体を止めずに外し、post_errors で知らせる（X と同じ形）。
+        # 理由は固定の文言で、本文や例外の中身は入れない
+        failed = {e.post_id for e in extracted if e.error is not None}
+        post_errors = [
+            {"post_id": post.post_id, "error": POST_ERROR_MESSAGE}
+            for post in posts
+            if post.post_id in failed
+        ]
+        if posts and len(failed) == len(posts):
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "投稿を読み取れませんでした")
+        posts = [post for post in posts if post.post_id not in failed]
+        events = await asyncio.to_thread(
+            _infer_events, posts, [e for e in extracted if e.post_id not in failed], gazetteer
+        )
         results = {name: data for name, data in events if name in {"conclusions", "plan"}}
-        failures = sum(1 for name, data in events if name == "clues" and data["error"])
-        if failures:
-            raise HTTPException(
-                status.HTTP_503_SERVICE_UNAVAILABLE, "一部の投稿の抽出に失敗しました"
-            )
         conclusion = results["conclusions"]
         current.posts = posts
         current.clues = [Clue.model_validate(item) for item in conclusion["clues"]]
@@ -612,6 +644,7 @@ async def diagnose(request: Request) -> dict[str, Any]:
             "plan": results["plan"],
             "profile_claims": conclusion["profile_claims"],
             "profile_claim_suggestions": current.profile_claim_suggestions,
+            "post_errors": post_errors,
             "elapsed_ms": round((time.monotonic() - started) * 1000),
             "mock": current.token is None,
         }
@@ -634,10 +667,14 @@ async def simulate(body: SimulateRequest, request: Request) -> dict[str, Any]:
     _origin(request)
     current = _session(request)
     _selected(body, current)
-    gazetteer = load_gazetteer(_settings(request).gazetteer_dir)
-    return simulation_json(
-        simulate_deletion(current.clues, current.posts, gazetteer, body.delete), current.clues
-    )
+    gazetteer = _cached_gazetteer(_settings(request).gazetteer_dir)
+
+    def run() -> dict[str, Any]:
+        return simulation_json(
+            simulate_deletion(current.clues, current.posts, gazetteer, body.delete), current.clues
+        )
+
+    return await asyncio.to_thread(run)
 
 
 @router.post("/rediagnose")
@@ -646,10 +683,13 @@ async def rediagnose(body: SimulateRequest, request: Request) -> dict[str, Any]:
     _origin(request)
     current = _session(request)
     _selected(body, current)
-    gone = set(body.delete)
+    gazetteer = _cached_gazetteer(_settings(request).gazetteer_dir)
+    return await asyncio.to_thread(_rediagnosed, current, set(body.delete), gazetteer)
+
+
+def _rediagnosed(current: ThreadsSession, gone: set[str], gazetteer: Gazetteer) -> dict[str, Any]:
     posts = [post for post in current.posts if post.post_id not in gone]
     clues = [clue for clue in current.clues if clue.post_id not in gone]
-    gazetteer = load_gazetteer(_settings(request).gazetteer_dir)
     return {
         "posts": [post.model_dump(mode="json") for post in posts],
         "clues": [clue.model_dump(mode="json") for clue in clues],

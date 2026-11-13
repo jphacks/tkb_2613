@@ -29,7 +29,7 @@ GAZETTEER = Gazetteer(
 
 @pytest.fixture(autouse=True)
 def _small_gazetteer(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(threads, "load_gazetteer", lambda data_dir: GAZETTEER)
+    monkeypatch.setattr(threads, "_cached_gazetteer", lambda data_dir: GAZETTEER)
 
 
 def _client() -> httpx.AsyncClient:
