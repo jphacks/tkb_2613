@@ -9,7 +9,7 @@
 export const ISSUES_URL = "https://github.com/jphacks/tkb_2613/issues";
 export const SUPPORT_EMAIL = "komekami7110@gmail.com";
 export const SUPPORT_MAILTO = `mailto:${SUPPORT_EMAIL}`;
-export const LEGAL_UPDATED = "2026年11月12日";
+export const LEGAL_UPDATED = "2026年11月13日";
 
 /** 段落か箇条書きのどちらか */
 export type LegalBlock = string | readonly string[];
@@ -122,7 +122,7 @@ export const privacy: LegalDocument = {
       heading: "利用目的とAI処理",
       blocks: [
         "本人投稿の一覧と詳細を本人へ表示し、公開されている情報を本人が確認するために使います。Threadsの公開情報セルフチェックは、取得済み本文をブラウザ内の固定文字列パターンで確認し、外部サービスやモデルへ送りません。文字列の所有者・実在性・意味は推定しません。",
-        "Blueskyの本文と写真はチームが管理するモデルサーバーで処理します。Threadsでは、利用者が一覧取得とは別に任意のAI診断を開始し、かつモデルが稼働している場合だけ、投稿本文をこのサービスが設定したOllamaの本文モデルで処理します。画像や動画は処理しません。モデルに投稿の削除などを行う機能は与えていません。",
+        "Blueskyの本文と写真はチームが管理するモデルサーバーで処理します。Threadsでは、利用者が一覧取得とは別に任意のAI診断を開始し、かつモデルが稼働している場合だけ、投稿本文をBlueskyと同じチームが管理するモデルサーバー（設定によりチームが管理するOllamaの本文モデル）で処理します。画像や動画は処理しません。モデルに投稿の削除などを行う機能は与えていません。",
         "投稿内容を OpenAI、Google Gemini などの外部のホスト型生成AI APIへ送る実装にはしていません。",
         "Bluesky の写真は Bluesky の画像配信サーバーから取得し、処理中はメモリ上に置きます。Threads の本人情報と投稿は Threads API から取得します。",
         "Bluesky では、あなたが選択して削除を確定した場合だけ削除を依頼します。Threads では投稿の削除を行いません。",

@@ -61,9 +61,13 @@ async def test_mock_x_diagnosis_simulation_and_rediagnosis() -> None:
         result = await client.post("/api/threads/diagnose", headers=HEADERS)
         assert result.status_code == 200
         snapshot = result.json()
-        assert [p["post_id"] for p in snapshot["posts"]] == ["threads:9001", "threads:9002"]
-        assert len(snapshot["clues"]) == 2
-        assert snapshot["clues"][0]["quote"] in snapshot["posts"][0]["text"]
+        assert [p["post_id"] for p in snapshot["posts"]] == [
+            f"threads:{n}" for n in range(9001, 9006)
+        ]
+        assert len(snapshot["clues"]) == 5
+        texts = {p["post_id"]: p["text"] for p in snapshot["posts"]}
+        assert all(c["quote"] in texts[c["post_id"]] for c in snapshot["clues"])
+        assert all(not p["images"] for p in snapshot["posts"])
         assert snapshot["conclusions"]
         restored = await client.get("/api/threads/diagnosis")
         assert restored.json() == snapshot
@@ -77,8 +81,10 @@ async def test_mock_x_diagnosis_simulation_and_rediagnosis() -> None:
             "/api/threads/rediagnose", json={"delete": ["threads:9001"]}, headers=HEADERS
         )
         assert after.status_code == 200
-        assert [p["post_id"] for p in after.json()["posts"]] == ["threads:9002"]
-        assert all(c["post_id"] == "threads:9002" for c in after.json()["clues"])
+        assert [p["post_id"] for p in after.json()["posts"]] == [
+            f"threads:{n}" for n in range(9002, 9006)
+        ]
+        assert all(c["post_id"] != "threads:9001" for c in after.json()["clues"])
         unknown = await client.post(
             "/api/threads/simulate", json={"delete": ["threads:another"]}, headers=HEADERS
         )

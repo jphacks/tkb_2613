@@ -34,7 +34,7 @@ from tkb_api.threads_poc import THREADS_API, ThreadsPocError, _get, fetch_own_po
 from tkb_common.schemas import Clue, ClueSource, ClueType, Post
 from tkb_detect.batch import PostExtraction
 from tkb_detect.errors import DetectError
-from tkb_detect.extract import build_extractor
+from tkb_detect.extract import Extractor, build_extractor
 from tkb_engine.planner import simulate as simulate_deletion
 from tkb_engine.rules import infer
 
@@ -473,25 +473,47 @@ async def logout(request: Request, response: Response) -> None:
     response.delete_cookie(SESSION_COOKIE, path="/api/threads")
 
 
+# 架空の Threads 投稿（本文だけ）と、モデルを使わない診断で返す手がかり。
+# 9003〜9005 は子どものいる保護者の架空投稿で、別々の投稿の「娘の小学校のあおぞらフェスタ」と
+# 「あおぞらフェスタは林町小学校の行事」から子どもの学校と、その学区の居住地域を推定できる
+# （eval/fixtures/demo_layered.json と同じ作り。人物・行事名は架空、学校名は公開データの表のもの）
+MOCK_POSTS: tuple[tuple[str, str, str], ...] = (
+    ("9001", "毎週火曜はジムに行く", "2026-11-03T18:00:00+09:00"),
+    ("9002", "今週も火曜のジムを終えた", "2026-11-10T18:00:00+09:00"),
+    ("9003", "燃えるゴミ出し忘れた。朝はお弁当作りでバタバタ。", "2026-11-04T07:50:00+09:00"),
+    ("9004", "娘の小学校のあおぞらフェスタ、今年は輪投げ係になった。", "2026-11-05T21:05:00+09:00"),
+    (
+        "9005",
+        "あおぞらフェスタは林町小学校の秋の行事で、地域の人も来られるらしい。",
+        "2026-11-06T12:10:00+09:00",
+    ),
+)
+MOCK_CLUES: tuple[tuple[str, ClueType, str], ...] = (
+    ("9001", ClueType.ROUTINE_TEXT, "毎週火曜はジム"),
+    ("9002", ClueType.ROUTINE_TEXT, "火曜のジム"),
+    ("9003", ClueType.ROUTINE_TEXT, "燃えるゴミ出し忘れた"),
+    ("9004", ClueType.RELATION_TEXT, "娘"),
+    ("9005", ClueType.ORG_TEXT, "林町小学校"),
+)
+
+
 def _mock_data() -> tuple[list[Post], list[Clue]]:
-    raw = [
-        ("9001", "毎週火曜はジムに行く", "2026-11-03T18:00:00+09:00"),
-        ("9002", "今週も火曜のジムを終えた", "2026-11-10T18:00:00+09:00"),
+    posts = [
+        to_post({"id": id_, "text": text, "timestamp": when}) for id_, text, when in MOCK_POSTS
     ]
-    posts = [to_post({"id": id_, "text": text, "timestamp": when}) for id_, text, when in raw]
     valid_posts = [post for post in posts if post is not None]
     clues = [
         Clue(
-            post_id=post.post_id,
+            post_id=f"threads:{id_}",
             image_index=None,
-            type=ClueType.ROUTINE_TEXT,
+            type=clue_type,
             value=quote,
             region=None,
             confidence=0.9,
             source=ClueSource.TEXT,
             quote=quote,
         )
-        for post, quote in zip(valid_posts, ("毎週火曜はジム", "火曜のジム"), strict=True)
+        for id_, clue_type, quote in MOCK_CLUES
     ]
     return valid_posts, clues
 
@@ -503,6 +525,39 @@ async def _preset_extractions(
         yield PostExtraction(
             post_id=post.post_id, clues=[c for c in clues if c.post_id == post.post_id]
         )
+
+
+def _text_extractor(settings: Settings) -> Extractor:
+    """Threads の本文を読む部品。写真は読まない（OCR を使わず、投稿にも写真を入れない）。
+
+    既定は Bluesky と同じ vLLM（VLM_*）で、送り先は MODEL_ALLOWED_HOST_SUFFIXES の許可リストで
+    確かめる。THREADS_TEXT_BACKEND=ollama のときだけ Ollama で読む。
+    """
+    try:
+        return build_extractor(
+            mock_mode=False,
+            vlm_base_url=settings.vlm_base_url,
+            vlm_api_key=settings.vlm_api_key.get_secret_value(),
+            vlm_model=settings.vlm_model,
+            ocr_base_url="",
+            allowed_hosts=settings.model_allowed_host_suffixes.split(","),
+            text_backend=settings.threads_text_backend,
+            ollama_base_url=settings.ollama_base_url,
+            ollama_model=settings.ollama_model,
+        )
+    except DetectError:
+        # 接続先の URL などは応答に入れない
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, "本文を読むモデルの設定を確認してください"
+        ) from None
+
+
+async def _reachable_text_extractor(settings: Settings) -> Extractor:
+    """診断の前に、Bluesky と同じくモデルの応答を確かめる。"""
+    extractor = _text_extractor(settings)
+    if not await extractor.model_reachable(settings.model_probe_timeout_seconds):
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "本文を読むモデルを利用できません")
+    return extractor
 
 
 @router.post("/diagnose")
@@ -522,49 +577,13 @@ async def diagnose(request: Request) -> dict[str, Any]:
                 raise HTTPException(status.HTTP_403_FORBIDDEN, "モック診断は無効です")
             posts, preset_clues = _mock_data()
             if current.demo_backend == "vlm":
-                try:
-                    extractor = build_extractor(
-                        mock_mode=False,
-                        vlm_base_url=settings.vlm_base_url,
-                        vlm_api_key=settings.vlm_api_key.get_secret_value(),
-                        vlm_model=settings.vlm_model,
-                        ocr_base_url="",
-                        allowed_hosts=settings.model_allowed_host_suffixes.split(","),
-                        text_backend="vlm",
-                    )
-                except DetectError:
-                    raise HTTPException(
-                        status.HTTP_503_SERVICE_UNAVAILABLE, "GPU モデルの設定を確認してください"
-                    ) from None
-                if not await extractor.model_reachable(settings.model_probe_timeout_seconds):
-                    raise HTTPException(
-                        status.HTTP_503_SERVICE_UNAVAILABLE, "GPU モデルを利用できません"
-                    )
+                extractor = await _reachable_text_extractor(settings)
                 extractions = real_extractions(extractor, posts)
             else:
                 extractions = _preset_extractions(posts, preset_clues)
         else:
             _require_live(settings)
-            try:
-                extractor = build_extractor(
-                    mock_mode=False,
-                    vlm_base_url="",
-                    vlm_api_key="",
-                    vlm_model="",
-                    ocr_base_url="",
-                    allowed_hosts=[],
-                    text_backend="ollama",
-                    ollama_base_url=settings.ollama_base_url,
-                    ollama_model=settings.ollama_model,
-                )
-            except DetectError:
-                raise HTTPException(
-                    status.HTTP_503_SERVICE_UNAVAILABLE, "ローカルモデルを利用できません"
-                ) from None
-            if not await extractor.model_reachable(settings.model_probe_timeout_seconds):
-                raise HTTPException(
-                    status.HTTP_503_SERVICE_UNAVAILABLE, "ローカルモデルを利用できません"
-                )
+            extractor = await _reachable_text_extractor(settings)
             posts = await _own_posts(current, settings)
             extractions = real_extractions(extractor, posts)
         gazetteer = load_gazetteer(settings.gazetteer_dir)
