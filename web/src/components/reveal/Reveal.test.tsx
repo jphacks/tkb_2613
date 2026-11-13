@@ -127,6 +127,14 @@ describe("Reveal", () => {
     expect(bars[0].getAttribute("style")).toContain("var(--stage-pace, 1)");
   });
 
+  it("stretches the gaps between the evidence cards by the presentation pace", () => {
+    render(<Reveal posts={[POST]} clues={[TEXT_CLUE]} conclusions={[CONCLUSION]} />);
+
+    const card = within(screen.getByRole("list", { name: t.evidenceLabel })).getAllByRole("listitem")[0];
+    // 発表モード（html.stage）では --stage-pace が 1 より大きくなり、遅れが伸びる
+    expect(card.getAttribute("style")).toContain("var(--stage-pace, 1)");
+  });
+
   it("shows the clue as text until the full source photo has loaded", () => {
     render(<Reveal posts={[POST]} clues={[PHOTO_CLUE]} conclusions={[]} />);
 
