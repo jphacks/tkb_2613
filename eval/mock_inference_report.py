@@ -8,18 +8,23 @@ import sys
 from pathlib import Path
 from typing import Any
 
+ROOT = Path(__file__).resolve().parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 from pydantic import TypeAdapter
 
-from tkb_common.schemas import Clue, Post, ProfileItem
+from candidate_evaluation import PROFILE_CANDIDATE_ATTRIBUTES, evaluate_candidate_sets
+from tkb_common.schemas import Clue, Post, ProfileCandidateSet, ProfileItem
 from tkb_engine import Conclusion, Gazetteer, infer
 from tkb_engine.cross_post import infer_owner_claims
 from tkb_engine.gazetteer import Knowledge
 from tkb_engine.planner import simulate
 
-ROOT = Path(__file__).resolve().parent
 DEFAULT_FIXTURE = ROOT / "fixtures" / "demo_observations.json"
 POSTS = TypeAdapter(list[Post])
 CLUES = TypeAdapter(list[Clue])
+CANDIDATE_SETS = TypeAdapter(list[ProfileCandidateSet])
 
 
 def _read_document(path: Path) -> dict[str, Any]:
@@ -148,7 +153,34 @@ def build_report(
     gaz: Gazetteer,
     truth: Any = None,
     table_availability: dict[str, bool] | None = None,
+    candidate_sets: Any = None,
+    provenance_scope: str = "all",
 ) -> dict[str, Any]:
+    if candidate_sets is None:
+        candidate_sets = document.get("candidate_sets")
+    if candidate_sets is not None:
+        if isinstance(candidate_sets, dict):
+            candidate_sets = candidate_sets.get(
+                "profile_claims", candidate_sets.get("candidate_sets")
+            )
+        if not isinstance(candidate_sets, list):
+            raise ValueError("candidate sets must be an array")
+        if any(
+            not isinstance(row, dict) or not isinstance(row.get("attribute"), str)
+            for row in candidate_sets
+        ):
+            raise ValueError("candidate sets require string attribute fields")
+        candidate_attributes = [row["attribute"] for row in candidate_sets]
+        if (
+            len(candidate_sets) != len(PROFILE_CANDIDATE_ATTRIBUTES)
+            or set(candidate_attributes) != PROFILE_CANDIDATE_ATTRIBUTES
+        ):
+            raise ValueError(
+                "candidate sets must contain exactly 24 unique attributes excluding home_room"
+            )
+        parsed_candidate_sets = CANDIDATE_SETS.validate_python(candidate_sets)
+        candidate_sets = [row.model_dump(mode="json") for row in parsed_candidate_sets]
+
     # Local fixture image paths are presentation metadata, not part of the inference Post type.
     post_rows = [
         {
@@ -189,9 +221,33 @@ def build_report(
     geographic_tables_available = all(
         available.get(key, False) for key in ("stations", "postal", "muni_mesh")
     )
+    if annotation_kind == "manual":
+        evaluation_track = "manual_annotation_rule_evaluation"
+    elif annotation_kind == "detector":
+        evaluation_track = "ocr_vlm_end_to_end_evaluation"
+    else:
+        evaluation_track = "fixture_source_unspecified"
+    candidate_truth_evaluation = (
+        evaluate_candidate_sets(
+            candidate_sets,
+            truth,
+            post_ids=known_posts,
+            post_images={post.post_id: {image.index for image in post.images} for post in posts},
+            clues=[clue.model_dump(mode="json") for clue in clues],
+            web_fact_ids={
+                row["id"]
+                for row in document.get("web_facts", [])
+                if isinstance(row, dict) and isinstance(row.get("id"), str)
+            },
+            provenance_scope=provenance_scope,
+        )
+        if candidate_sets is not None
+        else {"assessed": False, "reason": "no candidate sets supplied"}
+    )
     return {
         "mode": "offline_fixture_inference",
         "annotation_kind": annotation_kind,
+        "evaluation_track": evaluation_track,
         "geographic_tables": available,
         "excluded_post_ids": list(dict.fromkeys(excluded)),
         "claims": {
@@ -209,6 +265,8 @@ def build_report(
             "profile_inference_before": _truth_report(profile_before, truth),
             "profile_inference_after": _truth_report(profile_after, truth),
         },
+        "candidate_set_truth_evaluation": candidate_truth_evaluation,
+        "candidate_set_provenance_scope": provenance_scope,
         "notes": [
             "Inference and hypothetical exclusion use local rules only; "
             "no account or model is contacted.",
@@ -219,6 +277,22 @@ def build_report(
             *(
                 ["Clues are manually annotated and are not OCR/VLM results."]
                 if annotation_kind == "manual"
+                else []
+            ),
+            *(
+                [
+                    "Clues come from OCR/VLM extraction; this track includes detector "
+                    "and inference behavior."
+                ]
+                if annotation_kind == "detector"
+                else []
+            ),
+            *(
+                [
+                    "Observation provenance is unspecified; do not interpret this as manual-only "
+                    "or OCR/VLM end-to-end evaluation."
+                ]
+                if annotation_kind == "fixture"
                 else []
             ),
             *(
@@ -265,14 +339,38 @@ def main(argv: list[str] | None = None) -> int:
         "--truth", type=Path, help="separate truth JSON with complete and claims fields"
     )
     parser.add_argument(
+        "--candidate-sets",
+        type=Path,
+        help="JSON array of ProfileCandidateSet values (or report object with profile_claims)",
+    )
+    parser.add_argument(
+        "--provenance-scope",
+        choices=("all", "direct_disclosure", "combined_inference", "unclassified"),
+        default="all",
+        help="score candidates with evidence paths in this provenance scope",
+    )
+    parser.add_argument(
         "--output", type=Path, help="write JSON report under eval/local/ instead of stdout"
     )
     args = parser.parse_args(argv)
     try:
         document = _read_document(args.fixture)
         truth = json.loads(args.truth.read_text(encoding="utf-8")) if args.truth else None
+        candidate_sets = (
+            json.loads(args.candidate_sets.read_text(encoding="utf-8"))
+            if args.candidate_sets
+            else None
+        )
         gazetteer, table_availability = _gazetteer()
-        report = build_report(document, args.exclude, gazetteer, truth, table_availability)
+        report = build_report(
+            document,
+            args.exclude,
+            gazetteer,
+            truth,
+            table_availability,
+            candidate_sets,
+            args.provenance_scope,
+        )
         serialized = json.dumps(report, ensure_ascii=False, indent=2) + "\n"
         if args.output:
             _output_path(args.output).write_text(serialized, encoding="utf-8")

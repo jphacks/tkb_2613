@@ -15,7 +15,7 @@ import { validNameConclusions } from "@/lib/reveal";
 import type { Clue } from "@/types/clue";
 import type { Conclusion, RiskyPost, Simulation } from "@/types/diagnose";
 import type { Post } from "@/types/post";
-import type { ExternalLookupStatus, ExternalProfileResult, ProfileItem, WebFact } from "@/types/profile";
+import type { ExternalLookupStatus, ExternalProfileResult, ProfileCandidateSet, WebFact } from "@/types/profile";
 
 const t = messages.diagnose;
 
@@ -34,7 +34,7 @@ type Phase =
 interface Result {
   clues: readonly Clue[];
   conclusions: readonly Conclusion[];
-  profileClaims?: readonly ProfileItem[];
+  profileClaims?: readonly ProfileCandidateSet[];
   profileClaimSuggestions?: readonly string[];
   webFacts?: readonly WebFact[];
   externalLookupStatus?: ExternalLookupStatus;
@@ -220,7 +220,7 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
       <h2 id="diagnose-heading" className="sr-only">
         {t.heading}
       </h2>
-      {!busy && result && <Reveal posts={posts} clues={result.clues} conclusions={result.conclusions} />}
+      {!busy && result && <Reveal posts={posts} clues={result.clues} conclusions={result.conclusions} profileClaims={result.profileClaims} />}
       {(busy || !result) && controls}
 
       {!busy && result && (
@@ -240,7 +240,7 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
       )}
 
       {!busy && result && risky && (
-        <RiskyPosts posts={posts} risky={risky} clues={result.clues} clueCount={result.clues.length} onSimulated={setSimulation} />
+        <RiskyPosts posts={posts} risky={risky} clues={result.clues} clueCount={result.clues.length} profileClaims={result.profileClaims} onSimulated={setSimulation} />
       )}
       {!busy && result && <ResultShare />}
       {!busy && result && controls}

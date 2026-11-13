@@ -92,6 +92,25 @@ def test_completed_diagnosis_can_be_read_again_only_in_its_session(client: TestC
     streamed_claims = _events(result.text)[-3][1]
     assert streamed_claims["external_lookup_status"] == "fixture"
     assert data["profile_claims"] == streamed_claims["profile_claims"]
+    evidence_paths = [
+        path
+        for claim in streamed_claims["profile_claims"]
+        for candidate in claim["candidate_pool"]
+        for path in candidate["evidence_paths"]
+    ]
+    assert evidence_paths
+    assert {path["provenance"] for path in evidence_paths} <= {
+        "direct_disclosure",
+        "combined_inference",
+        "unclassified",
+    }
+    restored_paths = [
+        path
+        for claim in data["profile_claims"]
+        for candidate in claim["candidate_pool"]
+        for path in candidate["evidence_paths"]
+    ]
+    assert restored_paths == evidence_paths
     assert data["profile_claim_suggestions"] == streamed_claims["profile_claim_suggestions"]
     assert data["external_profile_results"] == streamed_claims["external_profile_results"]
     assert data["external_lookup_status"] == streamed_claims["external_lookup_status"]

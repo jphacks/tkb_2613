@@ -27,6 +27,7 @@ const CLUE_TYPE_LABELS: Readonly<Record<ClueType, string>> = {
   key: "鍵",
   code: "バーコード・QR コード",
   local_item: "地域の品物",
+  vehicle_model: "車種の文字・ロゴ",
   notice: "掲示・案内板",
   name_text: "名前",
   org_text: "会社・学校・団体",
@@ -164,14 +165,15 @@ export const messages = {
     count: (clues: number, posts: number) => `${posts} 件の投稿から、手がかりを ${clues} 個`,
   },
   identity: {
-    label: "推定した身元",
+    label: "プロフィールと手がかり",
     /** 写真の枠。顔は出さず、人影を出す */
     silhouette: "顔は写していなくても",
     /** 写真の枠に、本人の投稿に写っていた顔を出したとき。本人とは限らない */
     faceCaption: "写っていた顔（本人とは限りません）",
     faceAlt: "投稿の写真に写っていた顔",
-    nameLabel: "名前",
+    nameLabel: "名前の候補",
     nameUnknown: "名前は不明",
+    nameMultiple: "名前候補が複数あります",
     cluesFound: "見つかった手がかり",
     cluesUnit: "個",
     inferred: "推定",

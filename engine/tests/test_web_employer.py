@@ -1,7 +1,10 @@
 from datetime import datetime
 
-from tkb_common.schemas import Clue, ClueSource, ClueType, Post, ProfileStatus, WebFact
+from tkb_common.schemas import (
+    Clue, ClueSource, ClueType, EvidencePathProvenance, Post, ProfileStatus, WebFact,
+)
 from tkb_engine.cross_post import (
+    evaluate_profile_candidates,
     infer_owner_claims,
     infer_owner_claims_with_web,
     infer_web_employer_claim,
@@ -40,7 +43,8 @@ def test_web_employer_requires_two_posts_and_verified_entity_fact() -> None:
     bridge = post("b", "青空社の資料を整理")
     item = infer_web_employer_claim([anchor, bridge], [web_fact(company="株式会社青空")])
     assert item is not None and item.value == "株式会社青空"
-    assert item.status is ProfileStatus.WEAK
+    assert item.status is ProfileStatus.FOUND
+    assert item.evidence_paths[0].provenance is EvidencePathProvenance.DIRECT_DISCLOSURE
     assert item.assessment.minimal_scope == "bluesky_plus_public_web"
     refs = item.evidence_paths[0].evidence
     assert {ref.post_id for ref in refs if ref.post_id} == {anchor.post_id, bridge.post_id}
@@ -214,3 +218,19 @@ def test_company_possessive_bridge_does_not_establish_owner_employment() -> None
     )
 
     assert infer_owner_claims([anchor, photo], [ocr]) == []
+
+
+def test_multiple_independently_verified_employers_are_retained_as_candidates() -> None:
+    blue_anchor, blue_bridge = post("blue-anchor", "勤務先は青空社"), post("blue-bridge", "青空社の資料")
+    water_anchor, water_bridge = post("water-anchor", "勤務先は水色社"), post("water-bridge", "水色社の資料")
+    water_fact = web_fact(key="water", company="株式会社水色").model_copy(update={"subject": "水色社"})
+    claims = infer_owner_claims_with_web(
+        [blue_anchor, blue_bridge, water_anchor, water_bridge], [],
+        [web_fact(company="株式会社青空"), water_fact],
+    )
+    employer_claims = [claim for claim in claims if claim.attribute.value == "employer_name"]
+    assert {claim.value for claim in employer_claims} == {"株式会社青空", "株式会社水色"}
+    sets = evaluate_profile_candidates(claims, [blue_anchor, blue_bridge, water_anchor, water_bridge])
+    employers = next(item for item in sets if item.attribute.value == "employer_name")
+    assert employers.status.value == "ambiguous"
+    assert [candidate.rank for candidate in employers.candidates] == [1, 2]

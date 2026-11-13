@@ -29,7 +29,7 @@ from tkb_common.schemas import (
 )
 from tkb_detect.batch import PostExtraction, extract_posts
 from tkb_detect.extract import Extractor
-from tkb_engine.cross_post import infer_owner_claims_with_web, plan_profile_claim_deletion
+from tkb_engine.cross_post import infer_owner_candidate_sets_with_web, plan_profile_candidate_deletion
 from tkb_engine.gazetteer import Gazetteer, Knowledge
 from tkb_engine.planner import Simulation, plan, simulate
 from tkb_engine.rules import infer
@@ -232,7 +232,7 @@ async def diagnose_events(
         if owner_profile_text and owner_profile_analyzer
         else []
     )
-    profile_claims = infer_owner_claims_with_web(
+    profile_claims = infer_owner_candidate_sets_with_web(
         list(posts),
         all_clues,
         list(web_facts),
@@ -241,7 +241,7 @@ async def diagnose_events(
         gazetteer=gazetteer,
         diagnosis_date=diagnosis_date,
     )
-    profile_claim_suggestions = plan_profile_claim_deletion(profile_claims, posts)
+    profile_claim_suggestions = plan_profile_candidate_deletion(profile_claims, posts)
     yield (
         "conclusions",
         {

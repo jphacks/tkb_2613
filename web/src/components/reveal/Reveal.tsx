@@ -2,12 +2,13 @@
 
 import { messages } from "@/lib/messages";
 import { postImageSrc } from "@/lib/post-image";
-import { identityName, pickFace, pickSpotlight, type RevealItem } from "@/lib/reveal";
+import { pickFace, pickSpotlight, validNameConclusions, type RevealItem } from "@/lib/reveal";
 import { toPercentBox } from "@/lib/region";
 import { useLoadedSize } from "@/lib/useLoadedSize";
 import type { Clue } from "@/types/clue";
 import type { Conclusion } from "@/types/diagnose";
 import type { Post } from "@/types/post";
+import type { ProfileCandidate, ProfileCandidateSet } from "@/types/profile";
 
 import { IdentityCard } from "./IdentityCard";
 
@@ -74,6 +75,32 @@ interface RevealProps {
   posts: readonly Post[];
   clues: readonly Clue[];
   conclusions: readonly Conclusion[];
+  profileClaims?: readonly ProfileCandidateSet[];
+}
+
+function profileName(profileClaims: readonly ProfileCandidateSet[]): { candidate: ProfileCandidate | null; provenance: string[]; ambiguous: boolean } {
+  const fullNameSet = profileClaims.find((set) => set.attribute === "full_name");
+  const fullNameCandidates = fullNameSet?.candidates ?? [];
+  // An explicit full-name candidate takes priority over a shorter name, but an
+  // ambiguous full-name set never gets collapsed to rank #1.
+  const candidates = fullNameCandidates.length > 0
+    ? fullNameCandidates
+    : profileClaims.filter((set) => set.attribute === "given_name" || set.attribute === "nickname")
+      .flatMap((set) => set.candidates);
+  if (candidates.length !== 1) {
+    return { candidate: null, provenance: [], ambiguous: candidates.length > 1 };
+  }
+  const candidate = candidates[0];
+  const provenance = [...new Set(candidate.evidence_paths.map((path) => {
+    if (path.provenance === "direct_disclosure") return "自分で直接公開";
+    if (path.provenance === "combined_inference") {
+      return path.evidence.some((reference) => reference.source === "public_web")
+        ? "投稿と公開Webから推定"
+        : "投稿の組み合わせから推定";
+    }
+    return "根拠経路未分類";
+  }))];
+  return { candidate, provenance, ambiguous: false };
 }
 
 /**
@@ -81,12 +108,14 @@ interface RevealProps {
  * 推定できたことを大きく出し、続けて証拠を 1 枚ずつ机に投げ出すように並べる。
  * 動きを減らす設定の人には、動きなしで並べて見せる（globals.css）。
  */
-export function Reveal({ posts, clues, conclusions }: RevealProps) {
+export function Reveal({ posts, clues, conclusions, profileClaims = [] }: RevealProps) {
   const items = pickSpotlight(posts, clues, conclusions);
-  if (items.length === 0 && conclusions.length === 0) return null;
+  const identity = profileName(profileClaims);
+  if (items.length === 0 && conclusions.length === 0 && !identity.candidate && !identity.ambiguous) return null;
   const postCount = new Set(clues.map((c) => c.post_id)).size;
-
-  const identity = identityName(clues, conclusions);
+  const otherConclusions = validNameConclusions(conclusions).filter(
+    (conclusion) => conclusion.attribute !== "full_name" && conclusion.attribute !== "given_name_or_nickname",
+  );
 
   return (
     <section aria-labelledby="reveal-heading" className="reveal space-y-10">
@@ -99,9 +128,11 @@ export function Reveal({ posts, clues, conclusions }: RevealProps) {
       </div>
 
       <IdentityCard
-        name={identity.name}
+        name={identity.candidate?.value ?? null}
+        nameProvenance={identity.provenance}
+        nameAmbiguous={identity.ambiguous}
         face={pickFace(posts, clues)}
-        conclusions={identity.rest}
+        conclusions={otherConclusions}
         highlights={items
           .filter((item) => item.clue.type !== "name_text" && item.clue.type !== "face" && !item.used)
           .slice(0, MAX_HIGHLIGHTS)

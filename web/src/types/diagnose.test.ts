@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { InvalidDiagnoseEventError, toDiagnoseEvent } from "./diagnose";
+import { PROFILE_DIAGNOSED_ATTRIBUTES } from "./profile";
 
 const POST = {
   post_id: "at://did:plc:xxxx/app.bsky.feed.post/3kxxxx",
@@ -54,6 +55,23 @@ describe("toDiagnoseEvent", () => {
       event: "conclusions",
       ...data,
     });
+  });
+
+  it("reads all 24 candidate sets, including attributes that remain unknown", () => {
+    const profile_claims = PROFILE_DIAGNOSED_ATTRIBUTES.map((attribute) => ({
+      attribute,
+      status: "unknown",
+      candidates: [],
+      candidate_pool: [],
+      reason: "no_grounded_rule",
+      conflicting_evidence: [],
+    }));
+    expect(toDiagnoseEvent("conclusions", JSON.stringify({
+      clues: [CLUE], conclusions: [], profile_claims, profile_claim_suggestions: [],
+    }))).toMatchObject({ event: "conclusions", profile_claims });
+    expect(() => toDiagnoseEvent("conclusions", JSON.stringify({
+      clues: [CLUE], conclusions: [], profile_claims: profile_claims.slice(1), profile_claim_suggestions: [],
+    }))).toThrow(InvalidDiagnoseEventError);
   });
 
   it("reads a post event", () => {

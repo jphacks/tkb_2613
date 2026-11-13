@@ -80,6 +80,21 @@ export type ProfileAttribute = keyof typeof PROFILE_ATTRIBUTE_CATALOG;
 export type ProfileAttributeMetadata = (typeof PROFILE_ATTRIBUTE_CATALOG)[ProfileAttribute];
 export type Guessability = ProfileAttributeMetadata["guessability"];
 export type ProfileStatus = "found" | "weak" | "unknown";
+export const PROFILE_DIAGNOSED_ATTRIBUTES = (Object.keys(PROFILE_ATTRIBUTE_CATALOG) as ProfileAttribute[])
+  .filter((attribute) => attribute !== "home_room");
+
+function normalizeCandidateValue(value: string): string {
+  return value.normalize("NFKC").trim().toLowerCase();
+}
+
+function eligibleCandidateDisplay(pool: readonly ProfileCandidate[]): readonly ProfileCandidate[] {
+  const strongest = pool[0];
+  if (!strongest) return [];
+  const eligible = strongest.status === "weak"
+    ? pool.filter((candidate) => candidate.status === "weak")
+    : pool.filter((candidate) => candidate.status === "found" && strongest.confidence - candidate.confidence <= 0.15);
+  return eligible.slice(0, 3);
+}
 
 export interface WebFact {
   readonly id: string;
@@ -148,6 +163,7 @@ export interface ProfileEvidence {
 export interface ProfileEvidencePath {
   readonly evidence: readonly ProfileEvidence[];
   readonly confidence: number;
+  readonly provenance: "direct_disclosure" | "combined_inference" | "unclassified";
 }
 
 export interface ClaimAssessment {
@@ -176,6 +192,95 @@ export type ProfileItem =
   | (ProfileItemBase & { readonly value: string; readonly status: "found" | "weak" })
   | (ProfileItemBase & { readonly value: null; readonly status: "unknown" });
 
+/** One evidence-backed value candidate for an attribute. It is not a verified fact. */
+export interface ProfileCandidate {
+  readonly rank: number;
+  readonly value: string;
+  readonly confidence: number;
+  readonly status: "found" | "weak";
+  readonly evidence: readonly ProfileEvidence[];
+  readonly evidence_paths: readonly ProfileEvidencePath[];
+  readonly assessment: ClaimAssessment;
+  /** Source post time, required only for realtime_location candidates. */
+  readonly observed_at: string | null;
+  readonly counter_evidence: readonly ProfileEvidence[];
+}
+
+export type ProfileCandidateSetStatus = "candidate" | "ambiguous" | "unknown" | "conflict";
+
+/** Every attribute is represented, including attributes with no grounded candidate. */
+export interface ProfileCandidateSet {
+  readonly attribute: ProfileAttribute;
+  readonly status: ProfileCandidateSetStatus;
+  readonly candidates: readonly ProfileCandidate[];
+  readonly candidate_pool: readonly ProfileCandidate[];
+  readonly reason: string | null;
+  readonly conflicting_evidence: readonly ProfileEvidence[];
+}
+
+export function profileCandidateAfterDeletion(
+  set: ProfileCandidateSet,
+  deletedPostIds: ReadonlySet<string>,
+): ProfileCandidateSet {
+  const survivingConflicts = set.conflicting_evidence.filter((reference) =>
+    reference.post_id === null || !deletedPostIds.has(reference.post_id),
+  );
+  if (set.status === "unknown" || set.status === "conflict") {
+    const lostNegation = set.conflicting_evidence.length > 0 && survivingConflicts.length === 0;
+    return {
+      ...set,
+      status: lostNegation ? "unknown" : set.status,
+      reason: lostNegation ? "no_grounded_rule" : set.reason,
+      conflicting_evidence: survivingConflicts,
+    };
+  }
+  const surviving = set.candidate_pool.flatMap((candidate) => {
+    const item: ProfileItem = {
+      attribute: set.attribute,
+      value: candidate.value,
+      confidence: candidate.confidence,
+      status: candidate.status,
+      evidence: candidate.evidence,
+      evidence_paths: candidate.evidence_paths,
+      assessment: candidate.assessment,
+    };
+    const result = profileClaimAfterDeletion(item, deletedPostIds);
+    if (!result || result.status === "unknown") return [];
+    return [{
+      rank: candidate.rank,
+      value: result.value,
+      confidence: result.confidence,
+      status: result.status,
+      evidence: result.evidence,
+      evidence_paths: result.evidence_paths ?? [],
+      assessment: result.assessment ?? candidate.assessment,
+      observed_at: candidate.observed_at,
+      counter_evidence: candidate.counter_evidence.filter((reference) =>
+        reference.post_id === null || !deletedPostIds.has(reference.post_id),
+      ),
+    }];
+  });
+  if (surviving.length === 0) {
+    return { attribute: set.attribute, status: "unknown", candidates: [], candidate_pool: [], reason: "no_surviving_evidence_path", conflicting_evidence: survivingConflicts };
+  }
+  const ranked = [...surviving].sort((a, b) => {
+    const scoreOrder = b.confidence - a.confidence;
+    if (scoreOrder !== 0) return scoreOrder;
+    const aValue = normalizeCandidateValue(a.value);
+    const bValue = normalizeCandidateValue(b.value);
+    return aValue < bValue ? -1 : aValue > bValue ? 1 : 0;
+  }).map((candidate, index) => ({ ...candidate, rank: index + 1 }));
+  const eligible = eligibleCandidateDisplay(ranked);
+  return {
+    attribute: set.attribute,
+    status: eligible.length > 1 ? "ambiguous" : "candidate",
+    candidates: eligible,
+    candidate_pool: ranked,
+    reason: null,
+    conflicting_evidence: survivingConflicts,
+  };
+}
+
 /** Recalculate a known claim from its existing OR-of-AND paths only. */
 export function profileClaimAfterDeletion(item: ProfileItem, deletedPostIds: ReadonlySet<string>): ProfileItem | null | undefined {
   if (!item.evidence_paths?.length) return undefined;
@@ -187,12 +292,15 @@ export function profileClaimAfterDeletion(item: ProfileItem, deletedPostIds: Rea
   if (confidence < 0.5) return null;
   if (item.status === "unknown") return undefined;
   const hasBlueskyOnlyPath = survivingPaths.some((path) => path.evidence.every((reference) => reference.source !== "public_web"));
+  const status = item.status === "found" && survivingPaths.every((path) => path.provenance === "combined_inference")
+    ? "weak"
+    : item.status;
   return {
     ...item,
     evidence_paths: survivingPaths,
     evidence: survivingPaths.flatMap((path) => path.evidence),
     confidence,
-    status: confidence >= 0.8 ? "found" : "weak",
+    status,
     ...(item.assessment ? {
       assessment: {
         ...item.assessment,
@@ -276,7 +384,7 @@ export function isProfileItem(value: unknown): value is ProfileItem {
     value.confidence > 1 ||
     !Array.isArray(value.evidence) ||
     !value.evidence.every(isProfileEvidence)
-    || (value.evidence_paths !== undefined && (!Array.isArray(value.evidence_paths) || !value.evidence_paths.every((path) => isRecord(path) && typeof path.confidence === "number" && path.confidence >= 0 && path.confidence <= 1 && Array.isArray(path.evidence) && path.evidence.length >= 2 && path.evidence.every(isProfileEvidence))))
+    || (value.evidence_paths !== undefined && (!Array.isArray(value.evidence_paths) || !value.evidence_paths.every(isProfileEvidencePath)))
     || (value.assessment !== undefined && !isClaimAssessment(value.assessment))
   ) {
     return false;
@@ -287,4 +395,101 @@ export function isProfileItem(value: unknown): value is ProfileItem {
     typeof value.value === "string" &&
     value.value.trim().length > 0
   );
+}
+
+function isProfileEvidencePath(value: unknown): value is ProfileEvidencePath {
+  if (!isRecord(value)) return false;
+  return Object.keys(value).every((key) => ["evidence", "confidence", "provenance"].includes(key)) &&
+    Array.isArray(value.evidence) && value.evidence.length >= 2 && value.evidence.every(isProfileEvidence) &&
+    typeof value.confidence === "number" && Number.isFinite(value.confidence) && value.confidence >= 0 && value.confidence <= 1 &&
+    ["direct_disclosure", "combined_inference", "unclassified"].includes(value.provenance as string);
+}
+
+function isTimezoneIsoTimestamp(value: unknown): value is string {
+  return typeof value === "string" &&
+    /(?:Z|[+-]\d{2}:\d{2})$/i.test(value) &&
+    !Number.isNaN(Date.parse(value));
+}
+
+function isProfileCandidate(value: unknown, attribute: ProfileAttribute): value is ProfileCandidate {
+  if (!isRecord(value)) return false;
+  const allowedKeys = ["rank", "value", "confidence", "status", "evidence", "evidence_paths", "assessment", "observed_at", "counter_evidence"];
+  if (!Object.keys(value).every((key) => allowedKeys.includes(key))) return false;
+  if (!["rank", "value", "confidence", "status", "evidence", "evidence_paths", "assessment", "observed_at", "counter_evidence"].every((key) => Object.hasOwn(value, key)) ||
+    !Number.isInteger(value.rank) || (value.rank as number) < 1 || !Array.isArray(value.counter_evidence) || !value.counter_evidence.every(isProfileEvidence)) return false;
+  if (attribute === "realtime_location") {
+    if (!isTimezoneIsoTimestamp(value.observed_at)) return false;
+  } else if (value.observed_at !== undefined && value.observed_at !== null) {
+    return false;
+  }
+  const item: Record<string, unknown> = { ...value };
+  delete item.rank;
+  delete item.observed_at;
+  delete item.counter_evidence;
+  return isProfileItem({ ...item, attribute }) && value.value !== null && value.status !== "unknown" &&
+    Array.isArray(value.evidence_paths) && value.evidence_paths.length > 0;
+}
+
+function sameProfileCandidate(a: ProfileCandidate, b: ProfileCandidate): boolean {
+  return a.rank === b.rank && a.value === b.value && a.confidence === b.confidence && a.status === b.status &&
+    JSON.stringify(a.evidence) === JSON.stringify(b.evidence) &&
+    JSON.stringify(a.evidence_paths) === JSON.stringify(b.evidence_paths) &&
+    JSON.stringify(a.assessment) === JSON.stringify(b.assessment) &&
+    JSON.stringify(a.observed_at ?? null) === JSON.stringify(b.observed_at ?? null) &&
+    JSON.stringify(a.counter_evidence) === JSON.stringify(b.counter_evidence);
+}
+
+export function isProfileCandidateSet(value: unknown): value is ProfileCandidateSet {
+  if (!isRecord(value)) return false;
+  const allowedKeys = ["attribute", "status", "candidates", "candidate_pool", "reason", "conflicting_evidence"];
+  if (!Object.keys(value).every((key) => allowedKeys.includes(key)) ||
+    !["attribute", "status", "candidates", "candidate_pool", "reason", "conflicting_evidence"].every((key) => Object.hasOwn(value, key)) ||
+    typeof value.attribute !== "string" || !Object.hasOwn(PROFILE_ATTRIBUTE_CATALOG, value.attribute) ||
+    !["candidate", "ambiguous", "unknown", "conflict"].includes(value.status as string) ||
+    !Array.isArray(value.candidates) || value.candidates.length > 3 || !Array.isArray(value.candidate_pool) ||
+    !Array.isArray(value.conflicting_evidence) || !value.conflicting_evidence.every(isProfileEvidence) ||
+    !(value.reason === null || (typeof value.reason === "string" && value.reason.trim().length > 0))) return false;
+
+  const attribute = value.attribute as ProfileAttribute;
+  const candidates = value.candidates;
+  const candidatePool = value.candidate_pool;
+  if (!candidates.every((candidate) => isProfileCandidate(candidate, attribute)) ||
+    !candidatePool.every((candidate) => isProfileCandidate(candidate, attribute))) return false;
+  const status = value.status as ProfileCandidateSetStatus;
+  if (candidatePool.length === 0) {
+    return (status === "unknown" || status === "conflict") && candidates.length === 0 && value.reason !== null &&
+      (status !== "conflict" || value.conflicting_evidence.length > 0);
+  }
+  if (status === "unknown" || status === "conflict" || value.reason !== null) return false;
+  const pool = candidatePool as ProfileCandidate[];
+  if (pool.some((candidate, index) => {
+    if (candidate.rank !== index + 1 || (index > 0 && pool[index - 1].confidence < candidate.confidence)) return true;
+    if (index > 0 && pool[index - 1].confidence === candidate.confidence) {
+      return normalizeCandidateValue(pool[index - 1].value) > normalizeCandidateValue(candidate.value);
+    }
+    return false;
+  })) return false;
+  const normalizedValues = pool.map((candidate) => normalizeCandidateValue(candidate.value));
+  if (new Set(normalizedValues).size !== normalizedValues.length) return false;
+  const eligible = eligibleCandidateDisplay(pool);
+  if (eligible.length !== candidates.length || eligible.some((candidate, index) => {
+    const displayed = candidates[index] as ProfileCandidate;
+    return !sameProfileCandidate(candidate, displayed);
+  })) return false;
+  const expectedStatus = eligible.length > 1 ? "ambiguous" : "candidate";
+  if (status !== expectedStatus) return false;
+  if (value.reason !== null) return false;
+  if (status === "ambiguous") {
+    const grades = new Set(eligible.map((candidate) => candidate.status));
+    const confidences = eligible.map((candidate) => candidate.confidence);
+    if (eligible.length < 2 || grades.size !== 1 || (grades.has("found") && Math.max(...confidences) - Math.min(...confidences) > 0.15)) return false;
+  }
+  return true;
+}
+
+export function isProfileCandidateSetList(value: unknown): value is readonly ProfileCandidateSet[] {
+  if (!Array.isArray(value) || value.length !== PROFILE_DIAGNOSED_ATTRIBUTES.length ||
+    !value.every(isProfileCandidateSet)) return false;
+  const actual = new Set(value.map((set) => set.attribute));
+  return actual.size === value.length && PROFILE_DIAGNOSED_ATTRIBUTES.every((attribute) => actual.has(attribute));
 }

@@ -23,6 +23,7 @@ uv run python eval/try_detect.py --text "25歳になりました"
 
 - `posts`：投稿（CLAUDE.md の「投稿」の形）。写真本体はない
 - `clues`：手がかり（CLAUDE.md の「手がかり」の形）
+- `annotation_kind: "manual"`：clue は手作業の注釈で、OCR/VLMの抽出結果ではない
 - `expected`：この手がかりからそろうはずの推理と、その根拠の手がかりの番号（`clues` の添字）。最寄り駅・職業・名前と誕生日・決まった外出時間の4つ
 - 推理に効かないおとりの手がかり（猫の瞳の映り込み、ジムの鏡に映ったロゴの一部）も混ぜてある
 - 形式は `api/tests/test_demo_observations.py` で検査している
@@ -77,7 +78,7 @@ python eval/mock_inference_report.py eval/local/demo_posts.json --output eval/lo
 python eval/mock_inference_report.py eval/local/manual_fixture.json --truth eval/local/truth.json
 ```
 
-手元データに任意の `truth` を付けるとプロフィール推定との照合を行う。`status: "confirmed"` の期待 claim のみ見逃しとして数える。`status: "provisional"` は未推定でも「未推定の暫定候補」と表示し、確認済みの失敗とは扱わない。未注釈の推定を false positive とするのは `status: "confirmed"` かつ `complete: true` の場合だけ。claim の照合は `attribute` と `value` の完全一致。旧形式の Conclusion は別枠で出すが、truth 評価には使わない。
+手元データに任意の `truth` を付けるとプロフィール推定との照合を行う。`status: "confirmed"` の期待 claim のみ見逃しとして数える。`status: "provisional"` は未推定でも「未推定の暫定候補」と表示し、確認済みの失敗とは扱わない。完全性が確認されていない truth では未注釈候補を誤りと断定しない。claim の照合は `attribute` と `value` の完全一致。旧形式の Conclusion は別枠で出すが、truth 評価には使わない。
 
 truth は fixture 内の `truth` フィールドでも、`--truth` で別ファイルでも渡せる。`status` は任意で `provisional` / `confirmed` を記録でき、レポートにも引き継ぐ。手作業で作った観測には fixture の `"annotation_kind": "manual"` を付けると、レポートに手動注釈であり OCR/VLM 結果ではないことが明記される。
 
@@ -88,6 +89,41 @@ truth は fixture 内の `truth` フィールドでも、`--truth` で別ファ�
   "claims": [{"attribute": "residential_area", "value": "架空市"}]
 }
 ```
+
+## 候補集合の評価
+
+`mock_inference_report.py` は、fixture に `candidate_sets` を含めるか、`--candidate-sets` に推論結果JSONを渡すと ProfileCandidateSet の評価を追加する。渡せるJSONは候補集合の配列、または `profile_claims` / `candidate_sets` 配列を持つオブジェクト。schema validation 後にレポートへ反映する。
+
+`--provenance-scope` で `all`（既定）、`direct_disclosure`、`combined_inference`、`unclassified` のいずれかを選ぶと、その provenance の根拠経路を持つ表示候補だけを評価する。1つの候補に直接開示と複合推論の代替経路が両方あれば、両方のスコープに現れる。スコープは評価結果に記録される。精度指標は完全・確認済み truth を指定したときだけ計算され、この変更では正解率の再測定を行わない。
+
+`candidate_status_rates` は入力された ProfileCandidateSet の status をそのまま数えた、未スコープの記述値。選択スコープ後の候補集合状態は `provenance_scoped_status_rates` に出す。対象 provenance の候補が0件なら `unknown`、1件なら `candidate`、2件以上なら `ambiguous` として数える。
+
+```bash
+python eval/mock_inference_report.py eval/local/manual_fixture.json --truth eval/local/truth.json --candidate-sets eval/local/candidate-sets.json
+python eval/mock_inference_report.py eval/local/manual_fixture.json --truth eval/local/truth.json --candidate-sets eval/local/candidate-sets.json --provenance-scope combined_inference
+```
+
+```json
+{
+  "status": "confirmed",
+  "complete": true,
+  "claims": [
+    {
+      "attribute": "regular_station",
+      "value": "根津駅",
+      "evidence_paths": [[{"post_id": "at://…", "clue_index": 2}]]
+    }
+  ]
+}
+```
+
+候補集合は `home_room` を除く24属性を一度ずつ含める必要がある。空配列、欠落属性、重複属性、余分な属性は採点前に拒否する。値は `candidate`（単独値）/ `ambiguous`（複数値）/ `unknown` / `conflict`。top-1 は正解値がある属性だけを分母にする。表示候補カバレッジは truth の期待値のうち候補集合に含まれた値の割合。誤候補率は完全・確認済み truth と照合できる場合に限り、表示された全候補値を分母として数える。unknown / conflict 率は24候補集合全体に対する記述統計で、truth が未確定でも出す。
+
+候補集合の truth value 照合は NFKC 正規化・前後空白除去・`lower()` 後の完全一致で行い、意味的な同義表現は一致扱いしない（たとえば `Straße` と `STRASSE` は異なる値として扱う）。採点範囲は画面に出す `candidates` のみ。内部候補プール、rank、counter-evidence は採点に加えない。
+
+truth claim に `evidence_paths` が付く場合は、予測の証拠経路との完全一致率に加えて、期待参照集合に対する参照 precision / recall を出す。完全一致は厳密な注釈一致指標。注釈にない追加参照は annotation precision を下げるが、それだけで事実に反する証拠とは判定しない。これらは注釈との一致度であり、根拠が意味的・因果的に推論を支持するかの判定ではない。別に出す evidence reference integrity は、`post_id` の存在、`clue_index` の範囲と投稿対応、画像番号、`web_fact_id` の存在を検査する。
+
+レポートの `evaluation_track` は `annotation_kind` で区別する。`manual` は手作業で付けた観測上のルール評価、`detector` は OCR/VLM を含むエンドツーエンド評価、既定の `fixture` は観測元が明示されていない評価として扱う。手動注釈の結果をOCR/VLM精度として報告しないこと。
 
 証拠は各状態の clue 配列に対する `clue_index` と投稿ID・種類・画像番号・領域・抽出元で示し、代替となる根拠経路を別々に保つ。本文や clue の値は証拠一覧に複製しない。地理テーブル `data/processed/` がない場合も他のルールを実行し、駅・住所などテーブル依存の推理は利用できない。`geographic_tables` には駅・郵便番号・メッシュ・学校の各表の利用可否を出す。`--output` は `.gitignore` 済みの `eval/local/` 以下だけに書き込める。
 

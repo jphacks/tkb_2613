@@ -1,11 +1,11 @@
 "use client";
 
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { messages } from "@/lib/messages";
 import type { Clue } from "@/types/clue";
 import type { Conclusion } from "@/types/diagnose";
-import { PROFILE_ATTRIBUTE_CATALOG, type ExternalLookupStatus, type ExternalProfileResult, type ProfileItem, type WebFact } from "@/types/profile";
+import { PROFILE_ATTRIBUTE_CATALOG, type ExternalLookupStatus, type ExternalProfileResult, type ProfileCandidateSet, type ProfileEvidence, type ProfileEvidencePath, type WebFact } from "@/types/profile";
 import type { Post } from "@/types/post";
 import { ProfileClaimWhatIf } from "./ProfileClaimWhatIf";
 
@@ -19,7 +19,7 @@ interface ConclusionBoardProps {
   conclusions: readonly Conclusion[];
   /** 消したらどうなるかで推定できなくなった項目（attribute）。「不明」のカードで出す */
   unknown?: readonly string[];
-  profileClaims?: readonly ProfileItem[];
+  profileClaims?: readonly ProfileCandidateSet[];
   profileClaimSuggestions?: readonly string[];
   posts?: readonly Post[];
   webFacts?: readonly WebFact[];
@@ -32,6 +32,46 @@ interface ConclusionBoardProps {
 interface RedString {
   key: string;
   d: string;
+}
+
+function profileAttributeLabel(set: ProfileCandidateSet, nowMs: number): string {
+  if (set.attribute !== "realtime_location") return PROFILE_ATTRIBUTE_CATALOG[set.attribute].label;
+  if (nowMs === 0) return "投稿時点の位置候補";
+  const allRecent = set.candidates.length > 0 && set.candidates.every((candidate) => {
+    const timestamp = candidate.observed_at ? Date.parse(candidate.observed_at) : Number.NaN;
+    const age = nowMs - timestamp;
+    return age >= 0 && age <= 15 * 60_000;
+  });
+  return allRecent ? "直近15分以内の投稿時点の位置候補" : "投稿時点の位置候補";
+}
+
+function profileEvidenceKey(reference: ProfileEvidence): string {
+  return [reference.post_id, reference.clue_index, reference.source, reference.excerpt, reference.web_fact_id].join(":");
+}
+
+function provenanceLabels(candidate: ProfileCandidateSet["candidates"][number]): readonly string[] {
+  return [...new Set(candidate.evidence_paths.map(evidencePathLabel))];
+}
+
+function evidencePathLabel(path: ProfileEvidencePath): string {
+  if (path.provenance === "direct_disclosure") return "自分で直接公開";
+  if (path.provenance === "combined_inference") {
+    return path.evidence.some((reference) => reference.source === "public_web")
+      ? "投稿と公開Webから推定"
+      : "投稿の組み合わせから推定";
+  }
+  return "根拠経路未分類";
+}
+
+function profileEvidenceLabel(reference: ProfileEvidence, clues: readonly Clue[], webFacts: readonly WebFact[]): string {
+  if (reference.source === "public_web") {
+    return webFacts.find((fact) => fact.id === reference.web_fact_id)?.excerpt ?? "公開Webの根拠";
+  }
+  if (reference.clue_index !== null && reference.clue_index !== undefined) {
+    const clue = clues[reference.clue_index];
+    if (clue) return `${messages.clues.typeLabels[clue.type]}：${clue.value}`;
+  }
+  return reference.excerpt ?? (reference.source === "profile_text" ? "プロフィール文" : "投稿本文");
 }
 
 /**
@@ -71,25 +111,63 @@ export function ConclusionBoard({
   clues, conclusions, unknown = [], profileClaims = [], profileClaimSuggestions = [], posts = [],
   webFacts = [], externalLookupStatus = "not_requested", externalProfileResults = [], ownerProfileText = "", selfReportClues = [],
 }: ConclusionBoardProps) {
+  // R8 copies observed name text directly. Its legacy Conclusion has no provenance
+  // field, so it cannot safely be shown as an inference; profile candidate cards
+  // are the provenance-labelled source for name results.
+  const boardConclusions = useMemo(
+    () => conclusions.filter(
+      (conclusion) => conclusion.attribute !== "full_name" && conclusion.attribute !== "given_name_or_nickname",
+    ),
+    [conclusions],
+  );
+  const boardUnknown = unknown.filter(
+    (attribute) => attribute !== "full_name" && attribute !== "given_name_or_nickname",
+  );
   const boardRef = useRef<HTMLDivElement>(null);
   const pinRefs = useRef(new Map<number, HTMLElement>());
   const cardRefs = useRef(new Map<number, HTMLElement>());
   const [strings, setStrings] = useState<readonly RedString[]>([]);
+  const [nowMs, setNowMs] = useState(0);
+  const postNumbers = new Map(posts.map((post, index) => [post.post_id, index + 1]));
+  const hasTimedLocationCandidate = profileClaims.some((set) =>
+    set.attribute === "realtime_location" && set.candidates.some((candidate) => candidate.observed_at),
+  );
+  const visibleProfileClaims = profileClaims.filter((set) => set.candidates.length > 0);
+
+  useEffect(() => {
+    setNowMs(Date.now());
+    if (!hasTimedLocationCandidate) return;
+    const timer = window.setInterval(() => setNowMs(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, [hasTimedLocationCandidate]);
 
   // 消したらどうなるかで全部「不明」になっても、演出は出したままにする（出し直さない）
-  const found = conclusions.length > 0 || unknown.length > 0;
-  const evidence = [...new Set(conclusions.flatMap((c) => c.clue_indices))].sort((a, b) => a - b);
+  const found = boardConclusions.length > 0 || boardUnknown.length > 0 || visibleProfileClaims.length > 0;
+  const evidence = [...new Set(boardConclusions.flatMap((c) => c.clue_indices))].sort((a, b) => a - b);
+
+  function profileEvidenceList(label: string, references: readonly ProfileEvidence[]) {
+    const unique = [...new Map(references.map((reference) => [profileEvidenceKey(reference), reference])).values()];
+    if (unique.length === 0) return null;
+    return <div className="mt-2">
+      <p className="text-xs font-bold">{label}（{unique.length}）</p>
+      <ul className="mt-1 list-disc pl-5 text-xs">
+        {unique.map((reference) => <li key={profileEvidenceKey(reference)}>
+          {profileEvidenceLabel(reference, clues, webFacts)}{reference.post_id ? `（投稿 ${postNumbers.get(reference.post_id) ?? "?"}）` : ""}
+        </li>)}
+      </ul>
+    </div>;
+  }
 
   // カードの位置は描いてみないと分からないので、描いたあとに測る。幅が変わったら測り直す
   useLayoutEffect(() => {
     const board = boardRef.current;
     if (!board || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(() =>
-      setStrings(layoutStrings(board, pinRefs.current, cardRefs.current, conclusions)),
+      setStrings(layoutStrings(board, pinRefs.current, cardRefs.current, boardConclusions)),
     );
     observer.observe(board);
     return () => observer.disconnect();
-  }, [conclusions]);
+  }, [boardConclusions]);
 
   return (
     <>
@@ -140,7 +218,7 @@ export function ConclusionBoard({
           </ul>
 
           <ol aria-label={t.conclusionsLabel} className="relative mt-16 space-y-6">
-            {conclusions.map((conclusion, i) => (
+            {boardConclusions.map((conclusion, i) => (
               <li
                 key={i}
                 ref={(el) => {
@@ -171,7 +249,7 @@ export function ConclusionBoard({
                 </ul>
               </li>
             ))}
-            {unknown.map((attribute) => (
+            {boardUnknown.map((attribute) => (
               <li
                 key={`unknown-${attribute}`}
                 className="border-l-4 border-dashed border-ink/30 bg-paper-deep/50 px-4 py-3 text-ink/60"
@@ -187,14 +265,57 @@ export function ConclusionBoard({
     </section>
     {(profileClaims.length > 0 || ownerProfileText || externalProfileResults.length > 0 || externalLookupStatus !== "not_requested") && (
       <section aria-labelledby="profile-claims-heading" className="mt-8 max-w-2xl space-y-4">
-        <h3 id="profile-claims-heading" className="font-display text-2xl">投稿を横断したプロフィール推定</h3>
-        {profileClaims.length === 0 ? <p className="text-ink/70">現行ルールで候補が成立しませんでした。</p> : (
+        <h3 id="profile-claims-heading" className="font-display text-2xl">プロフィール候補</h3>
+        <p className="text-sm text-ink/70">表示するのは根拠経路のある候補だけです。値を本人が直接公開した経路と、投稿を組み合わせて導いた経路を分けて示します。候補スコアは正しさの確率ではありません。</p>
+        {visibleProfileClaims.length === 0 ? <p className="text-ink/70">根拠経路のある候補はありません。</p> : (
           <ul className="space-y-3">
-            {profileClaims.map((claim) => (
-              <li key={claim.attribute} className="border-l-4 border-seeker bg-paper-deep px-4 py-3">
-                <p className="text-xs tracking-widest text-ink/60">{PROFILE_ATTRIBUTE_CATALOG[claim.attribute].label} ・{claim.status === "found" ? "推定" : "弱い推定"}</p>
-                <p className="mt-1 text-xl font-bold">{claim.value}</p>
-                <p className="mt-1 text-sm text-ink/70">確からしさ {Math.round(claim.confidence * 100)}%</p>
+            {visibleProfileClaims.map((claimSet) => (
+              <li key={claimSet.attribute} className="border-l-4 border-seeker bg-paper-deep px-4 py-3">
+                <p className="text-xs tracking-widest text-ink/60">
+                  {profileAttributeLabel(claimSet, nowMs)} ・{
+                    claimSet.status === "ambiguous" ? "複数の候補" : "候補（正解とは限りません）"
+                  }
+                </p>
+                <ul aria-label={`${profileAttributeLabel(claimSet, nowMs)}の候補`} className="mt-2 space-y-2">
+                  {claimSet.candidates.map((candidate) => {
+                    const observedAt = candidate.observed_at ? Date.parse(candidate.observed_at) : Number.NaN;
+                    const ageMs = nowMs - observedAt;
+                    const recentLocation = claimSet.attribute === "realtime_location" && ageMs >= 0 && ageMs <= 15 * 60_000;
+                    return <li key={candidate.value} className="rounded border border-ink/15 px-3 py-2">
+                      <p className="text-xl font-bold">{candidate.value}</p>
+                      <ul aria-label="値の根拠経路" className="mt-1 flex flex-wrap gap-2 text-xs">
+                        {provenanceLabels(candidate).map((label) => <li key={label} className="rounded border border-ink/25 px-2 py-0.5">{label}</li>)}
+                      </ul>
+                      <p className="mt-1 text-sm text-ink/70">{candidate.status === "weak" ? "弱い候補" : "候補"} ・ 順位 #{candidate.rank} / 根拠候補 {claimSet.candidate_pool.length} 件 ・ 根拠スコア {candidate.confidence.toFixed(2)}（正しさの確率ではありません）</p>
+                      {claimSet.attribute === "realtime_location" && candidate.observed_at && (
+                        <p className="mt-1 text-xs text-ink/70">
+                          投稿時点：{new Date(candidate.observed_at).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })}
+                          {nowMs === 0 ? "（時刻を確認中）" : recentLocation ? "（15分以内の投稿）" : "（15分経過。最新情報ではありません）"}
+                        </p>
+                      )}
+                      <details className="mt-2 text-sm">
+                        <summary className="cursor-pointer font-bold">根拠と反対の根拠を確認</summary>
+                        <div className="mt-2">
+                          <p className="text-xs font-bold">候補を支える根拠経路（{candidate.evidence_paths.length}）</p>
+                          <ul className="mt-1 space-y-2">
+                            {candidate.evidence_paths.map((path, index) => <li key={`${candidate.value}:${index}`} className="rounded border border-ink/15 px-2 py-1.5">
+                              <p className="text-xs font-bold">{evidencePathLabel(path)}</p>
+                              {profileEvidenceList("この経路の根拠", path.evidence)}
+                            </li>)}
+                          </ul>
+                        </div>
+                        {profileEvidenceList("この候補への反対根拠", candidate.counter_evidence)}
+                        {profileEvidenceList("項目全体に関する矛盾根拠", claimSet.conflicting_evidence)}
+                      </details>
+                    </li>;
+                  })}
+                </ul>
+                {claimSet.candidates.length === 0 && claimSet.conflicting_evidence.length > 0 && (
+                  <details className="mt-2 text-sm">
+                    <summary className="cursor-pointer font-bold">矛盾を示す根拠を確認</summary>
+                    {profileEvidenceList("項目全体に関する矛盾根拠", claimSet.conflicting_evidence)}
+                  </details>
+                )}
               </li>
             ))}
           </ul>

@@ -118,6 +118,55 @@ def test_profile_inference_is_recomputed_after_excluding_a_required_post() -> No
     assert report["notes"][-2] == "Clues are manually annotated and are not OCR/VLM results."
 
 
+def test_candidate_set_evaluation_is_separate_and_labeled_by_annotation_track() -> None:
+    candidate_sets = [
+        {
+            "attribute": attribute,
+            "status": "unknown",
+            "candidates": [],
+            "reason": "no grounded candidate",
+        }
+        for attribute in sorted(module.PROFILE_CANDIDATE_ATTRIBUTES)
+    ]
+    report = module.build_report(
+        {"posts": [], "clues": [], "annotation_kind": "manual"},
+        [],
+        Gazetteer(),
+        {"status": "confirmed", "complete": True, "claims": []},
+        {"stations": True, "postal": True, "muni_mesh": True, "schools": True},
+        candidate_sets,
+    )
+    assert report["evaluation_track"] == "manual_annotation_rule_evaluation"
+    candidate_eval = report["candidate_set_truth_evaluation"]
+    assert candidate_eval["accuracy_metrics"]["wrong_candidate_rate"] == 0.0
+    assert candidate_eval["candidate_status_rates"]["unknown_count"] == 24
+
+
+def test_candidate_report_rejects_incomplete_attribute_sets() -> None:
+    all_sets = [
+        {
+            "attribute": attribute,
+            "status": "unknown",
+            "candidates": [],
+            "reason": "no grounded candidate",
+        }
+        for attribute in sorted(module.PROFILE_CANDIDATE_ATTRIBUTES)
+    ]
+    for incomplete in ([], all_sets[:-1]):
+        try:
+            module.build_report(
+                {"posts": [], "clues": []},
+                [],
+                Gazetteer(),
+                {"status": "confirmed", "complete": True, "claims": []},
+                candidate_sets=incomplete,
+            )
+        except ValueError as error:
+            assert "exactly 24 unique attributes" in str(error)
+        else:
+            raise AssertionError("an empty or incomplete candidate set array must be rejected")
+
+
 def test_report_output_must_stay_in_ignored_eval_local() -> None:
     assert module._output_path(module.ROOT / "local" / "report.json").name == "report.json"
     try:

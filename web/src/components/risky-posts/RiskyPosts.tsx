@@ -8,6 +8,7 @@ import { isLikelyNameText } from "@/lib/reveal";
 import type { Clue } from "@/types/clue";
 import type { Deletion, RiskyPost, Simulation } from "@/types/diagnose";
 import type { Post } from "@/types/post";
+import { profileCandidateAfterDeletion, type ProfileCandidateSet } from "@/types/profile";
 
 import { DeleteConfirm } from "./DeleteConfirm";
 
@@ -15,6 +16,7 @@ const t = messages.risky;
 
 /** engine の IMPORTANT_ATTRIBUTES（tkb_engine/planner.py）とそろえる。 */
 const IMPORTANT_ATTRIBUTES = ["full_name", "birthday", "home_block", "home_area", "long_term_home_absence", "home_district", "home_city", "workplace", "school", "home_school_commute", "given_name_or_nickname", "station", "age", "frequent_shop", "line", "active_time", "routine"] as const;
+const LEGACY_NAME_ATTRIBUTES = new Set(["full_name", "given_name_or_nickname"]);
 const DIRECT_CLUES = ["face", "name_text", "address_text", "phone", "postal_code"] as const;
 
 /** 投稿の本文はこの文字数で切って見せる */
@@ -27,6 +29,8 @@ interface RiskyPostsProps {
   clues?: readonly Clue[];
   /** 診断の手がかりの数（simulate の結果の根拠の番号を確かめる） */
   clueCount: number;
+  /** Candidate-based profiles are the authoritative escape check for the new result model. */
+  profileClaims?: readonly ProfileCandidateSet[];
   /** 消したらどうなるか・実際に消した結果。元に戻したり選び直したりしたら null */
   onSimulated: (simulation: Simulation | null) => void;
 }
@@ -40,12 +44,16 @@ function excerpt(text: string): string {
   return text.length > EXCERPT_LENGTH ? `${text.slice(0, EXCERPT_LENGTH)}…` : text;
 }
 
+function withoutLegacyNameBreakage(attributes: readonly string[]): string[] {
+  return attributes.filter((attribute) => !LEGACY_NAME_ATTRIBUTES.has(attribute));
+}
+
 /**
  * 危ない投稿（診断の plan）を並べ、選んだ投稿を消したらどうなるかを見せる（まーだだよ）。
  * 結果は捜査ボードに渡して、崩れた項目を「不明」にする。
  * 試したあと、確認ダイアログで OK したときだけ Bluesky から実際に消す（もういいよ）。消したあとは選び直せない。
  */
-export function RiskyPosts({ posts, risky, clues = [], clueCount, onSimulated }: RiskyPostsProps) {
+export function RiskyPosts({ posts, risky, clues = [], clueCount, profileClaims = [], onSimulated }: RiskyPostsProps) {
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set(risky.map((r) => r.post_id)));
   const [result, setResult] = useState<Simulation | null>(null);
   const [pending, setPending] = useState(false);
@@ -132,7 +140,12 @@ export function RiskyPosts({ posts, risky, clues = [], clueCount, onSimulated }:
   const shown = deletion ?? result;
   const gone = new Set(shown?.delete ?? []);
   const directCluesLeft = clues.some((c) => !gone.has(c.post_id) && directClueLabel(c) !== null);
-  const escaped = shown !== null && !directCluesLeft && IMPORTANT_ATTRIBUTES.every((a) => !shown.after.some((c) => c.attribute === a));
+  const profileCandidateLeft = shown !== null && profileClaims.some((claimSet) =>
+    profileCandidateAfterDeletion(claimSet, gone).candidates.length > 0,
+  );
+  const escaped = shown !== null && !directCluesLeft && IMPORTANT_ATTRIBUTES
+    .filter((attribute) => !LEGACY_NAME_ATTRIBUTES.has(attribute))
+    .every((attribute) => !shown.after.some((conclusion) => conclusion.attribute === attribute)) && !profileCandidateLeft;
 
   return (
     <section aria-labelledby="risky-heading" aria-busy={pending} className="max-w-2xl space-y-4">
@@ -166,7 +179,9 @@ export function RiskyPosts({ posts, risky, clues = [], clueCount, onSimulated }:
                     <span className="mt-0.5 block text-xs text-ink/60">{t.photos(post.images.length)}</span>
                   )}
                   <span className="mt-1 block text-sm font-bold text-seeker">
-                    {r.broken.length > 0 ? t.breaks(labelsOf(r.broken)) : t.breaksNothing}
+                    {withoutLegacyNameBreakage(r.broken).length > 0
+                      ? t.breaks(labelsOf(withoutLegacyNameBreakage(r.broken)))
+                      : t.breaksNothing}
                   </span>
                   {direct.length > 0 && <span className="mt-1 block text-sm text-ink/80">{t.directClues(direct.join("・"))}</span>}
                 </span>
@@ -220,8 +235,8 @@ export function RiskyPosts({ posts, risky, clues = [], clueCount, onSimulated }:
       )}
       {result && !deletion && (
         <div role="status" className="space-y-1">
-          <p className="font-bold">{t.result(result.delete.length, result.broken.length)}</p>
-          {result.broken.length > 0 && <p className="text-sm text-ink/70">{labelsOf(result.broken)}</p>}
+          <p className="font-bold">{t.result(result.delete.length, withoutLegacyNameBreakage(result.broken).length)}</p>
+          {withoutLegacyNameBreakage(result.broken).length > 0 && <p className="text-sm text-ink/70">{labelsOf(withoutLegacyNameBreakage(result.broken))}</p>}
           {escaped && <p className="font-display text-xl text-seeker">{t.safe}</p>}
         </div>
       )}
@@ -258,7 +273,7 @@ function Escaped({ deletion, escaped }: { deletion: Deletion; escaped: boolean }
     <div role="status" className="space-y-2 border-t border-ink/15 pt-4">
       <p className="horror-title text-4xl">{e.heading}</p>
       <p className="font-bold">{e.deleted(deletion.delete.length)}</p>
-      {deletion.broken.length > 0 && <p className="text-sm text-ink/70">{t.breaks(labelsOf(deletion.broken))}</p>}
+      {withoutLegacyNameBreakage(deletion.broken).length > 0 && <p className="text-sm text-ink/70">{t.breaks(labelsOf(withoutLegacyNameBreakage(deletion.broken)))}</p>}
       {escaped && <p className="font-display text-xl text-seeker">{t.safe}</p>}
       {deletion.failed.length > 0 && (
         <p className="border-l-4 border-seeker bg-seeker/10 px-4 py-2">
