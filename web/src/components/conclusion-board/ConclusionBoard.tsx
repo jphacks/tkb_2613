@@ -7,6 +7,7 @@ import type { Clue } from "@/types/clue";
 import { confidenceLevel, type Conclusion } from "@/types/diagnose";
 import { openDataCitations, PROFILE_ATTRIBUTE_CATALOG, type ExternalLookupStatus, type ExternalProfileResult, type ProfileItem, type WebFact } from "@/types/profile";
 import type { Post } from "@/types/post";
+import { ClaimStrings } from "./ClaimStrings";
 import { ProfileClaimWhatIf, whatIfEvidencePostIds } from "./ProfileClaimWhatIf";
 import { ReasoningChain } from "./ReasoningChain";
 
@@ -218,6 +219,8 @@ export function ConclusionBoard({
                 {openDataCitations(claim).map((citation) => (
                   <p key={citation} className="mt-1 text-xs text-ink/70">{citation}</p>
                 ))}
+                {/* 根拠の道筋が2つ以上あるときだけ、道筋ごとの投稿から答えへ赤い糸を張る */}
+                <ClaimStrings claim={claim} posts={posts} />
               </li>
             ))}
           </ul>
