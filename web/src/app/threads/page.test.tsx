@@ -304,6 +304,61 @@ describe("profile claims on the Threads diagnosis", () => {
   });
 });
 
+describe("stamps on the inferences lost by excluding posts", () => {
+  const GYM_POSTS = ["threads:9001", "threads:9002"];
+
+  function stubLosingApi() {
+    const snapshot = profileFixture.snapshot;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path.endsWith("/config")) return json({ mock_enabled: true, gpu_demo_enabled: false, live_enabled: false, max_posts: 30 });
+      if (path.endsWith("/session")) return json({ username: "架空のThreadsアカウント", mock: true });
+      if (path.endsWith("/diagnosis")) return json(snapshot);
+      // ジムの投稿2件を外すと「決まった外出」が崩れる
+      if (path.endsWith("/simulate")) return json({ ...profileFixture.simulate, delete: GYM_POSTS, broken: ["routine"], after: [] });
+      if (path.endsWith("/rediagnose")) {
+        const base = profileFixture.rediagnose;
+        const posts = base.posts.filter((p) => !GYM_POSTS.includes(p.post_id));
+        const clues = base.clues.filter((c) => !GYM_POSTS.includes(c.post_id));
+        return json({ ...base, posts, clues, conclusions: [] });
+      }
+      throw new Error(`unexpected fetch: ${path}`);
+    }));
+  }
+
+  async function excludeGymPosts() {
+    await screen.findByRole("heading", { name: "投稿を横断したプロフィール推定" });
+    for (const box of screen.getAllByRole("checkbox", { name: "仮除外する" })) {
+      if (box.closest("li")?.textContent?.includes("ジム")) fireEvent.click(box);
+    }
+  }
+
+  it("stamps 不明 on the lost inference and counts it down after a tentative exclusion", async () => {
+    stubLosingApi();
+    render(<ThreadsPage />);
+    await excludeGymPosts();
+
+    fireEvent.click(screen.getByRole("button", { name: "仮除外を試す" }));
+
+    const figure = await screen.findByRole("figure", { name: "推定できた項目は 1 から 0 になります" });
+    expect(within(figure).getByText("毎週火曜（毎週火曜はジム）")).toBeInTheDocument();
+    expect(within(figure).getByText("不明")).toBeInTheDocument();
+    expect(within(figure).getByText("もう、見つからない")).toBeInTheDocument();
+  });
+
+  it("stamps the lost inference after the rediagnosis too, and not when nothing was lost", async () => {
+    stubLosingApi();
+    render(<ThreadsPage />);
+    await excludeGymPosts();
+
+    fireEvent.click(screen.getByRole("button", { name: "選択した投稿を除いて再診断" }));
+    expect(await screen.findByRole("figure", { name: "推定できた項目は 1 から 0 になります" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "全投稿の結果に戻す" }));
+    await waitFor(() => expect(screen.queryByText("もう、見つからない")).not.toBeInTheDocument());
+  });
+});
+
 describe("posts that could not be read", () => {
   it("tells how many posts were left out of the diagnosis", async () => {
     const snapshot = { ...profileFixture.snapshot, post_errors: [{ post_id: "threads:9006", error: "この投稿は読み取れませんでした" }] };

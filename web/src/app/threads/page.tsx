@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 
 import { ConclusionBoard } from "@/components/conclusion-board/ConclusionBoard";
+import { EscapeStamps, brokenInferences, countAttributes, lostAttributes } from "@/components/escape-stamps/EscapeStamps";
 import { PostCard } from "@/components/post-list/PostCard";
 import { THREADS_TEXT, ThreadsError, type ThreadsErrorKey, type ThreadsLang } from "@/lib/threads-i18n";
 import { checkThreadsPublicText } from "@/lib/threads-public-check";
@@ -156,6 +157,14 @@ export default function ThreadsPage() {
   const profileClaims = profileClaimsAfterDeletion(current?.profile_claims ?? [], previewExcluded);
   const profileClaimSuggestions = (current?.profile_claim_suggestions ?? []).filter((id) => !previewExcluded.has(id));
   const publicFindings = fetchedPosts ? checkThreadsPublicText(fetchedPosts) : [];
+  // 仮除外の試算か、仮除外後の再診断で推定できた項目が減ったら、崩れた推定に判子を押して数を減らす（Bluesky と同じ）
+  const lost = !original ? [] : preview ? preview.broken : view && view !== original ? lostAttributes(original.conclusions, view.conclusions) : [];
+  const escape = original && lost.length > 0 ? {
+    key: `${preview ? "simulated" : "rediagnosed"}:${(preview?.delete ?? selected).join(",")}`,
+    before: countAttributes(original.conclusions),
+    after: countAttributes(original.conclusions.filter((c) => !lost.includes(c.attribute))),
+    broken: brokenInferences(original.conclusions, lost),
+  } : null;
   return (
     <main className="mx-auto max-w-4xl px-5 py-12">
       <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
@@ -327,6 +336,7 @@ export default function ThreadsPage() {
               })}>{t.rediagnose}</button>
             {view !== original && <button type="button" className="underline" onClick={() => { setView(original); setPreview(null); setSelected([]); }}>{t.showAll}</button>}
           </div>
+          {escape && <EscapeStamps key={escape.key} before={escape.before} after={escape.after} broken={escape.broken} />}
           {preview && <p role="status">{t.brokenItems(preview.broken.length ? preview.broken.join(t.listSeparator) : t.none)}</p>}
         </section>
       </div>}

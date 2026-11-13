@@ -2,6 +2,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError, deletePosts, simulate } from "@/lib/api";
+import { ESCAPED_MESSAGE } from "@/components/escape-stamps/EscapeStamps";
 import { messages } from "@/lib/messages";
 import type { Clue } from "@/types/clue";
 import type { RiskyPost, Simulation } from "@/types/diagnose";
@@ -180,7 +181,27 @@ describe("RiskyPosts", () => {
     // 同じ項目（最寄り駅）の結論が2つあっても1と数える：3 → 1
     const figure = await screen.findByRole("figure", { name: t.countLabel(3, 1) });
     expect(figure).toHaveTextContent(t.countHeading);
-    expect(figure).toHaveTextContent("3→1");
+    // 減ったので、崩れた推定に「不明」の判子を押し、数を 1 つずつ減らし、最後に「もう、見つからない」
+    const rows = within(figure).getAllByRole("listitem");
+    expect(rows.map((r) => r.textContent)).toEqual([
+      expect.stringContaining("根津"),
+      expect.stringContaining("夜"),
+    ]);
+    for (const row of rows) expect(within(row).getByText("不明")).toBeInTheDocument();
+    expect(within(figure).getByText(ESCAPED_MESSAGE)).toBeInTheDocument();
+  });
+
+  it("keeps the plain counts without stamps when nothing was lost", async () => {
+    const before = [{ rule: "R3", attribute: "routine", value: "毎週火曜", clue_indices: [2], note: "" }];
+    vi.mocked(simulate).mockResolvedValue({ ...ALL_BROKEN, broken: [], after: before });
+    render(<RiskyPosts posts={[GYM, ADDRESS]} risky={RISKY} clueCount={20} onSimulated={vi.fn()} conclusions={before} />);
+
+    fireEvent.click(screen.getByRole("button", { name: t.simulate }));
+
+    const figure = await screen.findByRole("figure", { name: t.countLabel(1, 1) });
+    expect(figure).toHaveTextContent("1→1");
+    expect(within(figure).queryByText("不明")).not.toBeInTheDocument();
+    expect(screen.queryByText(ESCAPED_MESSAGE)).not.toBeInTheDocument();
   });
 
   it("keeps showing the counts after deleting for real", async () => {

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { EscapeStamps, brokenInferences } from "@/components/escape-stamps/EscapeStamps";
 import { ApiError, deletePosts, simulate } from "@/lib/api";
 import { messages } from "@/lib/messages";
 import { isLikelyNameText, validNameConclusions } from "@/lib/reveal";
@@ -241,7 +242,17 @@ export function RiskyPosts({ posts, risky, clues = [], clueCount, onSimulated, o
           {t.simulating}
         </p>
       )}
-      {counts && <CountChange before={counts.before} after={counts.after} />}
+      {/* 減ったときは、崩れた推定に判子を押して数を1つずつ減らす。減らなかったときは今までどおり N → M だけ */}
+      {counts && shown && conclusions && counts.after < counts.before && shown.broken.length > 0 ? (
+        <EscapeStamps
+          key={`${deletion ? "deleted" : "simulated"}:${shown.delete.join(",")}`}
+          before={counts.before}
+          after={counts.after}
+          broken={brokenInferences(conclusions, shown.broken)}
+        />
+      ) : (
+        counts && <CountChange before={counts.before} after={counts.after} />
+      )}
       {result && !deletion && (
         <div role="status" className="space-y-1">
           <p className="font-bold">{t.result(result.delete.length, result.broken.length)}</p>
