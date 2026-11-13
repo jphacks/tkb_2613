@@ -113,7 +113,7 @@ Developer Policy の geo-data 条項（位置情報を Post から切り離し�
 
 ## EXPOで利用できる範囲
 
-用途確認が未完了の間は `X_MOCK_MODE=1` の合成デモだけを提供する。来場者は地名・駅名・曜日・時刻・学校名の根拠と件数、元投稿、仮除外前後を操作できるが、自分のXアカウントでログインしたり実投稿を取得したりはできない。
+用途確認が未完了の間は `X_MOCK_MODE=1` の合成デモだけを提供する。来場者は地名・駅名・曜日・時刻・学校名の根拠と件数、元投稿、仮除外前後を操作できるが、自分のXアカウントでログインしたり実投稿を取得したりはできない。合成デモでも `/api/x` の POST は Origin を `X_PUBLIC_ORIGIN` と照らすので、本番の `.env` には `X_PUBLIC_ORIGIN=https://<公開オリジン>` と `X_CALLBACK_URL` が要る（`infra/aws.env.example`）。未設定（既定の `http://localhost:3000`）のまま `COOKIE_SECURE=1` で起動すると、api は起動時に警告をログに出す（起動は止めない）。Threads を開けているとき（`THREADS_MOCK_MODE=1` か `THREADS_ENABLED=1`）の `THREADS_PUBLIC_ORIGIN` も同じ。
 
 実試験へ進む前提は、Xの用途確認、チームの課金承認、ConsoleのWeb App設定、creditとspending limit、HTTPS callback、Secretの安全な注入、全段のqueryログ伏せ、本人同意文面、削除・変更への運用方針を揃えること。最初の実試験はチーム所有のテストアカウント1件、`X_MAX_POSTS=5`、監視下で行い、その後フラグを戻してメモリ・ログ・請求を確認する。
 

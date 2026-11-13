@@ -126,6 +126,29 @@ class Settings(BaseSettings):
             )
         return self
 
+    def origin_warnings(self) -> list[str]:
+        """本番（COOKIE_SECURE=1）なのに、開けている X・Threads の公開オリジンが手元のままのとき。
+
+        X_PUBLIC_ORIGIN・THREADS_PUBLIC_ORIGIN が未設定だと既定の http://localhost:3000 になり、
+        /api/x・/api/threads の POST がすべて Origin の確認（check_origin）で 403 になる。
+        起動は止めず、ログに出す警告の文だけを返す。
+        """
+        if not self.cookie_secure:
+            return []
+        warnings: list[str] = []
+        if self.x_mock_mode and urlparse(self.x_public_origin).hostname in LOOPBACK_HOSTS:
+            warnings.append(
+                "X_MOCK_MODE=1 ですが X_PUBLIC_ORIGIN が手元のオリジンのままです。"
+                "/x の合成デモの POST は 403 になります（公開の HTTPS オリジンを設定してください）"
+            )
+        threads_open = self.threads_mock_mode or self.threads_enabled
+        if threads_open and urlparse(self.threads_public_origin).hostname in LOOPBACK_HOSTS:
+            warnings.append(
+                "Threads を開けていますが THREADS_PUBLIC_ORIGIN が手元のオリジンのままです。"
+                "/threads の POST は 403 になります（公開の HTTPS オリジンを設定してください）"
+            )
+        return warnings
+
     @property
     def public_web_lookup_available(self) -> bool:
         """公開Web検索の同意欄を出せるか。

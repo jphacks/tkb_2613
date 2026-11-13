@@ -243,3 +243,34 @@ async def test_oauth_pkce_state_owner_check_and_direct_only_aggregation() -> Non
             follow_redirects=False,
         )
         assert replay.status_code == 400  # state と開始Cookieは一回限り
+
+
+@pytest.mark.anyio
+async def test_mock_demo_works_with_the_production_public_origin() -> None:
+    # infra/aws.env.example と同じ形の設定（COOKIE_SECURE=1、公開の HTTPS オリジン）で、
+    # 合成デモの開始から仮除外までが Origin の確認を通る
+    public = "https://d111.cloudfront.net"
+    app = create_app(
+        settings=Settings(
+            _env_file=None,
+            cookie_secure=True,
+            x_mock_mode=True,
+            x_public_origin=public,
+            x_callback_url=f"{public}/api/x/callback",
+            gazetteer_dir=Path("/missing-x-gazetteer"),
+            share_enabled=False,
+        )
+    )
+    headers = {"Origin": public}
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url=public) as client:
+        login = await client.post("/api/x/mock/session", json={"consent": True}, headers=headers)
+        assert login.status_code == 200
+        assert "secure" in login.headers["set-cookie"].lower()
+        assert (await client.post("/api/x/diagnose", headers=headers)).status_code == 200
+        preview = await client.post("/api/x/simulate", json={"delete": ["x:9001"]}, headers=headers)
+        assert preview.status_code == 200
+
+        # 手元のオリジン（未設定のときの既定）から送られた POST は通さない
+        local = {"Origin": "http://localhost:3000"}
+        assert (await client.post("/api/x/diagnose", headers=local)).status_code == 403

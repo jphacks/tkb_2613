@@ -115,6 +115,8 @@ def create_app(
     logging.getLogger("tkb_api").info(
         "閲覧リンク：%s（SHARE_ENABLED）", "オン" if settings.share_enabled else "オフ"
     )
+    for warning in settings.origin_warnings():
+        logging.getLogger("tkb_api").warning(warning)
     app.state.shares = (
         ShareStore(settings.share_db_path, settings.share_ttl_minutes * 60)
         if settings.share_enabled
