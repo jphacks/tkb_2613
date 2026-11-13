@@ -8,6 +8,7 @@ import { messages } from "@/lib/messages";
 import type { Clue } from "@/types/clue";
 import type { DiagnoseEvent } from "@/types/diagnose";
 import type { Post } from "@/types/post";
+import type { ProfileItem } from "@/types/profile";
 
 import { DiagnosePanel } from "./DiagnosePanel";
 
@@ -421,6 +422,49 @@ describe("DiagnosePanel", () => {
     fireEvent.click(screen.getByRole("button", { name: messages.risky.reset }));
 
     expect(screen.getByRole("list", { name: b.conclusionsLabel })).toHaveTextContent("毎週火曜");
+  });
+  it("hides a cross-post profile claim once the post it rests on is excluded", async () => {
+    const gymPost = post(2, "ジムおわり 毎週火曜はここ");
+    const other = post(3, "文京区の公園");
+    const gym = clue(gymPost.post_id, "毎週火曜のジム");
+    const ref = (postId: string) => ({ post_id: postId, clue_index: null, required: true, source: "post_text" as const, excerpt: "架空" });
+    const claim: ProfileItem = {
+      attribute: "residential_area", value: "架空の区", confidence: 0.85, status: "found",
+      evidence: [ref(gymPost.post_id), ref(other.post_id)],
+      evidence_paths: [{ evidence: [ref(gymPost.post_id), ref(other.post_id)], confidence: 0.85 }],
+    };
+    vi.mocked(diagnose).mockImplementation(async function* () {
+      yield { event: "post", post: gymPost };
+      yield { event: "clues", post_id: gymPost.post_id, clues: [gym], error: null };
+      yield { event: "post", post: other };
+      yield { event: "clues", post_id: other.post_id, clues: [], error: null };
+      yield {
+        event: "conclusions",
+        clues: [gym],
+        conclusions: [{ rule: "R3", attribute: "routine", value: "毎週火曜", clue_indices: [0], note: "" }],
+        profile_claims: [claim],
+      };
+      yield {
+        event: "plan",
+        delete: [gymPost.post_id],
+        broken: ["routine"],
+        after: [],
+        posts: [{ post_id: gymPost.post_id, broken: ["routine"] }],
+      };
+      yield { event: "done", posts_seen: 2 };
+    });
+    vi.mocked(simulate).mockResolvedValue({ delete: [gymPost.post_id], broken: ["routine"], after: [] });
+
+    fireEvent.click(await renderLoggedIn());
+    expect(await screen.findByText("架空の区")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: messages.risky.simulate }));
+
+    await vi.waitFor(() => expect(screen.queryByText("架空の区")).not.toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: messages.risky.reset }));
+
+    expect(screen.getByText("架空の区")).toBeInTheDocument();
   });
 });
 

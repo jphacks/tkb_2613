@@ -2,7 +2,7 @@
 
 import re
 import unicodedata
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from datetime import date, datetime, timedelta, timezone
 from itertools import combinations
 
@@ -213,6 +213,29 @@ def recalculate_after_deletion(item: ProfileItem, deleted_post_ids: set[str]) ->
             ),
         }
     )
+
+
+def claims_after_deletion(
+    claims: Sequence[ProfileItem], deleted_post_ids: Collection[str]
+) -> list[ProfileItem]:
+    """消した投稿を根拠から除いたプロフィール推定。根拠がなくなった推定は返さない。
+
+    画面の profileClaimsAfterDeletion（web/src/types/profile.ts）と同じ規則にする。
+    根拠の経路（evidence_paths）があれば recalculate_after_deletion で計算し直す。経路のない推定と
+    unknown は計算し直せないので、消した投稿を根拠に含むものだけを除く。
+    """
+    deleted = set(deleted_post_ids)
+    if not deleted:
+        return list(claims)
+    kept: list[ProfileItem] = []
+    for claim in claims:
+        if claim.evidence_paths and claim.status is not ProfileStatus.UNKNOWN:
+            after = recalculate_after_deletion(claim, deleted)
+            if after is not None:
+                kept.append(after)
+        elif not any(reference.post_id in deleted for reference in claim.evidence):
+            kept.append(claim)
+    return kept
 
 
 PROFILE_PLAN_MAX_POSTS = 3
