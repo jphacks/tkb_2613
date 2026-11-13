@@ -7,7 +7,7 @@ test("審査フロー：本人投稿の一覧・詳細とAIを使わないセル
   await page.getByRole("button", { name: "架空のThreads投稿で試す" }).click();
   await expect(page.getByText("架空のThreadsアカウント")).toBeVisible();
   await page.getByRole("button", { name: "本人投稿を確認" }).click();
-  await expect(page.getByText("本人投稿 2 件を取得しました。")).toBeVisible();
+  await expect(page.getByText("本人投稿 5 件を取得しました。")).toBeVisible();
   await page.getByText("取得情報の詳細").first().click();
   await expect(page.getByText("投稿ID：").first()).toBeVisible();
   await page.getByRole("button", { name: "公開情報をセルフチェック" }).click();
@@ -25,7 +25,7 @@ test("英語表示：審査フローを英語のまま通し、再読み込み�
   await page.reload();
   await expect(page.getByRole("button", { name: "Review my posts" })).toBeVisible();
   await page.getByRole("button", { name: "Review my posts" }).click();
-  await expect(page.getByText(/Retrieved 2 of your own posts\./)).toBeVisible();
+  await expect(page.getByText(/Retrieved 5 of your own posts\./)).toBeVisible();
   await expect(page.getByText("毎週火曜はジムに行く")).toBeVisible();
   await page.getByText("Retrieved data details").first().click();
   await expect(page.getByText("Post ID:").first()).toBeVisible();
@@ -42,7 +42,7 @@ test("任意機能：合成Threads投稿をAI診断し、根拠を見て仮除�
   await page.getByRole("button", { name: "架空のThreads投稿で試す" }).click();
   await expect(page.getByText("架空のThreadsアカウント")).toBeVisible();
   await page.getByRole("button", { name: "本人投稿を確認" }).click();
-  await expect(page.getByText("本人投稿 2 件を取得しました。")).toBeVisible();
+  await expect(page.getByText("本人投稿 5 件を取得しました。")).toBeVisible();
   await page.getByText("任意機能：AI診断（モデル稼働時のみ）").click();
   await page.getByRole("button", { name: "AI診断を試す" }).click();
   await expect(page.getByText("診断結果", { exact: true })).toBeVisible();

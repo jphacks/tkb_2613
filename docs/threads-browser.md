@@ -21,7 +21,7 @@ Threads の本人投稿の本文と投稿時刻を読む。画像は診断しな
 
 ## AWS 側の最小設定差分
 
-`infra/aws.env.example` に必要なキーを記載している。本番では `THREADS_PUBLIC_ORIGIN=https://d2qyby5y8mc03f.cloudfront.net`、`THREADS_CALLBACK_URL=https://d2qyby5y8mc03f.cloudfront.net/api/threads/callback`、Threads専用App ID/Secret、`COOKIE_SECURE=1` が必要。公開応答上は実Threadsログインが有効だが、秘密値そのものは表示・記録しない。実診断にはAPIから到達できるOllamaの `qwen3:4b-instruct` が必要である。本番Ollamaの実際の実行場所、アクセス制御、本文・応答ログの設定は、審査提出前にEC2上で読み取り確認する。
+`infra/aws.env.example` に必要なキーを記載している。本番では `THREADS_PUBLIC_ORIGIN=https://d2qyby5y8mc03f.cloudfront.net`、`THREADS_CALLBACK_URL=https://d2qyby5y8mc03f.cloudfront.net/api/threads/callback`、Threads専用App ID/Secret、`COOKIE_SECURE=1` が必要。公開応答上は実Threadsログインが有効だが、秘密値そのものは表示・記録しない。実診断は既定でBlueskyと同じvLLM（`VLM_BASE_URL`・`VLM_API_KEY`・`VLM_MODEL`・`MODEL_ALLOWED_HOST_SUFFIXES`）で本文だけを読むので、GPUのvLLMが起動している必要がある。`THREADS_TEXT_BACKEND=ollama` にしたときだけ、APIから到達できるOllamaが必要。
 
 ## 検証状況
 

@@ -85,6 +85,9 @@ class Settings(BaseSettings):
     threads_mock_mode: bool = True
     threads_gpu_demo_enabled: bool = False
     threads_max_posts: int = Field(default=30, ge=1, le=30)
+    # Threads の本文を読むモデル。既定は Bluesky と同じ vLLM（VLM_*・MODEL_ALLOWED_HOST_SUFFIXES）。
+    # ollama にすると OLLAMA_BASE_URL・OLLAMA_MODEL で読む。写真は読まない
+    threads_text_backend: Literal["vlm", "ollama"] = "vlm"
     x_client_id: str = ""
     x_client_secret: SecretStr = SecretStr("")
     x_callback_url: str = "http://localhost:3000/api/x/callback"

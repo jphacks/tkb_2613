@@ -36,6 +36,7 @@ describe("legal pages", () => {
     expect(text).toContain("ユーザーID・ユーザーネーム・認可トークン");
     expect(text).toContain("最大30件");
     expect(text).toContain("Threads の画像や動画のデータは取得しません");
+    expect(text).toContain("投稿本文をBlueskyと同じチームが管理するモデルサーバー");
     expect(text).toContain("Ollama");
     expect(text).toContain("ブラウザ内の固定文字列パターン");
     expect(text).toContain("外部サービスやモデルへ送りません");

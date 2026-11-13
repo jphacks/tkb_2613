@@ -14,8 +14,8 @@
 | ユーザー情報 | `GET https://graph.threads.com/v1.0/me?fields=id,username` で、ログイン本人のThreadsユーザーIDとユーザーネームを取得する。コード交換時に返る `user_id` と `/me` のIDも照合する。 |
 | 投稿情報 | `GET /me/threads?fields=id,text,timestamp,media_type` で、本文のある本人投稿を新しい方から最大30件取得する。ページングにはMetaが返すcursorだけを使う。画像・動画URLやバイナリは取得せず、画面へ保持するのは投稿ID・本文・投稿時刻。 |
 | 固定ルールのセルフチェック | `GET /api/threads/posts` で取得済みの本文をブラウザ内で確認し、URL・メールアドレス・電話番号・郵便番号・`@`ユーザーネームらしき文字列との一致だけを示す。追加の外部送信やモデル呼出しはなく、所有者・実在性・意味を推定しない。 |
-| 任意のAIへの送信 | 利用者が一覧取得とは別に「AI診断を試す」を押し、かつモデルが稼働している場合だけ、実Threads投稿の本文を `OLLAMA_BASE_URL` のOllamaへ送る。投稿ID・ThreadsユーザーID・画像は送らない。現在の本番ではOllamaへ接続できず、この任意機能は利用できない。 |
-| AIの実行場所 | コード上の既定値はAPIサーバーから見た `http://localhost:11434`。本番はAWS上のチーム管理環境で動かす設計。2026-11-12の読み取り専用確認では、本番APIコンテナからOllamaへ到達できず、GPUインスタンスも停止中だったため、実ThreadsのAI診断は現状完走できない。 |
+| 任意のAIへの送信 | 利用者が一覧取得とは別に「AI診断を試す」を押し、かつモデルが稼働している場合だけ、実Threads投稿の本文を、Blueskyと同じチーム管理のvLLM（`VLM_BASE_URL`。送り先は `MODEL_ALLOWED_HOST_SUFFIXES` で限定）へ送る。`THREADS_TEXT_BACKEND=ollama` のときだけ `OLLAMA_BASE_URL` のOllamaへ送る。投稿ID・ThreadsユーザーID・画像は送らない。診断の前にモデルの応答を確かめ、応答がなければ送らずに503を返す。 |
+| AIの実行場所 | 2026-11-13から既定はBlueskyと同じAWSのプライベートGPU上のvLLM（`THREADS_TEXT_BACKEND=vlm`）。以下は変更前（Ollama既定）の記録：2026-11-12の読み取り専用確認では、本番APIコンテナからOllamaへ到達できず、GPUインスタンスも停止中だったため、実ThreadsのAI診断は現状完走できない。 |
 | セッション保存 | アクセストークン、ユーザーID、ユーザーネーム、投稿、手がかり、診断結果はFastAPIプロセスのメモリのみ。Threads経路から共有結果SQLiteへ書く処理はない。CookieはランダムなセッションIDだけ。 |
 | 保持期間 | セッション作成から最大30分（`SESSION_TTL_MINUTES` が長くてもThreadsは1800秒上限）。OAuth開始情報は最大5分。アクセスによる延長はない。プロセス再起動でも消える。 |
 | 終了時の削除 | `DELETE /api/threads/session` はCookieのセッションをメモリから削除する。期限時も削除する。Metaの認証解除・データ削除通知は、署名を検証して同じowner IDの全セッションを削除する。ブラウザを閉じるだけでは即時削除にならず、期限まで残り得る。 |
@@ -25,7 +25,7 @@
 | 表示言語 | Threads画面は日本語（既定）と英語。画面上部の切り替え、または `/threads?lang=en` で選ぶ。選択はブラウザの `localStorage` に保存し、Threads認可画面から戻っても保つ（トークン・投稿は保存しない）。投稿本文・ユーザー名・投稿IDは取得したまま表示し、翻訳しない。APIと診断の処理は言語に依らず同じ。公開ページ（`/privacy` など）とフッターは日本語のみ。 |
 | 既存公開文書 | `/privacy`、`/terms`、`/contact` は存在したがBluesky中心だった。今回Threadsの処理を反映し、`/data-deletion` と `/support` を追加した。 |
 
-ThreadsのAPI処理は `api/src/tkb_api/routes/threads.py` と `api/src/tkb_api/threads_poc.py`、モデル処理は `detect/src/tkb_detect/ollama_client.py`、セッション期限は `api/src/tkb_api/config.py` を根拠に確認した。
+ThreadsのAPI処理は `api/src/tkb_api/routes/threads.py` と `api/src/tkb_api/threads_poc.py`、モデル処理は `detect/src/tkb_detect/vlm_client.py`（`THREADS_TEXT_BACKEND=ollama` のときは `ollama_client.py`）、セッション期限は `api/src/tkb_api/config.py` を根拠に確認した。
 
 ## `threads_basic` が必要な理由（Dashboard貼り付け用・英語）
 
@@ -146,7 +146,7 @@ Support and privacy contact: `komekami7110@gmail.com`
 - [ ] Meta側のクローラまたは米国外を含む別ネットワークから4公開URLに到達できることを確認する。WAFのkill switchと `oauth-test-team-only` が無効であることもAWS Dashboardで読む。
 - [ ] WAFのrequest samplingが本番でも無効、CloudFront標準access logが無効、FastAPIが `--no-access-log` であることを実環境で再確認する。
 - [ ] 実テスターでOAuth→本人投稿取得→詳細表示→固定ルールセルフチェック→ログアウトを通し、コンテナログにcode、token、Cookie、投稿本文がないことを確認する。この通し確認が審査提出のブロッカー。
-- [ ] 任意のAI診断を再提供するときは、本番APIから到達できるチーム管理Ollamaを起動し、`OLLAMA_BASE_URL` と `OLLAMA_MODEL`、アクセス制御、本文・応答ログの扱いを確認する。これは今回の `threads_basic` 審査提出のブロッカーではない。
+- [ ] 任意のAI診断を再提供するときは、GPUのvLLMを起動し、本番APIから `VLM_BASE_URL` に届くこと、`THREADS_TEXT_BACKEND=vlm`、本文・応答ログの扱いを確認する（Ollamaを選ぶ場合は `OLLAMA_BASE_URL` と `OLLAMA_MODEL`、アクセス制御も）。これは今回の `threads_basic` 審査提出のブロッカーではない。
 - [ ] Meta DashboardのApp Icon、Category、App Domains、Privacy Policy、Terms、Data Deletion、Support、callback各URL、連絡先メール `komekami7110@gmail.com` を保存する。
 - [ ] 審査員用Threadsアカウントと操作可能な認証情報を、Metaの安全な入力欄へ設定する。
 - [ ] 上記チェックリストで英語字幕付きの本番動画を撮影し、`threads_basic` の申請へ添付する。
