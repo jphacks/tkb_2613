@@ -11,7 +11,8 @@ export type RefusalCode =
   | "closed"
   | "model_unavailable"
   | "bluesky_busy"
-  | "share_disabled";
+  | "share_disabled"
+  | "diagnosis_required";
 
 export interface Refusal {
   readonly code: RefusalCode;
@@ -29,6 +30,7 @@ const CODES: readonly string[] = [
   "model_unavailable",
   "bluesky_busy",
   "share_disabled",
+  "diagnosis_required",
 ] satisfies readonly RefusalCode[];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -89,5 +91,7 @@ export function refusalMessage(refusal: Refusal): string {
       return e.blueskyBusy;
     case "share_disabled":
       return e.shareDisabled;
+    case "diagnosis_required":
+      return e.diagnoseFirst;
   }
 }

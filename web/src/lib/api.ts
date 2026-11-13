@@ -62,10 +62,10 @@ export async function checkDraft(
   }
   if (res.status === 401) throw new ApiError("unauthorized", "ログインし直してください", 401);
   if (!res.ok) {
-    const message = res.status === 503
-      ? "モックモードでは下書き確認を使えません。実アカウントの診断環境でお試しください。"
-      : `下書きを確認できませんでした（${res.status}）`;
-    throw new ApiError("server", message, res.status);
+    // 診断前（diagnosis_required）・混雑・公開時間外・モデルの準備中は、理由ごとの文言にする
+    const refusal = await readRefusal(res);
+    if (refusal) throw new ApiError("server", refusalMessage(refusal), res.status, refusal.code);
+    throw new ApiError("server", `下書きを確認できませんでした（${res.status}）`, res.status);
   }
   const data: unknown = await res.json().catch(() => undefined);
   if (!isDraftCheckResponse(data)) {

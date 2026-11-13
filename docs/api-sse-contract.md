@@ -43,7 +43,7 @@ OAuth 時の投稿取得は、セッション DID に限定して公開 AppView 
 | `POST /api/demo/simulate` | なし。JSON `{"delete":["at://…",…]}`（最大100件） | 200 Simulation | 体験デモで投稿を仮に除いた結果。`after` の `clue_indices` は `GET /api/demo/diagnosis` の `clues` での番号。デモにない投稿ID・余計なキーは422（IDは応答に入れない）。削除のAPIはない。 |
 | `POST /api/delete` | `tkb_session` Cookie。JSON `{"delete":["at://…",…]}` | 200 Deletion（下記） | 本人の投稿だけを Bluesky から1件ずつ消す。Cookieなし・無効は401、診断前は409、最後の診断にない投稿ID・もう消した投稿IDは422。消せた投稿IDはセッションの診断に記録し、2回目以降の `broken`・`after` はそれまでに消した投稿を除いた状態から計算する。途中で Bluesky に回数制限（429）で断られたら残りは試さず `failed` に入れ、`bluesky_busy: true` を返す。 |
 | `POST /api/simulate` | `tkb_session` Cookie。JSON `{"delete":["at://…",…]}`（最大100件） | 200 Simulation（下記） | 実際には消さない（Bluesky の削除APIを呼ばない）。モデルも呼ばない。Cookieなし・無効は401、そのセッションで診断が終わっていなければ409、最後の診断にない投稿ID・もう消した投稿ID・余計なキーは422（送られたIDは応答に入れない）。もう消した投稿を除いた状態から計算する（`POST /api/delete` と同じ）。 |
-| `POST /api/draft-check` | Cookie認証。JSON `{"text":"…","photo_base64":string|null,"photo_content_type":string|null}` | 200 `{"posts_checked":number,"overlaps":[…],"mock_mode":boolean,"notices":[…]}` | 認証必須。セッション本人の投稿だけを取得し、下書きと既存投稿の観測手がかりが一致する箇所を返す。診断の推理・投稿時刻由来推定は行わない。本文は最大10,000文字、写真は最大20MiB。 |
+| `POST /api/draft-check` | Cookie認証。JSON `{"text":"…","photo_base64":string|null,"photo_content_type":string|null}` | 200 `{"posts_checked":number,"overlaps":[…],"mock_mode":boolean,"notices":[…]}` | 認証必須。過去の投稿の手がかりは、そのセッションで終わった診断の `clues` を使う（本人の投稿だけ。`POST /api/delete` で消した投稿は除く）。モデルに読ませるのは下書きの1件だけで、下書きと既存投稿の観測手がかりが一致する箇所を返す。診断の推理・投稿時刻由来推定は行わない。本文は最大10,000文字、写真は最大20MiB（リクエスト本文は写真20MiBのbase64に余裕を足した大きさまで）。診断前は409 `diagnosis_required`。`MOCK_MODE=0` では公開時間（`closed`）、同時実行の枠（同じセッション・アカウントは1件まで `already_running`、全体は診断と共有の `busy`）、モデルの応答（`model_unavailable`）を診断と同じく確かめる。1日の診断回数には数えず、回数の上限に達していても使える。画面は診断の結果が出たあとにだけ出す。 |
 
 バリデーションエラーは422で `{"detail":[{"loc":[…],"msg":"…","type":"…"}]}` を返す。送信値そのものは詳細に含めない。その他のエラー形式は FastAPI のHTTPエラー応答に従う。
 
@@ -53,13 +53,14 @@ OAuth 時の投稿取得は、セッション DID に限定して公開 AppView 
 
 | code | 状態 | 返すところ | ほかの項目 | 意味 |
 | --- | --- | --- | --- | --- |
-| `closed` | 503 | diagnose | `next_open`：次の公開の開始時刻（時差つき ISO 8601）。最後の公開の後は null | 公開時間外（`PUBLIC_WINDOWS`。空なら制限しない） |
-| `already_running` | 409 | diagnose | — | 同じセッションか同じアカウント（DID）で診断中。別々にログインしても1アカウント1つまで |
+| `closed` | 503 | diagnose、draft-check（`MOCK_MODE=0`） | `next_open`：次の公開の開始時刻（時差つき ISO 8601）。最後の公開の後は null | 公開時間外（`PUBLIC_WINDOWS`。空なら制限しない） |
+| `already_running` | 409 | diagnose、draft-check（`MOCK_MODE=0`） | — | 同じセッションか同じアカウント（DID）で診断中。別々にログインしても1アカウント1つまで |
 | `daily_limit` | 429 | diagnose | `limit`、`resets_at`（日本時間の次の 0:00）。`Retry-After` ヘッダー | 1アカウント（DID）1日（日本時間）の回数の上限（`DIAGNOSE_DAILY_LIMIT`） |
-| `busy` | 503 | diagnose | `retry_after`。`Retry-After` ヘッダー | 同時に診断できる数の上限（`MAX_CONCURRENT_DIAGNOSES`）。待たずに断る |
-| `model_unavailable` | 503 | diagnose（`MOCK_MODE=0`） | — | 診断の前に VLM の `/models`、または `TEXT_BACKEND=ollama` で Ollama の `/api/tags` が応答せず指定モデルがない。OCR を使う設定で写真も読むときは、`GET {OCR_BASE_URL}/health` が 5xx か接続できない場合も（GPU の停止中・起動中）。回数は数えない |
+| `busy` | 503 | diagnose、draft-check（`MOCK_MODE=0`） | `retry_after`。`Retry-After` ヘッダー | 同時に診断できる数の上限（`MAX_CONCURRENT_DIAGNOSES`）。待たずに断る |
+| `model_unavailable` | 503 | diagnose・draft-check（`MOCK_MODE=0`） | — | 診断の前に VLM の `/models`、または `TEXT_BACKEND=ollama` で Ollama の `/api/tags` が応答せず指定モデルがない。OCR を使う設定で写真も読むときは、`GET {OCR_BASE_URL}/health` が 5xx か接続できない場合も（GPU の停止中・起動中）。回数は数えない |
 | `bluesky_busy` | 503 | session、diagnose | — | Bluesky が回数制限（429）で断った |
 | `share_disabled` | 404 | result-link（作成・無効化）、shared-result | — | 閲覧リンクの機能がオフ（`SHARE_ENABLED=0`）。保存先も作らない。作成と無効化は、ログインしていなければ先に401 |
+| `diagnosis_required` | 409 | draft-check | — | そのセッションで終わった診断がない（下書き確認は診断で読んだ手がかりと照らすため） |
 
 - diagnose の確認の順：ログイン（401）→ 公開時間 → 同じセッション・同じアカウント → 1日の回数 → 同時実行の枠 → モデルの応答 → Bluesky からの投稿の取得。どれかで断ったときは、ストリームを始めない
 - 1日の回数は、ストリームを始めるときに数える。公開時間外・混雑・モデルや Bluesky の不調で始められなかった分は数えない

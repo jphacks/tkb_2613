@@ -339,10 +339,16 @@ def _ensure_open(settings: Settings, now: datetime) -> None:
 
 
 def _acquire(
-    limiter: DiagnoseLimiter, settings: Settings, session_id: str, did: str, now: datetime
+    limiter: DiagnoseLimiter,
+    settings: Settings,
+    session_id: str,
+    did: str,
+    now: datetime,
+    *,
+    check_daily: bool = True,
 ) -> Lease:
     try:
-        return limiter.acquire(session_id, did)
+        return limiter.acquire(session_id, did, check_daily=check_daily)
     except AlreadyRunningError:
         raise refusal(
             status.HTTP_409_CONFLICT, "already_running", "このアカウントの別の診断が進んでいます"
