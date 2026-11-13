@@ -5,6 +5,7 @@ import Link from "next/link";
 
 import { ConclusionBoard } from "@/components/conclusion-board/ConclusionBoard";
 import { PostCard } from "@/components/post-list/PostCard";
+import { Reveal } from "@/components/reveal/Reveal";
 import { THREADS_TEXT, ThreadsError, type ThreadsErrorKey, type ThreadsLang } from "@/lib/threads-i18n";
 import { checkThreadsPublicText } from "@/lib/threads-public-check";
 import { useThreadsLang } from "@/lib/useThreadsLang";
@@ -337,6 +338,8 @@ export default function ThreadsPage() {
       {error && <p role="alert" className="mt-6 border-l-4 border-seeker p-3">{t.errors[error]}</p>}
 
       {original && current && <div className="mt-12 space-y-10">
+        {/* 全投稿の診断が出た瞬間だけ、Bluesky と同じ演出で「ここまでわかった」を叩きつける（文言は日本語のまま） */}
+        {view === original && <Reveal posts={original.posts} clues={original.clues} conclusions={original.conclusions} />}
         <div aria-live="polite" className="border-l-4 border-seeker bg-paper-deep p-4">
           <p className="font-bold">{view === original ? t.resultFull : t.resultRe}</p>
           <p className="text-sm text-ink/70">{t.resultCount(current.posts.length, current.clues.length, current.conclusions.length)}

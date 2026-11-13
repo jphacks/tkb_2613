@@ -2,6 +2,7 @@
 
 import { messages } from "@/lib/messages";
 import { postImageSrc } from "@/lib/post-image";
+import { paced } from "@/lib/motion";
 import { cropStyle, type FacePhoto } from "@/lib/reveal";
 import { useLoadedSize } from "@/lib/useLoadedSize";
 import type { Conclusion } from "@/types/diagnose";
@@ -20,7 +21,7 @@ function Roller({ value }: { value: number }) {
         <span key={i} className="roller-digit">
           <span
             className="roller-strip"
-            style={{ transform: `translateY(${-(10 + Number(d)) * 5}%)`, animationDelay: `${0.4 + i * 0.25}s` }}
+            style={{ transform: `translateY(${-(10 + Number(d)) * 5}%)`, animationDelay: paced(0.4 + i * 0.25) }}
           >
             {Array.from({ length: 20 }, (_, n) => (
               <span key={n}>{n % 10}</span>
@@ -125,7 +126,7 @@ export function IdentityCard({ name, nameProvenance, nameAmbiguous, face, conclu
           <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1.5 border-y border-ink/15 py-3">
             {/* display: contents の要素は動かないので、動きは dt と dd に付ける */}
             {highlights.map((h, i) => {
-              const delay = { animationDelay: `${0.4 + i * 0.12}s` };
+              const delay = { animationDelay: paced(0.4 + i * 0.12) };
               return (
                 <div key={i} className="contents">
                   <dt className="reveal-stamp text-xs leading-7 tracking-widest text-ink/60" style={delay}>
@@ -143,7 +144,7 @@ export function IdentityCard({ name, nameProvenance, nameAmbiguous, face, conclu
         {conclusions.length > 0 && (
           <ul aria-label={messages.reveal.conclusionsLabel} className="space-y-2">
             {conclusions.map((c, i) => (
-              <li key={i} className="reveal-stamp" style={{ animationDelay: `${0.5 + i * 0.2}s` }}>
+              <li key={i} className="reveal-stamp" style={{ animationDelay: paced(0.5 + i * 0.2) }}>
                 <span className="mr-2 text-xs tracking-widest text-ink/60">
                   {messages.board.attributeLabels[c.attribute] ?? c.attribute}
                 </span>

@@ -5,6 +5,8 @@ import type { ReactNode } from "react";
 import { messages } from "@/lib/messages";
 import { postImageSrc } from "@/lib/post-image";
 import { pickFace, pickSpotlight, validNameConclusions, type RevealItem } from "@/lib/reveal";
+import { paced } from "@/lib/motion";
+import { identityName, pickFace, pickSpotlight, type RevealItem } from "@/lib/reveal";
 import { toPercentBox } from "@/lib/region";
 import { useLoadedSize } from "@/lib/useLoadedSize";
 import type { Clue } from "@/types/clue";
@@ -155,7 +157,7 @@ export function Reveal({ posts, clues, conclusions, profileClaims = [], excluded
               <li
                 key={item.clueIndex}
                 className="reveal-slam evidence-pin relative bg-paper-deep p-4 shadow-[6px_6px_0_oklch(0%_0_0/0.5)]"
-                style={{ animationDelay: `${FIRST_DELAY + i * STEP}s`, rotate: tilt(i) }}
+                style={{ animationDelay: paced(FIRST_DELAY + i * STEP), rotate: tilt(i) }}
               >
                 {item.used && (
                   <span className="absolute -top-3 right-3 z-10 rotate-6 bg-seeker px-2 py-0.5 text-xs font-bold text-paper">
