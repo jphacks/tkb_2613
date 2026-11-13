@@ -33,8 +33,8 @@ OAuth 時の投稿取得は、セッション DID に限定して公開 AppView 
 | `DELETE /api/session` | `tkb_session` Cookie | 204、Cookie削除 | セッションがなくても204。 |
 | `POST /api/detect` | 画像バイナリをリクエスト本文に直接送信。許可Content-Type: JPEG/PNG/WebP/HEIC/HEIF | モック時200 `{"clues":[…]}` | 空本文400、未対応形式415、20MiB超413。`MOCK_MODE=0` は現状501「検出はまだ実装されていません」。このルートはログイン必須ではない。 |
 | `POST /api/diagnose` | `tkb_session` Cookie。任意JSON `{"public_web_lookup_consent":boolean}`（既定false） | `text/event-stream` | Cookieなし・無効は401。始められないときはストリームを始めずに理由のコードつきで断る（下の「理由のコードつきのエラー」）。成功時は以下のSSE順序。投稿/手がかり/診断結果はディスクやログに保存しない。投稿・手がかり・限定プロフィール推定・検索候補はログアウトまたは期限切れまでセッションのメモリだけに置き、次の診断開始時に置き換える。 |
-| `GET /api/diagnosis` | `tkb_session` Cookie | 200 `{"posts":[Post],"clues":[Clue],"conclusions":[Conclusion],"plan":Plan,"profile_claims":[ProfileCandidateSet;24],"profile_relations":[ProfileRelation],"profile_claim_suggestions":[post_id],"external_profile_results":[ExternalProfileResult],"external_lookup_status":status,…}` | 同じセッションで完了済みの直近結果をモデル再解析なしで画面に復元する。Cookieなし・無効は401、結果がなければ404。結果はセッションとともに消える。 |
-| `GET /api/features` | なし | 200 `{"share_enabled":true,"auth_mode":"app_password"}` | 認証不要。`auth_mode` は `oauth` または `app_password`。`share_enabled` は設定 `SHARE_ENABLED`（既定1）。 |
+| `GET /api/diagnosis` | `tkb_session` Cookie | 200 `{"posts":[Post],"clues":[Clue],"deleted":[post_id],"conclusions":[Conclusion],"plan":Plan,"profile_claims":[ProfileCandidateSet;24],"profile_relations":[ProfileRelation],"profile_claim_suggestions":[post_id],"web_facts":[WebFact],"external_profile_results":[ExternalProfileResult],…}` | 同じセッションで完了済みの直近結果をモデル再解析なしで画面に復元する。Cookieなし・無効は401、結果がなければ404。結果はセッションとともに消える。 |
+| `GET /api/features` | なし | 200 `{"share_enabled":true,"auth_mode":"app_password","public_web_lookup_available":false}` | 認証不要。`auth_mode` は `oauth` または `app_password`。`share_enabled` は設定 `SHARE_ENABLED`（既定1）、`public_web_lookup_available` は公開Web検索に必要な設定が揃っているかを示す。 |
 | `POST /api/result-link` | `tkb_session` Cookie | 200 `{"token":"…"}` | 本人が画面で選んだとき、完了済みの結果を2時間の閲覧用スナップショットとして保存する。結果がなければ404。ランダムなトークンを URL のフラグメントに置き、アクセスログに記録しない。`SHARE_ENABLED=0` なら404 `share_disabled`（何も保存しない）。 |
 | `DELETE /api/result-link` | `tkb_session` Cookie、JSON `{"token":"…"}` | 204 | 作成者の DID と一致するリンクだけを無効化する。別人のリンクは消せない。 |
 | `POST /api/shared-result` | JSON `{"token":"…"}` | 200 `{"posts":[Post],"clues":[Clue],"conclusions":[Conclusion],"plan":Plan}` | トークンを知る人はログインなしで閲覧できる。無効・期限切れは404。閲覧側の画面に削除操作はない。結果は設定された `SHARE_DB_PATH` の SQLite に期限付きで保存し、APIプロセスの再起動後も読める。`SHARE_ENABLED=0` なら、オフにする前に作ったリンクも404 `share_disabled`。 |
@@ -43,6 +43,8 @@ OAuth 時の投稿取得は、セッション DID に限定して公開 AppView 
 | `POST /api/draft-check` | Cookie認証。JSON `{"text":"…","photo_base64":string|null,"photo_content_type":string|null}` | 200 `{"posts_checked":number,"overlaps":[…],"mock_mode":boolean,"notices":[…]}` | 認証必須。セッション本人の投稿だけを取得し、下書きと既存投稿の観測手がかりが一致する箇所を返す。診断の推理・投稿時刻由来推定は行わない。本文は最大10,000文字、写真は最大20MiB。 |
 
 バリデーションエラーは422で `{"detail":[{"loc":[…],"msg":"…","type":"…"}]}` を返す。送信値そのものは詳細に含めない。その他のエラー形式は FastAPI のHTTPエラー応答に従う。
+
+`GET /api/diagnosis` は、診断時の `posts` と `clues` を保持したまま、実際に消せた投稿IDを `deleted` に返す。投稿・手がかりの元配列順と `clue_indices` は変えない。`conclusions`、`plan`、24件のプロフィール候補セット、関係、候補投稿IDは `deleted` を反映して返す。プロフィール候補セットは保存済みの全 `candidate_pool` と残存する投稿・手がかりから、推論器や外部APIを再実行せず再評価する。診断開始時刻 `diagnosis_at` はセッション内の診断状態に保持し、現在地など時間で鮮度が変わる候補はその時刻で評価する。削除済みIDは候補提案から除く。フロントエンドは削除済み投稿を一覧・画像表示・削除候補・表示中のプラン要約から除外し、仮除外中も候補と根拠から除く。診断結果はセッションTTL（既定30分）、ログアウト、次の診断開始で破棄される。
 
 ### 理由のコードつきのエラー
 
@@ -70,6 +72,7 @@ Pythonの正は `common/src/tkb_common/schemas.py`、画面側の対応型は `w
 
 - **Post**: `post_id`（AT URI）、`text`、時差付き `created_at`、`images`。画像は `index, url, alt, width, height` と任意の `mock_asset`。通常の `url` は `https://cdn.bsky.app/` のみ、画像は最大4枚。`mock_asset` はローカルfixture画像のファイル名で、モック画面表示だけに使う。実モードの画像取得は従来どおりCDN URLだけを使う。
 - **Clue**: `post_id, image_index, type, value, region, confidence, source`。`region` は元画像ピクセルの `[x1,y1,x2,y2]` またはnull。本文由来は通常 `image_index/region=null`、`source=text`。画像alt由来は `source=alt` と画像の `image_index` を持ち、矩形はnull。プロフィール文由来の自己申告は `source=profile_text`。確信度は0〜1。許容type/sourceの列挙と写真/本文の整合条件は共通スキーマを参照。
+- **ProfileEvidence.source**: `clue`, `post_text`, `profile_text`, `image_alt`, `public_web`, `open_data`。`public_web` 根拠は投稿IDを持たず `web_fact_id` を参照する。`open_data` 根拠も投稿IDとclue indexを持たず、出典表示に使う非空の `excerpt` を持つ。
 - `TEXT_BACKEND=ollama` の本文手がかりには任意の `quote` が付く。これはモデルの出力を投稿本文の連続部分文字列として検証した原文引用で、`value` もその引用内の連続部分文字列に限定する。従来データは `quote=null` または省略可。既存の `post_id` とともに原文根拠を保持する。
 - `TEXT_BACKEND` の既定は `vlm`。`ollama` では本文だけを Ollama に送る。`VLM_BASE_URL` が空なら画像を取得・抽出しない。設定されている場合は画像の従来VLM経路を使う。画像経路が失敗しても本文の成功結果を残す。
 - `name_text` は人名として読めた文字に限る。誕生日の飾り文字や年齢の数字は抽出結果から除き、R8 の名前推定にも使わない。
@@ -110,10 +113,9 @@ SSEブロックは `event: <name>\ndata: <JSON>\n\n`。JSONはUTF-8で送られ�
 - 候補は根拠経路がある値だけを含む。メイン結果は候補のある項目だけ表示し、24属性すべてのセットはAPIと内部型に保持する。値は候補カード1つだけ表示し、同じ値に直接公開と組合せ推定の両方の経路があれば、カード内に両方の出所ラベルを付ける。画面の直接公開ラベルは `自分で直接公開`、組合せ推定は `投稿の組み合わせから推定` とし、組合せ経路に公開Webの根拠がある場合は `投稿と公開Webから推定` とする。根拠経路が `unclassified` の場合は推定と表示しない。候補を正解と断定せず、値はログイン中の本人にそのまま表示する。
 - `realtime_location` 候補には、根拠投稿の時刻を timezone-aware ISO 8601 の `observed_at` として必須で返す。診断時に投稿時刻が未来、欠落、または15分を超えて古い場合は候補にせず `unknown` にする。画面表示後に15分を超えた場合も、現在地を示す文言を外し、投稿時点の情報として表示する。
 - 仮除外は `candidate_pool` 全体の根拠経路を除外投稿に合わせて再評価する。画面は再評価後の上位3件だけを表示し、全根拠候補数・表示候補数・候補順位の変化を示す。これは新しい投稿や根拠を使った推理の再実行ではない。
-- `profile_claim_suggestions` は候補を崩すことを優先し、候補プール内の候補値の根拠経路がすべて崩れる投稿の組合せから最大3件を選ぶ。これは main の Conclusion 向け `plan` / `/api/simulate` と別の根拠モデルで、実削除はしない。
+- `profile_claim_suggestions` は診断済み投稿の組合せを最大3件まで調べ、confidence 0.5以上の完全経路がすべて失われる候補値を再評価する。候補が一つも残らなくなる属性数、失われる候補値数、投稿数の少なさ、診断順の順に選ぶ。値の順位変更だけでは属性が崩れたと数えない。これは `plan` / `/api/simulate` の `Conclusion` と直接画像手がかり向けプランとは別の候補根拠モデルで、提案自体は実削除しない。
 - 公開Web検索は診断ごとの明示同意がある場合だけ行う。送信値は本人の公開Blueskyハンドルと固定 `site:` 検索演算子のみ。投稿文・プロフィール文・Clue・DID・投稿URI・画像・氏名は送らない。Brave検索語は最大90日保持され、実検索は `BRAVE_SEARCH_API_KEY` 設定時のみ可能。
 - `external_profile_results` は検索候補と、本人プロフィール/投稿に記載されたURLと照合した候補を返す。これは公開URL上のリンク関係を示すだけで、実世界の本人確認や記事の執筆者確認を意味しない。検索結果本文の取得はしない。`MOCK_MODE=1` は固定fixtureのみで外部通信しない。
-- `GET /api/diagnosis` による復元用データは既存の投稿・手がかり・planに加え、profile claims・候補・同意後の外部検索結果と状態・プロフィール文・自己申告手がかりを含む。いずれもプロセス内セッションメモリのみで保持し、Cookieの期限・ログアウト・次の診断で消える。共有リンクの形式は別途定義されているため、共有応答にこの追加データは含めない。
 
 ## 担当境界とデータ受け渡し
 
@@ -156,3 +158,7 @@ Bluesky の `/api/session`・`/api/diagnose`・`/api/simulate` とは独立し�
 | `POST /api/x/rediagnose` | 同上 | 除外後の `posts, clues, conclusions, plan, mock` を再計算。X API・モデルは再呼出ししない。 |
 
 X の状態変更 API は同一オリジンの `Origin` ヘッダーを要求する。投稿IDは `x:<numeric id>`、画像は空配列。`clues` と `conclusions` の根拠番号は既存の形を再利用する。429は503と `Retry-After` を返す。詳細な設定・規約・費用は [x-poc.md](x-poc.md)。
+
+## Threads 専用の読み取り診断
+
+`/api/threads/diagnose` と `/api/threads/diagnosis` は、共通パイプラインの24属性候補セットを Threads 画面向けの従来の `ProfileItem[]` に変換して返す。表示対象の候補だけを平坦化し、候補のない属性は省略する。`/api/threads/rediagnose` は仮除外後の根拠経路を再評価し、返却する `clues` に合わせて根拠番号を振り直す。Threads の結果は専用セッションのメモリに置き、投稿の実削除は行わない。

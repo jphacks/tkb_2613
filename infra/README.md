@@ -50,9 +50,14 @@ make up
 | `VLM_BASE_URL`・`OCR_BASE_URL` | 手元か RunPod | GPU のプライベート IP | GPU はインターネットから届かない |
 | `MODEL_ALLOWED_HOST_SUFFIXES` | 空（localhost だけ） | GPU のプライベート IP | 送り先の許可リスト。IP は完全一致 |
 | `VLM_API_KEY` | `.env` | Secrets Manager から起動時に渡す | キーをファイルに残さない |
+| `X_CLIENT_SECRET` | `.env`（手元だけ） | Secrets Manager の `tkb_2613/x-client-secret` からAPIだけへ渡す | Git・`.env`・webコンテナにOAuth Secretを残さない |
 | `SHARE_ENABLED` | 1 | 0 | 公開中は閲覧リンクの機能をオフにし、診断結果を保存しない。画面にボタンを出さず、API は 404、保存先のファイルも作らない |
 
 - api の 8001 番は `127.0.0.1` のままにする。外から届くのは web だけで、api は compose のネットワークの中で web から呼ばれる
 - **閲覧リンクがオフになっているかを、起動のたびに確かめる**。`SHARE_ENABLED` の既定は 1（オン）なので、`.env` に書き忘れるとオンになる。api のログに「閲覧リンク：オフ（SHARE_ENABLED）」が出ていること、`curl -s https://<配信ID>.cloudfront.net/api/features` が `{"share_enabled":false}` を返すことを見る
 - 前に閲覧リンクを使ったホストでオフにするときは、保存先のボリュームに古い結果が残っているので消す（`docker compose --env-file .env -f infra/docker-compose.yml down`、`docker volume rm tkb_2613_shared-results`）。新しく作った EC2 なら残っていない
 - `.env` の値に `$` が入る場合は `'...'` で囲む（compose が変数として展開しないように）
+
+### 公開後の確認（ログインなし）
+
+`python3 infra/prod_smoke.py https://<配信ID>.cloudfront.net` で、ログインせずに公開オリジンへ問い合わせて確かめる（Python の標準ライブラリだけで動き、uv は要らない。URL は引数で渡し、スクリプトには書かない）。確かめるのは、トップ `/` が 200 の HTML、画面経由の `/api/features` が 200 で `share_enabled` が false（api の `/health` は `/api` の外なので画面経由では届かず、代わりにこれを使う）、`/api/demo/diagnosis` の conclusions に「最寄り駅：根津駅」（attribute `station`）と「ゴミの収集地区：文京区 弥生1・2丁目」（attribute `home_district`）があること（公開データの表が EC2 に入っていないと出ない）、`/__internal/oauth/*`・`/%5F%5Finternal/...`・`/api/detect` が GET・POST とも WAF で遮断されること（403 で本文が空でも JSON でもない。アプリ自身の 403・404・405 や JSON の応答は失敗にする）。リダイレクトは追わず失敗にする（`http://` を渡すと https への 301 で失敗する）。1回の通信のタイムアウトは `--timeout`（既定10秒）。各チェックを `OK`/`NG` で1行ずつ出し、1つでも NG なら終了コード1。手元（`make dev`）には WAF がないので遮断のチェックは NG になる。手元で正常系だけ見るときは `--allow-share-enabled` を付ける。

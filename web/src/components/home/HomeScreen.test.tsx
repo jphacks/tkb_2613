@@ -47,6 +47,32 @@ afterEach(() => {
 });
 
 describe("HomeScreen", () => {
+  it("offers the login-free demo to visitors who are not logged in", async () => {
+    vi.mocked(getSession).mockResolvedValue(null);
+    render(
+      <SessionProvider>
+        <HomeScreen />
+      </SessionProvider>,
+    );
+
+    expect(await screen.findByRole("link", { name: messages.demo.entry })).toHaveAttribute("href", "/demo");
+  });
+
+  it("shows the draft check only after the diagnosis result is revealed", async () => {
+    vi.mocked(getSession).mockResolvedValue({ handle: "alice.bsky.social", did: "did:plc:abc" });
+    render(
+      <SessionProvider>
+        <HomeScreen />
+      </SessionProvider>,
+    );
+    expect(await screen.findByText("@alice.bsky.social")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "投稿前に手がかりを確認" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "reveal" }));
+
+    expect(screen.getByRole("heading", { name: "投稿前に手がかりを確認" })).toBeInTheDocument();
+  });
+
   it("hides the title and the login bar once the result is revealed, and brings them back after logout", async () => {
     vi.mocked(getSession).mockResolvedValue({ handle: "alice.bsky.social", did: "did:plc:abc" });
     vi.mocked(deleteSession).mockResolvedValue(undefined);

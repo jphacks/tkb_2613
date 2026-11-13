@@ -105,8 +105,8 @@ Python は `common/` の Pydantic モデル（`tkb_common.schemas`）、TypeScri
 ## 推定と最小削除の考え方（engine）
 
 - プロフィール推定：手がかりの一覧（文字だけ）を言語モデルに渡し、項目ごとの候補と根拠（手がかりの番号）を出させる。項目の確からしさは、根拠の手がかりの confidence を 1 − ∏(1 − c_i) で合成する。`required` の根拠が1つでも消えたら、その項目は不明にする
-- 駅名は `data-prep` の stations 表で実在を確認する。生活時間帯は今回の16項目に含めない
-- 現在の実装は、言語モデルを使わない推理ルール R1〜R12（`engine/src/tkb_engine/rules.py`）。指定ゴミ袋・収集地区・大学の時間割は手で作る知識表 `data-prep/manual/knowledge.json`、学校の名前と所在地は `make data` で作る schools 表（文部科学省の学校コード）を引く。知識表は行ごとに出典を書き、未確認のところはそう書く。写真のバーコードは言語モデルではなく `detect/src/tkb_detect/barcode.py`（zxing-cpp と日本郵便のカスタマバーコード）で読む
+- 駅名は `data-prep` の stations 表で実在を確認する。最寄り駅（R1）の候補が複数残ったときは、国土数値情報の駅別乗降客数を説明に参考として添えるだけで、どの駅にするかには使わない。生活時間帯は今回の16項目に含めない
+- 現在の実装は、言語モデルを使わない推理ルール R1〜R12（`engine/src/tkb_engine/rules.py`）。指定ゴミ袋・収集地区・大学の時間割は手で作る知識表 `data-prep/manual/knowledge.json`、学校の名前と所在地は `make data` で作る schools 表（文部科学省の学校コード）を引く。知識表は行ごとに出典を書き、未確認のところはそう書く。文京区の収集地区の行は、文京区のオープンデータ「ごみと資源の収集日」から `python -m tkb_data_prep.bunkyo_collection` で作る。R5（収集地区）は、朝の「燃えるゴミ出し忘れた」のような投稿の曜日も読み、指定ゴミ袋がない区では住所・郵便番号の手がかりで区を決める。写真のバーコードは言語モデルではなく `detect/src/tkb_detect/barcode.py`（zxing-cpp と日本郵便のカスタマバーコード）で読む
 - 最小削除：投稿を1件抜いたときの各項目の確からしさを、モデルを呼ばずに計算し直す。16項目に対する重みは実装時に決める。重要な項目を最も多く崩す投稿から貪欲法で選ぶ。最大3件まで
 - 再診断：抜き出し済みの手がかりから、削除した投稿の分を除いてすぐに計算する
 
@@ -150,7 +150,7 @@ Python は `common/` の Pydantic モデル（`tkb_common.schemas`）、TypeScri
 
 既存：`MOCK_MODE`、`VLM_BASE_URL`、`VLM_API_KEY`、`VLM_MODEL`、`OCR_BASE_URL`。鍵を `NEXT_PUBLIC_` で始まる変数に入れない。
 
-プロフィール推定は現在 `residential_area`、`regular_station`、`employer_name`、`child_age` の限定ルールのみ。投稿ごとの観測手がかりと、投稿を横断した推定を区別し、根拠経路は `docs/profile-classification-v2.md` に合わせる。ProfileItem用の仮除外候補と、mainのConclusion向けplan/simulate/deleteは別フローとして維持する。
+プロフィール推定は現在 `residential_area`、`regular_station`、`employer_name`、`child_age`、`child_school` の限定ルールのみ。`residential_area` には、事前に取得した国土地理院の避難所の表と、国土数値情報のバス停留所（令和4年度版）を「X は Y にある」という知識として使う経路がある（`engine/src/tkb_engine/open_data.py`、`open_data_bus.py`）。`child_school` は、本人の子どもの学校の X（「娘の小学校のひまわり祭り」）と別の投稿の「X は〇〇小学校」が同じ X でつながり、学区の表で学校が1つに決まるときだけ推定し（`child_school.py`）、その学区の区市町村を居住地域の経路に足す（`open_data_school.py`）。`employer_name` には、本人が明示した勤務先の名前を国税庁の法人番号の表（`data/processed/corporations.sqlite`。api のメモリに載せず、引くたびにディスクから読む）で正式名称に結ぶ経路がある。公開データの根拠は `source=open_data` で、画面に出典を出す。投稿ごとの観測手がかりと、投稿を横断した推定を区別し、根拠経路は `docs/profile-classification-v2.md` に合わせる。ProfileItem用の仮除外候補と、mainのConclusion向けplan/simulate/deleteは別フローとして維持する。
 
 OAuth：`AUTH_MODE`（ローカル既定 `app_password`、本番は採用試験を通れば `oauth`）、`PUBLIC_URL`（公開の HTTPS オリジン）、`OAUTH_WEB_ORIGIN`（api から web への Docker 内部 URL）、`API_INTERNAL_ORIGIN`（web から api への Docker 内部 URL）、`INTERNAL_AUTH_SECRET`（起動時に生成し、両コンテナへ別の一時ファイルで渡す）。
 

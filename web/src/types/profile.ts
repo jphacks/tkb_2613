@@ -154,7 +154,7 @@ export interface ProfileEvidence {
   readonly post_id: string | null;
   readonly clue_index: number | null;
   readonly required: boolean;
-  readonly source?: "clue" | "post_text" | "profile_text" | "image_alt" | "public_web";
+  readonly source?: "clue" | "post_text" | "profile_text" | "image_alt" | "public_web" | "open_data";
   readonly image_index?: number | null;
   readonly excerpt?: string | null;
   readonly web_fact_id?: string | null;
@@ -255,6 +255,20 @@ export function profileRelationsAfterDeletion(
   });
 }
 
+/** Returns public offline data citations attached to a legacy profile item. */
+export function openDataCitations(item: Pick<ProfileItem, "evidence"> | Pick<ProfileCandidate, "evidence">): string[] {
+  return [...new Set(item.evidence.flatMap((reference) =>
+    reference.source === "open_data" && reference.excerpt ? [reference.excerpt] : [],
+  ))];
+}
+
+export function profileClaimsAfterDeletion(
+  sets: readonly ProfileCandidateSet[],
+  deletedPostIds: ReadonlySet<string>,
+): ProfileCandidateSet[] {
+  return sets.map((set) => profileCandidateAfterDeletion(set, deletedPostIds));
+}
+
 export function profileCandidateAfterDeletion(
   set: ProfileCandidateSet,
   deletedPostIds: ReadonlySet<string>,
@@ -291,7 +305,12 @@ export function profileCandidateAfterDeletion(
       evidence: result.evidence,
       evidence_paths: result.evidence_paths ?? [],
       assessment: result.assessment ?? candidate.assessment,
-      observed_at: candidate.observed_at,
+      // Without the surviving post timestamps, do not keep labeling an alternative
+      // path with the old observation time. The API recomputes it from post.created_at.
+      observed_at: set.attribute === "realtime_location" &&
+        JSON.stringify(result.evidence_paths ?? []) !== JSON.stringify(candidate.evidence_paths)
+        ? null
+        : candidate.observed_at,
       counter_evidence: candidate.counter_evidence.filter((reference) =>
         reference.post_id === null || !deletedPostIds.has(reference.post_id),
       ),
@@ -373,12 +392,13 @@ function isProfileEvidence(value: unknown): value is ProfileEvidence {
       ["post_id", "clue_index", "required", "source", "image_index", "excerpt", "web_fact_id"].includes(key),
     ) &&
     typeof value.required === "boolean" &&
-    ["clue", "post_text", "profile_text", "image_alt", "public_web"].includes(source as string) &&
+    ["clue", "post_text", "profile_text", "image_alt", "public_web", "open_data"].includes(source as string) &&
     (source === "public_web" || value.web_fact_id === null || value.web_fact_id === undefined) &&
     ((source === "clue" && typeof value.post_id === "string" && Number.isInteger(value.clue_index) && (value.clue_index as number) >= 0 && (value.image_index === null || value.image_index === undefined)) ||
       (source === "post_text" && typeof value.post_id === "string" && value.clue_index === null && (value.image_index === null || value.image_index === undefined) && typeof value.excerpt === "string") ||
       (source === "profile_text" && value.post_id === null && value.clue_index === null && typeof value.excerpt === "string") ||
       (source === "image_alt" && typeof value.post_id === "string" && value.clue_index === null && Number.isInteger(value.image_index) && typeof value.excerpt === "string") ||
+      (source === "open_data" && value.post_id === null && value.clue_index === null && (value.image_index === null || value.image_index === undefined) && typeof value.excerpt === "string" && value.excerpt.length > 0) ||
       (source === "public_web" && value.post_id === null && value.clue_index === null && (value.image_index === null || value.image_index === undefined) && (value.excerpt === null || value.excerpt === undefined) && typeof value.web_fact_id === "string" && value.web_fact_id.length > 0))
   );
 }

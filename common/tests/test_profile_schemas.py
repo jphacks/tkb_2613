@@ -117,6 +117,30 @@ def test_profile_evidence_can_reference_profile_text_separately() -> None:
     assert evidence.clue_index is None
 
 
+def test_profile_evidence_can_cite_open_data_without_a_post() -> None:
+    evidence = ProfileEvidence(
+        source="open_data",
+        excerpt="根津小学校は文京区の指定避難所（出典：国土地理院）",
+        required=True,
+    )
+    assert evidence.post_id is None
+    assert evidence.source == "open_data"
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        {"source": "open_data", "required": True},
+        {"source": "open_data", "required": True, "excerpt": "出典", "post_id": POST_ID},
+        {"source": "open_data", "required": True, "excerpt": "出典", "clue_index": 0},
+        {"source": "open_data", "required": True, "excerpt": "出典", "image_index": 0},
+    ],
+)
+def test_open_data_evidence_needs_only_the_citation(data: dict[str, Any]) -> None:
+    with pytest.raises(ValidationError):
+        ProfileEvidence(**data)
+
+
 def test_claim_assessment_enforces_conditional_score_context() -> None:
     with pytest.raises(ValidationError):
         ClaimAssessment(minimal_scope=EvidenceScope.BLUESKY_OFFLINE)

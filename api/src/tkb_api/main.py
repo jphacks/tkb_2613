@@ -7,6 +7,7 @@ from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
@@ -15,6 +16,7 @@ from tkb_api.config import Settings, get_settings
 from tkb_api.limits import DiagnoseLimiter
 from tkb_api.routes import (
     delete,
+    demo,
     detect,
     diagnose,
     draft_check,
@@ -23,9 +25,11 @@ from tkb_api.routes import (
     session,
     share,
     simulate,
+    threads,
     x,
 )
 from tkb_api.shares import ShareStore
+from tkb_api.x_budget import DailyResourceBudget
 
 
 class NoStoreMiddleware:
@@ -89,6 +93,11 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        # 体験デモの診断は起動時に一度だけ計算する。テストで設定や地名の表を差し替えたときは、
+        # 差し替え前の値で計算しても使われないので、最初の要求のときに計算する
+        overrides = app.dependency_overrides
+        if get_settings not in overrides and diagnose.get_gazetteer not in overrides:
+            await run_in_threadpool(demo.warm_diagnosis_cache, settings)
         yield
         store = cast(SessionStore | None, getattr(app.state, "sessions", None))
         if store is not None:
@@ -107,6 +116,8 @@ def create_app(
     logging.getLogger("tkb_api").info(
         "閲覧リンク：%s（SHARE_ENABLED）", "オン" if settings.share_enabled else "オフ"
     )
+    for warning in settings.origin_warnings():
+        logging.getLogger("tkb_api").warning(warning)
     app.state.shares = (
         ShareStore(settings.share_db_path, settings.share_ttl_minutes * 60)
         if settings.share_enabled
@@ -136,9 +147,21 @@ def create_app(
     app.include_router(delete.router)
     app.include_router(share.router)
     app.include_router(features.router)
+    app.include_router(demo.router)
+    access_logger = logging.getLogger("uvicorn.access")
+    if not any(
+        isinstance(item, threads.ThreadsCallbackAccessFilter) for item in access_logger.filters
+    ):
+        access_logger.addFilter(threads.ThreadsCallbackAccessFilter())
+    app.include_router(threads.router)
+    app.state.threads_sessions = threads.ThreadsSessionStore(
+        min(settings.session_ttl_minutes * 60, 1800)
+    )
+    app.state.threads_settings = settings
     app.include_router(x.router)
     app.state.x_sessions = x.XSessionStore(settings.session_ttl_minutes * 60)
     app.state.x_settings = settings
+    app.state.x_budget = DailyResourceBudget(settings.x_daily_resource_limit)
     app.include_router(draft_check.router)
 
     @app.get("/health")

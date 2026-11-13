@@ -2,15 +2,38 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { POST as deletePost } from "@/app/%5F%5Finternal/oauth/delete/route";
+import { POST as dropSession } from "@/app/%5F%5Finternal/oauth/drop/route";
 import {
-  OAUTH_SCOPE, oauthTtlSeconds, pendingStateMatches, resetOAuthExpiry, validInternalSecret,
+  OAUTH_SCOPE, oauthTtlSeconds, pendingStateMatches, resetOAuthExpiry, revokeOAuthSession, validInternalSecret,
 } from "@/lib/server/oauth";
 
 const memory = globalThis as typeof globalThis & {
   tkbOAuthStates?: Map<string, { value: { appState: string }; expires: number }>;
   tkbOAuthSessions?: Map<string, { value: unknown; expires: number }>;
   tkbOAuthExpiries?: Map<string, number>;
+  tkbOAuthRevoking?: Set<string>;
+  tkbOAuthClient?: unknown;
 };
+
+const ALICE = "did:plc:alice";
+
+/** SDK の代わり。revoke の中で、失効の処理中の印が付いているかも記録する */
+function fakeClient(revoke: (did: string) => Promise<void> = async () => {}) {
+  const calls: { did: string; revoking: boolean }[] = [];
+  memory.tkbOAuthClient = {
+    revoke: async (did: string) => {
+      calls.push({ did, revoking: memory.tkbOAuthRevoking?.has(did) ?? false });
+      await revoke(did);
+    },
+  };
+  return calls;
+}
+
+function drop(did: string): Promise<Response> {
+  return dropSession(new Request("http://web:3000/__internal/oauth/drop", {
+    method: "POST", headers: { "X-Internal-Auth": "test-only-secret" }, body: JSON.stringify({ did }),
+  }));
+}
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -18,6 +41,85 @@ afterEach(() => {
   memory.tkbOAuthStates?.clear();
   memory.tkbOAuthSessions?.clear();
   memory.tkbOAuthExpiries?.clear();
+  memory.tkbOAuthRevoking?.clear();
+  memory.tkbOAuthClient = undefined;
+});
+
+describe("OAuth token revocation", () => {
+  it("revokes the token on logout, then forgets the session", async () => {
+    vi.stubEnv("INTERNAL_AUTH_SECRET", "test-only-secret");
+    const calls = fakeClient();
+    memory.tkbOAuthSessions?.set(ALICE, { value: {}, expires: Date.now() + 60_000 });
+
+    const response = await drop(ALICE);
+
+    expect(response.status).toBe(204);
+    expect(calls).toEqual([{ did: ALICE, revoking: true }]);
+    expect(memory.tkbOAuthSessions?.has(ALICE)).toBe(false);
+    expect(memory.tkbOAuthRevoking?.size).toBe(0);
+  });
+
+  it("still logs out and forgets the session when revocation fails", async () => {
+    vi.stubEnv("INTERNAL_AUTH_SECRET", "test-only-secret");
+    fakeClient(async () => {
+      throw new Error("authorization server unreachable");
+    });
+    memory.tkbOAuthSessions?.set(ALICE, { value: {}, expires: Date.now() + 60_000 });
+    memory.tkbOAuthExpiries?.set(ALICE, Date.now() + 60_000);
+
+    const response = await drop(ALICE);
+
+    expect(response.status).toBe(204);
+    expect(memory.tkbOAuthSessions?.has(ALICE)).toBe(false);
+    expect(memory.tkbOAuthExpiries?.has(ALICE)).toBe(false);
+  });
+
+  it("does not revoke without the internal secret", async () => {
+    vi.stubEnv("INTERNAL_AUTH_SECRET", "test-only-secret");
+    const calls = fakeClient();
+    const response = await dropSession(new Request("http://web:3000/__internal/oauth/drop", {
+      method: "POST", body: JSON.stringify({ did: ALICE }),
+    }));
+    expect(response.status).toBe(403);
+    expect(calls).toEqual([]);
+  });
+
+  it("revokes the token when the session lifetime ends", async () => {
+    vi.useFakeTimers();
+    vi.stubEnv("SESSION_TTL_MINUTES", "1");
+    const calls = fakeClient();
+    memory.tkbOAuthSessions?.set(ALICE, { value: {}, expires: 0 });
+    resetOAuthExpiry(ALICE);
+
+    await vi.advanceTimersByTimeAsync(59_000);
+    expect(calls).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(calls).toEqual([{ did: ALICE, revoking: true }]);
+    expect(memory.tkbOAuthSessions?.has(ALICE)).toBe(false);
+  });
+
+  it("does not revoke a newer login when an older lifetime ends", async () => {
+    vi.useFakeTimers();
+    vi.stubEnv("SESSION_TTL_MINUTES", "1");
+    const calls = fakeClient();
+    memory.tkbOAuthSessions?.set(ALICE, { value: {}, expires: 0 });
+    resetOAuthExpiry(ALICE);
+    await vi.advanceTimersByTimeAsync(30_000);
+    resetOAuthExpiry(ALICE); // ログインし直した
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(calls).toEqual([]);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(calls).toEqual([{ did: ALICE, revoking: true }]);
+  });
+
+  it("never throws from revokeOAuthSession", async () => {
+    fakeClient(async () => {
+      throw new Error("x");
+    });
+    await expect(revokeOAuthSession(ALICE)).resolves.toBeUndefined();
+  });
 });
 
 describe("OAuth session lifetime", () => {
@@ -57,6 +159,19 @@ describe("OAuth internal boundary", () => {
       value: { appState: "browser-state" }, expires: Date.now() - 1,
     });
     expect(pendingStateMatches("old", "browser-state")).toBe(false);
+  });
+
+  it("compares secrets of different byte lengths without throwing", () => {
+    // 文字数は同じでもバイト長が違う（é は UTF-8 で2バイト）。これまでは timingSafeEqual が例外を出して 500 になった
+    vi.stubEnv("INTERNAL_AUTH_SECRET", "secret-e");
+    const request = new Request("http://web:3000", { headers: { "X-Internal-Auth": "secret-é" } });
+    expect(() => validInternalSecret(request)).not.toThrow();
+    expect(validInternalSecret(request)).toBe(false);
+
+    memory.tkbOAuthStates?.set("sdk-state", { value: { appState: "state-e" }, expires: Date.now() + 1000 });
+    expect(() => pendingStateMatches("sdk-state", "state-é")).not.toThrow();
+    expect(pendingStateMatches("sdk-state", "state-é")).toBe(false);
+    expect(pendingStateMatches("sdk-state", "state-e")).toBe(true);
   });
 
   it("rejects missing or incorrect internal credentials", () => {

@@ -138,8 +138,11 @@ class DiagnoseLimiter:
     def _did_key(self, did: str) -> str:
         return hmac.new(self._key, did.encode("utf-8"), hashlib.sha256).hexdigest()
 
-    def acquire(self, session_id: str, did: str) -> Lease:
-        """枠を取る。取れなければ理由の例外を出す（待たない）。回数はまだ数えない。"""
+    def acquire(self, session_id: str, did: str, *, check_daily: bool = True) -> Lease:
+        """枠を取る。取れなければ理由の例外を出す（待たない）。回数はまだ数えない。
+
+        check_daily=False は、1日の回数に数えない処理（下書き確認）が同時実行の枠だけを取るとき。
+        """
         key = self._did_key(did)
         with self._lock:
             self._drop_expired()
@@ -149,7 +152,7 @@ class DiagnoseLimiter:
                 lease.session_id == session_id or lease.did_key == key for lease in self._leases
             ):
                 raise AlreadyRunningError
-            if self._daily_limit and self._used_today(key) >= self._daily_limit:
+            if check_daily and self._daily_limit and self._used_today(key) >= self._daily_limit:
                 raise DailyLimitError
             if self._max_concurrent and len(self._leases) >= self._max_concurrent:
                 raise BusyError

@@ -5,7 +5,20 @@ uv run python -m tkb_data_prep
 
 import sys
 
-from tkb_data_prep import area_codes, households, muni_mesh, postal, schools, stations
+from tkb_data_prep import (
+    area_codes,
+    boundaries,
+    bus_stops,
+    corporations,
+    households,
+    muni_mesh,
+    postal,
+    ridership,
+    school_districts,
+    schools,
+    shelters,
+    stations,
+)
 from tkb_data_prep.config import Paths
 from tkb_data_prep.errors import DataPrepError
 from tkb_data_prep.summary import Tables, report
@@ -17,16 +30,26 @@ def run(paths: Paths) -> Tables:
     postals = postal.load(paths)
     loaded = households.load(paths, allowed)
     station_rows = stations.load(paths, allowed)
+    ridership_year, ridership_rows = ridership.load(paths, {s.station_code for s in station_rows})
     converted = area_codes.load(paths, area_codes.NameIndex.build(munis, postals))
     school_rows = schools.load(paths, postals)
+    shelter_rows = shelters.load(paths, postals)
+    locator = boundaries.load(paths)
+    district_rows = school_districts.load(paths, postals, locator)
+    bus_stop_rows = bus_stops.load(paths, munis, postals, locator)
 
     out = paths.out_dir
     muni_mesh.write(munis, out / "muni_mesh.parquet")
     households.write(loaded.rows, out / "households_500m.parquet")
     postal.write(postals, out / "postal.parquet")
     stations.write(station_rows, out / "stations.parquet")
+    ridership.write(ridership_rows, ridership_year, out / "ridership.parquet")
     area_codes.write(converted.rows, out / "area_codes.parquet")
     schools.write(school_rows, out / "schools.parquet")
+    shelters.write(shelter_rows, out / "shelters.parquet")
+    school_districts.write(district_rows, out / "school_districts.parquet")
+    bus_stops.write(bus_stop_rows, out / "bus_stops.parquet")
+    corporation_result = corporations.build(paths, out / "corporations.sqlite")
 
     return Tables(
         muni_mesh=munis,
@@ -34,9 +57,15 @@ def run(paths: Paths) -> Tables:
         estat_first_meshes=loaded.first_meshes,
         postal=postals,
         stations=station_rows,
+        ridership=ridership_rows,
+        ridership_year=ridership_year,
         area_codes=converted.rows,
         area_code_problems=converted.problems,
         schools=school_rows,
+        shelters=shelter_rows,
+        school_districts=district_rows,
+        bus_stops=bus_stop_rows,
+        corporations=corporation_result,
     )
 
 

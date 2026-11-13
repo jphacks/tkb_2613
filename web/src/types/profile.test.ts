@@ -100,6 +100,15 @@ describe("isProfileItem", () => {
     expect(isProfileItem({ ...base, value: "会社名", status: "found" })).toBe(true);
     expect(isProfileItem({ ...base, value: null, status: "unknown" })).toBe(true);
   });
+
+  it("accepts a non-empty open data citation without a post or clue reference", () => {
+    const item = {
+      attribute: "residential_area", value: "架空の区", confidence: 0.65, status: "weak",
+      evidence: [{ post_id: null, clue_index: null, required: true, source: "open_data", excerpt: "出典：架空の境界データ" }],
+    };
+    expect(isProfileItem(item)).toBe(true);
+    expect(isProfileItem({ ...item, evidence: [{ ...item.evidence[0], excerpt: "" }] })).toBe(false);
+  });
   it("accepts source-aware text evidence paths", () => {
     expect(isProfileItem({ ...base, value: "会社名", status: "weak", evidence_paths: [{ provenance: "combined_inference", confidence: 0.65, evidence: [
       { post_id: "p1", clue_index: null, required: true, source: "post_text", image_index: null, excerpt: "うちの会社の研修" },
@@ -274,6 +283,27 @@ describe("profile candidate sets", () => {
     expect(after.status).toBe("candidate");
     expect(after.candidates).toHaveLength(1);
     expect(after.candidates[0].value).toBe("区B");
+  });
+
+  it("suppresses realtime currentness when deletion removes the timestamped path", () => {
+    const reference = (post_id: string, excerpt: string): ProfileEvidence => ({
+      post_id, clue_index: null, required: true, source: "post_text", excerpt,
+    });
+    const pathA = [reference("at://did:plc:test/app.bsky.feed.post/a", "fresh clue A"), reference("at://did:plc:test/app.bsky.feed.post/b", "fresh clue B")];
+    const pathB = [reference("at://did:plc:test/app.bsky.feed.post/c", "older clue C"), reference("at://did:plc:test/app.bsky.feed.post/d", "older clue D")];
+    const realtime = candidate("根津駅", 0.65, "weak", "2026-11-12T10:00:00+09:00");
+    const withPaths = {
+      ...realtime,
+      evidence: [...pathA, ...pathB],
+      evidence_paths: [
+        { evidence: pathA, confidence: 0.65, provenance: "combined_inference" as const },
+        { evidence: pathB, confidence: 0.6, provenance: "combined_inference" as const },
+      ],
+    };
+    const candidateSet = set("realtime_location", [withPaths]);
+    const after = profileCandidateAfterDeletion(candidateSet, new Set(["at://did:plc:test/app.bsky.feed.post/a"]));
+    expect(after.candidates[0].evidence_paths).toHaveLength(1);
+    expect(after.candidates[0].observed_at).toBeNull();
   });
 
   it("removes relationship edges when an evidence post or either endpoint candidate is deleted", () => {

@@ -1,6 +1,7 @@
 """明示的な閲覧リンクだけが、別ブラウザや API 再起動後に読める。"""
 
 import logging
+import os
 import stat
 from pathlib import Path
 
@@ -13,6 +14,9 @@ from tkb_api.routes.diagnose import get_gazetteer
 from tkb_api.shares import ShareStore
 from tkb_engine.gazetteer import Gazetteer
 
+# ブラウザは POST・DELETE に Origin を付ける（元に戻せない操作は Origin を確かめる）
+BROWSER_ORIGIN = {"Origin": "http://localhost:3000"}
+
 FIXTURE = Path(__file__).resolve().parents[2] / "eval" / "fixtures" / "demo_observations.json"
 PASSWORD = "test password"  # noqa: S105  架空のテスト値
 
@@ -21,7 +25,7 @@ def _client(settings: Settings) -> TestClient:
     app = create_app(settings)
     app.dependency_overrides[get_settings] = lambda: settings
     app.dependency_overrides[get_gazetteer] = lambda: Gazetteer()
-    return TestClient(app)
+    return TestClient(app, headers=BROWSER_ORIGIN)
 
 
 def test_result_link_requires_the_owners_finished_diagnosis_and_is_read_only(
@@ -43,7 +47,8 @@ def test_result_link_requires_the_owners_finished_diagnosis_and_is_read_only(
         assert response.status_code == 200
         token = response.json()["token"]
         assert len(token) >= 32
-        assert stat.S_IMODE(settings.share_db_path.stat().st_mode) == 0o600
+        if os.name == "posix":
+            assert stat.S_IMODE(settings.share_db_path.stat().st_mode) == 0o600
 
     # API プロセスが作り直されても、リンクを知る人はログインなしで閲覧できる。
     with _client(settings) as viewer:
@@ -87,7 +92,11 @@ def test_features_tell_the_screen_whether_result_links_are_on(tmp_path: Path) ->
         with _client(settings) as client:
             res = client.get("/api/features")  # ログインなしで読める
             assert res.status_code == 200
-            assert res.json() == {"share_enabled": enabled, "auth_mode": "app_password"}
+            assert res.json() == {
+                "share_enabled": enabled,
+                "auth_mode": "app_password",
+                "public_web_lookup_available": True,  # 既定はモック
+            }
             assert res.headers["cache-control"] == "no-store, no-transform"
 
 

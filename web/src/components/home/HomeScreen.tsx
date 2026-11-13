@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 
 import { DiagnosePanel } from "@/components/diagnose/DiagnosePanel";
@@ -43,12 +44,20 @@ function HomeContent() {
             <p className="mt-5 max-w-xl text-ink/80">{messages.home.lead}</p>
           </header>
           <LoginPanel />
+          {session.status === "anonymous" && (
+            <p className="mt-8">
+              <Link href="/demo" className="font-bold underline underline-offset-4 hover:text-seeker">
+                {messages.demo.entry}
+              </Link>
+            </p>
+          )}
         </>
       )}
       {/* 結果を出している間も、ページの名前は読み上げで伝える */}
       {showResult && <h1 className="sr-only">{name}</h1>}
       <DiagnosePanel onRevealedChange={setRevealed} />
-      <DraftCheckPanel />
+      {/* 下書き確認は診断で読んだ手がかりと照らし合わせるので、結果が出てからだけ出す */}
+      {showResult && <DraftCheckPanel />}
       {showResult && (
         <footer className="mt-20 border-t border-ink/15 pt-6 text-sm text-ink/60">
           <button type="button" onClick={logout} className="underline underline-offset-4 hover:text-ink">

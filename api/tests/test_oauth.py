@@ -4,6 +4,7 @@ import asyncio
 from collections.abc import Sequence
 from typing import Any
 
+import httpx
 from fastapi.testclient import TestClient
 
 from tkb_api.bluesky import BlueskySession, LoginResult, SessionStore
@@ -111,3 +112,39 @@ def test_oauth_delete_preserves_partial_success(monkeypatch: Any) -> None:
     result = asyncio.run(_delete(session, settings, unused, [POST, other]))
     assert result == [POST]
     assert calls == [POST, other]
+
+
+def test_oauth_delete_treats_a_non_json_reply_as_not_deleted(monkeypatch: Any) -> None:
+    replies = {
+        POST: httpx.Response(200, content=b"<html>proxy error</html>"),
+        f"at://{DID}/app.bsky.feed.post/3kdef": httpx.Response(200, json=["deleted"]),
+        f"at://{DID}/app.bsky.feed.post/3kghi": httpx.Response(200, json={"deleted": True}),
+    }
+
+    class FakeHttpClient:
+        def __init__(self, timeout: int) -> None:
+            pass
+
+        async def __aenter__(self) -> "FakeHttpClient":
+            return self
+
+        async def __aexit__(self, *_args: object) -> None:
+            pass
+
+        async def post(
+            self, _url: str, *, json: dict[str, str], headers: dict[str, str]
+        ) -> httpx.Response:
+            return replies[json["post_id"]]
+
+    monkeypatch.setattr("tkb_api.routes.delete.httpx.AsyncClient", FakeHttpClient)
+
+    async def unused(_client: Any, _did: str, _ids: Sequence[str]) -> list[str]:
+        raise AssertionError("legacy delete must not run")
+
+    session = BlueskySession("demo.bsky.social", DID, None, 1800, "oauth")
+    settings = Settings(mock_mode=False, auth_mode="oauth", internal_auth_secret="test-only-secret")  # noqa: S106
+
+    # JSON でない応答・辞書でない応答は 500 にせず、消せなかったとして扱う
+    result = asyncio.run(_delete(session, settings, unused, list(replies)))
+
+    assert result == [f"at://{DID}/app.bsky.feed.post/3kghi"]

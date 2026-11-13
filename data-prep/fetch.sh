@@ -14,6 +14,18 @@ MEXT_URLS=(
   "https://www.mext.go.jp/content/20260825-mxt_chousa01-000011635_2-2.csv"
   "https://www.mext.go.jp/content/20260825-mxt_chousa01-000011635_6.csv"
 )
+# 国土数値情報「バス停留所（P11）」令和4年度版（平成22年度版は非商用なので使わない）
+KSJ_P11_URL="https://nlftp.mlit.go.jp/ksj/gml/data/P11/P11-22"
+# 国土数値情報「行政区域（N03）」2026年1月1日時点（バス停がどの区市町村にあるかを引く）
+KSJ_N03_URL="https://nlftp.mlit.go.jp/ksj/gml/data/N03/N03-2026"
+# 国土数値情報「小学校区（A27）」「中学校区（A32）」令和3年度版と、自治体ごとの利用条件の一覧
+KSJ_GML_URL="https://nlftp.mlit.go.jp/ksj/gml/data"
+# 国土数値情報「駅別乗降客数（S12）」2025年度整備版（全国1ファイル。2024年度までの乗降客数）
+KSJ_S12_URL="https://nlftp.mlit.go.jp/ksj/gml/data/S12/S12-25/S12-25_GML.zip"
+BUNKYO_COLLECTION_URL="https://www.city.bunkyo.lg.jp/documents/6059/syusyubi.csv"
+KSJ_SCHOOL_TERMS_URL="https://nlftp.mlit.go.jp/ksj/gml/codelist/R3_Terms_of_use_municipality_data.xlsx"
+# 国土地理院「指定緊急避難場所・指定避難所データ」の都道府県別 CSV（_2 が指定緊急避難場所、_1 が指定避難所）
+GSI_SHELTER_URL="https://hinanmap.gsi.go.jp/hinanjocp/defaultFtpData/csv"
 PREFECTURES=(11 12 13 14)
 
 if ! compgen -G "$RAW/estat/*.zip" >/dev/null; then
@@ -24,6 +36,16 @@ e-Stat の地域メッシュ統計がありません。
   に置いてから、もう一度 make data を実行してください。手順は data-prep/README.md にあります。
 EOF
   exit 1
+fi
+
+if ! compgen -G "$RAW/houjin/*.zip" >/dev/null; then
+  cat >&2 <<EOF
+法人番号の全件データがないので、法人の表（corporations.sqlite）は作らずに進みます。
+  作るときは、法人番号公表サイトの「全件データ」から CSV 形式・Shift-JIS の
+  埼玉・千葉・東京・神奈川の zip を落とし、展開せずに
+  $RAW/houjin/
+  に置いてから、もう一度 make data を実行してください。手順は data-prep/README.md にあります。
+EOF
 fi
 
 fetch() {
@@ -46,3 +68,19 @@ fetch "$KSJ_N02_URL" "$RAW/ksj/N02-24_GML.zip"
 for url in "${MEXT_URLS[@]}"; do
   fetch "$url" "$RAW/mext/$(basename "$url")"
 done
+for pref in "${PREFECTURES[@]}"; do
+  for kind in 1 2; do
+    fetch "$GSI_SHELTER_URL/${pref}000_${kind}.csv" "$RAW/gsi/${pref}000_${kind}.csv"
+  done
+done
+for pref in "${PREFECTURES[@]}"; do
+  fetch "$KSJ_P11_URL/P11-22_${pref}_SHP.zip" "$RAW/ksj/P11-22_${pref}_SHP.zip"
+  fetch "$KSJ_N03_URL/N03-20260101_${pref}_GML.zip" "$RAW/ksj/N03-20260101_${pref}_GML.zip"
+  for kind in A27 A32; do
+    fetch "$KSJ_GML_URL/$kind/$kind-21/$kind-21_${pref}_GML.zip" "$RAW/ksj/$kind-21_${pref}_GML.zip"
+  done
+done
+fetch "$KSJ_S12_URL" "$RAW/ksj/S12-25_GML.zip"
+# 文京区オープンデータ「ごみと資源の収集日」（知識表の収集地区に変換する。make data では変換しない）
+fetch "$BUNKYO_COLLECTION_URL" "$RAW/bunkyo/syusyubi.csv"
+fetch "$KSJ_SCHOOL_TERMS_URL" "$RAW/ksj/R3_Terms_of_use_municipality_data.xlsx"

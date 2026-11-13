@@ -63,6 +63,13 @@ def build_inputs(root: Path) -> Paths:
     paths.mext_dir.mkdir(parents=True)
     (paths.mext_dir / "schools.csv").write_text("\ufeff" + SCHOOLS_CSV, encoding="utf-8")
 
+    paths.gsi_dir.mkdir(parents=True)
+    (paths.gsi_dir / "13000_2.csv").write_text(
+        "\ufeffNO,共通ID,施設・場所名,住所,緯度,経度\n"
+        "1,E1310400001001,新宿中央公園,東京都新宿区西新宿2-11,35.6896,139.6906\n",
+        encoding="utf-8",
+    )
+
     paths.manual_dir.mkdir()
     paths.area_codes_csv.write_text(
         "area_code,section_code,target_text\n03,219,東京都新宿区、所沢市\n", encoding="utf-8"
@@ -78,13 +85,22 @@ def test_run_writes_every_table_and_reports_counts(tmp_path: Path) -> None:
 
     assert sorted(p.name for p in paths.out_dir.iterdir()) == [
         "area_codes.parquet",
+        "bus_stops.parquet",
         "households_500m.parquet",
         "muni_mesh.parquet",
         "postal.parquet",
+        "ridership.parquet",
+        "school_districts.parquet",
         "schools.parquet",
+        "shelters.parquet",
         "stations.parquet",
     ]
     text = "\n".join(lines)
+    assert "shelters                 1 行" in text
+    assert "corporations     作っていません" in text
+    assert "bus_stops                0 行" in text
+    assert "ridership                0 行（-年度）" in text
+    assert "school_districts         0 行" in text
     assert "世帯数の合計 70" in text
     assert "人口の合計   130" in text
     assert "世帯数の行がない 1km メッシュ 4 / 5" in text

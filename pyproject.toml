@@ -49,14 +49,16 @@ files = [
   "engine/tests",
   "data-prep/src",
   "data-prep/tests",
+  "infra/prod_smoke.py",
+  "infra/tests",
 ]
 plugins = ["pydantic.mypy"]
 
 # 型情報を持たないライブラリ
 [[tool.mypy.overrides]]
-module = ["atproto", "atproto.*", "atproto_client.*", "jismesh.*", "pyarrow.*", "scipy.*", "zxingcpp"]
+module = ["atproto", "atproto.*", "atproto_client.*", "jismesh.*", "pyarrow.*", "scipy.*", "shapely", "shapely.*", "zxingcpp"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
-testpaths = ["common/tests", "api/tests", "detect/tests", "engine/tests", "data-prep/tests"]
+testpaths = ["common/tests", "api/tests", "detect/tests", "engine/tests", "data-prep/tests", "infra/tests"]
 addopts = "--import-mode=importlib --cov=tkb_common --cov=tkb_api --cov=tkb_detect --cov=tkb_engine --cov=tkb_data_prep --cov-report=term-missing --cov-fail-under=80"

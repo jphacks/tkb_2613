@@ -7,10 +7,12 @@ MOCK_MODE=1 のときは Bluesky に接続せず、全部消せたことにす�
 
   POST /api/delete  {"delete": [投稿ID]}
   → {"delete": [消せた投稿ID], "failed": [消せなかった投稿ID], "broken": [項目], "after": [結論]}
-    broken・after は消せた投稿だけを除いて推理し直した結果。after の clue_indices は、
-    診断の conclusions イベントの clues での番号（simulate と同じ）
+    broken・after は、それまでに消した投稿を除いた状態から、今回消せた投稿を除いて推理し直した結果。
+    after の clue_indices は、診断の conclusions イベントの clues での番号（simulate と同じ）
 
-セッションに置いた診断はそのままにする（画面の手がかりの番号とずれないように）。
+セッションの診断の投稿と手がかりはそのまま残し（画面の手がかりの番号とずれないように）、
+消せた投稿の ID だけを記録する（GET /api/diagnosis が消した投稿を除いて返すため）。
+もう消した投稿をまた選んだら 422 で断る。
 消したあとの投稿で最初から調べ直すには、もう一度診断する。
 """
 
@@ -23,12 +25,12 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from tkb_api import bluesky
 from tkb_api.bluesky import BlueskySession, PostsDeleter, SessionStore
 from tkb_api.config import Settings, get_settings
-from tkb_api.pipeline import simulation_json
+from tkb_api.origin import same_origin
+from tkb_api.pipeline import simulate_json
 from tkb_api.routes.diagnose import get_gazetteer
 from tkb_api.routes.session import current_session, current_session_id, get_session_store
 from tkb_api.schemas import DeleteRequest
 from tkb_engine.gazetteer import Gazetteer
-from tkb_engine.planner import simulate as simulate_deletion
 
 router = APIRouter(prefix="/api")
 logger = logging.getLogger(__name__)
@@ -36,6 +38,17 @@ logger = logging.getLogger(__name__)
 
 def get_delete_posts() -> PostsDeleter:
     return bluesky.delete_own_posts
+
+
+def _deleted(reply: httpx.Response) -> bool:
+    """内部経路の応答が「消せた」か。JSON でない・形が違う応答は、消せなかったとして扱う。"""
+    if reply.status_code != 200:
+        return False
+    try:
+        body = reply.json()
+    except ValueError:
+        return False
+    return isinstance(body, dict) and body.get("deleted") is True
 
 
 async def _delete(
@@ -60,7 +73,7 @@ async def _delete(
                     )
                 except httpx.HTTPError:
                     continue
-                if reply.status_code == 200 and reply.json().get("deleted") is True:
+                if _deleted(reply):
                     done.append(post_id)
                 elif reply.status_code == 429:
                     raise bluesky.BlueskyRateLimitedError(done)
@@ -71,7 +84,7 @@ async def _delete(
     return await delete_posts(session.client, session.did, post_ids)
 
 
-@router.post("/delete")
+@router.post("/delete", dependencies=[Depends(same_origin)])
 async def delete(
     body: DeleteRequest,
     store: Annotated[SessionStore, Depends(get_session_store)],
@@ -84,7 +97,7 @@ async def delete(
     diagnosis = store.get_diagnosis(session_id)
     if diagnosis is None:
         raise HTTPException(status.HTTP_409_CONFLICT, "先に診断してください")
-    known = {p.post_id for p in diagnosis.posts}
+    known = {p.post_id for p in diagnosis.posts} - set(diagnosis.deleted)
     if any(post_id not in known for post_id in body.delete):
         # 送られた ID は文言に入れない
         raise HTTPException(
@@ -103,5 +116,7 @@ async def delete(
     # 投稿の ID は出さず、件数だけ
     logger.info("投稿の削除：%d 件を消し、%d 件は消せませんでした", len(done), len(failed))
 
-    sim = simulate_deletion(diagnosis.clues, diagnosis.posts, gazetteer, done)
-    return {**simulation_json(sim, diagnosis.clues), "failed": failed, "bluesky_busy": bluesky_busy}
+    store.mark_deleted(session_id, done)
+
+    sim = simulate_json(diagnosis.clues, diagnosis.posts, gazetteer, done, diagnosis.deleted)
+    return {**sim, "failed": failed, "bluesky_busy": bluesky_busy}

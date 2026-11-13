@@ -12,14 +12,14 @@ ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from pydantic import TypeAdapter
+from candidate_evaluation import PROFILE_CANDIDATE_ATTRIBUTES, evaluate_candidate_sets  # noqa: E402
+from pydantic import TypeAdapter  # noqa: E402
 
-from candidate_evaluation import PROFILE_CANDIDATE_ATTRIBUTES, evaluate_candidate_sets
-from tkb_common.schemas import Clue, Post, ProfileCandidateSet, ProfileItem
-from tkb_engine import Conclusion, Gazetteer, infer
-from tkb_engine.cross_post import infer_owner_claims
-from tkb_engine.gazetteer import Knowledge
-from tkb_engine.planner import simulate
+from tkb_common.schemas import Clue, Post, ProfileCandidateSet, ProfileItem  # noqa: E402
+from tkb_engine import Conclusion, Gazetteer, infer  # noqa: E402
+from tkb_engine.cross_post import infer_owner_claims  # noqa: E402
+from tkb_engine.gazetteer import Knowledge  # noqa: E402
+from tkb_engine.planner import simulate  # noqa: E402
 
 DEFAULT_FIXTURE = ROOT / "fixtures" / "demo_observations.json"
 POSTS = TypeAdapter(list[Post])

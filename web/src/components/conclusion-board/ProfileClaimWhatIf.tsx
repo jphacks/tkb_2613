@@ -69,10 +69,13 @@ export function ProfileClaimWhatIf({ claims, relations = [], clues, posts, sugge
     set.attribute === "realtime_location" && set.candidate_pool.some((candidate) => candidate.observed_at),
   );
   useEffect(() => {
-    setNowMs(Date.now());
     if (!hasTimedLocationCandidate) return;
+    const initialTimer = window.setTimeout(() => setNowMs(Date.now()), 0);
     const timer = window.setInterval(() => setNowMs(Date.now()), 30_000);
-    return () => window.clearInterval(timer);
+    return () => {
+      window.clearTimeout(initialTimer);
+      window.clearInterval(timer);
+    };
   }, [hasTimedLocationCandidate]);
   const postById = new Map(posts.map((post) => [post.post_id, post]));
   const evidencePostIds = [...new Set(claims.flatMap((claimSet) =>

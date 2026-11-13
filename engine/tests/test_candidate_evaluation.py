@@ -53,16 +53,24 @@ def test_candidate_evaluation_rejects_empty_or_incomplete_sets_before_scoring() 
 
 def test_complete_truth_scores_top1_coverage_false_candidates_and_unknowns() -> None:
     rows = _complete_sets(
-        {"attribute": "regular_station", "status": "ambiguous", "candidates": [
-            _candidate("根津駅", [{"post_id": "p1", "clue_index": 0}]),
-            _candidate("千駄木駅", [{"post_id": "p2", "clue_index": 1}]),
-        ]},
+        {
+            "attribute": "regular_station",
+            "status": "ambiguous",
+            "candidates": [
+                _candidate("根津駅", [{"post_id": "p1", "clue_index": 0}]),
+                _candidate("千駄木駅", [{"post_id": "p2", "clue_index": 1}]),
+            ],
+        },
     )
     result = module.evaluate_candidate_sets(
         rows,
-        {"status": "confirmed", "complete": True, "claims": [
-            {"attribute": "regular_station", "value": "根津駅"},
-        ]},
+        {
+            "status": "confirmed",
+            "complete": True,
+            "claims": [
+                {"attribute": "regular_station", "value": "根津駅"},
+            ],
+        },
         post_ids={"p1", "p2"},
         clues=[{"post_id": "p1"}, {"post_id": "p2"}],
     )
@@ -70,9 +78,7 @@ def test_complete_truth_scores_top1_coverage_false_candidates_and_unknowns() -> 
     assert metrics["top1_accuracy"] == 1.0
     assert metrics["displayed_candidate_coverage"] == 1.0
     assert metrics["wrong_candidate_rate"] == 0.5
-    assert metrics["wrong_candidates"] == [
-        {"attribute": "regular_station", "value": "千駄木駅"}
-    ]
+    assert metrics["wrong_candidates"] == [{"attribute": "regular_station", "value": "千駄木駅"}]
     assert result["candidate_status_rates"]["unknown_count"] == 23
     assert result["candidate_status_rates"]["set_count"] == 24
     assert result["evidence_reference_integrity"]["valid_rate"] == 1.0
@@ -95,11 +101,13 @@ def test_provenance_scope_filters_all_value_metrics() -> None:
             "evidence": [{"post_id": "p3", "clue_index": 2}],
         }
     ]
-    rows = _complete_sets({
-        "attribute": "regular_station",
-        "status": "ambiguous",
-        "candidates": [direct, inferred],
-    })
+    rows = _complete_sets(
+        {
+            "attribute": "regular_station",
+            "status": "ambiguous",
+            "candidates": [direct, inferred],
+        }
+    )
     direct_truth = {
         "status": "confirmed",
         "complete": True,
@@ -161,11 +169,13 @@ def test_provenance_scoped_status_rates_mark_filtered_candidate_unknown() -> Non
 
 def test_accuracy_is_withheld_for_incomplete_truth_but_status_rates_remain() -> None:
     result = module.evaluate_candidate_sets(
-        _complete_sets({
-            "attribute": "regular_station",
-            "status": "candidate",
-            "candidates": [_candidate("根津駅", [])],
-        }),
+        _complete_sets(
+            {
+                "attribute": "regular_station",
+                "status": "candidate",
+                "candidates": [_candidate("根津駅", [])],
+            }
+        ),
         {
             "status": "confirmed",
             "complete": False,
@@ -180,9 +190,13 @@ def test_accuracy_is_withheld_for_incomplete_truth_but_status_rates_remain() -> 
 def test_unknown_set_for_truth_attribute_counts_as_top1_miss_and_uncovered() -> None:
     result = module.evaluate_candidate_sets(
         _complete_sets(),
-        {"status": "confirmed", "complete": True, "claims": [
-            {"attribute": "regular_station", "value": "根津駅"},
-        ]},
+        {
+            "status": "confirmed",
+            "complete": True,
+            "claims": [
+                {"attribute": "regular_station", "value": "根津駅"},
+            ],
+        },
     )
     assert result["accuracy_metrics"]["top1_accuracy"] == 0.0
     assert result["accuracy_metrics"]["displayed_candidate_coverage"] == 0.0
@@ -190,15 +204,23 @@ def test_unknown_set_for_truth_attribute_counts_as_top1_miss_and_uncovered() -> 
 
 def test_candidate_value_match_uses_documented_nfkc_lower_and_trim_normalization() -> None:
     result = module.evaluate_candidate_sets(
-        _complete_sets({
-            "attribute": "other_social_account",
-            "status": "candidate",
-            "candidates": [_candidate("  ＡＢＣ@Example.com  ", [])],
-        }),
-        {"status": "confirmed", "complete": True, "claims": [{
-            "attribute": "other_social_account",
-            "value": "abc@example.COM",
-        }]},
+        _complete_sets(
+            {
+                "attribute": "other_social_account",
+                "status": "candidate",
+                "candidates": [_candidate("  ＡＢＣ@Example.com  ", [])],
+            }
+        ),
+        {
+            "status": "confirmed",
+            "complete": True,
+            "claims": [
+                {
+                    "attribute": "other_social_account",
+                    "value": "abc@example.COM",
+                }
+            ],
+        },
     )
     assert result["accuracy_metrics"]["top1_accuracy"] == 1.0
     assert result["accuracy_metrics"]["displayed_candidate_coverage"] == 1.0
@@ -206,15 +228,23 @@ def test_candidate_value_match_uses_documented_nfkc_lower_and_trim_normalization
 
 def test_nfkc_lower_trim_does_not_casefold_sharp_s() -> None:
     result = module.evaluate_candidate_sets(
-        _complete_sets({
-            "attribute": "nickname",
-            "status": "candidate",
-            "candidates": [_candidate("Straße", [])],
-        }),
-        {"status": "confirmed", "complete": True, "claims": [{
-            "attribute": "nickname",
-            "value": "STRASSE",
-        }]},
+        _complete_sets(
+            {
+                "attribute": "nickname",
+                "status": "candidate",
+                "candidates": [_candidate("Straße", [])],
+            }
+        ),
+        {
+            "status": "confirmed",
+            "complete": True,
+            "claims": [
+                {
+                    "attribute": "nickname",
+                    "value": "STRASSE",
+                }
+            ],
+        },
     )
     assert result["accuracy_metrics"]["top1_accuracy"] == 0.0
     assert result["accuracy_metrics"]["displayed_candidate_coverage"] == 0.0
@@ -223,16 +253,24 @@ def test_nfkc_lower_trim_does_not_casefold_sharp_s() -> None:
 
 def test_scoring_uses_displayed_candidates_not_internal_candidate_pool() -> None:
     result = module.evaluate_candidate_sets(
-        _complete_sets({
-            "attribute": "regular_station",
-            "status": "candidate",
-            "candidates": [_candidate("千駄木駅", [])],
-            "candidate_pool": [_candidate("根津駅", [])],
-        }),
-        {"status": "confirmed", "complete": True, "claims": [{
-            "attribute": "regular_station",
-            "value": "根津駅",
-        }]},
+        _complete_sets(
+            {
+                "attribute": "regular_station",
+                "status": "candidate",
+                "candidates": [_candidate("千駄木駅", [])],
+                "candidate_pool": [_candidate("根津駅", [])],
+            }
+        ),
+        {
+            "status": "confirmed",
+            "complete": True,
+            "claims": [
+                {
+                    "attribute": "regular_station",
+                    "value": "根津駅",
+                }
+            ],
+        },
     )
     assert result["accuracy_metrics"]["top1_accuracy"] == 0.0
     assert result["accuracy_metrics"]["displayed_candidate_coverage"] == 0.0
@@ -242,19 +280,32 @@ def test_scoring_uses_displayed_candidates_not_internal_candidate_pool() -> None
 
 
 def test_evidence_annotation_reports_exact_path_and_partial_reference_agreement() -> None:
-    rows = _complete_sets({
-        "attribute": "regular_station",
-        "status": "candidate",
-        "candidates": [_candidate("根津駅", [
-            {"post_id": "p1", "clue_index": 0},
-            {"post_id": "p2", "clue_index": 1},
-        ])],
-    })
-    truth = {"status": "confirmed", "complete": True, "claims": [{
-        "attribute": "regular_station",
-        "value": "根津駅",
-        "evidence_paths": [[{"post_id": "p1", "clue_index": 0}]],
-    }]}
+    rows = _complete_sets(
+        {
+            "attribute": "regular_station",
+            "status": "candidate",
+            "candidates": [
+                _candidate(
+                    "根津駅",
+                    [
+                        {"post_id": "p1", "clue_index": 0},
+                        {"post_id": "p2", "clue_index": 1},
+                    ],
+                )
+            ],
+        }
+    )
+    truth = {
+        "status": "confirmed",
+        "complete": True,
+        "claims": [
+            {
+                "attribute": "regular_station",
+                "value": "根津駅",
+                "evidence_paths": [[{"post_id": "p1", "clue_index": 0}]],
+            }
+        ],
+    }
     result = module.evaluate_candidate_sets(rows, truth)
     agreement = result["evidence_annotation_agreement"]
     assert agreement["exact_path_match_rate"] == 0.0
@@ -265,11 +316,16 @@ def test_evidence_annotation_reports_exact_path_and_partial_reference_agreement(
 
 def test_reference_integrity_checks_clue_post_consistency() -> None:
     result = module.evaluate_candidate_sets(
-        _complete_sets({
-            "attribute": "regular_station", "status": "candidate",
-            "candidates": [_candidate("根津駅", [{"post_id": "p1", "clue_index": 0}])],
-        }), {"status": "provisional", "complete": False, "claims": []},
-        post_ids={"p1"}, clues=[{"post_id": "different-post"}],
+        _complete_sets(
+            {
+                "attribute": "regular_station",
+                "status": "candidate",
+                "candidates": [_candidate("根津駅", [{"post_id": "p1", "clue_index": 0}])],
+            }
+        ),
+        {"status": "provisional", "complete": False, "claims": []},
+        post_ids={"p1"},
+        clues=[{"post_id": "different-post"}],
     )
     assert result["accuracy_metrics"]["top1_accuracy"] is None
     assert result["evidence_reference_integrity"]["invalid"] == 1
@@ -278,11 +334,17 @@ def test_reference_integrity_checks_clue_post_consistency() -> None:
 def test_annotated_evidence_for_missing_candidate_is_counted_as_uncovered() -> None:
     result = module.evaluate_candidate_sets(
         _complete_sets(),
-        {"status": "confirmed", "complete": True, "claims": [{
-            "attribute": "regular_station",
-            "value": "根津駅",
-            "evidence_paths": [[{"post_id": "post-a", "clue_index": 0}]],
-        }]},
+        {
+            "status": "confirmed",
+            "complete": True,
+            "claims": [
+                {
+                    "attribute": "regular_station",
+                    "value": "根津駅",
+                    "evidence_paths": [[{"post_id": "post-a", "clue_index": 0}]],
+                }
+            ],
+        },
     )
     agreement = result["evidence_annotation_agreement"]
     assert agreement["annotated_claims"] == 1

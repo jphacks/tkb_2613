@@ -1,0 +1,97 @@
+{
+  "note": "居住地域の経路を重ねる架空デモ（子どものいる保護者）。ゴミの日（R5）・子どもの学校（学区）・避難所・バス停が、同じ文京区千駄木を指すように作った。人物・行事名（あおぞらフェスタ）・投稿IDは架空。学校・避難所・バス停の名前は公開データの表にある実在のもの。写真本体はない",
+  "account": {
+    "did": "did:plc:demolayered00000000000000",
+    "display_name": "JPHACKS 2026 デモ用の架空アカウント"
+  },
+  "posts": [
+    {
+      "post_id": "at://did:plc:demolayered00000000000000/app.bsky.feed.post/l001",
+      "text": "燃えるゴミ出し忘れた。朝はお弁当作りでバタバタ。",
+      "created_at": "2026-10-17T07:50:00+09:00",
+      "images": []
+    },
+    {
+      "post_id": "at://did:plc:demolayered00000000000000/app.bsky.feed.post/l002",
+      "text": "ネットで頼んだ絵本が届いた。娘がさっそく読んでる。",
+      "created_at": "2026-10-18T16:20:00+09:00",
+      "images": [
+        {
+          "index": 0,
+          "url": "https://cdn.bsky.app/img/feed_fullsize/plain/did:plc:demolayered00000000000000/demo-l002@jpeg",
+          "alt": "",
+          "width": 1200,
+          "height": 900
+        }
+      ]
+    },
+    {
+      "post_id": "at://did:plc:demolayered00000000000000/app.bsky.feed.post/l003",
+      "text": "娘の小学校のあおぞらフェスタ、今年は輪投げ係になった。",
+      "created_at": "2026-10-19T21:05:00+09:00",
+      "images": []
+    },
+    {
+      "post_id": "at://did:plc:demolayered00000000000000/app.bsky.feed.post/l004",
+      "text": "あおぞらフェスタは林町小学校の秋の行事で、地域の人も来られるらしい。",
+      "created_at": "2026-10-20T12:10:00+09:00",
+      "images": []
+    },
+    {
+      "post_id": "at://did:plc:demolayered00000000000000/app.bsky.feed.post/l005",
+      "text": "近所の千駄木小学校が避難所になっているので、防災リュックを見直した。",
+      "created_at": "2026-10-21T22:30:00+09:00",
+      "images": []
+    },
+    {
+      "post_id": "at://did:plc:demolayered00000000000000/app.bsky.feed.post/l006",
+      "text": "門のところの避難所の看板、ちゃんと見たのは初めて。",
+      "created_at": "2026-10-22T08:40:00+09:00",
+      "images": [
+        {
+          "index": 0,
+          "url": "https://cdn.bsky.app/img/feed_fullsize/plain/did:plc:demolayered00000000000000/demo-l006@jpeg",
+          "alt": "",
+          "width": 1200,
+          "height": 1600
+        }
+      ]
+    },
+    {
+      "post_id": "at://did:plc:demolayered00000000000000/app.bsky.feed.post/l007",
+      "text": "家の前のバス停、千駄木三丁目から毎朝バスに乗って出勤。",
+      "created_at": "2026-10-23T08:05:00+09:00",
+      "images": []
+    },
+    {
+      "post_id": "at://did:plc:demolayered00000000000000/app.bsky.feed.post/l008",
+      "text": "雨の日はバスが遅れがち。",
+      "created_at": "2026-10-24T08:15:00+09:00",
+      "images": [
+        {
+          "index": 0,
+          "url": "https://cdn.bsky.app/img/feed_fullsize/plain/did:plc:demolayered00000000000000/demo-l008@jpeg",
+          "alt": "",
+          "width": 1200,
+          "height": 900
+        }
+      ]
+    },
+    {
+      "post_id": "at://did:plc:demolayered00000000000000/app.bsky.feed.post/l009",
+      "text": "うちの猫、こたつから出てこない。",
+      "created_at": "2026-10-25T20:00:00+09:00",
+      "images": []
+    }
+  ],
+  "clues": [
+    {"post_id": "at://did:plc:demolayered00000000000000/app.bsky.feed.post/l001", "image_index": null, "type": "routine_text", "value": "燃えるゴミ出し忘れた", "region": null, "confidence": 0.9, "source": "text"},
+    {"post_id": "at://did:plc:demolayered00000000000000/app.bsky.feed.post/l002", "image_index": 0, "type": "address_text", "value": "文京区千駄木x丁目xx", "region": [180, 300, 700, 350], "confidence": 0.6, "source": "ocr"},
+    {"post_id": "at://did:plc:demolayered00000000000000/app.bsky.feed.post/l002", "image_index": null, "type": "relation_text", "value": "娘", "region": null, "confidence": 0.9, "source": "text"},
+    {"post_id": "at://did:plc:demolayered00000000000000/app.bsky.feed.post/l003", "image_index": null, "type": "relation_text", "value": "娘", "region": null, "confidence": 0.9, "source": "text"},
+    {"post_id": "at://did:plc:demolayered00000000000000/app.bsky.feed.post/l004", "image_index": null, "type": "org_text", "value": "林町小学校", "region": null, "confidence": 0.9, "source": "text"},
+    {"post_id": "at://did:plc:demolayered00000000000000/app.bsky.feed.post/l006", "image_index": 0, "type": "notice", "value": "指定避難所 千駄木小学校", "region": [120, 260, 980, 420], "confidence": 0.85, "source": "ocr"},
+    {"post_id": "at://did:plc:demolayered00000000000000/app.bsky.feed.post/l008", "image_index": 0, "type": "landmark", "value": "都営バス 千駄木三丁目", "region": [300, 120, 760, 260], "confidence": 0.8, "source": "vlm"},
+    {"post_id": "at://did:plc:demolayered00000000000000/app.bsky.feed.post/l009", "image_index": null, "type": "relation_text", "value": "猫", "region": null, "confidence": 0.95, "source": "text"}
+  ]
+}

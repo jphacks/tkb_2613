@@ -24,14 +24,24 @@ e-Stat はコマンドで取得できないので、ブラウザで落として�
 
 `3036` `3641` `3653` `3741` `3841` `3942` `4040` `4042` `4142` `4440` `4540` `4739` `4740` `4839` `4939` `5038` `5039` `5139`
 
-### 2. 取得と変換
+### 2. 法人番号の全件データを置く（任意、ブラウザで）
+
+勤務先の正式名称を確かめる表（`corporations.sqlite`）に使う。置かなければ、この表だけ作らずに進む。
+
+1. 国税庁「法人番号公表サイト」の [全件データのダウンロード](https://www.houjin-bangou.nta.go.jp/download/zenken/) を開く
+2. 「CSV形式・Shift-JIS」の行から、埼玉県・千葉県・東京都（2つに分かれている）・神奈川県の zip を落とす
+3. 展開せずに `data-prep/raw/houjin/` に置く（例：`13_tokyo_all_20261030_01.zip`）。同じ日付の版をそろえる
+
+月末ごとに新しい版が出る。入れ替えるときは古い zip を消してから置き、`make data` をやり直す。
+
+### 3. 取得と変換
 
 ```bash
 make data
 ```
 
-1. `fetch.sh` が郵便番号、市区町村別メッシュ・コード一覧、鉄道データを curl で `raw/` に取得する。取得済みのファイルは取り直さない（取り直すときは `raw/` の中の該当ファイルを消す）
-2. `python -m tkb_data_prep` が `data/processed/` に 5 つの表を書き出し、最後に件数を表示する
+1. `fetch.sh` が郵便番号、市区町村別メッシュ・コード一覧、鉄道データ、学校コード、避難所、バス停留所、行政区域、駅別乗降客数、小学校区・中学校区（と自治体ごとの利用条件）のデータを curl で `raw/` に取得する。取得済みのファイルは取り直さない（取り直すときは `raw/` の中の該当ファイルを消す）
+2. `python -m tkb_data_prep` が `data/processed/` に表を書き出し、最後に件数を表示する
 
 e-Stat の zip がないときは、置き場所を案内して止まる。
 
@@ -52,6 +62,10 @@ area_codes             276 行（うち一部だけが対象 47）
 令和2年国勢調査の 1都3県の合計（人口 約 3,691 万、世帯 約 1,740 万）とほぼ合う。
 人口が少し多いのは、県境の 1km メッシュに隣の県の人の分も入るため。
 
+### 4. 本番の EC2 に届ける
+
+`data/processed` は EC2 の上で作らない。手元で作った表を `infra/upload-processed-data.sh` で S3 に上げ、EC2 で `infra/install-processed-data.sh` を実行して入れ替える。法人番号の SQLite と e-Stat から作る表も含め、11 個がそろっていないと上げない。手順は [infra/terraform/README.md](../infra/terraform/README.md) の「推理の表を届ける」。
+
 ## 出力（data/processed/）
 
 コードはすべて文字列（先頭の 0 を残すため）。
@@ -61,8 +75,13 @@ area_codes             276 行（うち一部だけが対象 47）
 | `muni_mesh.parquet` | muni_code, muni_name, pref_code, mesh_1km | 市区町村と 1km メッシュ（8 桁）の対応。1 つのメッシュが複数の市区町村にまたがれば、それぞれに 1 行 |
 | `households_500m.parquet` | mesh_500m, mesh_1km, households, population, lat, lon | 500m メッシュ（9 桁）ごとの世帯総数と人口総数。lat, lon はメッシュの中心。1都3県の 1km メッシュに含まれるものだけ |
 | `postal.parquet` | postal_code, muni_code, pref, city, town | 郵便番号（7 桁）と市区町村。町域名は「以下に掲載がない場合」なども含めてそのまま |
-| `stations.parquet` | station_name, line_name, operator, lat, lon, mesh_1km | 駅 × 路線ごとに 1 行。lat, lon はホームの線の中心。1都3県の 1km メッシュにある駅だけ |
+| `stations.parquet` | station_code, station_name, line_name, operator, lat, lon, mesh_1km | 駅 × 路線ごとに 1 行。station_code は鉄道データの駅コード（N02_005c）。lat, lon はホームの線の中心。1都3県の 1km メッシュにある駅だけ |
 | `area_codes.parquet` | area_code, section_code, muni_code, partial, note | 市外局番（先頭の 0 付き）と番号区画コード、市区町村。一部だけが対象なら partial が true で、note に但し書き |
+| `shelters.parquet` | name, kind, muni_code, city, lat, lon, mesh_1km | 1都3県の指定緊急避難場所・指定避難所（国土地理院）。同じ区市町村の同じ名前の施設は 1 行にまとめ、kind は「指定緊急避難場所・指定避難所」のように並べる。区市町村は住所から引き、共通IDの市区町村と合う行だけ（隣の県にある施設は落とす）。lat, lon は 1km メッシュのためだけに持ち、画面には出さない |
+| `ridership.parquet` | station_code, station_name, operator, passengers, year | 1都3県の駅の 1 日の乗降客数（国土数値情報 S12、いちばん新しい年度）。駅コードで stations とつなぐ。重複コードが「重複なし」でデータのある行だけを駅コードごとに足す。2026-11-12 の実行で 2024 年度、1,611 行（駅コード 1,927 のうち。JR 東日本の無人駅などはデータがない） |
+| `bus_stops.parquet` | name, operator, muni_codes, cities, lat, lon, mesh_1km | 1都3県のバス停留所（国土数値情報 P11、令和4年度版）。operator は事業者名（コミュニティバスは自治体名）。区市町村の属性はないので、国土数値情報「行政区域（N03）」の境界で点が入る区市町村を引いて muni_codes・cities（リスト）に入れる。境界に入らないとき（N03 がない、海沿いなど）は、1km メッシュにかかる区市町村をすべて候補にする（メッシュだけだと都区部では 4 割が 2 つ以上になる）。2026-11-12 の実行で 43,977 行、候補が 2 つ以上のものは 1 行 |
+| `school_districts.parquet` | kind, school_code, name, muni_code, city, meshes, terms, note | 1都3県の公立の小学校区・中学校区（国土数値情報 A27・A32、令和3年度版）。kind は小学校・中学校。meshes は学区の多角形にかかる 1km メッシュ（リスト）。terms は自治体ごとの利用条件（オープンデータ公開・商用利用不可・条件公開）、note は特記条件の原文。「再配布・再利用不可」の自治体は入れない。政令市は行政区域（N03）の境界で区を引く。2026-11-12 の実行で 5,136 行（242 区市町村） |
+| `corporations.sqlite` | corporations(corporate_number, name, normalized_name, furigana, pref_code)、meta(key, value) | 1都3県に本店がある法人（国税庁「法人番号公表サイト」の全件データ。最新履歴で、閉鎖と検索対象除外を除く）。normalized_name に索引。meta の as_of がデータの時点。本店所在地は入れない。約 192 万行、約 230MB。api はメモリに載せず、引くたびに読み取り専用で開く |
 | `schools.parquet` | school_code, kind, name, address, postal_code, muni_code, city | 1都3県の大学・短期大学・高等専門学校・高等学校・中等教育学校（文部科学省「学校コード」、廃止を除く）。大学は本部の所在地だけ |
 
 ### 知っておくこと
@@ -71,6 +90,7 @@ area_codes             276 行（うち一部だけが対象 47）
 - e-Stat の秘匿処理（`HTKSYORI` が 1 か 2 の行）でも、「人口（総数）」と「世帯総数」は秘匿されず、そのメッシュ自身の値が入っている（合算されるのは内訳の列だけ）。そのまま足しても二重に数えない
 - `muni_mesh` には市区町村コード `12999` `13199` `13999`（境界未定地域）がある。市区町村ではないので市外局番はない
 - 駅は国土数値情報の路線名（例：「4号線丸ノ内線」）。同じ駅コード・同じ路線が複数の線に分かれているものは 1 行にまとめ、線の長さで重み付けした中心を取る
+- 区市町村の境界（N03）の多角形の処理は shapely（data-prep だけの依存）。engine には多角形を渡さず、バス停の区市町村のような変換済みの値だけを渡す
 - メッシュのコードと緯度経度の変換は jismesh。配列を渡す版は要素が 1 つのとき numpy 2 で失敗するので、1 件ずつ呼んでいる
 
 ## 市外局番の表（manual/area_codes.csv）

@@ -7,15 +7,20 @@
 """
 
 import dataclasses
+import functools
 import json
 import math
 import re
+import sqlite3
+import unicodedata
+from contextlib import closing
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import pyarrow.parquet as pq
 
+from tkb_common.corporate_name import normalize_corporate_name
 from tkb_common.schemas import Clue, ClueType
 
 DATA_DIR = Path(__file__).resolve().parents[3] / "data" / "processed"
@@ -122,9 +127,26 @@ class Gazetteer:
     knowledge: Knowledge = field(default_factory=Knowledge)
     # 学校ごとに {"name", "kind"（大学・高等学校など）, "city", ...}。表がなければ空
     schools: list[dict[str, str]] = field(default_factory=list)
+    # 国土地理院の指定緊急避難場所・指定避難所。{"name", "kind", "muni_code", "city", ...}。
+    # 表がなければ空
+    shelters: list[dict[str, Any]] = field(default_factory=list)
+    # 国土数値情報のバス停留所（令和4年度版）。{"name", "operator", "cities"（1km メッシュに
+    # かかる区市町村の候補）, ...}。表がなければ空
+    bus_stops: list[dict[str, Any]] = field(default_factory=list)
+    # 国土数値情報の小学校区・中学校区（令和3年度版）。{"kind"（小学校・中学校）, "name", "city",
+    # "terms"（自治体ごとの利用条件）, "note"（条件の原文）}。表がなければ空
+    school_districts: list[dict[str, Any]] = field(default_factory=list)
+    # 国土数値情報の駅別乗降客数。駅コード → 1日の乗降客数（ridership_year 年度）。表がなければ空。
+    # 推定の結果には使わず、候補の説明に参考として添えるだけ
+    ridership: dict[str, int] = field(default_factory=dict)
+    ridership_year: int = 0
+    # 法人番号の公表データの SQLite（data-prep の corporations.sqlite）。行はメモリに載せず、
+    # 引くたびに読み取り専用で開く。なければ None
+    corporations_path: Path | None = None
 
     @classmethod
     def load(cls, data_dir: Path = DATA_DIR, knowledge: Knowledge | None = None) -> "Gazetteer":
+        ridership_rows = _optional_table(data_dir / "ridership.parquet")
         meshes: dict[str, set[str]] = {}
         for row in pq.read_table(data_dir / "muni_mesh.parquet").to_pylist():
             meshes.setdefault(row["muni_code"], set()).add(row["mesh_1km"])
@@ -133,10 +155,18 @@ class Gazetteer:
             postal=pq.read_table(data_dir / "postal.parquet").to_pylist(),
             muni_meshes=meshes,
             knowledge=Knowledge.load() if knowledge is None else knowledge,
-            schools=(
-                pq.read_table(data_dir / "schools.parquet").to_pylist()
-                if (data_dir / "schools.parquet").is_file()
-                else []
+            schools=_optional_table(data_dir / "schools.parquet"),
+            shelters=_optional_table(data_dir / "shelters.parquet", SHELTER_COLUMNS),
+            bus_stops=_optional_table(data_dir / "bus_stops.parquet", BUS_STOP_COLUMNS),
+            school_districts=_optional_table(
+                data_dir / "school_districts.parquet", SCHOOL_DISTRICT_COLUMNS
+            ),
+            ridership={str(r["station_code"]): int(r["passengers"]) for r in ridership_rows},
+            ridership_year=max((int(r["year"]) for r in ridership_rows), default=0),
+            corporations_path=(
+                data_dir / "corporations.sqlite"
+                if (data_dir / "corporations.sqlite").is_file()
+                else None
             ),
         )
 
@@ -163,6 +193,111 @@ class Gazetteer:
         longest = max((len(v) for v, _ in hits), default=0)
         found = {s["name"]: s for v, s in hits if len(v) == longest}
         return list(found.values())
+
+    @functools.cached_property
+    def _shelters_by_variant(self) -> dict[str, list[dict[str, Any]]]:
+        by_variant: dict[str, list[dict[str, Any]]] = {}
+        for row in self.shelters:
+            for variant in shelter_name_variants(str(row["name"])):
+                by_variant.setdefault(variant, []).append(row)
+        return by_variant
+
+    def shelters_named_at(self, text: str) -> dict[str, list[dict[str, Any]]]:
+        """文字の先頭に名前が書かれた避難所。名前の核（shelter_core_name）→ 同じ核の施設の行。
+        先頭の「指定避難所」などの見出しと「〇〇区立」は飛ばす。長い名前の一部
+        （「新宿中央公園」の「中央公園」）には合わせないよう、先頭からの一致だけを見て、
+        いちばん長い名前を返す。同じ名前の施設が別の区市町村にもあるときは、その行がすべて入る
+        （使う側で競合として捨てる）。"""
+        normalized = _SHELTER_LABEL.sub("", _normalize_name(text))
+        heads = {normalized, _MUNICIPAL_PREFIX.sub("", normalized)}
+        found = {
+            v: rows
+            for v, rows in self._shelters_by_variant.items()
+            if any(head.startswith(v) for head in heads)
+        }
+        longest = max((len(v) for v in found), default=0)
+        cores = {
+            shelter_core_name(str(row["name"]))
+            for v, rows in found.items()
+            if len(v) == longest
+            for row in rows
+        }
+        return {core: self._shelters_by_core[core] for core in cores}
+
+    @functools.cached_property
+    def _shelters_by_core(self) -> dict[str, list[dict[str, Any]]]:
+        by_core: dict[str, list[dict[str, Any]]] = {}
+        for row in self.shelters:
+            by_core.setdefault(shelter_core_name(str(row["name"])), []).append(row)
+        return by_core
+
+    @functools.cached_property
+    def _bus_stops_by_name(self) -> dict[str, list[dict[str, Any]]]:
+        by_name: dict[str, list[dict[str, Any]]] = {}
+        for row in self.bus_stops:
+            name = _normalize_name(re.sub(r"[（(].*?[）)]", "", str(row["name"])))
+            if len(name) >= MIN_BUS_STOP_NAME_LENGTH:
+                by_name.setdefault(name, []).append(row)
+        return by_name
+
+    def bus_stops_named_at(self, text: str) -> dict[str, list[dict[str, Any]]]:
+        """文字の先頭に名前が書かれたバス停。名前 → 同じ名前のバス停の行（事業者・場所が違うものも
+        すべて）。長い名前の一部（「西根津一丁目」の「根津一丁目」）には合わせない。"""
+        head = _normalize_name(text)
+        found = [name for name in self._bus_stops_by_name if head.startswith(name)]
+        if not found:
+            return {}
+        name = max(found, key=len)
+        return {name: self._bus_stops_by_name[name]}
+
+    @functools.cached_property
+    def _districts_by_name(self) -> dict[str, list[dict[str, Any]]]:
+        by_name: dict[str, list[dict[str, Any]]] = {}
+        for row in self.school_districts:
+            by_name.setdefault(_school_key(str(row["name"])), []).append(row)
+        return by_name
+
+    def districts_of_school(self, name: str) -> list[dict[str, Any]]:
+        """学校名（「文京区立根津小学校」「根津小」も）の学区の行。同じ名前の学校がほかの
+        区市町村にもあれば、その行もすべて入る（使う側で競合として捨てる）。"""
+        return self._districts_by_name.get(_school_key(name), [])
+
+    def passengers_of(self, station_name: str) -> int | None:
+        """駅（同じ名前の駅をまとめたもの）の1日の乗降客数。各社の合計。同じ名前の別の場所の駅が
+        あるか、乗降客数がなければ None。"""
+        if not self.ridership or self.station_point(station_name) is None:
+            return None
+        codes = {
+            str(s["station_code"])
+            for s in self.stations
+            if s["station_name"] == station_name and s.get("station_code")
+        }
+        counts = [self.ridership[c] for c in codes if c in self.ridership]
+        return sum(counts) if counts else None
+
+    def corporations_named(self, name: str) -> list[tuple[str, str]]:
+        """正規化した名前が一致する法人の (法人番号, 商号)。表がなければ空。部分一致はしない。"""
+        normalized = normalize_corporate_name(name)
+        if not normalized:
+            return []
+        rows = self._query_corporations(
+            "SELECT DISTINCT corporate_number, name FROM corporations WHERE normalized_name = ?",
+            (normalized,),
+        )
+        return [(str(number), str(legal)) for number, legal in rows]
+
+    def corporations_as_of(self) -> str:
+        """法人番号の表の時点（「2026-10-30」）。わからなければ空。"""
+        rows = self._query_corporations("SELECT value FROM meta WHERE key = 'as_of'", ())
+        return str(rows[0][0]) if rows else ""
+
+    def _query_corporations(self, sql: str, params: tuple[str, ...]) -> list[tuple[Any, ...]]:
+        if self.corporations_path is None:
+            return []
+        # 本番では読み取り専用でマウントされるので、immutable で開く（ロックのファイルを作らない）
+        uri = f"{self.corporations_path.resolve().as_uri()}?mode=ro&immutable=1"
+        with closing(sqlite3.connect(uri, uri=True)) as db:
+            return db.execute(sql, params).fetchall()
 
     def postal_rows(self, code: str) -> list[dict[str, str]]:
         """ハイフンなし7桁の郵便番号の行。"""
@@ -244,6 +379,62 @@ def school_name_variants(name: str) -> set[str]:
             if name.startswith(("東京都立", "都立")):
                 variants.add("都立" + stem + short)
     return {v for v in variants if len(v) > 2}
+
+
+# 避難所の名前から取り除く、建物や場所の部分（「〇〇小学校体育館」→「〇〇小学校」）
+_SHELTER_PART = re.compile(
+    r"(?:の)?(?:第?[0-9一二三]?体育館|屋内運動場|校庭|グラウンド|グランド|校舎|講堂|運動場|プール)$"
+)
+_MUNICIPAL_PREFIX = re.compile(r"^(?:.{1,6}?[都道府県区市町村]立)")
+# 掲示などで名前の前に書かれる見出し（「指定避難所 〇〇小学校」）
+_SHELTER_LABEL = re.compile(r"^(?:[指定広域緊急一時]{0,6}避難(?:場所|所)[:：・]?)+")
+# 手がかりの文字に合わせる名前の最短の長さ（「西公園」のような短い名前は合わせない）
+MIN_SHELTER_NAME_LENGTH = 4
+# バス停の名前の最短の長さ（「本町」「駅前」のような短い名前は合わせない）
+MIN_BUS_STOP_NAME_LENGTH = 3
+
+
+def shelter_core_name(name: str) -> str:
+    """括弧書き、建物の部分、「〇〇区立」を落とした名前。同じ施設の書き方の違いをまとめる。"""
+    base = _normalize_name(re.sub(r"[（(].*?[）)]", "", name))
+    return _MUNICIPAL_PREFIX.sub("", _SHELTER_PART.sub("", base))
+
+
+def shelter_name_variants(name: str) -> set[str]:
+    """避難所の名前から、投稿や写真に出てきそうな書き方。括弧書き、「〇〇区立」、
+    「体育館」などの建物の部分を落とした形も入れる。短すぎるものは入れない。"""
+    base = _normalize_name(re.sub(r"[（(].*?[）)]", "", name))
+    variants = {base}
+    for v in list(variants):
+        variants.add(_SHELTER_PART.sub("", v))
+    for v in list(variants):
+        variants.add(_MUNICIPAL_PREFIX.sub("", v))
+    return {v for v in variants if len(v) >= MIN_SHELTER_NAME_LENGTH}
+
+
+def _normalize_name(text: str) -> str:
+    """互換漢字、「ヶ」と「ケ」、空白をそろえる。"""
+    return re.sub(r"\s", "", unicodedata.normalize("NFKC", text)).replace("ヶ", "ケ")
+
+
+def _optional_table(path: Path, columns: list[str] | None = None) -> list[dict[str, Any]]:
+    """公開データの表は、ないとき（テスト、CI、取得前）は空として扱う。columns を渡すと、
+    推定に使う列だけを読む（api の常駐メモリを減らすため。座標などは読まない）。"""
+    return pq.read_table(path, columns=columns).to_pylist() if path.is_file() else []
+
+
+# 公開データの表から読む列（推定に使うものだけ）
+SHELTER_COLUMNS = ["name", "kind", "city"]
+BUS_STOP_COLUMNS = ["name", "operator", "cities"]
+SCHOOL_DISTRICT_COLUMNS = ["kind", "name", "city", "terms", "note"]
+
+
+def _school_key(name: str) -> str:
+    """学校名を引くための形。「〇〇区立」を落とし、「根津小」「根津中」は「〜学校」にそろえる。"""
+    key = _MUNICIPAL_PREFIX.sub("", _normalize_name(name))
+    if key.endswith(("小", "中")):
+        key += "学校"
+    return key
 
 
 # 同じ名前の駅をまとめるとき、中心からこれより離れた行があれば別の場所の駅とみなす

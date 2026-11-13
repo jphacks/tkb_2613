@@ -52,3 +52,92 @@ def test_session_ttl_minutes_sets_the_session_store_lifetime(
     assert settings.session_ttl_minutes == 60
     assert app.state.sessions._ttl == 60 * 60
     app.state.sessions.close()
+
+
+def test_aws_env_example_keeps_live_x_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tkb_api.routes.x import _live_ready
+
+    env_file = Path(__file__).resolve().parents[2] / "infra" / "aws.env.example"
+    for line in env_file.read_text(encoding="utf-8").splitlines():
+        key, sep, value = line.partition("=")
+        if sep and key.startswith("X_") and not line.startswith("#"):
+            monkeypatch.setenv(key, value)
+
+    settings = Settings()
+
+    assert settings.x_use_case_approved is False
+    assert settings.x_paid_reads_approved is False
+    assert settings.x_mock_mode is True
+    assert _live_ready(settings) is False
+
+
+def test_x_live_flags_default_to_off() -> None:
+    from tkb_api.routes.x import _live_ready
+
+    settings = Settings(_env_file=None)
+
+    assert settings.x_use_case_approved is False
+    assert settings.x_paid_reads_approved is False
+    assert settings.x_query_logs_redacted is False
+    assert settings.x_mock_mode is True
+    assert _live_ready(settings) is False
+
+
+def _aws_example_env(monkeypatch: pytest.MonkeyPatch, prefixes: tuple[str, ...]) -> None:
+    env_file = Path(__file__).resolve().parents[2] / "infra" / "aws.env.example"
+    for line in env_file.read_text(encoding="utf-8").splitlines():
+        key, sep, value = line.partition("=")
+        if sep and key.startswith(prefixes) and not line.startswith("#"):
+            monkeypatch.setenv(key, value)
+
+
+def test_aws_env_example_sets_the_public_origin_for_the_x_demo(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # 未設定だと http://localhost:3000 になり、/api/x の POST がすべて 403 になる
+    _aws_example_env(monkeypatch, ("X_", "THREADS_", "COOKIE_SECURE"))
+
+    settings = Settings(_env_file=None)
+
+    assert settings.x_public_origin.startswith("https://")
+    assert settings.x_callback_url == f"{settings.x_public_origin}/api/x/callback"
+    assert settings.origin_warnings() == []
+
+
+def test_production_warns_when_the_x_demo_origin_is_still_local() -> None:
+    settings = Settings(
+        _env_file=None, cookie_secure=True, x_mock_mode=True, threads_mock_mode=False
+    )
+
+    [warning] = settings.origin_warnings()
+    assert "X_PUBLIC_ORIGIN" in warning
+
+
+def test_production_warns_when_open_threads_has_a_local_origin() -> None:
+    public = "https://d111.cloudfront.net"
+    settings = Settings(
+        _env_file=None, cookie_secure=True, x_public_origin=public, threads_mock_mode=True
+    )
+
+    [warning] = settings.origin_warnings()
+    assert "THREADS_PUBLIC_ORIGIN" in warning
+
+
+def test_no_origin_warning_locally_or_when_the_demos_are_closed() -> None:
+    assert Settings(_env_file=None).origin_warnings() == []  # COOKIE_SECURE=0（手元）
+    closed = Settings(
+        _env_file=None, cookie_secure=True, x_mock_mode=False, threads_mock_mode=False
+    )
+    assert closed.origin_warnings() == []
+
+
+def test_origin_warning_is_logged_at_startup_without_stopping(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    settings = Settings(_env_file=None, cookie_secure=True, x_mock_mode=True, share_enabled=False)
+
+    with caplog.at_level("WARNING", logger="tkb_api"):
+        app = create_app(settings)
+
+    assert any("X_PUBLIC_ORIGIN" in record.getMessage() for record in caplog.records)
+    app.state.sessions.close()

@@ -5,8 +5,10 @@ import { type DetectResponse, isDetectResponse } from "@/types/clue";
 import {
   type Deletion,
   type DiagnoseEvent,
+  type DemoDiagnosis,
   type DiagnosisSnapshot,
   isDeletion,
+  isDemoDiagnosis,
   isDiagnosisSnapshot,
   isSimulation,
   type Simulation,
@@ -60,10 +62,10 @@ export async function checkDraft(
   }
   if (res.status === 401) throw new ApiError("unauthorized", "ログインし直してください", 401);
   if (!res.ok) {
-    const message = res.status === 503
-      ? "モックモードでは下書き確認を使えません。実アカウントの診断環境でお試しください。"
-      : `下書きを確認できませんでした（${res.status}）`;
-    throw new ApiError("server", message, res.status);
+    // 診断前（diagnosis_required）・混雑・公開時間外・モデルの準備中は、理由ごとの文言にする
+    const refusal = await readRefusal(res);
+    if (refusal) throw new ApiError("server", refusalMessage(refusal), res.status, refusal.code);
+    throw new ApiError("server", `下書きを確認できませんでした（${res.status}）`, res.status);
   }
   const data: unknown = await res.json().catch(() => undefined);
   if (!isDraftCheckResponse(data)) {
@@ -234,11 +236,13 @@ export async function getDiagnosis({
 export interface Features {
   readonly share_enabled: boolean;
   readonly auth_mode?: "oauth" | "app_password";
+  /** 公開Web検索（Brave）が使えるか。キーの値は返らない。ないときは使えない側に倒す */
+  readonly public_web_lookup_available?: boolean;
 }
 
 /**
- * 機能のオン・オフを読む。ログインは不要。読めなかったときは、閲覧リンクを出さない側に倒す
- * （公開中の本番ではオフにしているため）。
+ * 機能のオン・オフを読む。ログインは不要。読めなかったときは、閲覧リンクと公開Web検索の同意欄を
+ * 出さない側に倒す（公開中の本番ではオフにしているため）。
  */
 export async function getFeatures({ baseUrl = DEFAULT_BASE_URL, signal }: RequestOptions = {}): Promise<Features> {
   const off: Features = { share_enabled: false };
@@ -249,7 +253,13 @@ export async function getFeatures({ baseUrl = DEFAULT_BASE_URL, signal }: Reques
     if (typeof data === "object" && data !== null && "share_enabled" in data && typeof data.share_enabled === "boolean") {
       const mode = "auth_mode" in data && (data.auth_mode === "oauth" || data.auth_mode === "app_password")
         ? data.auth_mode : undefined;
-      return mode ? { share_enabled: data.share_enabled, auth_mode: mode } : { share_enabled: data.share_enabled };
+      const publicWeb = "public_web_lookup_available" in data && typeof data.public_web_lookup_available === "boolean"
+        ? data.public_web_lookup_available : undefined;
+      return {
+        share_enabled: data.share_enabled,
+        ...(mode ? { auth_mode: mode } : {}),
+        ...(publicWeb === undefined ? {} : { public_web_lookup_available: publicWeb }),
+      };
     }
     return off;
   } catch {
@@ -444,4 +454,47 @@ async function postDeleteIds(
   }
 
   return res.json().catch(() => undefined);
+}
+
+/**
+ * ログインなしの体験デモの結果（架空アカウント）。Cookie は送らない。モデルにも Bluesky にも接続しない。
+ */
+export async function getDemoDiagnosis({
+  baseUrl = DEFAULT_BASE_URL,
+  signal,
+}: RequestOptions = {}): Promise<DemoDiagnosis> {
+  let res: Response;
+  try {
+    res = await fetch(`${baseUrl}/api/demo/diagnosis`, { credentials: "omit", signal });
+  } catch {
+    throw new ApiError("network", messages.errors.network);
+  }
+  if (!res.ok) throw new ApiError("server", messages.errors.server(res.status), res.status);
+  const data: unknown = await res.json().catch(() => undefined);
+  if (!isDemoDiagnosis(data)) throw new ApiError("invalid_response", messages.errors.invalidResponse);
+  return data;
+}
+
+/** 体験デモで、選んだ投稿を消したらどうなるか。実際には何も消さない。clueCount はデモの手がかりの数 */
+export async function simulateDemo(
+  deleteIds: readonly string[],
+  clueCount: number,
+  { baseUrl = DEFAULT_BASE_URL, signal }: RequestOptions = {},
+): Promise<Simulation> {
+  let res: Response;
+  try {
+    res = await fetch(`${baseUrl}/api/demo/simulate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ delete: deleteIds }),
+      credentials: "omit",
+      signal,
+    });
+  } catch {
+    throw new ApiError("network", messages.errors.network);
+  }
+  if (!res.ok) throw new ApiError("server", messages.errors.server(res.status), res.status);
+  const data: unknown = await res.json().catch(() => undefined);
+  if (!isSimulation(data, clueCount)) throw new ApiError("invalid_response", messages.errors.invalidResponse);
+  return data;
 }

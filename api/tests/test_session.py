@@ -13,6 +13,9 @@ from tkb_api.config import Settings, get_settings
 from tkb_api.main import create_app
 from tkb_api.routes.session import MOCK_DID, SESSION_COOKIE, current_session, get_login
 
+# ブラウザは POST・DELETE に Origin を付ける（元に戻せない操作は Origin を確かめる）
+BROWSER_ORIGIN = {"Origin": "http://localhost:3000"}
+
 PASSWORD = "correct horse battery staple"  # noqa: S105  テスト用の架空の値
 
 
@@ -26,7 +29,7 @@ def _client(settings: Settings, login: bluesky.LoginFn | None = None) -> TestCli
     def me(session: Annotated[BlueskySession, Depends(current_session)]) -> dict[str, str]:
         return {"did": session.did}
 
-    return TestClient(app)
+    return TestClient(app, headers=BROWSER_ORIGIN)
 
 
 @pytest.fixture
@@ -241,7 +244,7 @@ def test_relogin_revokes_previous_session(client: TestClient) -> None:
 
 def test_lifespan_closes_session_store() -> None:
     app = create_app(Settings(mock_mode=True))
-    with TestClient(app) as client:
+    with TestClient(app, headers=BROWSER_ORIGIN) as client:
         res = client.post(
             "/api/session", json={"handle": "alice.bsky.social", "password": PASSWORD}
         )

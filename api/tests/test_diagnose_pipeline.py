@@ -155,7 +155,10 @@ async def test_events_keep_failed_posts_and_index_conclusions_into_all_clues() -
     assert result["clues"] == [clue.model_dump(mode="json")]
     assert len(result["profile_claims"]) == 24
     assert result["profile_relations"] == []
-    assert all(claim["status"] == "unknown" and claim["candidates"] == [] for claim in result["profile_claims"])
+    assert all(
+        claim["status"] == "unknown" and claim["candidates"] == []
+        for claim in result["profile_claims"]
+    )
     assert "home_room" not in {claim["attribute"] for claim in result["profile_claims"]}
     assert result["profile_claim_suggestions"] == []
     assert saved_result["clues"] == [clue]
@@ -164,7 +167,9 @@ async def test_events_keep_failed_posts_and_index_conclusions_into_all_clues() -
     assert all(claim.status == "unknown" for claim in saved_result["profile_claims"])
     routine = next(c for c in result["conclusions"] if c["attribute"] == "routine")
     assert routine["clue_indices"] == [0]
-    assert set(routine) == {"rule", "attribute", "value", "clue_indices", "note"}
+    assert set(routine) == {"rule", "attribute", "value", "clue_indices", "note", "confidence"}
+    # 根拠は確からしさ 0.9 の手がかり1件だけなので、合成しても 0.9
+    assert routine["confidence"] == 0.9
 
 
 @pytest.mark.anyio
@@ -201,3 +206,40 @@ async def test_events_log_timings_without_post_contents(caplog: pytest.LogCaptur
     ]
     # 投稿の ID・本文・手がかりの中身はログに出さない
     assert not any(post.post_id in m or "ジム" in m for m in messages)
+
+
+@pytest.mark.anyio
+async def test_events_run_inference_and_planning_off_the_event_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # 推理と危ない投稿の選び方は別のスレッドで動き、その間もイベントループは止まらない
+    import threading
+
+    from tkb_api import pipeline
+    from tkb_engine.rules import infer as real_infer
+
+    loop_thread = threading.get_ident()
+    threads: dict[str, int] = {}
+    real_plan_json = pipeline.plan_json
+
+    def infer(*args: Any) -> Any:
+        threads["infer"] = threading.get_ident()
+        return real_infer(*args)
+
+    def plan_json(*args: Any) -> Any:
+        threads["plan_json"] = threading.get_ident()
+        return real_plan_json(*args)
+
+    monkeypatch.setattr(pipeline, "infer", infer)
+    monkeypatch.setattr(pipeline, "plan_json", plan_json)
+    post = _post(0)
+    events = [
+        e
+        async for e in diagnose_events(
+            [post], _stream([PostExtraction(post_id=post.post_id, clues=[])]), Gazetteer()
+        )
+    ]
+
+    assert [name for name, _ in events][-3:] == ["conclusions", "plan", "done"]
+    assert set(threads) == {"infer", "plan_json"}
+    assert loop_thread not in threads.values()

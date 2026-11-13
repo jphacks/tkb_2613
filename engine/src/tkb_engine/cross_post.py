@@ -2,10 +2,8 @@
 
 import re
 import unicodedata
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
-from enum import StrEnum
+from collections.abc import Collection, Mapping, Sequence
+from datetime import UTC, date, datetime, timedelta, timezone
 from itertools import combinations
 
 from tkb_common.schemas import (
@@ -13,6 +11,8 @@ from tkb_common.schemas import (
     Clue,
     ClueSource,
     ClueType,
+    EvidencePathProvenance,
+    EvidenceScope,
     Post,
     ProfileAttribute,
     ProfileCandidate,
@@ -20,42 +20,38 @@ from tkb_common.schemas import (
     ProfileCandidateSetStatus,
     ProfileEvidence,
     ProfileEvidencePath,
+    ProfileItem,
     ProfileRelation,
     ProfileRelationEndpoint,
     ProfileRelationEndpointKind,
     ProfileRelationKind,
-    EvidencePathProvenance,
-    ProfileItem,
-    EvidenceScope,
     ProfileStatus,
     WebFact,
     WebSourceKind,
     WebVerificationStatus,
 )
+from tkb_engine.child_school import BRIDGE_PREFIX as CHILD_SCHOOL_BRIDGE
+from tkb_engine.child_school import child_school_facts
+from tkb_engine.cross_post_facts import (
+    CrossPostFact,
+    FactRole,
+)
+from tkb_engine.cross_post_facts import (
+    forbidden_context as _forbidden_context,
+)
+from tkb_engine.cross_post_facts import (
+    is_distinctive_bridge as _is_distinctive_bridge,
+)
+from tkb_engine.cross_post_facts import (
+    matching_text_clue as _matching_text_clue,
+)
+from tkb_engine.cross_post_facts import (
+    normalize_bridge as _normalize_bridge,
+)
 from tkb_engine.gazetteer import Gazetteer
-
-
-class FactRole(StrEnum):
-    OWNER_RELATION = "owner_relation"
-    SPECIFIC_VALUE = "specific_value"
-    BRIDGE = "bridge"
-
-
-@dataclass(frozen=True)
-class CrossPostFact:
-    post_id: str | None
-    clue_index: int | None
-    role: FactRole
-    value: str
-    confidence: float
-    # An explicit phrase, identifier, or other observed bridge connecting this fact to the
-    # same owner-related entity. Do not use a mere visit, logo, or location coincidence.
-    bridge_id: str | None
-    owner_relation_explicit: bool = False
-    context: str = ""
-    excerpt: str = ""
-    related_evidence: tuple[ProfileEvidence, ...] = ()
-    source: str = "post_text"
+from tkb_engine.open_data import infer_registry_employer_claim, shelter_home_facts
+from tkb_engine.open_data_bus import bus_stop_home_facts
+from tkb_engine.open_data_school import add_school_district_residence
 
 
 def infer_cross_post_claim(
@@ -68,12 +64,18 @@ def infer_cross_post_claim(
     different posts, joined by the same explicit bridge. Any competing value invalidates the
     claim instead of choosing one. Confidence is the weakest fact on the AND path.
     """
-    if attribute not in {ProfileAttribute.RESIDENTIAL_AREA, ProfileAttribute.REGULAR_STATION, ProfileAttribute.HOME_NEAREST_STATION}:
+    if attribute not in {
+        ProfileAttribute.RESIDENTIAL_AREA,
+        ProfileAttribute.REGULAR_STATION,
+        ProfileAttribute.HOME_NEAREST_STATION,
+        ProfileAttribute.CHILD_SCHOOL,
+    }:
         raise ValueError("cross-post gate is only defined for supported cross-post attributes")
     expected_bridge = {
         ProfileAttribute.RESIDENTIAL_AREA: "home:",
         ProfileAttribute.REGULAR_STATION: "regular_station:",
         ProfileAttribute.HOME_NEAREST_STATION: "home_station:",
+        ProfileAttribute.CHILD_SCHOOL: CHILD_SCHOOL_BRIDGE,
     }[attribute]
     eligible = [
         f
@@ -183,15 +185,32 @@ def infer_cross_post_candidates(
     facts: list[CrossPostFact],
 ) -> list[ProfileItem]:
     """Return separately grounded values for an attribute without choosing by order."""
-    if attribute not in {ProfileAttribute.RESIDENTIAL_AREA, ProfileAttribute.REGULAR_STATION, ProfileAttribute.HOME_NEAREST_STATION}:
+    if attribute not in {
+        ProfileAttribute.RESIDENTIAL_AREA,
+        ProfileAttribute.REGULAR_STATION,
+        ProfileAttribute.HOME_NEAREST_STATION,
+        ProfileAttribute.CHILD_SCHOOL,
+    }:
         raise ValueError("cross-post gate is only defined for supported cross-post attributes")
-    expected_bridge = {ProfileAttribute.RESIDENTIAL_AREA: "home:", ProfileAttribute.REGULAR_STATION: "regular_station:", ProfileAttribute.HOME_NEAREST_STATION: "home_station:"}[attribute]
+    expected_bridge = {
+        ProfileAttribute.RESIDENTIAL_AREA: "home:",
+        ProfileAttribute.REGULAR_STATION: "regular_station:",
+        ProfileAttribute.HOME_NEAREST_STATION: "home_station:",
+        ProfileAttribute.CHILD_SCHOOL: CHILD_SCHOOL_BRIDGE,
+    }[attribute]
     eligible = [
-        fact for fact in facts
-        if fact.value.strip() and fact.bridge_id and fact.bridge_id.startswith(expected_bridge)
+        fact
+        for fact in facts
+        if fact.value.strip()
+        and fact.bridge_id
+        and fact.bridge_id.startswith(expected_bridge)
         and not _forbidden_context(fact.context)
     ]
-    anchors = [fact for fact in eligible if fact.role is FactRole.OWNER_RELATION and fact.owner_relation_explicit]
+    anchors = [
+        fact
+        for fact in eligible
+        if fact.role is FactRole.OWNER_RELATION and fact.owner_relation_explicit
+    ]
     values = [fact for fact in eligible if fact.role is FactRole.SPECIFIC_VALUE]
     bridge_facts = [fact for fact in eligible if fact.role is FactRole.BRIDGE]
     paths_by_value: dict[str, list[list[CrossPostFact]]] = {}
@@ -207,10 +226,14 @@ def infer_cross_post_candidates(
             if anchor.post_id is not None and value_fact.post_id is not None:
                 paths_by_value.setdefault(normalized, []).append([anchor, value_fact])
                 continue
-            required_post_ids = {fact.post_id for fact in (anchor, value_fact) if fact.post_id is not None}
+            required_post_ids = {
+                fact.post_id for fact in (anchor, value_fact) if fact.post_id is not None
+            }
             bridge_posts = [
-                fact for fact in bridge_facts
-                if fact.bridge_id == anchor.bridge_id and fact.post_id is not None
+                fact
+                for fact in bridge_facts
+                if fact.bridge_id == anchor.bridge_id
+                and fact.post_id is not None
                 and fact.post_id not in required_post_ids
             ]
             needed = max(1, 2 - len(required_post_ids))
@@ -225,21 +248,37 @@ def infer_cross_post_candidates(
             continue
         unique_paths: dict[tuple[tuple[object, ...], ...], list[CrossPostFact]] = {}
         for path in paths:
-            signature = tuple(sorted((fact.source, fact.post_id or "", fact.clue_index if fact.clue_index is not None else -1,
-                                      fact.role.value, fact.bridge_id or "", fact.value, fact.excerpt) for fact in path))
+            signature = tuple(
+                sorted(
+                    (
+                        fact.source,
+                        fact.post_id or "",
+                        fact.clue_index if fact.clue_index is not None else -1,
+                        fact.role.value,
+                        fact.bridge_id or "",
+                        fact.value,
+                        fact.excerpt,
+                    )
+                    for fact in path
+                )
+            )
             unique_paths[signature] = path
         evidence_paths = [
             ProfileEvidencePath(
-                evidence=[ref for fact in path for ref in [
-                    ProfileEvidence(
-                        post_id=fact.post_id if fact.source != "profile_text" else None,
-                        clue_index=fact.clue_index,
-                        required=True,
-                        source=fact.source if fact.clue_index is None else "clue",
-                        excerpt=fact.excerpt if fact.clue_index is None else None,
-                    ),
-                    *fact.related_evidence,
-                ]],
+                evidence=[
+                    ref
+                    for fact in path
+                    for ref in [
+                        ProfileEvidence(
+                            post_id=fact.post_id if fact.source != "profile_text" else None,
+                            clue_index=fact.clue_index,
+                            required=True,
+                            source=fact.source if fact.clue_index is None else "clue",
+                            excerpt=fact.excerpt if fact.clue_index is None else None,
+                        ),
+                        *fact.related_evidence,
+                    ]
+                ],
                 confidence=min(fact.confidence for fact in path),
                 provenance=EvidencePathProvenance.COMBINED_INFERENCE,
             )
@@ -248,16 +287,63 @@ def infer_cross_post_candidates(
         confidence = max(path.confidence for path in evidence_paths)
         if confidence < 0.5:
             continue
-        results.append(ProfileItem(
-            attribute=attribute,
-            value=values_by_key[normalized],
-            confidence=confidence,
-            status=ProfileStatus.WEAK,
-            evidence=[ref for path in evidence_paths for ref in path.evidence],
-            evidence_paths=evidence_paths,
-            assessment=ClaimAssessment(minimal_scope=EvidenceScope.BLUESKY, harm_status="unknown"),
-        ))
+        results.append(
+            ProfileItem(
+                attribute=attribute,
+                value=values_by_key[normalized],
+                confidence=confidence,
+                status=ProfileStatus.WEAK,
+                evidence=[ref for path in evidence_paths for ref in path.evidence],
+                evidence_paths=evidence_paths,
+                assessment=ClaimAssessment(
+                    minimal_scope=EvidenceScope.BLUESKY, harm_status="unknown"
+                ),
+            )
+        )
     return results
+
+
+def infer_child_school_claims(
+    posts: list[Post], clues: list[Clue], gazetteer: Gazetteer
+) -> list[ProfileItem]:
+    """Infer child school candidates only through the explicit cross-post bridge."""
+    claims = infer_cross_post_candidates(
+        ProfileAttribute.CHILD_SCHOOL, child_school_facts(posts, clues, gazetteer)
+    )
+    return [
+        claim.model_copy(
+            update={
+                "assessment": ClaimAssessment(
+                    minimal_scope=EvidenceScope.BLUESKY,
+                    harm_status="prerequisites_unmet",
+                    harm_scenario="子どもの通う学校がわかると、登下校の時間や場所で子どもに近づく、"
+                    "学校を名乗って保護者をだますなどの材料になりうる",
+                    harm_prerequisites=[
+                        "子どもを識別できる情報が別途得られる",
+                        "攻撃者がその情報を悪用する",
+                    ],
+                )
+            }
+        )
+        for claim in claims
+    ]
+
+
+def _realtime_path_observed_at(
+    path: ProfileEvidencePath, posts_by_id: Mapping[str, Post]
+) -> datetime | None:
+    """Return the newest timestamp cited by one complete realtime evidence path."""
+    timestamps = [
+        posts_by_id[post_id].created_at
+        for post_id in {
+            reference.post_id
+            for reference in path.evidence
+            if reference.post_id is not None and reference.post_id in posts_by_id
+        }
+    ]
+    if not timestamps:
+        return None
+    return max(timestamps)
 
 
 def evaluate_profile_candidates(
@@ -272,12 +358,20 @@ def evaluate_profile_candidates(
     to three evidence-sufficient candidates regardless of score gap. A found leader keeps
     same-grade contenders within 0.15 score points. Scores are provisional rule scores.
     """
-    attributes = [attribute for attribute in ProfileAttribute if attribute is not ProfileAttribute.HOME_ROOM]
-    grouped: dict[ProfileAttribute, dict[str, ProfileItem]] = {attribute: {} for attribute in attributes}
+    attributes = [
+        attribute for attribute in ProfileAttribute if attribute is not ProfileAttribute.HOME_ROOM
+    ]
+    grouped: dict[ProfileAttribute, dict[str, ProfileItem]] = {
+        attribute: {} for attribute in attributes
+    }
     post_by_id = {post.post_id: post for post in posts}
     for claim in claims:
-        if (claim.attribute not in grouped or claim.status is ProfileStatus.UNKNOWN or not claim.value
-                or not claim.evidence_paths):
+        if (
+            claim.attribute not in grouped
+            or claim.status is ProfileStatus.UNKNOWN
+            or not claim.value
+            or not claim.evidence_paths
+        ):
             continue
         normalized = unicodedata.normalize("NFKC", claim.value).lower().strip()
         current = grouped[claim.attribute].get(normalized)
@@ -286,21 +380,35 @@ def evaluate_profile_candidates(
         else:
             paths = [*current.evidence_paths, *claim.evidence_paths]
             unique_paths = {
-                (path.provenance.value, tuple(
-                    (reference.source.value, reference.post_id or "", reference.clue_index,
-                     reference.web_fact_id or "", reference.excerpt or "") for reference in path.evidence
-                )): path
+                (
+                    path.provenance.value,
+                    tuple(
+                        (
+                            reference.source.value,
+                            reference.post_id or "",
+                            reference.clue_index,
+                            reference.web_fact_id or "",
+                            reference.excerpt or "",
+                        )
+                        for reference in path.evidence
+                    ),
+                ): path
                 for path in paths
             }
             kept_paths = list(unique_paths.values())
             stronger = claim if claim.confidence > current.confidence else current
-            grouped[claim.attribute][normalized] = stronger.model_copy(update={
-                "confidence": max(current.confidence, claim.confidence),
-                "status": (ProfileStatus.FOUND if ProfileStatus.FOUND in {current.status, claim.status}
-                           else ProfileStatus.WEAK),
-                "evidence_paths": kept_paths,
-                "evidence": [reference for path in kept_paths for reference in path.evidence],
-            })
+            grouped[claim.attribute][normalized] = stronger.model_copy(
+                update={
+                    "confidence": max(current.confidence, claim.confidence),
+                    "status": (
+                        ProfileStatus.FOUND
+                        if ProfileStatus.FOUND in {current.status, claim.status}
+                        else ProfileStatus.WEAK
+                    ),
+                    "evidence_paths": kept_paths,
+                    "evidence": [reference for path in kept_paths for reference in path.evidence],
+                }
+            )
 
     result: list[ProfileCandidateSet] = []
     counter_by_attribute_value, conflicts_by_attribute = _collect_counter_evidence(posts, clues)
@@ -308,35 +416,63 @@ def evaluate_profile_candidates(
         conflict_reason = (conflict_reasons or {}).get(attribute)
         if conflict_reason:
             conflicting_evidence = conflicts_by_attribute.get(attribute, [])
-            result.append(ProfileCandidateSet(
-                attribute=attribute,
-                status=ProfileCandidateSetStatus.CONFLICT if conflicting_evidence else ProfileCandidateSetStatus.UNKNOWN,
-                candidates=[],
-                candidate_pool=[],
-                conflicting_evidence=conflicting_evidence,
-                reason=conflict_reason if conflicting_evidence else "conflict_not_evidenced",
-            ))
+            result.append(
+                ProfileCandidateSet(
+                    attribute=attribute,
+                    status=ProfileCandidateSetStatus.CONFLICT
+                    if conflicting_evidence
+                    else ProfileCandidateSetStatus.UNKNOWN,
+                    candidates=[],
+                    candidate_pool=[],
+                    conflicting_evidence=conflicting_evidence,
+                    reason=conflict_reason if conflicting_evidence else "conflict_not_evidenced",
+                )
+            )
             continue
-        ranked = sorted(grouped[attribute].values(), key=lambda claim: (-claim.confidence, unicodedata.normalize("NFKC", claim.value or "").lower()))
+        ranked = sorted(
+            grouped[attribute].values(),
+            key=lambda claim: (
+                -claim.confidence,
+                unicodedata.normalize("NFKC", claim.value or "").lower(),
+            ),
+        )
         if not ranked:
-            result.append(ProfileCandidateSet(attribute=attribute, status=ProfileCandidateSetStatus.UNKNOWN,
-                                              candidates=[], candidate_pool=[],
-                                              conflicting_evidence=conflicts_by_attribute.get(attribute, []),
-                                              reason="explicit_negation" if conflicts_by_attribute.get(attribute) else "no_grounded_rule"))
+            result.append(
+                ProfileCandidateSet(
+                    attribute=attribute,
+                    status=ProfileCandidateSetStatus.UNKNOWN,
+                    candidates=[],
+                    candidate_pool=[],
+                    conflicting_evidence=conflicts_by_attribute.get(attribute, []),
+                    reason="explicit_negation"
+                    if conflicts_by_attribute.get(attribute)
+                    else "no_grounded_rule",
+                )
+            )
             continue
         # If evidence grades differ, or the runner-up is materially weaker, show only the
         # strongest value while preserving its candidate (not found-fact) status.
         strongest = ranked[0]
-        def make_candidate(claim: ProfileItem, rank: int) -> ProfileCandidate:
+
+        def make_candidate(
+            claim: ProfileItem, rank: int, candidate_attribute: ProfileAttribute = attribute
+        ) -> ProfileCandidate:
             observed_at = None
-            if attribute is ProfileAttribute.REALTIME_LOCATION:
-                observed_at = next(
-                    (post_by_id[reference.post_id].created_at
-                     for reference in claim.evidence if reference.post_id in post_by_id),
-                    None,
+            if candidate_attribute is ProfileAttribute.REALTIME_LOCATION:
+                observed_at = max(
+                    (
+                        timestamp
+                        for path in claim.evidence_paths
+                        if (timestamp := _realtime_path_observed_at(path, post_by_id)) is not None
+                    ),
+                    default=None,
                 )
             counter_evidence = counter_by_attribute_value.get(
-                (attribute, unicodedata.normalize("NFKC", claim.value or "").lower().strip()), []
+                (
+                    candidate_attribute,
+                    unicodedata.normalize("NFKC", claim.value or "").lower().strip(),
+                ),
+                [],
             )
             return ProfileCandidate(
                 rank=rank,
@@ -349,24 +485,41 @@ def evaluate_profile_candidates(
                 observed_at=observed_at,
                 counter_evidence=counter_evidence,
             )
+
         candidate_pool = [make_candidate(claim, rank) for rank, claim in enumerate(ranked, start=1)]
         if strongest.status is ProfileStatus.WEAK:
-            eligible = [candidate for candidate in candidate_pool if candidate.status is ProfileStatus.WEAK]
+            eligible = [
+                candidate for candidate in candidate_pool if candidate.status is ProfileStatus.WEAK
+            ]
         else:
-            eligible = [candidate for candidate in candidate_pool
-                        if candidate.status is strongest.status
-                        and strongest.confidence - candidate.confidence <= 0.15]
+            eligible = [
+                candidate
+                for candidate in candidate_pool
+                if candidate.status is strongest.status
+                and strongest.confidence - candidate.confidence <= 0.15
+            ]
         candidates = eligible[:3]
-        result.append(ProfileCandidateSet(attribute=attribute,
-            status=ProfileCandidateSetStatus.AMBIGUOUS if len(candidates) > 1 else ProfileCandidateSetStatus.CANDIDATE,
-            candidates=candidates, candidate_pool=candidate_pool,
-            conflicting_evidence=conflicts_by_attribute.get(attribute, []), reason=None))
+        result.append(
+            ProfileCandidateSet(
+                attribute=attribute,
+                status=ProfileCandidateSetStatus.AMBIGUOUS
+                if len(candidates) > 1
+                else ProfileCandidateSetStatus.CANDIDATE,
+                candidates=candidates,
+                candidate_pool=candidate_pool,
+                conflicting_evidence=conflicts_by_attribute.get(attribute, []),
+                reason=None,
+            )
+        )
     return result
 
 
 def _collect_counter_evidence(
     posts: Sequence[Post], clues: Sequence[Clue]
-) -> tuple[dict[tuple[ProfileAttribute, str], list[ProfileEvidence]], dict[ProfileAttribute, list[ProfileEvidence]]]:
+) -> tuple[
+    dict[tuple[ProfileAttribute, str], list[ProfileEvidence]],
+    dict[ProfileAttribute, list[ProfileEvidence]],
+]:
     """Retain evidence for explicit denials even when they disqualify a candidate."""
     by_value: dict[tuple[ProfileAttribute, str], list[ProfileEvidence]] = {}
     by_attribute: dict[ProfileAttribute, list[ProfileEvidence]] = {}
@@ -388,14 +541,24 @@ def _collect_counter_evidence(
                 continue
             captured_value = captured_value.removesuffix("です").removesuffix("だ").strip()
             for index, clue in enumerate(clues):
-                if (clue.post_id != post.post_id or clue.type not in allowed_types
-                        or clue.confidence < 0.5
-                        or _normalize_bridge(clue.value) != _normalize_bridge(captured_value)):
+                if (
+                    clue.post_id != post.post_id
+                    or clue.type not in allowed_types
+                    or clue.confidence < 0.5
+                    or _normalize_bridge(clue.value) != _normalize_bridge(captured_value)
+                ):
                     continue
                 refs = [
-                    ProfileEvidence(post_id=post.post_id, clue_index=None, required=True,
-                                    source="post_text", excerpt=match.group(0)),
-                    ProfileEvidence(post_id=post.post_id, clue_index=index, required=True, source="clue"),
+                    ProfileEvidence(
+                        post_id=post.post_id,
+                        clue_index=None,
+                        required=True,
+                        source="post_text",
+                        excerpt=match.group(0),
+                    ),
+                    ProfileEvidence(
+                        post_id=post.post_id, clue_index=index, required=True, source="clue"
+                    ),
                 ]
                 key = (attribute, unicodedata.normalize("NFKC", clue.value).lower().strip())
                 by_value.setdefault(key, []).extend(refs)
@@ -431,6 +594,28 @@ def recalculate_after_deletion(item: ProfileItem, deleted_post_ids: set[str]) ->
             ),
         }
     )
+
+
+def claims_after_deletion(
+    claims: Sequence[ProfileItem], deleted_post_ids: Collection[str]
+) -> list[ProfileItem]:
+    """Recalculate legacy ProfileItem claims after excluding posts.
+
+    Candidate-set restoration uses ``recalculate_profile_candidate_sets`` instead;
+    this helper remains for legacy conclusion and Threads response contracts.
+    """
+    deleted = set(deleted_post_ids)
+    if not deleted:
+        return list(claims)
+    kept: list[ProfileItem] = []
+    for claim in claims:
+        if claim.evidence_paths and claim.status is not ProfileStatus.UNKNOWN:
+            after = recalculate_after_deletion(claim, deleted)
+            if after is not None:
+                kept.append(after)
+        elif not any(reference.post_id in deleted for reference in claim.evidence):
+            kept.append(claim)
+    return kept
 
 
 PROFILE_PLAN_MAX_POSTS = 3
@@ -511,18 +696,22 @@ def plan_profile_candidate_deletion(
     change, not a broken attribute. All values in the full pool are re-evaluated per subset.
     Ties prefer fewer posts and then original post order.
     """
-    eligible_sets = [candidate_set for candidate_set in candidate_sets if candidate_set.candidate_pool]
+    eligible_sets = [
+        candidate_set for candidate_set in candidate_sets if candidate_set.candidate_pool
+    ]
     if not eligible_sets or not posts:
         return []
     post_order = list(dict.fromkeys(post.post_id for post in posts))
-    candidate_indexes = sorted({
-        post_order.index(reference.post_id)
-        for candidate_set in eligible_sets
-        for candidate in candidate_set.candidate_pool
-        for path in candidate.evidence_paths
-        for reference in path.evidence
-        if reference.post_id in post_order
-    })
+    candidate_indexes = sorted(
+        {
+            post_order.index(reference.post_id)
+            for candidate_set in eligible_sets
+            for candidate in candidate_set.candidate_pool
+            for path in candidate.evidence_paths
+            for reference in path.evidence
+            if reference.post_id in post_order
+        }
+    )
     if not candidate_indexes:
         return []
 
@@ -563,34 +752,71 @@ def recalculate_profile_candidate_sets(
     diagnosis_at: datetime | None = None,
 ) -> list[ProfileCandidateSet]:
     """Re-rank the complete candidate pool after exclusions without rerunning inference."""
-    now = diagnosis_at or datetime.now(timezone.utc)
+    now = diagnosis_at or datetime.now(UTC)
     remaining_by_id = {post.post_id: post for post in posts}
     claims: list[ProfileItem] = []
     for candidate_set in candidate_sets:
         for candidate in candidate_set.candidate_pool:
+            candidate_paths = list(candidate.evidence_paths)
+            if candidate_set.attribute is ProfileAttribute.REALTIME_LOCATION:
+                candidate_paths = [
+                    path
+                    for path in candidate_paths
+                    if (observed_at := _realtime_path_observed_at(path, remaining_by_id))
+                    is not None
+                    and timedelta(0)
+                    <= now.astimezone(UTC) - observed_at.astimezone(UTC)
+                    <= timedelta(minutes=15)
+                ]
+                if not candidate_paths:
+                    continue
             item = ProfileItem(
                 attribute=candidate_set.attribute,
                 value=candidate.value,
                 confidence=candidate.confidence,
                 status=candidate.status,
-                evidence=candidate.evidence,
-                evidence_paths=candidate.evidence_paths,
+                evidence=[reference for path in candidate_paths for reference in path.evidence],
+                evidence_paths=candidate_paths,
                 assessment=candidate.assessment,
             )
             surviving = recalculate_after_deletion(item, deleted_post_ids)
             if surviving is None:
                 continue
-            if candidate_set.attribute is ProfileAttribute.REALTIME_LOCATION:
-                post_ids = {reference.post_id for reference in surviving.evidence if reference.post_id}
-                source_post = next((remaining_by_id[post_id] for post_id in post_ids if post_id in remaining_by_id), None)
-                if source_post is None:
-                    continue
-                age = now.astimezone(timezone.utc) - source_post.created_at.astimezone(timezone.utc)
-                if age < timedelta(0) or age > timedelta(minutes=15):
-                    continue
             claims.append(surviving)
     surviving_clues = [clue for clue in clues if clue.post_id not in deleted_post_ids]
     return evaluate_profile_candidates(claims, posts, clues=surviving_clues)
+
+
+def profile_relations_after_deletion(
+    relations: Sequence[ProfileRelation],
+    deleted_post_ids: Collection[str],
+    surviving_claims: Sequence[ProfileCandidateSet],
+) -> list[ProfileRelation]:
+    """Keep only relation paths and candidate endpoints still supported after deletion."""
+    deleted = set(deleted_post_ids)
+    claims_by_attribute = {claim.attribute: claim for claim in surviving_claims}
+    kept: list[ProfileRelation] = []
+    for relation in relations:
+        paths = [
+            path
+            for path in relation.evidence_paths
+            if not any(reference.post_id in deleted for reference in path.evidence)
+        ]
+        endpoints_survive = True
+        for endpoint in (relation.left, relation.right):
+            if endpoint.kind is not ProfileRelationEndpointKind.PROFILE_CANDIDATE:
+                continue
+            candidate_set = (
+                claims_by_attribute.get(endpoint.attribute) if endpoint.attribute else None
+            )
+            if candidate_set is None or not any(
+                candidate.value == endpoint.value for candidate in candidate_set.candidates
+            ):
+                endpoints_survive = False
+                break
+        if paths and endpoints_survive:
+            kept.append(relation.model_copy(update={"evidence_paths": paths}))
+    return kept
 
 
 def _minimal_scope(paths: list[ProfileEvidencePath]) -> EvidenceScope:
@@ -700,8 +926,11 @@ def infer_web_employer_claim(
                             )
                         key = _normalize_bridge(fact.object)
                         candidates.setdefault(key, (fact.object, []))[1].append(
-                            ProfileEvidencePath(evidence=evidence, confidence=0.65,
-                                                provenance=EvidencePathProvenance.DIRECT_DISCLOSURE)
+                            ProfileEvidencePath(
+                                evidence=evidence,
+                                confidence=0.65,
+                                provenance=EvidencePathProvenance.DIRECT_DISCLOSURE,
+                            )
                         )
     if len(candidates) != 1:
         return None
@@ -739,10 +968,12 @@ def infer_web_employer_claims(
             by_value[key] = claim
         else:
             paths = [*previous.evidence_paths, *claim.evidence_paths]
-            by_value[key] = previous.model_copy(update={
-                "evidence_paths": paths,
-                "evidence": [ref for path in paths for ref in path.evidence],
-            })
+            by_value[key] = previous.model_copy(
+                update={
+                    "evidence_paths": paths,
+                    "evidence": [ref for path in paths for ref in path.evidence],
+                }
+            )
     return list(by_value.values())
 
 
@@ -767,12 +998,24 @@ def infer_owner_claims_with_web(
         diagnosis_date=diagnosis_date,
         diagnosis_at=diagnosis_at,
     )
-    web_claims = infer_web_employer_claims(posts, web_facts, owner_profile_text)
+    registry_claim = (
+        infer_registry_employer_claim(posts, owner_profile_text, gazetteer)
+        if gazetteer is not None
+        else None
+    )
+    # The offline registry is authoritative for names it can verify; use WebFacts only
+    # when the local registry has no unique employer match.
+    web_claims = (
+        [registry_claim]
+        if registry_claim is not None
+        else infer_web_employer_claims(posts, web_facts, owner_profile_text)
+    )
     if not web_claims:
         return claims
     direct_by_value = {
         _normalize_bridge(item.value or ""): item
-        for item in claims if item.attribute is ProfileAttribute.EMPLOYER_NAME and item.value
+        for item in claims
+        if item.attribute is ProfileAttribute.EMPLOYER_NAME and item.value
     }
     employer_results = list(direct_by_value.values())
     for web_claim in web_claims:
@@ -782,14 +1025,20 @@ def infer_owner_claims_with_web(
             employer_results.append(web_claim)
             continue
         paths = [*direct.evidence_paths, *web_claim.evidence_paths]
-        merged = direct.model_copy(update={
-            "evidence_paths": paths,
-            "evidence": [ref for path in paths for ref in path.evidence],
-            "assessment": direct.assessment.model_copy(update={"minimal_scope": _minimal_scope(paths)}),
-        })
+        merged = direct.model_copy(
+            update={
+                "evidence_paths": paths,
+                "evidence": [ref for path in paths for ref in path.evidence],
+                "assessment": direct.assessment.model_copy(
+                    update={"minimal_scope": _minimal_scope(paths)}
+                ),
+            }
+        )
         employer_results = [item for item in employer_results if item is not direct]
         employer_results.append(merged)
-    return [item for item in claims if item.attribute is not ProfileAttribute.EMPLOYER_NAME] + employer_results
+    return [
+        item for item in claims if item.attribute is not ProfileAttribute.EMPLOYER_NAME
+    ] + employer_results
 
 
 def infer_owner_candidate_sets_with_web(
@@ -805,18 +1054,29 @@ def infer_owner_candidate_sets_with_web(
 ) -> list[ProfileCandidateSet]:
     """Public multi-candidate entry point; returns one set for each supported catalog item."""
     claims = infer_owner_claims_with_web(
-        posts, clues, web_facts, owner_profile_text, self_report_clues,
-        gazetteer, diagnosis_date=diagnosis_date, diagnosis_at=diagnosis_at,
+        posts,
+        clues,
+        web_facts,
+        owner_profile_text,
+        self_report_clues,
+        gazetteer,
+        diagnosis_date=diagnosis_date,
+        diagnosis_at=diagnosis_at,
     )
     return evaluate_profile_candidates(claims, posts, clues=clues)
 
 
-_COMMUTE_DESTINATION_RE = re.compile(r"(?:私|自分)(?:は|が)[^。！？\n]{0,20}(?:通勤先|勤務先)(?:は|が)(?P<value>[^、。\s]+)")
-_SCHOOL_DESTINATION_RE = re.compile(r"(?:私|自分)(?:は|が)[^。！？\n]{0,20}通学先(?:は|が)(?P<value>[^、。\s]+)")
+_COMMUTE_DESTINATION_RE = re.compile(
+    r"(?:私|自分)(?:は|が)[^。！？\n]{0,20}(?:通勤先|勤務先)(?:は|が)(?P<value>[^、。\s]+)"
+)
+_SCHOOL_DESTINATION_RE = re.compile(
+    r"(?:私|自分)(?:は|が)[^。！？\n]{0,20}通学先(?:は|が)(?P<value>[^、。\s]+)"
+)
 
 
 def infer_owner_profile_relations(
-    posts: Sequence[Post], profile_claims: Sequence[ProfileCandidateSet],
+    posts: Sequence[Post],
+    profile_claims: Sequence[ProfileCandidateSet],
 ) -> list[ProfileRelation]:
     """Create scoreless links only from explicit owner wording and independent candidate paths."""
     by_attribute = {claim.attribute: claim for claim in profile_claims}
@@ -827,80 +1087,152 @@ def infer_owner_profile_relations(
     if home and regular:
         for home_candidate in home.candidates:
             for regular_candidate in regular.candidates:
-                if unicodedata.normalize("NFKC", home_candidate.value).strip() != unicodedata.normalize("NFKC", regular_candidate.value).strip():
+                if (
+                    unicodedata.normalize("NFKC", home_candidate.value).strip()
+                    != unicodedata.normalize("NFKC", regular_candidate.value).strip()
+                ):
                     continue
                 for home_path in home_candidate.evidence_paths:
                     if not any(
                         ref.source.value == "post_text"
                         and HOME_ORIGIN_CLAIM_RE.search(ref.excerpt or "")
                         and ref.post_id in posts_by_id
-                        and HOME_ORIGIN_TEXT_RE.search(unicodedata.normalize("NFKC", posts_by_id[ref.post_id].text))
+                        and HOME_ORIGIN_TEXT_RE.search(
+                            unicodedata.normalize("NFKC", posts_by_id[ref.post_id].text)
+                        )
                         for ref in home_path.evidence
                     ):
                         continue
                     for regular_path in regular_candidate.evidence_paths:
-                        if not any(ref.source.value == "post_text" and HOME_ORIGIN_ROUTINE_RE.search(ref.excerpt or "")
-                                   for ref in regular_path.evidence):
+                        if not any(
+                            ref.source.value == "post_text"
+                            and HOME_ORIGIN_ROUTINE_RE.search(ref.excerpt or "")
+                            for ref in regular_path.evidence
+                        ):
                             continue
-                        refs = _unique_relation_evidence([*home_path.evidence, *regular_path.evidence])
+                        refs = _unique_relation_evidence(
+                            [*home_path.evidence, *regular_path.evidence]
+                        )
                         if len({ref.post_id for ref in refs if ref.post_id}) < 2:
                             continue
-                        relations.append(ProfileRelation(
-                            kind=ProfileRelationKind.HOME_NEAREST_IS_COMMUTE_ORIGIN,
-                            left=ProfileRelationEndpoint(kind=ProfileRelationEndpointKind.PROFILE_CANDIDATE,
-                                attribute=ProfileAttribute.HOME_NEAREST_STATION, value=home_candidate.value),
-                            right=ProfileRelationEndpoint(kind=ProfileRelationEndpointKind.PROFILE_CANDIDATE,
-                                attribute=ProfileAttribute.REGULAR_STATION, value=regular_candidate.value),
-                            evidence_paths=[ProfileEvidencePath(evidence=refs,
-                                confidence=min(home_path.confidence, regular_path.confidence),
-                                provenance=EvidencePathProvenance.COMBINED_INFERENCE)],
-                        ))
+                        relations.append(
+                            ProfileRelation(
+                                kind=ProfileRelationKind.HOME_NEAREST_IS_COMMUTE_ORIGIN,
+                                left=ProfileRelationEndpoint(
+                                    kind=ProfileRelationEndpointKind.PROFILE_CANDIDATE,
+                                    attribute=ProfileAttribute.HOME_NEAREST_STATION,
+                                    value=home_candidate.value,
+                                ),
+                                right=ProfileRelationEndpoint(
+                                    kind=ProfileRelationEndpointKind.PROFILE_CANDIDATE,
+                                    attribute=ProfileAttribute.REGULAR_STATION,
+                                    value=regular_candidate.value,
+                                ),
+                                evidence_paths=[
+                                    ProfileEvidencePath(
+                                        evidence=refs,
+                                        confidence=min(
+                                            home_path.confidence, regular_path.confidence
+                                        ),
+                                        provenance=EvidencePathProvenance.COMBINED_INFERENCE,
+                                    )
+                                ],
+                            )
+                        )
 
     for post in posts:
         destination_matches = (
-            (_COMMUTE_DESTINATION_RE.search(post.text), ProfileAttribute.EMPLOYER_NAME,
-             ProfileRelationKind.COMMUTE_DESTINATION_IS_EMPLOYER),
-            (_SCHOOL_DESTINATION_RE.search(post.text), ProfileAttribute.SCHOOL,
-             ProfileRelationKind.COMMUTE_DESTINATION_IS_SCHOOL),
+            (
+                _COMMUTE_DESTINATION_RE.search(post.text),
+                ProfileAttribute.EMPLOYER_NAME,
+                ProfileRelationKind.COMMUTE_DESTINATION_IS_EMPLOYER,
+            ),
+            (
+                _SCHOOL_DESTINATION_RE.search(post.text),
+                ProfileAttribute.SCHOOL,
+                ProfileRelationKind.COMMUTE_DESTINATION_IS_SCHOOL,
+            ),
         )
         for match, attribute, kind in destination_matches:
-            if (not match or _forbidden_context(post.text) or _has_quoted_or_fiction_context(post.text)
-                    or _third_party_context(post.text, attribute, match.start("value"))
-                    or _is_negated_claim(post.text, match.end("value"))):
+            if (
+                not match
+                or _forbidden_context(post.text)
+                or _has_quoted_or_fiction_context(post.text)
+                or _third_party_context(post.text, attribute, match.start("value"))
+                or _is_negated_claim(post.text, match.end("value"))
+            ):
                 continue
             value = re.sub(r"(?:です|だ)$", "", match.group("value")).strip()
             candidate_set = by_attribute.get(attribute)
             if candidate_set is None:
                 continue
             for candidate in candidate_set.candidates:
-                if unicodedata.normalize("NFKC", candidate.value).strip() != unicodedata.normalize("NFKC", value).strip():
+                if (
+                    unicodedata.normalize("NFKC", candidate.value).strip()
+                    != unicodedata.normalize("NFKC", value).strip()
+                ):
                     continue
-                relation_ref = ProfileEvidence(post_id=post.post_id, clue_index=None, required=True,
-                    source="post_text", excerpt=match.group(0))
+                relation_ref = ProfileEvidence(
+                    post_id=post.post_id,
+                    clue_index=None,
+                    required=True,
+                    source="post_text",
+                    excerpt=match.group(0),
+                )
                 for candidate_path in candidate.evidence_paths:
                     # Destination wording cannot be the independent observation of the affiliation.
-                    if (any(ref.post_id == post.post_id for ref in candidate_path.evidence)
-                            or not any(ref.source.value == "clue" and ref.post_id is not None
-                                       and ref.post_id != post.post_id for ref in candidate_path.evidence)):
+                    if any(
+                        ref.post_id == post.post_id for ref in candidate_path.evidence
+                    ) or not any(
+                        ref.source.value == "clue"
+                        and ref.post_id is not None
+                        and ref.post_id != post.post_id
+                        for ref in candidate_path.evidence
+                    ):
                         continue
                     refs = _unique_relation_evidence([relation_ref, *candidate_path.evidence])
                     if len({ref.post_id for ref in refs if ref.post_id}) < 2:
                         continue
                     candidate_endpoint = ProfileRelationEndpoint(
                         kind=ProfileRelationEndpointKind.PROFILE_CANDIDATE,
-                        attribute=attribute, value=candidate.value)
+                        attribute=attribute,
+                        value=candidate.value,
+                    )
                     destination_endpoint = ProfileRelationEndpoint(
-                        kind=ProfileRelationEndpointKind.COMMUTE_DESTINATION, value=value)
-                    relations.append(ProfileRelation(kind=kind, left=destination_endpoint,
-                        right=candidate_endpoint, evidence_paths=[ProfileEvidencePath(
-                            evidence=refs, confidence=min(0.55, candidate_path.confidence),
-                            provenance=EvidencePathProvenance.COMBINED_INFERENCE)]))
+                        kind=ProfileRelationEndpointKind.COMMUTE_DESTINATION, value=value
+                    )
+                    relations.append(
+                        ProfileRelation(
+                            kind=kind,
+                            left=destination_endpoint,
+                            right=candidate_endpoint,
+                            evidence_paths=[
+                                ProfileEvidencePath(
+                                    evidence=refs,
+                                    confidence=min(0.55, candidate_path.confidence),
+                                    provenance=EvidencePathProvenance.COMBINED_INFERENCE,
+                                )
+                            ],
+                        )
+                    )
     grouped: dict[tuple[str, str, str, str], list[ProfileEvidencePath]] = {}
-    endpoints_by_key: dict[tuple[str, str, str, str], tuple[ProfileRelationKind, ProfileRelationEndpoint, ProfileRelationEndpoint]] = {}
+    endpoints_by_key: dict[
+        tuple[str, str, str, str],
+        tuple[ProfileRelationKind, ProfileRelationEndpoint, ProfileRelationEndpoint],
+    ] = {}
     for relation in relations:
-        key = (relation.kind.value, relation.left.kind.value, relation.left.attribute.value if relation.left.attribute else "",
-               relation.left.value + "\0" + relation.right.kind.value + "\0" +
-               (relation.right.attribute.value if relation.right.attribute else "") + "\0" + relation.right.value)
+        key = (
+            relation.kind.value,
+            relation.left.kind.value,
+            relation.left.attribute.value if relation.left.attribute else "",
+            relation.left.value
+            + "\0"
+            + relation.right.kind.value
+            + "\0"
+            + (relation.right.attribute.value if relation.right.attribute else "")
+            + "\0"
+            + relation.right.value,
+        )
         grouped.setdefault(key, []).extend(relation.evidence_paths)
         endpoints_by_key.setdefault(key, (relation.kind, relation.left, relation.right))
     result: list[ProfileRelation] = []
@@ -910,44 +1242,27 @@ def infer_owner_profile_relations(
             path_key = path.model_dump_json(exclude_none=True)
             unique_paths.setdefault(path_key, path)
         kind, left, right = endpoints_by_key[key]
-        result.append(ProfileRelation(kind=kind, left=left, right=right,
-            evidence_paths=list(unique_paths.values())))
+        result.append(
+            ProfileRelation(
+                kind=kind, left=left, right=right, evidence_paths=list(unique_paths.values())
+            )
+        )
     return result
 
 
 def _unique_relation_evidence(evidence: Sequence[ProfileEvidence]) -> list[ProfileEvidence]:
     unique: dict[tuple[object, ...], ProfileEvidence] = {}
     for reference in evidence:
-        key = (reference.source.value, reference.post_id, reference.clue_index,
-               reference.image_index, reference.web_fact_id, reference.excerpt)
+        key = (
+            reference.source.value,
+            reference.post_id,
+            reference.clue_index,
+            reference.image_index,
+            reference.web_fact_id,
+            reference.excerpt,
+        )
         unique.setdefault(key, reference)
     return list(unique.values())
-
-
-def _forbidden_context(context: str) -> bool:
-    value = context.lower()
-    return any(
-        token in value
-        for token in (
-            "visitor",
-            "logo-only",
-            "visit-only",
-            "guest",
-            "訪問",
-            "見学",
-            "遊びに",
-            "客として",
-            "来場",
-            "参加者として",
-            "取引先",
-            "委託",
-            "外注",
-            "派遣先",
-            "会議",
-            "打合せ",
-            "打ち合わせ",
-        )
-    )
 
 
 def infer_owner_claims(
@@ -1083,18 +1398,28 @@ def infer_owner_claims(
                             )
                         )
 
+    if gazetteer is not None:
+        facts.extend(shelter_home_facts(posts, clues, owner_profile_text, gazetteer))
+        facts.extend(bus_stop_home_facts(posts, clues, owner_profile_text, gazetteer))
     claims = infer_cross_post_candidates(ProfileAttribute.RESIDENTIAL_AREA, facts)
     claims.extend(infer_workplace_area_claims(posts, clues))
     claims.extend(infer_child_age_claims(posts, diagnosis_date=diagnosis_date))
     claims.extend(infer_school_claims(posts, clues))
     if gazetteer is not None:
         claims.extend(infer_regular_station_claims(posts, clues, gazetteer))
-        claims.extend(infer_regular_station_from_home_origin(posts, clues, gazetteer, diagnosis_at=diagnosis_at))
+        claims.extend(
+            infer_regular_station_from_home_origin(
+                posts, clues, gazetteer, diagnosis_at=diagnosis_at
+            )
+        )
         claims.extend(infer_combined_regular_line_claims(posts, clues, gazetteer))
         claims.extend(infer_home_nearest_station_claims(posts, clues, gazetteer))
     claims.extend(infer_realtime_location_claims(posts, clues, diagnosis_at=diagnosis_at))
     claims.extend(infer_explicit_observation_claims(posts, clues, diagnosis_at=diagnosis_at))
     claims.extend(infer_frequent_shop_claims(posts, clues))
+    if gazetteer is not None:
+        claims.extend(infer_child_school_claims(posts, clues, gazetteer))
+        claims = add_school_district_residence(claims, gazetteer)
     return claims
 
 
@@ -1114,96 +1439,146 @@ MOVE_CONTEXT_RE = re.compile(r"(?:引っ越|転居|転校|転職|異動|住み�
 
 
 def infer_regular_station_from_home_origin(
-    posts: Sequence[Post], clues: Sequence[Clue], gazetteer: Gazetteer,
-    *, diagnosis_at: datetime | None = None,
+    posts: Sequence[Post],
+    clues: Sequence[Clue],
+    gazetteer: Gazetteer,
+    *,
+    diagnosis_at: datetime | None = None,
 ) -> list[ProfileItem]:
-    """Add a weak regular-station path only when separate dated owner posts link home origin to commute."""
-    known = {
-        unicodedata.normalize("NFKC", row["station_name"]).strip()
-        for row in gazetteer.stations
-        if isinstance(row.get("station_name"), str) and row["station_name"].strip()
-    }
+    """Add a weak regular-station path from separate dated home and commute posts."""
+    known: set[str] = set()
+    for row in gazetteer.stations:
+        station_name = row.get("station_name")
+        if isinstance(station_name, str) and station_name.strip():
+            known.add(unicodedata.normalize("NFKC", station_name).strip())
     eligible: list[tuple[Post, str, list[ProfileEvidence]]] = []
     for post in posts:
         text = unicodedata.normalize("NFKC", post.text)
         match = HOME_ORIGIN_TEXT_RE.search(text)
-        if (not match or _forbidden_context(text) or _has_quoted_or_fiction_context(text)
-                or _third_party_context(text, ProfileAttribute.HOME_NEAREST_STATION, match.start())
-                or MOVE_CONTEXT_RE.search(text)):
+        if (
+            not match
+            or _forbidden_context(text)
+            or _has_quoted_or_fiction_context(text)
+            or _third_party_context(text, ProfileAttribute.HOME_NEAREST_STATION, match.start())
+            or MOVE_CONTEXT_RE.search(text)
+        ):
             continue
         station = unicodedata.normalize("NFKC", match.group("station")).removesuffix("駅").strip()
         if station not in known or _is_negated_claim(text, match.end("station")):
             continue
-        station_signs = [clue for clue in clues
-                         if clue.post_id == post.post_id and clue.type is ClueType.STATION_SIGN]
+        station_signs = [
+            clue
+            for clue in clues
+            if clue.post_id == post.post_id and clue.type is ClueType.STATION_SIGN
+        ]
         if any("x" in unicodedata.normalize("NFKC", clue.value).lower() for clue in station_signs):
             continue
         observed_station_values = {
             unicodedata.normalize("NFKC", clue.value).removesuffix("駅").strip()
             for clue in clues
-            if clue.post_id == post.post_id and clue.type in {ClueType.PLACE_TEXT, ClueType.STATION_SIGN}
+            if clue.post_id == post.post_id
+            and clue.type in {ClueType.PLACE_TEXT, ClueType.STATION_SIGN}
             and unicodedata.normalize("NFKC", clue.value).removesuffix("駅").strip() in known
         }
         if observed_station_values and observed_station_values != {station}:
             continue
-        typed = [(index, clue) for index, clue in enumerate(clues)
-                 if clue.post_id == post.post_id and clue.type in {ClueType.PLACE_TEXT, ClueType.STATION_SIGN}
-                 and clue.source in {ClueSource.TEXT, ClueSource.OCR, ClueSource.VLM}
-                 and unicodedata.normalize("NFKC", clue.value).removesuffix("駅").strip() == station
-                 and clue.confidence >= 0.5]
+        typed = [
+            (index, clue)
+            for index, clue in enumerate(clues)
+            if clue.post_id == post.post_id
+            and clue.type in {ClueType.PLACE_TEXT, ClueType.STATION_SIGN}
+            and clue.source in {ClueSource.TEXT, ClueSource.OCR, ClueSource.VLM}
+            and unicodedata.normalize("NFKC", clue.value).removesuffix("駅").strip() == station
+            and clue.confidence >= 0.5
+        ]
         if not typed:
             continue
-        evidence = [ProfileEvidence(post_id=post.post_id, clue_index=None, required=True,
-                                    source="post_text", excerpt=match.group(0))]
-        evidence.extend(ProfileEvidence(post_id=post.post_id, clue_index=index, required=True)
-                        for index, _ in typed)
+        evidence = [
+            ProfileEvidence(
+                post_id=post.post_id,
+                clue_index=None,
+                required=True,
+                source="post_text",
+                excerpt=match.group(0),
+            )
+        ]
+        evidence.extend(
+            ProfileEvidence(post_id=post.post_id, clue_index=index, required=True)
+            for index, _ in typed
+        )
         eligible.append((post, station, evidence))
 
     routines: list[tuple[Post, str, list[ProfileEvidence]]] = []
     for post in posts:
         text = unicodedata.normalize("NFKC", post.text)
         match = HOME_ORIGIN_ROUTINE_RE.search(text)
-        if (not match or _forbidden_context(text) or _has_quoted_or_fiction_context(text)
-                or _third_party_context(text, ProfileAttribute.REGULAR_STATION, match.start())
-                or THIRD_PARTY_HOME_CONTEXT_RE.search(text) or MOVE_CONTEXT_RE.search(text)
-                or _is_negated_claim(text, match.end())):
+        if (
+            not match
+            or _forbidden_context(text)
+            or _has_quoted_or_fiction_context(text)
+            or _third_party_context(text, ProfileAttribute.REGULAR_STATION, match.start())
+            or THIRD_PARTY_HOME_CONTEXT_RE.search(text)
+            or MOVE_CONTEXT_RE.search(text)
+            or _is_negated_claim(text, match.end())
+        ):
             continue
-        typed = [(index, clue) for index, clue in enumerate(clues)
-                 if clue.post_id == post.post_id and clue.type is ClueType.ROUTINE_TEXT
-                 and clue.source is ClueSource.TEXT and clue.value.strip() in text
-                 and HOME_ORIGIN_ROUTINE_RE.search(unicodedata.normalize("NFKC", clue.value))]
+        typed = [
+            (index, clue)
+            for index, clue in enumerate(clues)
+            if clue.post_id == post.post_id
+            and clue.type is ClueType.ROUTINE_TEXT
+            and clue.source is ClueSource.TEXT
+            and clue.value.strip() in text
+            and HOME_ORIGIN_ROUTINE_RE.search(unicodedata.normalize("NFKC", clue.value))
+        ]
         if not typed:
             continue
-        evidence = [ProfileEvidence(post_id=post.post_id, clue_index=None, required=True,
-                                    source="post_text", excerpt=match.group(0))]
-        evidence.extend(ProfileEvidence(post_id=post.post_id, clue_index=index, required=True)
-                        for index, _ in typed)
+        evidence = [
+            ProfileEvidence(
+                post_id=post.post_id,
+                clue_index=None,
+                required=True,
+                source="post_text",
+                excerpt=match.group(0),
+            )
+        ]
+        evidence.extend(
+            ProfileEvidence(post_id=post.post_id, clue_index=index, required=True)
+            for index, _ in typed
+        )
         routines.append((post, match.group(0), evidence))
 
     claims: list[ProfileItem] = []
     max_gap = timedelta(days=90)
-    now = diagnosis_at or datetime.now(timezone.utc)
+    now = diagnosis_at or datetime.now(UTC)
     if now.tzinfo is None or now.utcoffset() is None:
         return []
     for origin, station, origin_refs in eligible:
-        for routine_post, routine_excerpt, routine_refs in routines:
+        for routine_post, _routine_excerpt, routine_refs in routines:
             if origin.post_id == routine_post.post_id:
                 continue
             if origin.created_at is None or routine_post.created_at is None:
                 continue
             origin_at, routine_at = origin.created_at, routine_post.created_at
-            if (origin_at.tzinfo is None or routine_at.tzinfo is None
-                    or origin_at.utcoffset() is None or routine_at.utcoffset() is None):
+            if (
+                origin_at.tzinfo is None
+                or routine_at.tzinfo is None
+                or origin_at.utcoffset() is None
+                or routine_at.utcoffset() is None
+            ):
                 continue
             start, end = sorted((origin_at, routine_at))
-            if (end - start > max_gap
-                    or end.astimezone(timezone.utc) > now.astimezone(timezone.utc)):
+            if end - start > max_gap or end.astimezone(UTC) > now.astimezone(UTC):
                 continue
             invalid_or_moving_context = False
             for post in posts:
                 if not MOVE_CONTEXT_RE.search(post.text):
                     continue
-                if post.created_at is None or post.created_at.tzinfo is None or post.created_at.utcoffset() is None:
+                if (
+                    post.created_at is None
+                    or post.created_at.tzinfo is None
+                    or post.created_at.utcoffset() is None
+                ):
                     invalid_or_moving_context = True
                     break
                 if start < post.created_at < end:
@@ -1215,12 +1590,24 @@ def infer_regular_station_from_home_origin(
             # One evidence path is a conjunction of two independent dated owner posts.
             if len({ref.post_id for ref in evidence if ref.post_id}) != 2:
                 continue
-            path = ProfileEvidencePath(evidence=evidence, confidence=0.55,
-                                      provenance=EvidencePathProvenance.COMBINED_INFERENCE)
-            claims.append(ProfileItem(attribute=ProfileAttribute.REGULAR_STATION,
-                value=f"{station}駅", confidence=0.55, status=ProfileStatus.WEAK,
-                evidence=evidence, evidence_paths=[path],
-                assessment=ClaimAssessment(minimal_scope=EvidenceScope.BLUESKY, harm_status="unknown")))
+            path = ProfileEvidencePath(
+                evidence=evidence,
+                confidence=0.55,
+                provenance=EvidencePathProvenance.COMBINED_INFERENCE,
+            )
+            claims.append(
+                ProfileItem(
+                    attribute=ProfileAttribute.REGULAR_STATION,
+                    value=f"{station}駅",
+                    confidence=0.55,
+                    status=ProfileStatus.WEAK,
+                    evidence=evidence,
+                    evidence_paths=[path],
+                    assessment=ClaimAssessment(
+                        minimal_scope=EvidenceScope.BLUESKY, harm_status="unknown"
+                    ),
+                )
+            )
     return claims
 
 
@@ -1245,12 +1632,24 @@ def infer_combined_regular_line_claims(
         station = row.get("station_name")
         operator = row.get("operator")
         line = row.get("line_name")
-        if not all(isinstance(value, str) and value.strip() for value in (station, operator, line)):
+        if not (
+            isinstance(station, str)
+            and station.strip()
+            and isinstance(operator, str)
+            and operator.strip()
+            and isinstance(line, str)
+            and line.strip()
+        ):
             return []
         station_records.setdefault(unicodedata.normalize("NFKC", station).strip(), set()).add(
-            (unicodedata.normalize("NFKC", operator).strip(), unicodedata.normalize("NFKC", line).strip())
+            (
+                unicodedata.normalize("NFKC", operator).strip(),
+                unicodedata.normalize("NFKC", line).strip(),
+            )
         )
-    station_pattern = "|".join(re.escape(name) for name in sorted(station_records, key=len, reverse=True))
+    station_pattern = "|".join(
+        re.escape(name) for name in sorted(station_records, key=len, reverse=True)
+    )
     if not station_pattern:
         return []
     commute_endpoints_re = re.compile(
@@ -1261,7 +1660,7 @@ def infer_combined_regular_line_claims(
         r"通って(?:いる|います|いた|いました))(?=$|[。！？\n])"
     )
 
-    candidates: dict[tuple[str, str], list[tuple[Post, re.Match[str], int, int]]] = {}
+    candidates: dict[tuple[str, str, str, str], list[tuple[Post, re.Match[str], int, int]]] = {}
     for post in posts:
         text = unicodedata.normalize("NFKC", post.text)
         if (
@@ -1272,21 +1671,32 @@ def infer_combined_regular_line_claims(
             continue
         for match in commute_endpoints_re.finditer(text):
             sentence_start = max(text.rfind(mark, 0, match.start()) for mark in "。！？\n") + 1
-            sentence_end = min((pos for mark in "。！？\n" if (pos := text.find(mark, match.end())) >= 0), default=len(text))
+            sentence_end = min(
+                (pos for mark in "。！？\n" if (pos := text.find(mark, match.end())) >= 0),
+                default=len(text),
+            )
             sentence = text[sentence_start:sentence_end]
-            if not _COMMUTE_ROUTINE_RE.search(sentence) or _is_negated_claim(sentence, match.end() - sentence_start):
+            if not _COMMUTE_ROUTINE_RE.search(sentence) or _is_negated_claim(
+                sentence, match.end() - sentence_start
+            ):
                 continue
             origin, destination = match.group("origin", "destination")
             if origin == destination or any(
-                cue in sentence for cue in ("友人", "友達", "家族", "同僚", "彼", "彼女", "夫", "妻")
+                cue in sentence
+                for cue in ("友人", "友達", "家族", "同僚", "彼", "彼女", "夫", "妻")
             ):
                 continue
-            if any(_mentions_line_name(post.text, line) for _op, line in {
-                pair for station in station_records.values() for pair in station
-            }):
+            if any(
+                _mentions_line_name(post.text, line)
+                for _op, line in {pair for station in station_records.values() for pair in station}
+            ):
                 continue
-            origin_clue = _matching_text_clue(list(clues), post.post_id, f"{origin}駅", ClueType.PLACE_TEXT)
-            destination_clue = _matching_text_clue(list(clues), post.post_id, f"{destination}駅", ClueType.PLACE_TEXT)
+            origin_clue = _matching_text_clue(
+                list(clues), post.post_id, f"{origin}駅", ClueType.PLACE_TEXT
+            )
+            destination_clue = _matching_text_clue(
+                list(clues), post.post_id, f"{destination}駅", ClueType.PLACE_TEXT
+            )
             if origin_clue is None or destination_clue is None:
                 continue
             origin_lines = station_records.get(origin, set())
@@ -1297,37 +1707,54 @@ def infer_combined_regular_line_claims(
             if len(common) != 1:
                 continue
             pair = (origin, destination, *next(iter(common)))
-            candidates.setdefault(pair, []).append((post, match, origin_clue[0], destination_clue[0]))
+            candidates.setdefault(pair, []).append(
+                (post, match, origin_clue[0], destination_clue[0])
+            )
 
     output: list[ProfileItem] = []
-    for (origin, destination, operator, line), supports in candidates.items():
+    for (_origin, _destination, _operator, line), supports in candidates.items():
         # At least two distinct owner-authored posts must independently establish the same pair.
         unique = {support[0].post_id: support for support in supports}
         if len(unique) < 2:
             continue
         evidence = []
         for post, match, origin_index, destination_index in unique.values():
-            evidence.extend([
-                ProfileEvidence(post_id=post.post_id, clue_index=None, required=True,
-                                source="post_text", excerpt=match.group(0)),
-                ProfileEvidence(post_id=post.post_id, clue_index=origin_index, required=True),
-                ProfileEvidence(post_id=post.post_id, clue_index=destination_index, required=True),
-            ])
-        paths = [ProfileEvidencePath(
-            evidence=evidence,
-            confidence=0.55,
-            provenance=EvidencePathProvenance.COMBINED_INFERENCE,
-        )]
+            evidence.extend(
+                [
+                    ProfileEvidence(
+                        post_id=post.post_id,
+                        clue_index=None,
+                        required=True,
+                        source="post_text",
+                        excerpt=match.group(0),
+                    ),
+                    ProfileEvidence(post_id=post.post_id, clue_index=origin_index, required=True),
+                    ProfileEvidence(
+                        post_id=post.post_id, clue_index=destination_index, required=True
+                    ),
+                ]
+            )
+        paths = [
+            ProfileEvidencePath(
+                evidence=evidence,
+                confidence=0.55,
+                provenance=EvidencePathProvenance.COMBINED_INFERENCE,
+            )
+        ]
         flat = evidence
-        output.append(ProfileItem(
-            attribute=ProfileAttribute.REGULAR_LINE,
-            value=line,
-            confidence=0.55,
-            status=ProfileStatus.WEAK,
-            evidence=flat,
-            evidence_paths=paths,
-            assessment=ClaimAssessment(minimal_scope=EvidenceScope.BLUESKY, harm_status="unknown"),
-        ))
+        output.append(
+            ProfileItem(
+                attribute=ProfileAttribute.REGULAR_LINE,
+                value=line,
+                confidence=0.55,
+                status=ProfileStatus.WEAK,
+                evidence=flat,
+                evidence_paths=paths,
+                assessment=ClaimAssessment(
+                    minimal_scope=EvidenceScope.BLUESKY, harm_status="unknown"
+                ),
+            )
+        )
     return output
 
 
@@ -1346,12 +1773,13 @@ _WORKPLACE_OWNER = re.compile(
     r"[^。！？\n]{0,20}?(?P<site>本社|本店|支社|支店|営業所|工場|研究所|キャンパス)"
     r"[^。！？\n]{0,15}?(?:で|に)?(?:働いて(?:いる|います|おり|いた|いました)|"
     r"勤務して(?:いる|います|おり|いた|いました)|勤めて(?:いる|います|おり|いた|いました))"
-    r"(?=$|[、,。！？\s])")
-_WORKPLACE_ATTENDANCE = re.compile(
-    r"(?:私|自分|僕|俺)(?:は|が)(?P<context>[^。！？\n]{0,90})")
+    r"(?=$|[、,。！？\s])"
+)
+_WORKPLACE_ATTENDANCE = re.compile(r"(?:私|自分|僕|俺)(?:は|が)(?P<context>[^。！？\n]{0,90})")
 _WORKPLACE_ORG_SITE = re.compile(
     r"(?P<org>[一-龯々ぁ-んァ-ヶA-Za-z0-9・＆&（）()ー]+(?:株式会社|有限会社|合同会社|商事|銀行|大学|病院|社))"
-    r"[^。！？\n]{0,25}?(?P<site>本社|本店|支社|支店|営業所|工場|研究所|キャンパス)")
+    r"[^。！？\n]{0,25}?(?P<site>本社|本店|支社|支店|営業所|工場|研究所|キャンパス)"
+)
 
 
 def infer_workplace_area_claims(posts: Sequence[Post], clues: Sequence[Clue]) -> list[ProfileItem]:
@@ -1374,29 +1802,53 @@ def infer_workplace_area_claims(posts: Sequence[Post], clues: Sequence[Clue]) ->
                 continue
             attendance = owner_match.group("context")
             match = _WORKPLACE_ORG_SITE.search(attendance)
-            if (match is None or _WORKPLACE_PREDICATE.search(attendance) is None
-                    or _is_negated_claim(supporting.text, owner_match.end())):
+            if (
+                match is None
+                or _WORKPLACE_PREDICATE.search(attendance) is None
+                or _is_negated_claim(supporting.text, owner_match.end())
+            ):
                 continue
-            if _normalize_bridge(match.group("org")) != _normalize_bridge(org) or match.group("site") != site:
+            if (
+                _normalize_bridge(match.group("org")) != _normalize_bridge(org)
+                or match.group("site") != site
+            ):
                 continue
-            if _third_party_context(supporting.text, ProfileAttribute.WORKPLACE_AREA, match.start()):
+            if _third_party_context(
+                supporting.text, ProfileAttribute.WORKPLACE_AREA, match.start()
+            ):
                 continue
             for area_index, area in enumerate(clues):
-                if (area.post_id != supporting.post_id or area.type is not ClueType.PLACE_TEXT
-                        or area.source not in {ClueSource.OCR, ClueSource.VLM}
-                        or area.image_index is None or area.region is None or area.confidence < 0.7):
+                if (
+                    area.post_id != supporting.post_id
+                    or area.type is not ClueType.PLACE_TEXT
+                    or area.source not in {ClueSource.OCR, ClueSource.VLM}
+                    or area.image_index is None
+                    or area.region is None
+                    or area.confidence < 0.7
+                ):
                     continue
-                image = next((item for item in supporting.images if item.index == area.image_index), None)
-                if image is None or any(_normalize_bridge(area.value) in _normalize_bridge(p.text) for p in (anchor, supporting)):
+                image = next(
+                    (item for item in supporting.images if item.index == area.image_index), None
+                )
+                if image is None or any(
+                    _normalize_bridge(area.value) in _normalize_bridge(p.text)
+                    for p in (anchor, supporting)
+                ):
                     continue
                 # The organization and site must be observable in the same image as the area.
                 bridge_clues = [
-                    (i, clue) for i, clue in enumerate(clues)
-                    if clue.post_id == supporting.post_id and clue.image_index == area.image_index
-                    and clue.type is ClueType.ORG_TEXT and clue.source in {ClueSource.OCR, ClueSource.VLM}
-                    and clue.region is not None and clue.confidence >= 0.7
-                    and (_normalize_bridge(org) in _normalize_bridge(clue.value)
-                         or _normalize_bridge(clue.value) in _normalize_bridge(org))
+                    (i, clue)
+                    for i, clue in enumerate(clues)
+                    if clue.post_id == supporting.post_id
+                    and clue.image_index == area.image_index
+                    and clue.type is ClueType.ORG_TEXT
+                    and clue.source in {ClueSource.OCR, ClueSource.VLM}
+                    and clue.region is not None
+                    and clue.confidence >= 0.7
+                    and (
+                        _normalize_bridge(org) in _normalize_bridge(clue.value)
+                        or _normalize_bridge(clue.value) in _normalize_bridge(org)
+                    )
                     and _normalize_bridge(site) in _normalize_bridge(clue.value)
                     and _regions_linked(area.region, clue.region, image.width, image.height)
                 ]
@@ -1406,25 +1858,59 @@ def infer_workplace_area_claims(posts: Sequence[Post], clues: Sequence[Clue]) ->
                 if not _is_residential_value(area_text):
                     continue
                 evidence = [
-                    ProfileEvidence(post_id=anchor.post_id, clue_index=None, required=True,
-                                    source="post_text", excerpt=anchor_match.group(0)),
-                    ProfileEvidence(post_id=supporting.post_id, clue_index=None, required=True,
-                                    source="post_text", excerpt=match.group(0)),
-                    ProfileEvidence(post_id=supporting.post_id, clue_index=area_index, required=True, source="clue"),
+                    ProfileEvidence(
+                        post_id=anchor.post_id,
+                        clue_index=None,
+                        required=True,
+                        source="post_text",
+                        excerpt=anchor_match.group(0),
+                    ),
+                    ProfileEvidence(
+                        post_id=supporting.post_id,
+                        clue_index=None,
+                        required=True,
+                        source="post_text",
+                        excerpt=match.group(0),
+                    ),
+                    ProfileEvidence(
+                        post_id=supporting.post_id,
+                        clue_index=area_index,
+                        required=True,
+                        source="clue",
+                    ),
                 ]
-                for index, clue in bridge_clues:
-                    evidence.append(ProfileEvidence(post_id=supporting.post_id, clue_index=index,
-                                                    required=True, source="clue"))
-                confidence = min(0.65, area.confidence, *(clue.confidence for _, clue in bridge_clues))
-                path = ProfileEvidencePath(evidence=evidence, confidence=confidence,
-                                          provenance=EvidencePathProvenance.COMBINED_INFERENCE)
+                for index, _clue in bridge_clues:
+                    evidence.append(
+                        ProfileEvidence(
+                            post_id=supporting.post_id,
+                            clue_index=index,
+                            required=True,
+                            source="clue",
+                        )
+                    )
+                confidence = min(
+                    0.65, area.confidence, *(clue.confidence for _, clue in bridge_clues)
+                )
+                path = ProfileEvidencePath(
+                    evidence=evidence,
+                    confidence=confidence,
+                    provenance=EvidencePathProvenance.COMBINED_INFERENCE,
+                )
                 key = _normalize_bridge(area.value)
-                output.setdefault(key, ProfileItem(
-                    attribute=ProfileAttribute.WORKPLACE_AREA, value=area.value,
-                    confidence=confidence, status=ProfileStatus.WEAK, evidence=evidence,
-                    evidence_paths=[path],
-                    assessment=ClaimAssessment(minimal_scope=EvidenceScope.BLUESKY, harm_status="unknown"),
-                ))
+                output.setdefault(
+                    key,
+                    ProfileItem(
+                        attribute=ProfileAttribute.WORKPLACE_AREA,
+                        value=area.value,
+                        confidence=confidence,
+                        status=ProfileStatus.WEAK,
+                        evidence=evidence,
+                        evidence_paths=[path],
+                        assessment=ClaimAssessment(
+                            minimal_scope=EvidenceScope.BLUESKY, harm_status="unknown"
+                        ),
+                    ),
+                )
     return list(output.values())
 
 
@@ -1439,9 +1925,24 @@ _OWNER_SHOP_VISIT = re.compile(
 )
 _THIRD_PARTY_SUBJECT = re.compile(r"友人|友達|知人|同僚|他人|家族|甥|姪|彼女|彼氏")
 _AMBIGUOUS_SHOP_BRANDS = (
-    "スターバックス", "スタバ", "マクドナルド", "マック", "モスバーガー", "ケンタッキー",
-    "吉野家", "すき家", "松屋", "サイゼリヤ", "ガスト", "コメダ", "ドトール",
-    "タリーズ", "セブンイレブン", "ファミリーマート", "ローソン", "イオン",
+    "スターバックス",
+    "スタバ",
+    "マクドナルド",
+    "マック",
+    "モスバーガー",
+    "ケンタッキー",
+    "吉野家",
+    "すき家",
+    "松屋",
+    "サイゼリヤ",
+    "ガスト",
+    "コメダ",
+    "ドトール",
+    "タリーズ",
+    "セブンイレブン",
+    "ファミリーマート",
+    "ローソン",
+    "イオン",
 )
 
 
@@ -1455,32 +1956,54 @@ def infer_frequent_shop_claims(posts: Sequence[Post], clues: Sequence[Clue]) -> 
     indexed_clues = [(index, clue) for index, clue in enumerate(clues)]
     claims: dict[str, ProfileItem] = {}
     for habit_post in posts:
-        habit_clause = next((clause for clause in re.split(r"[、,。！？\n]", habit_post.text)
-                             if _OWNER_SHOP_HABIT.search(clause) and _SHOP_REFERENCE.search(clause)), None)
+        habit_clause = next(
+            (
+                clause
+                for clause in re.split(r"[、,。！？\n]", habit_post.text)
+                if _OWNER_SHOP_HABIT.search(clause) and _SHOP_REFERENCE.search(clause)
+            ),
+            None,
+        )
         habit_cue = _OWNER_SHOP_HABIT.search(habit_clause) if habit_clause else None
-        if (_forbidden_context(habit_post.text) or _has_quoted_or_fiction_context(habit_post.text)
-                or habit_cue is None or _THIRD_PARTY_SUBJECT.search(habit_clause or "")
-                or _third_party_context(habit_post.text, ProfileAttribute.FREQUENT_SHOP,
-                                        habit_post.text.find(habit_clause or ""))):
+        if (
+            _forbidden_context(habit_post.text)
+            or _has_quoted_or_fiction_context(habit_post.text)
+            or habit_cue is None
+            or _THIRD_PARTY_SUBJECT.search(habit_clause or "")
+            or _third_party_context(
+                habit_post.text,
+                ProfileAttribute.FREQUENT_SHOP,
+                habit_post.text.find(habit_clause or ""),
+            )
+        ):
             continue
         habit_routines = [
-            (index, clue) for index, clue in indexed_clues
-            if clue.post_id == habit_post.post_id and clue.type is ClueType.ROUTINE_TEXT
-            and clue.confidence >= 0.5 and _SHOP_HABIT_CUE.search(clue.value)
+            (index, clue)
+            for index, clue in indexed_clues
+            if clue.post_id == habit_post.post_id
+            and clue.type is ClueType.ROUTINE_TEXT
+            and clue.confidence >= 0.5
+            and _SHOP_HABIT_CUE.search(clue.value)
         ]
         habit_places = [
-            (index, clue) for index, clue in indexed_clues
-            if clue.post_id == habit_post.post_id and clue.type is ClueType.PLACE_TEXT
-            and clue.confidence >= 0.5 and clue.value.strip()
+            (index, clue)
+            for index, clue in indexed_clues
+            if clue.post_id == habit_post.post_id
+            and clue.type is ClueType.PLACE_TEXT
+            and clue.confidence >= 0.5
+            and clue.value.strip()
             and clue.value.strip() in habit_post.text
             and _is_distinctive_bridge(clue.value)
         ]
         if not habit_routines or not habit_places:
             continue
         habit_shops = [
-            (index, clue) for index, clue in indexed_clues
-            if clue.post_id == habit_post.post_id and clue.type is ClueType.SHOP
-            and clue.confidence >= 0.5 and clue.value.strip()
+            (index, clue)
+            for index, clue in indexed_clues
+            if clue.post_id == habit_post.post_id
+            and clue.type is ClueType.SHOP
+            and clue.confidence >= 0.5
+            and clue.value.strip()
             and "x" not in clue.value.lower()
             and _has_explicit_shop_branch(clue.value)
             and not any(brand in clue.value for brand in _AMBIGUOUS_SHOP_BRANDS)
@@ -1488,65 +2011,131 @@ def infer_frequent_shop_claims(posts: Sequence[Post], clues: Sequence[Clue]) -> 
         for observation_post in posts:
             if observation_post.post_id == habit_post.post_id:
                 continue
-            visit_clause = next((clause for clause in re.split(r"[、,。！？\n]", observation_post.text)
-                                 if _OWNER_SHOP_VISIT.search(clause)), None)
+            visit_clause = next(
+                (
+                    clause
+                    for clause in re.split(r"[、,。！？\n]", observation_post.text)
+                    if _OWNER_SHOP_VISIT.search(clause)
+                ),
+                None,
+            )
             visit_cue = _OWNER_SHOP_VISIT.search(visit_clause) if visit_clause else None
-            if (_forbidden_context(observation_post.text)
-                    or _has_quoted_or_fiction_context(observation_post.text)
-                    or visit_cue is None or _THIRD_PARTY_SUBJECT.search(visit_clause or "")
-                    or _third_party_context(observation_post.text, ProfileAttribute.FREQUENT_SHOP,
-                                            observation_post.text.find(visit_clause or ""))):
+            if (
+                _forbidden_context(observation_post.text)
+                or _has_quoted_or_fiction_context(observation_post.text)
+                or visit_cue is None
+                or _THIRD_PARTY_SUBJECT.search(visit_clause or "")
+                or _third_party_context(
+                    observation_post.text,
+                    ProfileAttribute.FREQUENT_SHOP,
+                    observation_post.text.find(visit_clause or ""),
+                )
+            ):
                 continue
-            if (habit_post.created_at is None or observation_post.created_at is None
-                    or habit_post.created_at.date() == observation_post.created_at.date()):
+            if (
+                habit_post.created_at is None
+                or observation_post.created_at is None
+                or habit_post.created_at.date() == observation_post.created_at.date()
+            ):
                 continue
             observed_places = [
-                (index, clue) for index, clue in indexed_clues
-                if clue.post_id == observation_post.post_id and clue.type is ClueType.PLACE_TEXT
-                and clue.confidence >= 0.5 and clue.value.strip()
+                (index, clue)
+                for index, clue in indexed_clues
+                if clue.post_id == observation_post.post_id
+                and clue.type is ClueType.PLACE_TEXT
+                and clue.confidence >= 0.5
+                and clue.value.strip()
                 and clue.value.strip() in observation_post.text
                 and _is_distinctive_bridge(clue.value)
             ]
             shops = [
-                (index, clue) for index, clue in indexed_clues
-                if clue.post_id == observation_post.post_id and clue.type is ClueType.SHOP
-                and clue.confidence >= 0.5 and clue.value.strip()
+                (index, clue)
+                for index, clue in indexed_clues
+                if clue.post_id == observation_post.post_id
+                and clue.type is ClueType.SHOP
+                and clue.confidence >= 0.5
+                and clue.value.strip()
                 and "x" not in clue.value.lower()
                 and _has_explicit_shop_branch(clue.value)
                 and not any(brand in clue.value for brand in _AMBIGUOUS_SHOP_BRANDS)
             ]
             for habit_place_index, habit_place in habit_places:
                 for observation_place_index, observation_place in observed_places:
-                    if _normalize_bridge(habit_place.value) != _normalize_bridge(observation_place.value):
+                    if _normalize_bridge(habit_place.value) != _normalize_bridge(
+                        observation_place.value
+                    ):
                         continue
                     for routine_index, routine in habit_routines:
                         for habit_shop_index, habit_shop in habit_shops:
                             for shop_index, shop in shops:
-                                if _normalize_bridge(habit_shop.value) != _normalize_bridge(shop.value):
+                                if _normalize_bridge(habit_shop.value) != _normalize_bridge(
+                                    shop.value
+                                ):
                                     continue
-                                value_key = unicodedata.normalize("NFKC", shop.value).lower().strip()
+                                value_key = (
+                                    unicodedata.normalize("NFKC", shop.value).lower().strip()
+                                )
                                 # Directly naming the shop in either post collapses this into
                                 # self-report, so only retain an independently observed value.
-                                if shop.value.strip() in habit_post.text or shop.value.strip() in observation_post.text:
+                                if (
+                                    shop.value.strip() in habit_post.text
+                                    or shop.value.strip() in observation_post.text
+                                ):
                                     continue
                                 evidence = [
-                                    ProfileEvidence(post_id=habit_post.post_id, clue_index=None, required=True,
-                                                    source="post_text", excerpt=habit_clause),
-                                    ProfileEvidence(post_id=habit_post.post_id, clue_index=routine_index,
-                                                    required=True, source="clue"),
-                                    ProfileEvidence(post_id=habit_post.post_id, clue_index=habit_place_index,
-                                                    required=True, source="clue"),
-                                    ProfileEvidence(post_id=habit_post.post_id, clue_index=habit_shop_index,
-                                                    required=True, source="clue"),
-                                    ProfileEvidence(post_id=observation_post.post_id, clue_index=shop_index,
-                                                    required=True, source="clue"),
-                                    ProfileEvidence(post_id=observation_post.post_id, clue_index=observation_place_index,
-                                                    required=True, source="clue"),
-                                    ProfileEvidence(post_id=observation_post.post_id, clue_index=None, required=True,
-                                                    source="post_text", excerpt=visit_cue.group(0)),
+                                    ProfileEvidence(
+                                        post_id=habit_post.post_id,
+                                        clue_index=None,
+                                        required=True,
+                                        source="post_text",
+                                        excerpt=habit_clause,
+                                    ),
+                                    ProfileEvidence(
+                                        post_id=habit_post.post_id,
+                                        clue_index=routine_index,
+                                        required=True,
+                                        source="clue",
+                                    ),
+                                    ProfileEvidence(
+                                        post_id=habit_post.post_id,
+                                        clue_index=habit_place_index,
+                                        required=True,
+                                        source="clue",
+                                    ),
+                                    ProfileEvidence(
+                                        post_id=habit_post.post_id,
+                                        clue_index=habit_shop_index,
+                                        required=True,
+                                        source="clue",
+                                    ),
+                                    ProfileEvidence(
+                                        post_id=observation_post.post_id,
+                                        clue_index=shop_index,
+                                        required=True,
+                                        source="clue",
+                                    ),
+                                    ProfileEvidence(
+                                        post_id=observation_post.post_id,
+                                        clue_index=observation_place_index,
+                                        required=True,
+                                        source="clue",
+                                    ),
+                                    ProfileEvidence(
+                                        post_id=observation_post.post_id,
+                                        clue_index=None,
+                                        required=True,
+                                        source="post_text",
+                                        excerpt=visit_cue.group(0),
+                                    ),
                                 ]
-                                confidence = min(0.6, routine.confidence, habit_place.confidence,
-                                                 habit_shop.confidence, shop.confidence, observation_place.confidence)
+                                confidence = min(
+                                    0.6,
+                                    routine.confidence,
+                                    habit_place.confidence,
+                                    habit_shop.confidence,
+                                    shop.confidence,
+                                    observation_place.confidence,
+                                )
                                 if confidence < 0.5:
                                     continue
                                 path = ProfileEvidencePath(
@@ -1574,27 +2163,96 @@ def infer_frequent_shop_claims(posts: Sequence[Post], clues: Sequence[Clue]) -> 
 
 def _has_explicit_shop_branch(value: str) -> bool:
     """A shop clue needs an observed branch/store marker before it can identify a location."""
-    return bool(re.search(r"(?:本店|支店|店|店舗)$", value.strip())) and _is_distinctive_bridge(value)
+    return bool(re.search(r"(?:本店|支店|店|店舗)$", value.strip())) and _is_distinctive_bridge(
+        value
+    )
 
 
 _EXPLICIT_CLAIM_RULES: dict[ProfileAttribute, tuple[re.Pattern[str], frozenset[ClueType]]] = {
-    ProfileAttribute.FULL_NAME: (re.compile(r"(?:私の本名|本名|フルネーム)は(?P<value>[^、。\s]+?)(?:です|だ|$)"), frozenset({ClueType.NAME_TEXT})),
-    ProfileAttribute.GIVEN_NAME: (re.compile(r"(?:私の下の名前|下の名前)は(?P<value>[^、。\s]+?)(?:です|だ|$)"), frozenset({ClueType.NAME_TEXT})),
-    ProfileAttribute.NICKNAME: (re.compile(r"(?:私のあだ名|ニックネーム|あだ名)は(?P<value>[^、。\s]+?)(?:です|だ|$)"), frozenset({ClueType.NAME_TEXT})),
-    ProfileAttribute.OTHER_SOCIAL_ACCOUNT: (re.compile(r"(?:私の別垢|私の別アカウント|別垢|別アカウント)は(?P<value>[^、。\s]+?)(?:です|だ|$)"), frozenset({ClueType.HANDLE_TEXT})),
-    ProfileAttribute.HOME_BUILDING: (re.compile(r"(?:私の自宅|自宅|私の家)は(?P<value>[^、。\s]+?)(?:です|だ|$)"), frozenset({ClueType.ADDRESS_TEXT, ClueType.LANDMARK})),
-    ProfileAttribute.HOME_NEAREST_STATION: (re.compile(r"(?:自宅|家)(?:の)?最寄り(?:駅)?は(?P<value>[^、。\s]+?)(?:です|だ|$)"), frozenset({ClueType.PLACE_TEXT, ClueType.STATION_SIGN})),
-    ProfileAttribute.REGULAR_LINE: (re.compile(r"(?:私の|通勤|通学)(?:で使う)?路線は(?P<value>[^、。\s]+?)(?:です|だ|$)"), frozenset({ClueType.PLACE_TEXT})),
-    ProfileAttribute.ANNOUNCED_LONG_ABSENCE: (re.compile(r"(?P<value>(?:来週|今週|今月|明日|あす|\d{1,2}月\d{1,2}日)[^。！？\n]{0,24}(?:家|自宅)を(?:空け|留守)[^。！？\n]*)"), frozenset({ClueType.ROUTINE_TEXT})),
-    ProfileAttribute.ACTUAL_HOME_ABSENCE: (re.compile(r"(?P<value>(?:今|現在)(?:は)?(?:家|自宅)(?:にいません|を空けています))"), frozenset({ClueType.ROUTINE_TEXT})),
-    ProfileAttribute.EMPLOYER_NAME: (re.compile(r"(?:私の勤務先|勤務先|勤め先|うちの会社)は(?P<value>[^、。\s]+?)(?:です|だ|$)"), frozenset({ClueType.ORG_TEXT})),
-    ProfileAttribute.WORKPLACE_BUILDING_CANDIDATE: (re.compile(r"(?:私の|勤務先の|職場の)(?:勤務先|職場)?(?:ビル|建物)は(?P<value>[^、。\s]+?)(?:です|だ|$)"), frozenset({ClueType.LANDMARK, ClueType.ORG_TEXT})),
-    ProfileAttribute.WORKPLACE_AREA: (re.compile(r"(?:私の職場|勤務先|職場)の(?:場所|エリア)は(?P<value>[^、。\s]+?)(?:です|だ|$)"), frozenset({ClueType.PLACE_TEXT})),
-    ProfileAttribute.VEHICLE_MODEL: (re.compile(r"(?:私の|自分の|うちの)車(?:は|が)(?P<value>[^、。\s]+?)(?:です|だ|$)"), frozenset({ClueType.VEHICLE_MODEL})),
-    ProfileAttribute.PARTIAL_PLATE: (re.compile(r"(?:私の|自分の|うちの)車の(?:ナンバー|番号)(?:は|が)(?P<value>[^、。\s]+?)(?:です|だ|$)"), frozenset({ClueType.PLATE})),
-    ProfileAttribute.PARTNER_STATUS: (re.compile(r"(?:私|自分)(?:は)?(?P<value>既婚|結婚して|交際中|恋人がいる|パートナーがいる)(?:です|だ|$)"), frozenset({ClueType.RELATION_TEXT})),
-    ProfileAttribute.PARTNER_ATTRIBUTES: (re.compile(r"(?:私の|自分の|うちの)(?:夫|妻|配偶者|恋人|パートナー)(?:の|は)(?P<value>[^、。\s]+?)(?:です|だ|$)"), frozenset({ClueType.AGE_TEXT, ClueType.NAME_TEXT, ClueType.ORG_TEXT})),
-    ProfileAttribute.CHILD_SCHOOL: (re.compile(r"(?:私の|自分の|うちの)(?:息子|娘|子ども|子供)(?:の学校|の通う学校|の通園先|の通学先)(?:は|が)(?P<value>[^、。\s]+?)(?:です|だ|$)"), frozenset({ClueType.ORG_TEXT, ClueType.PLACE_TEXT})),
+    ProfileAttribute.FULL_NAME: (
+        re.compile(r"(?:私の本名|本名|フルネーム)は(?P<value>[^、。\s]+?)(?:です|だ|$)"),
+        frozenset({ClueType.NAME_TEXT}),
+    ),
+    ProfileAttribute.GIVEN_NAME: (
+        re.compile(r"(?:私の下の名前|下の名前)は(?P<value>[^、。\s]+?)(?:です|だ|$)"),
+        frozenset({ClueType.NAME_TEXT}),
+    ),
+    ProfileAttribute.NICKNAME: (
+        re.compile(r"(?:私のあだ名|ニックネーム|あだ名)は(?P<value>[^、。\s]+?)(?:です|だ|$)"),
+        frozenset({ClueType.NAME_TEXT}),
+    ),
+    ProfileAttribute.OTHER_SOCIAL_ACCOUNT: (
+        re.compile(
+            r"(?:私の別垢|私の別アカウント|別垢|別アカウント)は(?P<value>[^、。\s]+?)(?:です|だ|$)"
+        ),
+        frozenset({ClueType.HANDLE_TEXT}),
+    ),
+    ProfileAttribute.HOME_BUILDING: (
+        re.compile(r"(?:私の自宅|自宅|私の家)は(?P<value>[^、。\s]+?)(?:です|だ|$)"),
+        frozenset({ClueType.ADDRESS_TEXT, ClueType.LANDMARK}),
+    ),
+    ProfileAttribute.HOME_NEAREST_STATION: (
+        re.compile(r"(?:自宅|家)(?:の)?最寄り(?:駅)?は(?P<value>[^、。\s]+?)(?:です|だ|$)"),
+        frozenset({ClueType.PLACE_TEXT, ClueType.STATION_SIGN}),
+    ),
+    ProfileAttribute.REGULAR_LINE: (
+        re.compile(r"(?:私の|通勤|通学)(?:で使う)?路線は(?P<value>[^、。\s]+?)(?:です|だ|$)"),
+        frozenset({ClueType.PLACE_TEXT}),
+    ),
+    ProfileAttribute.ANNOUNCED_LONG_ABSENCE: (
+        re.compile(
+            r"(?P<value>(?:来週|今週|今月|明日|あす|\d{1,2}月\d{1,2}日)[^。！？\n]{0,24}(?:家|自宅)を(?:空け|留守)[^。！？\n]*)"
+        ),
+        frozenset({ClueType.ROUTINE_TEXT}),
+    ),
+    ProfileAttribute.ACTUAL_HOME_ABSENCE: (
+        re.compile(r"(?P<value>(?:今|現在)(?:は)?(?:家|自宅)(?:にいません|を空けています))"),
+        frozenset({ClueType.ROUTINE_TEXT}),
+    ),
+    ProfileAttribute.EMPLOYER_NAME: (
+        re.compile(r"(?:私の勤務先|勤務先|勤め先|うちの会社)は(?P<value>[^、。\s]+?)(?:です|だ|$)"),
+        frozenset({ClueType.ORG_TEXT}),
+    ),
+    ProfileAttribute.WORKPLACE_BUILDING_CANDIDATE: (
+        re.compile(
+            r"(?:私の|勤務先の|職場の)(?:勤務先|職場)?(?:ビル|建物)は(?P<value>[^、。\s]+?)(?:です|だ|$)"
+        ),
+        frozenset({ClueType.LANDMARK, ClueType.ORG_TEXT}),
+    ),
+    ProfileAttribute.WORKPLACE_AREA: (
+        re.compile(
+            r"(?:私の職場|勤務先|職場)の(?:場所|エリア)は(?P<value>[^、。\s]+?)(?:です|だ|$)"
+        ),
+        frozenset({ClueType.PLACE_TEXT}),
+    ),
+    ProfileAttribute.VEHICLE_MODEL: (
+        re.compile(r"(?:私の|自分の|うちの)車(?:は|が)(?P<value>[^、。\s]+?)(?:です|だ|$)"),
+        frozenset({ClueType.VEHICLE_MODEL}),
+    ),
+    ProfileAttribute.PARTIAL_PLATE: (
+        re.compile(
+            r"(?:私の|自分の|うちの)車の(?:ナンバー|番号)(?:は|が)(?P<value>[^、。\s]+?)(?:です|だ|$)"
+        ),
+        frozenset({ClueType.PLATE}),
+    ),
+    ProfileAttribute.PARTNER_STATUS: (
+        re.compile(
+            r"(?:私|自分)(?:は)?(?P<value>既婚|結婚して|交際中|恋人がいる|パートナーがいる)(?:です|だ|$)"
+        ),
+        frozenset({ClueType.RELATION_TEXT}),
+    ),
+    ProfileAttribute.PARTNER_ATTRIBUTES: (
+        re.compile(
+            r"(?:私の|自分の|うちの)(?:夫|妻|配偶者|恋人|パートナー)(?:の|は)(?P<value>[^、。\s]+?)(?:です|だ|$)"
+        ),
+        frozenset({ClueType.AGE_TEXT, ClueType.NAME_TEXT, ClueType.ORG_TEXT}),
+    ),
+    ProfileAttribute.CHILD_SCHOOL: (
+        re.compile(
+            r"(?:私の|自分の|うちの)(?:息子|娘|子ども|子供)(?:の学校|の通う学校|の通園先|の通学先)(?:は|が)(?P<value>[^、。\s]+?)(?:です|だ|$)"
+        ),
+        frozenset({ClueType.ORG_TEXT, ClueType.PLACE_TEXT}),
+    ),
 }
 
 
@@ -1605,28 +2263,47 @@ def infer_explicit_observation_claims(
     diagnosis_at: datetime | None = None,
 ) -> list[ProfileItem]:
     """Extract only directly self-associated, typed observations from explicit wording."""
-    now = diagnosis_at or datetime.now(timezone.utc)
+    now = diagnosis_at or datetime.now(UTC)
     claims: dict[tuple[ProfileAttribute, str], ProfileItem] = {}
     self_face_reference = re.compile(r"(?:私|自分)(?:の顔|の自撮り|が撮った自撮り)")
     for post in posts:
         face_match = self_face_reference.search(post.text)
-        if (face_match is not None and not _forbidden_context(post.text)
-                and not _has_quoted_or_fiction_context(post.text)
-                and not _third_party_context(post.text, ProfileAttribute.FACIAL_APPEARANCE, face_match.start())):
+        if (
+            face_match is not None
+            and not _forbidden_context(post.text)
+            and not _has_quoted_or_fiction_context(post.text)
+            and not _third_party_context(
+                post.text, ProfileAttribute.FACIAL_APPEARANCE, face_match.start()
+            )
+        ):
             for index, clue in enumerate(clues):
-                if (clue.post_id != post.post_id or clue.type is not ClueType.FACE
-                        or clue.image_index is None or clue.image_index not in {image.index for image in post.images}
-                        or clue.confidence < 0.5):
+                if (
+                    clue.post_id != post.post_id
+                    or clue.type is not ClueType.FACE
+                    or clue.image_index is None
+                    or clue.image_index not in {image.index for image in post.images}
+                    or clue.confidence < 0.5
+                ):
                     continue
                 value = "本人が自分の顔と書いた写真あり"
                 confidence = min(0.75, clue.confidence)
                 evidence = [
-                    ProfileEvidence(post_id=post.post_id, clue_index=None, required=True,
-                                    source="post_text", excerpt=face_match.group(0)),
-                    ProfileEvidence(post_id=post.post_id, clue_index=index, required=True, source="clue"),
+                    ProfileEvidence(
+                        post_id=post.post_id,
+                        clue_index=None,
+                        required=True,
+                        source="post_text",
+                        excerpt=face_match.group(0),
+                    ),
+                    ProfileEvidence(
+                        post_id=post.post_id, clue_index=index, required=True, source="clue"
+                    ),
                 ]
-                path = ProfileEvidencePath(evidence=evidence, confidence=confidence,
-                                           provenance=EvidencePathProvenance.DIRECT_DISCLOSURE)
+                path = ProfileEvidencePath(
+                    evidence=evidence,
+                    confidence=confidence,
+                    provenance=EvidencePathProvenance.DIRECT_DISCLOSURE,
+                )
                 item = ProfileItem(
                     attribute=ProfileAttribute.FACIAL_APPEARANCE,
                     value=value,
@@ -1634,7 +2311,9 @@ def infer_explicit_observation_claims(
                     status=ProfileStatus.WEAK,
                     evidence=evidence,
                     evidence_paths=[path],
-                    assessment=ClaimAssessment(minimal_scope=EvidenceScope.BLUESKY, harm_status="unknown"),
+                    assessment=ClaimAssessment(
+                        minimal_scope=EvidenceScope.BLUESKY, harm_status="unknown"
+                    ),
                 )
                 claims[(ProfileAttribute.FACIAL_APPEARANCE, value)] = item
         for attribute, (pattern, allowed_types) in _EXPLICIT_CLAIM_RULES.items():
@@ -1642,10 +2321,15 @@ def infer_explicit_observation_claims(
                 continue
             if attribute is ProfileAttribute.ACTUAL_HOME_ABSENCE:
                 created_at = post.created_at
-                if (created_at is None or created_at.tzinfo is None or created_at.utcoffset() is None
-                        or now.tzinfo is None or now.utcoffset() is None):
+                if (
+                    created_at is None
+                    or created_at.tzinfo is None
+                    or created_at.utcoffset() is None
+                    or now.tzinfo is None
+                    or now.utcoffset() is None
+                ):
                     continue
-                age = now.astimezone(timezone.utc) - created_at.astimezone(timezone.utc)
+                age = now.astimezone(UTC) - created_at.astimezone(UTC)
                 if age < timedelta(0) or age > timedelta(minutes=15):
                     continue
             match = pattern.search(post.text)
@@ -1666,17 +2350,28 @@ def infer_explicit_observation_claims(
                 if _normalize_bridge(clue.value) != _normalize_bridge(captured_value):
                     continue
                 if attribute is ProfileAttribute.PARTNER_STATUS and not any(
-                    token in post.text for token in ("夫", "妻", "恋人", "交際", "パートナー", "結婚", "既婚")
+                    token in post.text
+                    for token in ("夫", "妻", "恋人", "交際", "パートナー", "結婚", "既婚")
                 ):
                     continue
                 evidence = [
-                    ProfileEvidence(post_id=post.post_id, clue_index=None, required=True,
-                                    source="post_text", excerpt=match.group(0)),
-                    ProfileEvidence(post_id=post.post_id, clue_index=index, required=True, source="clue"),
+                    ProfileEvidence(
+                        post_id=post.post_id,
+                        clue_index=None,
+                        required=True,
+                        source="post_text",
+                        excerpt=match.group(0),
+                    ),
+                    ProfileEvidence(
+                        post_id=post.post_id, clue_index=index, required=True, source="clue"
+                    ),
                 ]
                 confidence = min(0.75, clue.confidence)
-                path = ProfileEvidencePath(evidence=evidence, confidence=confidence,
-                                           provenance=EvidencePathProvenance.DIRECT_DISCLOSURE)
+                path = ProfileEvidencePath(
+                    evidence=evidence,
+                    confidence=confidence,
+                    provenance=EvidencePathProvenance.DIRECT_DISCLOSURE,
+                )
                 item = ProfileItem(
                     attribute=attribute,
                     value=clue.value,
@@ -1684,7 +2379,9 @@ def infer_explicit_observation_claims(
                     status=ProfileStatus.FOUND,
                     evidence=evidence,
                     evidence_paths=[path],
-                    assessment=ClaimAssessment(minimal_scope=EvidenceScope.BLUESKY, harm_status="unknown"),
+                    assessment=ClaimAssessment(
+                        minimal_scope=EvidenceScope.BLUESKY, harm_status="unknown"
+                    ),
                 )
                 key = (attribute, unicodedata.normalize("NFKC", clue.value).lower().strip())
                 previous = claims.get(key)
@@ -1698,17 +2395,22 @@ def _is_negated_claim(text: str, match_end: int) -> bool:
     if any(mark in text for mark in ("「", "」", "『", "』", "『", "』")):
         return True
     tail = text[match_end : match_end + 36]
-    return bool(re.search(
-        r"(?:ではない|じゃない|ではありません|ではなく|では無い|ではなかった|ではありませんでした|"
-        r"しない|しません|しなかった|していない|していません|してなかった)", tail
-    ))
+    return bool(
+        re.search(
+            r"(?:ではない|じゃない|ではありません|ではなく|では無い|ではなかった|ではありませんでした|"
+            r"しない|しません|しなかった|していない|していません|してなかった)",
+            tail,
+        )
+    )
 
 
 def _third_party_context(text: str, attribute: ProfileAttribute, match_start: int) -> bool:
     """Reject clauses whose subject is explicitly someone other than the owner."""
     clause_start = max(text.rfind(mark, 0, match_start) for mark in ("。", "！", "？", "\n")) + 1
     left_context = text[clause_start:match_start]
-    third_party_subject = re.search(r"(?:友人|友達|知人|同僚|他人|家族|甥|姪)(?:の|が|は|という)", left_context)
+    third_party_subject = re.search(
+        r"(?:友人|友達|知人|同僚|他人|家族|甥|姪)(?:の|が|は|という)", left_context
+    )
     if third_party_subject:
         return True
     if attribute in {ProfileAttribute.PARTNER_ATTRIBUTES, ProfileAttribute.CHILD_SCHOOL}:
@@ -1728,7 +2430,7 @@ def infer_realtime_location_claims(
     diagnosis_at: datetime | None = None,
 ) -> list[ProfileItem]:
     """Infer all explicit first-person locations posted within the 15-minute window."""
-    now = diagnosis_at or datetime.now(timezone.utc)
+    now = diagnosis_at or datetime.now(UTC)
     if now.tzinfo is None or now.utcoffset() is None:
         raise ValueError("diagnosis_at must be timezone-aware")
     candidates: dict[str, ProfileItem] = {}
@@ -1736,12 +2438,18 @@ def infer_realtime_location_claims(
         created_at = post.created_at
         if created_at is None or created_at.tzinfo is None or created_at.utcoffset() is None:
             continue
-        age = now.astimezone(timezone.utc) - created_at.astimezone(timezone.utc)
+        age = now.astimezone(UTC) - created_at.astimezone(UTC)
         if age < timedelta(0) or age > timedelta(minutes=15):
             continue
-        if (_forbidden_context(post.text) or _has_quoted_or_fiction_context(post.text)
-                or re.search(r"(?:友達|友人|妻|夫|彼氏|彼女|子ども|子供|息子|娘|甥|姪)が", post.text)
-                or re.search(r"(?:彼|彼女|友達|友人|妻|夫|子ども|子供|息子|娘|甥|姪)(?:が|は).{0,16}(?:現在地|今|いま)", post.text)):
+        if (
+            _forbidden_context(post.text)
+            or _has_quoted_or_fiction_context(post.text)
+            or re.search(r"(?:友達|友人|妻|夫|彼氏|彼女|子ども|子供|息子|娘|甥|姪)が", post.text)
+            or re.search(
+                r"(?:彼|彼女|友達|友人|妻|夫|子ども|子供|息子|娘|甥|姪)(?:が|は).{0,16}(?:現在地|今|いま)",
+                post.text,
+            )
+        ):
             continue
         match = _REALTIME_LOCATION_RE.search(post.text)
         if not match:
@@ -1749,7 +2457,7 @@ def infer_realtime_location_claims(
         location = match.group("location").strip("はがにで、。 ")
         if not location:
             continue
-        typed = _matching_text_clue(clues, post.post_id, location, ClueType.PLACE_TEXT)
+        typed = _matching_text_clue(list(clues), post.post_id, location, ClueType.PLACE_TEXT)
         if typed is None:
             continue
         clue_index, clue = typed
@@ -1757,12 +2465,22 @@ def infer_realtime_location_claims(
         if confidence < 0.5:
             continue
         evidence = [
-            ProfileEvidence(post_id=post.post_id, clue_index=None, required=True,
-                            source="post_text", excerpt=match.group(0)),
-            ProfileEvidence(post_id=post.post_id, clue_index=clue_index, required=True, source="clue"),
+            ProfileEvidence(
+                post_id=post.post_id,
+                clue_index=None,
+                required=True,
+                source="post_text",
+                excerpt=match.group(0),
+            ),
+            ProfileEvidence(
+                post_id=post.post_id, clue_index=clue_index, required=True, source="clue"
+            ),
         ]
-        path = ProfileEvidencePath(evidence=evidence, confidence=confidence,
-                                   provenance=EvidencePathProvenance.DIRECT_DISCLOSURE)
+        path = ProfileEvidencePath(
+            evidence=evidence,
+            confidence=confidence,
+            provenance=EvidencePathProvenance.DIRECT_DISCLOSURE,
+        )
         normalized = unicodedata.normalize("NFKC", location).lower()
         candidates[normalized] = ProfileItem(
             attribute=ProfileAttribute.REALTIME_LOCATION,
@@ -1834,9 +2552,18 @@ def infer_school_claims(posts: list[Post], clues: list[Clue]) -> list[ProfileIte
     if not school_signs:
         return []
     if len(school_signs) > 1:
-        return [claim for school_name in school_signs
-                for claim in infer_school_claims(posts, [clue for clue in clues
-                    if unicodedata.normalize("NFKC", clue.value).strip() == school_name])]
+        return [
+            claim
+            for school_name in school_signs
+            for claim in infer_school_claims(
+                posts,
+                [
+                    clue
+                    for clue in clues
+                    if unicodedata.normalize("NFKC", clue.value).strip() == school_name
+                ],
+            )
+        ]
     school_name, signs = next(iter(school_signs.items()))
     anchor_post_ids = {post.post_id for _, _, post in signs}
 
@@ -1913,20 +2640,29 @@ def infer_school_claims(posts: list[Post], clues: list[Clue]) -> list[ProfileIte
     if not paths:
         return []
     unique_paths = {
-        tuple((reference.source.value, reference.post_id or "", reference.clue_index,
-               reference.excerpt or "") for reference in path.evidence): path
+        tuple(
+            (
+                reference.source.value,
+                reference.post_id or "",
+                reference.clue_index,
+                reference.excerpt or "",
+            )
+            for reference in path.evidence
+        ): path
         for path in paths
     }
     paths = list(unique_paths.values())
-    return [ProfileItem(
-        attribute=ProfileAttribute.SCHOOL,
-        value=school_name,
-        confidence=0.55,
-        status=ProfileStatus.WEAK,
-        evidence=[reference for path in paths for reference in path.evidence],
-        evidence_paths=paths,
-        assessment=ClaimAssessment(minimal_scope=EvidenceScope.BLUESKY, harm_status="unknown"),
-    )]
+    return [
+        ProfileItem(
+            attribute=ProfileAttribute.SCHOOL,
+            value=school_name,
+            confidence=0.55,
+            status=ProfileStatus.WEAK,
+            evidence=[reference for path in paths for reference in path.evidence],
+            evidence_paths=paths,
+            assessment=ClaimAssessment(minimal_scope=EvidenceScope.BLUESKY, harm_status="unknown"),
+        )
+    ]
 
 
 def infer_school_claim(posts: list[Post], clues: list[Clue]) -> ProfileItem | None:
@@ -2017,8 +2753,18 @@ def infer_child_age_claims(
     for age, birth_post, birth_excerpt, birthday_post, birthday_excerpt in candidates:
         path = ProfileEvidencePath(
             evidence=[
-                ProfileEvidence(post_id=birth_post.post_id, required=True, source="post_text", excerpt=birth_excerpt),
-                ProfileEvidence(post_id=birthday_post.post_id, required=True, source="post_text", excerpt=birthday_excerpt),
+                ProfileEvidence(
+                    post_id=birth_post.post_id,
+                    required=True,
+                    source="post_text",
+                    excerpt=birth_excerpt,
+                ),
+                ProfileEvidence(
+                    post_id=birthday_post.post_id,
+                    required=True,
+                    source="post_text",
+                    excerpt=birthday_excerpt,
+                ),
             ],
             confidence=confidence,
             provenance=EvidencePathProvenance.COMBINED_INFERENCE,
@@ -2036,14 +2782,19 @@ def infer_child_age_claims(
                 minimal_scope=EvidenceScope.BLUESKY,
                 harm_status="prerequisites_unmet",
                 harm_scenario="子どもの年齢と識別情報が組み合わさると、保護者や子どもを狙うなりすまし・詐欺の説得材料になりうる",
-                harm_prerequisites=["子どもを識別できる情報が別途得られる", "攻撃者がその情報を悪用する"],
+                harm_prerequisites=[
+                    "子どもを識別できる情報が別途得られる",
+                    "攻撃者がその情報を悪用する",
+                ],
             ),
         )
         for age, paths in sorted(paths_by_age.items())
     ]
 
 
-def infer_child_age_claim(posts: list[Post], diagnosis_date: date | None = None) -> ProfileItem | None:
+def infer_child_age_claim(
+    posts: list[Post], diagnosis_date: date | None = None
+) -> ProfileItem | None:
     """Backward-compatible singular helper; competing ages have no arbitrary winner."""
     claims = infer_child_age_claims(posts, diagnosis_date=diagnosis_date)
     return claims[0] if len(claims) == 1 else None
@@ -2118,37 +2869,60 @@ def infer_home_nearest_station_claims(
         if not any(cue in text for cue in ("写真", "駅名標", "看板", "標識", "ここ")):
             continue
         for ocr_index, ocr in enumerate(clues):
-            if (ocr.post_id != post.post_id or ocr.type is not ClueType.STATION_SIGN
-                    or ocr.source is not ClueSource.OCR or ocr.image_index is None
-                    or ocr.image_index >= len(post.images) or ocr.region is None
-                    or ocr.confidence < HOME_STATION_MIN_CONFIDENCE or "x" in ocr.value.lower()):
+            if (
+                ocr.post_id != post.post_id
+                or ocr.type is not ClueType.STATION_SIGN
+                or ocr.source is not ClueSource.OCR
+                or ocr.image_index is None
+                or ocr.image_index >= len(post.images)
+                or ocr.region is None
+                or ocr.confidence < HOME_STATION_MIN_CONFIDENCE
+                or "x" in ocr.value.lower()
+            ):
                 continue
             station = unicodedata.normalize("NFKC", ocr.value).removesuffix("駅").strip()
             if station not in known_names:
                 continue
             corroborators = [
-                (index, clue) for index, clue in enumerate(clues)
-                if clue.post_id == post.post_id and clue.type is ClueType.STATION_SIGN
-                and clue.source is ClueSource.VLM and clue.image_index == ocr.image_index
-                and clue.region is not None and clue.confidence >= HOME_STATION_MIN_CONFIDENCE
+                (index, clue)
+                for index, clue in enumerate(clues)
+                if clue.post_id == post.post_id
+                and clue.type is ClueType.STATION_SIGN
+                and clue.source is ClueSource.VLM
+                and clue.image_index == ocr.image_index
+                and clue.region is not None
+                and clue.confidence >= HOME_STATION_MIN_CONFIDENCE
                 and unicodedata.normalize("NFKC", clue.value).removesuffix("駅").strip() == station
                 and _regions_overlap(ocr.region, clue.region)
             ]
             if not corroborators:
                 continue
             vlm_index, _ = corroborators[0]
-            facts.append(CrossPostFact(
-                post_id=post.post_id, clue_index=ocr_index, role=FactRole.SPECIFIC_VALUE,
-                value=station, confidence=min(ocr.confidence, REGULAR_STATION_ANCHOR_CONFIDENCE),
-                bridge_id="home_station:self_nearest", excerpt=ocr.value, source="clue",
-                related_evidence=(
-                    ProfileEvidence(post_id=post.post_id, clue_index=vlm_index, required=True),
-                    ProfileEvidence(post_id=post.post_id, clue_index=None, required=True,
-                        source="post_text",
-                        excerpt=HOME_STATION_ANCHOR_RE.search(text).group(0),
+            anchor_match = HOME_STATION_ANCHOR_RE.search(text)
+            if anchor_match is None:
+                continue
+            facts.append(
+                CrossPostFact(
+                    post_id=post.post_id,
+                    clue_index=ocr_index,
+                    role=FactRole.SPECIFIC_VALUE,
+                    value=station,
+                    confidence=min(ocr.confidence, REGULAR_STATION_ANCHOR_CONFIDENCE),
+                    bridge_id="home_station:self_nearest",
+                    excerpt=ocr.value,
+                    source="clue",
+                    related_evidence=(
+                        ProfileEvidence(post_id=post.post_id, clue_index=vlm_index, required=True),
+                        ProfileEvidence(
+                            post_id=post.post_id,
+                            clue_index=None,
+                            required=True,
+                            source="post_text",
+                            excerpt=anchor_match.group(0),
+                        ),
                     ),
-                ),
-            ))
+                )
+            )
     for post in posts:
         text = unicodedata.normalize("NFKC", post.text)
         match = HOME_STATION_ROUTINE_RE.search(text)
@@ -2157,23 +2931,33 @@ def infer_home_nearest_station_claims(
         if any(_mentions_station_name(text, name) for name in known_names):
             continue
         routine_clues = [
-            (index, clue) for index, clue in enumerate(clues)
-            if clue.post_id == post.post_id and clue.type is ClueType.ROUTINE_TEXT
-            and clue.source is ClueSource.TEXT and clue.value.strip() in text
+            (index, clue)
+            for index, clue in enumerate(clues)
+            if clue.post_id == post.post_id
+            and clue.type is ClueType.ROUTINE_TEXT
+            and clue.source is ClueSource.TEXT
+            and clue.value.strip() in text
             and HOME_STATION_ROUTINE_RE.search(clue.value)
         ]
         if not routine_clues:
             continue
-        facts.append(CrossPostFact(
-            post_id=post.post_id, clue_index=None, role=FactRole.OWNER_RELATION,
-            value="自宅から駅までの習慣", confidence=REGULAR_STATION_ANCHOR_CONFIDENCE,
-            bridge_id="home_station:self_nearest", owner_relation_explicit=True,
-            excerpt=match.group(0), source="post_text",
-            related_evidence=tuple(
-                ProfileEvidence(post_id=post.post_id, clue_index=index, required=True)
-                for index, _ in routine_clues
-            ),
-        ))
+        facts.append(
+            CrossPostFact(
+                post_id=post.post_id,
+                clue_index=None,
+                role=FactRole.OWNER_RELATION,
+                value="自宅から駅までの習慣",
+                confidence=REGULAR_STATION_ANCHOR_CONFIDENCE,
+                bridge_id="home_station:self_nearest",
+                owner_relation_explicit=True,
+                excerpt=match.group(0),
+                source="post_text",
+                related_evidence=tuple(
+                    ProfileEvidence(post_id=post.post_id, clue_index=index, required=True)
+                    for index, _ in routine_clues
+                ),
+            )
+        )
     claims = infer_cross_post_candidates(ProfileAttribute.HOME_NEAREST_STATION, facts)
     return [claim.model_copy(update={"value": f"{claim.value}駅"}) for claim in claims]
 
@@ -2352,52 +3136,6 @@ def _regions_linked(
     gap_y = max(0, left[1] - right[3], right[1] - left[3])
     threshold = max(24, round(max(width, height) * 0.02))
     return max(gap_x, gap_y) <= threshold
-
-
-def _normalize_bridge(value: str) -> str:
-    return " ".join(unicodedata.normalize("NFKC", value).lower().split())
-
-
-def _is_distinctive_bridge(value: str) -> bool:
-    """Require a named bridge, rejecting generic nouns such as 研修 or 商店街."""
-    bridge = _normalize_bridge(value)
-    generic_suffixes = (
-        "商店街",
-        "ショッピングモール",
-        "モール",
-        "研修",
-        "研修会",
-        "駅",
-        "商店",
-        "店",
-        "会社",
-        "ビル",
-        "オフィス",
-        "病院",
-        "学校",
-        "公園",
-        "通り",
-        "施設",
-    )
-    for suffix in generic_suffixes:
-        if bridge.endswith(suffix):
-            name = bridge[: -len(suffix)]
-            return len(name) >= 2 and any(ch.isalnum() or "\u3040" <= ch <= "\u9fff" for ch in name)
-    return len(bridge) >= 3 and any(ch.isalpha() for ch in bridge)
-
-
-def _matching_text_clue(
-    clues: list[Clue], post_id: str, value: str, clue_type: ClueType
-) -> tuple[int, Clue] | None:
-    for index, clue in enumerate(clues):
-        if (
-            clue.post_id == post_id
-            and clue.source is ClueSource.TEXT
-            and clue.type is clue_type
-            and _normalize_bridge(clue.value) == _normalize_bridge(value)
-        ):
-            return index, clue
-    return None
 
 
 def _matching_profile_clue(clues: list[Clue], value: str, clue_type: ClueType) -> Clue | None:

@@ -1,5 +1,7 @@
 "use client";
 
+import type { ReactNode } from "react";
+
 import { messages } from "@/lib/messages";
 import { postImageSrc } from "@/lib/post-image";
 import { pickFace, pickSpotlight, validNameConclusions, type RevealItem } from "@/lib/reveal";
@@ -76,6 +78,8 @@ interface RevealProps {
   clues: readonly Clue[];
   conclusions: readonly Conclusion[];
   profileClaims?: readonly ProfileCandidateSet[];
+  excludedPostIds?: ReadonlySet<string>;
+  children?: ReactNode;
 }
 
 function profileName(profileClaims: readonly ProfileCandidateSet[]): { candidate: ProfileCandidate | null; provenance: string[]; ambiguous: boolean } {
@@ -108,11 +112,12 @@ function profileName(profileClaims: readonly ProfileCandidateSet[]): { candidate
  * 推定できたことを大きく出し、続けて証拠を 1 枚ずつ机に投げ出すように並べる。
  * 動きを減らす設定の人には、動きなしで並べて見せる（globals.css）。
  */
-export function Reveal({ posts, clues, conclusions, profileClaims = [] }: RevealProps) {
-  const items = pickSpotlight(posts, clues, conclusions);
+export function Reveal({ posts, clues, conclusions, profileClaims = [], excludedPostIds = new Set(), children }: RevealProps) {
+  const items = pickSpotlight(posts, clues, conclusions, excludedPostIds);
   const identity = profileName(profileClaims);
-  if (items.length === 0 && conclusions.length === 0 && !identity.candidate && !identity.ambiguous) return null;
-  const postCount = new Set(clues.map((c) => c.post_id)).size;
+  if (items.length === 0 && conclusions.length === 0 && !identity.candidate && !identity.ambiguous) return children ?? null;
+  const visibleClues = clues.filter((clue) => !excludedPostIds.has(clue.post_id));
+  const postCount = new Set(visibleClues.map((c) => c.post_id)).size;
   const otherConclusions = validNameConclusions(conclusions).filter(
     (conclusion) => conclusion.attribute !== "full_name" && conclusion.attribute !== "given_name_or_nickname",
   );
@@ -124,7 +129,7 @@ export function Reveal({ posts, clues, conclusions, profileClaims = [] }: Reveal
         <h2 id="reveal-heading" className="horror-title reveal-heading text-4xl leading-tight sm:text-8xl">
           {t.heading}
         </h2>
-        <p className="mt-3 text-ink/70">{t.count(clues.length, postCount)}</p>
+        <p className="mt-3 text-ink/70">{t.count(visibleClues.length, postCount)}</p>
       </div>
 
       <IdentityCard
@@ -137,8 +142,10 @@ export function Reveal({ posts, clues, conclusions, profileClaims = [] }: Reveal
           .filter((item) => item.clue.type !== "name_text" && item.clue.type !== "face" && !item.used)
           .slice(0, MAX_HIGHLIGHTS)
           .map((item) => ({ label: messages.clues.typeLabels[item.clue.type], value: item.clue.value }))}
-        clueCount={clues.length}
+        clueCount={visibleClues.length}
       />
+
+      {children}
 
       {items.length > 0 && (
         <ul aria-label={t.evidenceLabel} className="grid grid-cols-1 gap-8">

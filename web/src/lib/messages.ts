@@ -70,6 +70,19 @@ export const messages = {
     tagline: "あなたの投稿、組み合わせると",
     lead: "Bluesky の自分の投稿を特定班AIが読み、1件ずつは無害な投稿の組み合わせから、何がわかるかを見せます。調べられるのはログインした本人のアカウントだけです。",
   },
+  /** ログインなしの体験デモ（/demo）。架空アカウントの結果だけを見せる */
+  demo: {
+    banner: "これは架空のアカウントです。実在の人物ではなく、JPHACKS 2026 のデモ用に作った投稿です。",
+    heading: "体験デモ：架空のアカウントを診断すると",
+    lead: "ログインせずに、特定班AIが架空の人物の投稿から何を推定するかを試せます。モデルにも Bluesky にも接続しません。",
+    entry: "ログインせずに、架空のアカウントで試す",
+    loading: "架空のアカウントの診断結果を読み込んでいます…",
+    failed: "体験デモを読み込めませんでした。時間を置いてもう一度お試しください",
+    candidatesHeading: "消したらどうなる？",
+    candidatesLead: "危ない投稿を選んで、消したあとの捜査ボードを確かめられます。体験デモなので、何も消えません。",
+    candidatesLabel: "削除候補の投稿",
+    backHome: "Bluesky でログインして、自分の投稿を調べる",
+  },
   login: {
     formLabel: "Bluesky にログイン",
     heading: "Bluesky のアカウントでログイン",
@@ -82,7 +95,9 @@ export const messages = {
     checking: "ログイン状態を確認しています…",
     pending: "Bluesky にログインしています…",
     failed: "ログインできませんでした",
+    oauthFailed: "Bluesky でのログインに失敗しました。もう一度お試しください",
     loggedIn: "ログイン中",
+    expired: "時間が切れました。もう一度ログインしてください",
     logout: "ログアウト",
     // 同意と、アプリパスワードの取り消しの案内（文章の続きは web/src/lib/legal.ts）
     consentBefore: "ログインすると、",
@@ -94,12 +109,23 @@ export const messages = {
   diagnose: {
     heading: "診断",
     start: "診断する",
+    /** 結果のあとに出す、控えめな再診断ボタン。1日の回数を使うので、その注意を添える */
+    rediagnose: "もう一度診断する",
+    // 1日の上限回数と残りの回数は画面に届かないので、数字は書かない（api の DIAGNOSE_DAILY_LIMIT）
+    rediagnoseNote: "1日に診断できる回数には上限があります。押すと1回分を使います。",
     connecting: "特定班AIが投稿を取りに行っています…",
     reading: (posts: number) => `${posts} 件の投稿を調べています…`,
     searching: (searched: number, posts: number) => `手がかりを探しています…（${searched} / ${posts} 件）`,
     done: (posts: number) => `${posts} 件の投稿を読みました`,
     failed: "診断できませんでした",
+    /** 公開Web検索の同意欄。api が使えると答えたとき（Brave のキーがあるか、モック）だけ出す */
+    publicWebConsentLabel: "公開Webで外部SNS・ブログ・記事の候補を検索する（この診断のみ）",
+    publicWebConsentNote:
+      "同意すると、実モードではログイン中の公開BlueskyハンドルだけをBraveへ送ります。検索の費用は運営が負担します。あなたに料金が請求されることはなく、支払情報の登録も要りません。検索語は最大90日保持されます。投稿文・プロフィール文・写真は送りません。候補だけでは同一人物と判断しません。モックモードは固定の架空結果を使い、外部通信しません。",
+    deletedBadge: "削除済み",
     postsLabel: "読んだ投稿",
+    /** 結果が出たあと、読んだ投稿の一覧を折りたたむときの見出し */
+    postsSummary: (posts: number) => `読んだ投稿 ${posts} 件と、見つけた手がかり`,
   },
   /** 診断の間の画面 */
   loading: {
@@ -136,6 +162,8 @@ export const messages = {
     failed: (reason: string) => `手がかりを探せませんでした（${reason}）`,
   },
   board: {
+    /** 投稿を横断したプロフィール推定の、根拠経路ごとの比較（折りたたみ）の見出し */
+    whatIfSummary: "詳しく比べる：投稿を仮に外すと、どの推定の根拠がなくなるか",
     heading: "捜査ボード",
     /** 推理の結論が出た瞬間の鬼のかけ声。アプリ名と同じ言葉だが、名前を変えてもこちらは変えない */
     found: "みーつけた",
@@ -143,9 +171,21 @@ export const messages = {
     evidence: "証拠",
     conclusionsLabel: "推定できたこと",
     inferred: "推定",
+    /** 確からしさが弱い推定にだけ付ける印（数字は出さない。web/src/types/diagnose.ts の STRONG_CONFIDENCE 未満） */
+    confidence: { weak: "確からしさ：弱い" },
     attributeLabels: ATTRIBUTE_LABELS,
     reasons: (count: number) => `根拠（${count} 件）`,
     reasonsLabel: "根拠の手がかり",
+    /** 推理の連鎖（この投稿 → この手がかり → この推定） */
+    chain: {
+      summary: "推理の流れをたどる",
+      label: "推理の流れ",
+      post: "投稿",
+      clue: "手がかり",
+      conclusion: "推定",
+      photo: (n: number) => `写真 ${n} 枚目`,
+      noText: "（本文なし）",
+    },
     empty: "投稿からは、あなたについて推定できることは見つかりませんでした",
     /** 消したらどうなるかで、推定できなくなった項目 */
     unknown: "不明",
@@ -178,6 +218,18 @@ export const messages = {
     cluesUnit: "個",
     inferred: "推定",
   },
+  /** 結果の先頭に出す、消す投稿の要約と、いまどの段階か */
+  plan: {
+    label: "消す投稿の要約",
+    stepsLabel: "診断の流れ",
+    steps: ["もういいかい", "みーつけた", "まーだだよ", "もういいよ"],
+    stepNotes: ["投稿を読む", "推定を見る", "消す投稿を選ぶ", "消して逃げ切る"],
+    /** labels は不明になる項目の表示名。1件ずつ消したときに崩れる項目を合わせたもの */
+    breaks: (count: number, labels: string) => `この ${count} 件を消すと、少なくとも「${labels}」が不明になります`,
+    direct: (count: number) => `この ${count} 件に、名前や住所などの手がかりが直接残っています`,
+    none: "消すと推定が崩れる投稿は見つかりませんでした",
+    show: "消す投稿を見る",
+  },
   risky: {
     heading: "まーだだよ",
     lead: "名前・生年月日・住まいなどの推定と、写真や本文に残った顔・名前・住所を重く見て選びました。「消したらどうなる」で削除後の捜査ボードを確認できます。ここではまだ消しません。",
@@ -193,6 +245,9 @@ export const messages = {
     result: (deleted: number, broken: number) =>
       broken > 0 ? `${deleted} 件消すと、${broken} つの項目が不明になります` : `${deleted} 件消しても、推定は崩れません`,
     safe: "重要な推定と直接写った手がかりがなくなりました",
+    /** 消す前後の、推定できた項目の数 */
+    countHeading: "推定できた項目",
+    countLabel: (before: number, after: number) => `推定できた項目は ${before} から ${after} になります`,
     none: "重要な推定や直接写った手がかりを減らせる投稿は見つかりませんでした",
     failed: "推理し直せませんでした",
     /** ここから下は、Bluesky から実際に消すとき */
@@ -206,6 +261,12 @@ export const messages = {
     deleting: "Bluesky から消しています…",
     deleteFailed: "消せませんでした",
   },
+  /** 友だちを誘う Bluesky の投稿画面（結果の最後）。本文に診断の中身は入れない */
+  invite: {
+    link: "友だちにも「診断してみて」と誘う",
+    note: "Bluesky の投稿画面が開きます。誘い文とこのサイトの URL だけが入り、あなたの診断結果は入りません。",
+    text: "Bluesky の自分の投稿から、どこまで特定されるか試せる「みーつけた」。診断してみて",
+  },
   /** 実際に消したあと */
   escaped: {
     heading: "もういいよ",
@@ -213,7 +274,7 @@ export const messages = {
     failed: (count: number) => `${count} 件は消せませんでした。Bluesky のアプリから直接消してください`,
     blueskyBusy: (count: number) =>
       `Bluesky が混雑しているため、${count} 件は消せませんでした。少し待ってから消し直すか、Bluesky のアプリから直接消してください`,
-    rediagnose: "もう一度「診断する」を押すと、残った投稿で最初から調べ直します",
+    rediagnose: "下の「もう一度診断する」を押すと、残った投稿で最初から調べ直します",
   },
   hideAndSeek: {
     pickerLabel: "写真の選択",

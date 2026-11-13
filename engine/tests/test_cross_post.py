@@ -1,32 +1,37 @@
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 from tkb_common.schemas import (
     Clue,
     ClueSource,
     ClueType,
-    ProfileCandidateSetStatus,
+    EvidencePathProvenance,
     Post,
     PostImage,
     ProfileAttribute,
+    ProfileCandidateSetStatus,
     ProfileEvidence,
     ProfileEvidencePath,
-    EvidencePathProvenance,
     ProfileItem,
+    ProfileRelation,
+    ProfileRelationEndpoint,
+    ProfileRelationEndpointKind,
+    ProfileRelationKind,
     ProfileStatus,
 )
 from tkb_engine.cross_post import (
+    evaluate_profile_candidates,
     infer_child_age_claim,
     infer_child_age_claims,
+    infer_combined_regular_line_claims,
     infer_explicit_observation_claims,
     infer_home_nearest_station_claims,
-    infer_regular_station_from_home_origin,
-    infer_owner_profile_relations,
     infer_owner_claims,
-    infer_combined_regular_line_claims,
+    infer_owner_profile_relations,
     infer_realtime_location_claim,
-    evaluate_profile_candidates,
+    infer_regular_station_from_home_origin,
     plan_profile_candidate_deletion,
     plan_profile_claim_deletion,
+    profile_relations_after_deletion,
     recalculate_after_deletion,
     recalculate_profile_candidate_sets,
 )
@@ -79,7 +84,9 @@ def shop_sign_clue(p: Post, value: str, *, confidence: float = 0.9) -> Clue:
 
 
 def frequent_shop_fixture(
-    *, shop_a: str = "青葉珈琲 神保町店", shop_b: str | None = None,
+    *,
+    shop_a: str = "青葉珈琲 神保町店",
+    shop_b: str | None = None,
     habit_text: str = "私は毎週神保町のこの店で昼食をとる",
     observation_text: str = "私は今日も神保町のこの店で休憩した",
     same_day: bool = False,
@@ -112,22 +119,55 @@ def school_org_clue(p: Post, value: str, *, confidence: float = 0.92) -> Clue:
     )
 
 
-def workplace_photo_clues(p: Post, area: str = "文京区", *, with_area: bool = True, with_site: bool = True) -> list[Clue]:
+def workplace_photo_clues(
+    p: Post, area: str = "文京区", *, with_area: bool = True, with_site: bool = True
+) -> list[Clue]:
     clues = []
     if with_area:
-        clues.append(Clue(post_id=p.post_id, image_index=0, type=ClueType.PLACE_TEXT, value=area,
-                          region=(10, 55, 150, 95), confidence=0.9, source=ClueSource.OCR))
+        clues.append(
+            Clue(
+                post_id=p.post_id,
+                image_index=0,
+                type=ClueType.PLACE_TEXT,
+                value=area,
+                region=(10, 55, 150, 95),
+                confidence=0.9,
+                source=ClueSource.OCR,
+            )
+        )
     if with_site:
-        clues.append(Clue(post_id=p.post_id, image_index=0, type=ClueType.ORG_TEXT, value="青空社 本社",
-                          region=(10, 10, 220, 50), confidence=0.9, source=ClueSource.VLM))
+        clues.append(
+            Clue(
+                post_id=p.post_id,
+                image_index=0,
+                type=ClueType.ORG_TEXT,
+                value="青空社 本社",
+                region=(10, 10, 220, 50),
+                confidence=0.9,
+                source=ClueSource.VLM,
+            )
+        )
     return clues
 
 
-def workplace_posts(anchor_text: str = "私は青空社の本社で働いている", attendance_text: str = "私は青空社の本社に出勤した") -> list[Post]:
+def workplace_posts(
+    anchor_text: str = "私は青空社の本社で働いている",
+    attendance_text: str = "私は青空社の本社に出勤した",
+) -> list[Post]:
     owner = post("work-owner", anchor_text)
-    attendance = post("work-photo", attendance_text).model_copy(update={
-        "images": [PostImage(index=0, url="https://cdn.bsky.app/img/feed_fullsize/example", alt="", width=640, height=480)]
-    })
+    attendance = post("work-photo", attendance_text).model_copy(
+        update={
+            "images": [
+                PostImage(
+                    index=0,
+                    url="https://cdn.bsky.app/img/feed_fullsize/example",
+                    alt="",
+                    width=640,
+                    height=480,
+                )
+            ]
+        }
+    )
     return [owner, attendance]
 
 
@@ -154,8 +194,10 @@ def test_workplace_area_rejects_unbridged_visitors_third_party_quotes_and_direct
         workplace_posts(attendance_text="私は職場は文京区と投稿した。青空社の本社に出勤した"),
     ]
     for posts in cases:
-        assert all(item.attribute is not ProfileAttribute.WORKPLACE_AREA
-                   for item in infer_owner_claims(posts, workplace_photo_clues(posts[1])))
+        assert all(
+            item.attribute is not ProfileAttribute.WORKPLACE_AREA
+            for item in infer_owner_claims(posts, workplace_photo_clues(posts[1]))
+        )
 
 
 def test_workplace_area_rejects_employment_phrase_inside_visitor_relative_clause() -> None:
@@ -163,25 +205,35 @@ def test_workplace_area_rejects_employment_phrase_inside_visitor_relative_clause
         anchor_text="私は青空社の本社で働く友人を訪ねた",
         attendance_text="私は青空社の本社に出勤した",
     )
-    assert all(item.attribute is not ProfileAttribute.WORKPLACE_AREA
-               for item in infer_owner_claims(posts, workplace_photo_clues(posts[1])))
+    assert all(
+        item.attribute is not ProfileAttribute.WORKPLACE_AREA
+        for item in infer_owner_claims(posts, workplace_photo_clues(posts[1]))
+    )
 
 
 def test_workplace_area_requires_image_linked_area_and_same_image_org_site_clue() -> None:
-    for kwargs in ({"with_area": False}, {"with_site": False}):
+    for with_area, with_site in ((False, True), (True, False)):
         posts = workplace_posts()
-        assert all(item.attribute is not ProfileAttribute.WORKPLACE_AREA
-                   for item in infer_owner_claims(posts, workplace_photo_clues(posts[1], **kwargs)))
+        assert all(
+            item.attribute is not ProfileAttribute.WORKPLACE_AREA
+            for item in infer_owner_claims(
+                posts, workplace_photo_clues(posts[1], with_area=with_area, with_site=with_site)
+            )
+        )
     posts = workplace_posts()
     unrelated = workplace_photo_clues(posts[1])
     unrelated[0] = unrelated[0].model_copy(update={"image_index": 1})
-    assert all(item.attribute is not ProfileAttribute.WORKPLACE_AREA
-               for item in infer_owner_claims(posts, unrelated))
+    assert all(
+        item.attribute is not ProfileAttribute.WORKPLACE_AREA
+        for item in infer_owner_claims(posts, unrelated)
+    )
     posts = workplace_posts()
     opposite_corners = workplace_photo_clues(posts[1])
     opposite_corners[0] = opposite_corners[0].model_copy(update={"region": (500, 400, 630, 450)})
-    assert all(item.attribute is not ProfileAttribute.WORKPLACE_AREA
-               for item in infer_owner_claims(posts, opposite_corners))
+    assert all(
+        item.attribute is not ProfileAttribute.WORKPLACE_AREA
+        for item in infer_owner_claims(posts, opposite_corners)
+    )
 
 
 def test_residential_claim_uses_landmark_bridge_across_two_posts() -> None:
@@ -213,23 +265,27 @@ def test_frequent_shop_requires_habit_and_same_distinctive_shop_branch_in_two_po
 
 def test_frequent_shop_rejects_insufficient_or_same_day_visits() -> None:
     one_shop_post, one_shop_clues = frequent_shop_fixture()
-    assert all(item.attribute is not ProfileAttribute.FREQUENT_SHOP
-               for item in infer_owner_claims(one_shop_post[:1], one_shop_clues[:3]))
+    assert all(
+        item.attribute is not ProfileAttribute.FREQUENT_SHOP
+        for item in infer_owner_claims(one_shop_post[:1], one_shop_clues[:3])
+    )
     same_day_posts, same_day_clues = frequent_shop_fixture(same_day=True)
-    assert all(item.attribute is not ProfileAttribute.FREQUENT_SHOP
-               for item in infer_owner_claims(same_day_posts, same_day_clues))
+    assert all(
+        item.attribute is not ProfileAttribute.FREQUENT_SHOP
+        for item in infer_owner_claims(same_day_posts, same_day_clues)
+    )
 
 
 def test_frequent_shop_rejects_chain_ambiguous_and_unidentified_branches() -> None:
     chain_posts, chain_clues = frequent_shop_fixture(
         shop_a="スターバックス神保町店", shop_b="スターバックス神保町店"
     )
-    no_branch_posts, no_branch_clues = frequent_shop_fixture(
-        shop_a="青葉珈琲", shop_b="青葉珈琲"
-    )
+    no_branch_posts, no_branch_clues = frequent_shop_fixture(shop_a="青葉珈琲", shop_b="青葉珈琲")
     for posts, clues in ((chain_posts, chain_clues), (no_branch_posts, no_branch_clues)):
-        assert all(item.attribute is not ProfileAttribute.FREQUENT_SHOP
-                   for item in infer_owner_claims(posts, clues))
+        assert all(
+            item.attribute is not ProfileAttribute.FREQUENT_SHOP
+            for item in infer_owner_claims(posts, clues)
+        )
 
 
 def test_frequent_shop_rejects_third_party_and_direct_shop_self_report() -> None:
@@ -242,9 +298,7 @@ def test_frequent_shop_rejects_third_party_and_direct_shop_self_report() -> None
     intervening_friend_posts, intervening_friend_clues = frequent_shop_fixture(
         habit_text="私は友人が毎週神保町のこの店で昼食をとる"
     )
-    direct_posts, direct_clues = frequent_shop_fixture(
-        habit_text="私は毎週青葉珈琲 神保町店に通う"
-    )
+    direct_posts, direct_clues = frequent_shop_fixture(habit_text="私は毎週青葉珈琲 神保町店に通う")
     direct_observation_posts, direct_observation_clues = frequent_shop_fixture(
         observation_text="神保町で青葉珈琲 神保町店へ"
     )
@@ -257,20 +311,27 @@ def test_frequent_shop_rejects_third_party_and_direct_shop_self_report() -> None
         (direct_observation_posts, direct_observation_clues),
         (photo_only_posts, photo_only_clues),
     ):
-        assert all(item.attribute is not ProfileAttribute.FREQUENT_SHOP
-                   for item in infer_owner_claims(posts, clues))
+        assert all(
+            item.attribute is not ProfileAttribute.FREQUENT_SHOP
+            for item in infer_owner_claims(posts, clues)
+        )
 
 
 def test_frequent_shop_rejects_conflicting_shop_values_at_same_location() -> None:
     posts, clues = frequent_shop_fixture(shop_b="別の珈琲 神保町店")
-    assert all(item.attribute is not ProfileAttribute.FREQUENT_SHOP
-               for item in infer_owner_claims(posts, clues))
+    assert all(
+        item.attribute is not ProfileAttribute.FREQUENT_SHOP
+        for item in infer_owner_claims(posts, clues)
+    )
 
 
 def test_frequent_shop_candidate_is_removed_when_either_required_post_is_deleted() -> None:
     posts, clues = frequent_shop_fixture()
-    claims = [item for item in infer_owner_claims(posts, clues)
-              if item.attribute is ProfileAttribute.FREQUENT_SHOP]
+    claims = [
+        item
+        for item in infer_owner_claims(posts, clues)
+        if item.attribute is ProfileAttribute.FREQUENT_SHOP
+    ]
     claim = claims[0]
     assert recalculate_after_deletion(claim, {posts[0].post_id}) is None
     assert recalculate_after_deletion(claim, {posts[1].post_id}) is None
@@ -334,8 +395,11 @@ def test_school_rule_retains_separately_supported_school_candidates() -> None:
     class_day = post("school-class", "授業終わりに学食へ")
     festival = post("school-festival", "文化祭が来週開催")
     clues = [school_org_clue(first, "東京外国語大学"), school_org_clue(second, "架空青空大学")]
-    claims = [item for item in infer_owner_claims([first, second, class_day, festival], clues)
-              if item.attribute is ProfileAttribute.SCHOOL]
+    claims = [
+        item
+        for item in infer_owner_claims([first, second, class_day, festival], clues)
+        if item.attribute is ProfileAttribute.SCHOOL
+    ]
     assert {item.value for item in claims} == {"東京外国語大学", "架空青空大学"}
     sets = evaluate_profile_candidates(claims, [first, second, class_day, festival], clues=clues)
     school_set = next(item for item in sets if item.attribute is ProfileAttribute.SCHOOL)
@@ -345,12 +409,16 @@ def test_school_rule_retains_separately_supported_school_candidates() -> None:
 def test_school_same_name_signs_across_anchor_posts_merge_independent_evidence_paths() -> None:
     first = photo_post("school-sign-one", "大学のキャンパスで撮影")
     second = photo_post("school-sign-two", "大学のキャンパスで撮影")
-    class_day, festival = post("school-class-merge", "授業終わりに学食へ"), post(
-        "school-festival-merge", "文化祭が来週開催"
+    class_day, festival = (
+        post("school-class-merge", "授業終わりに学食へ"),
+        post("school-festival-merge", "文化祭が来週開催"),
     )
     clues = [school_org_clue(first, "東京外国語大学"), school_org_clue(second, "東京外国語大学")]
-    claims = [item for item in infer_owner_claims([first, second, class_day, festival], clues)
-              if item.attribute is ProfileAttribute.SCHOOL]
+    claims = [
+        item
+        for item in infer_owner_claims([first, second, class_day, festival], clues)
+        if item.attribute is ProfileAttribute.SCHOOL
+    ]
     assert len(claims) == 1
     assert len(claims[0].evidence_paths) == 2
 
@@ -430,12 +498,12 @@ def test_conflicting_values_on_same_bridge_are_kept_as_separate_candidates() -> 
     one = post("b", "青葉商店街は文京区")
     two = post("c", "青葉商店街は台東区")
     claims = infer_owner_claims(
-            [anchor, one, two],
-            [
-                typed_clue(one, "文京区", ClueType.PLACE_TEXT),
-                typed_clue(two, "台東区", ClueType.PLACE_TEXT),
-            ],
-        )
+        [anchor, one, two],
+        [
+            typed_clue(one, "文京区", ClueType.PLACE_TEXT),
+            typed_clue(two, "台東区", ClueType.PLACE_TEXT),
+        ],
+    )
     assert {claim.value for claim in claims} == {"文京区", "台東区"}
 
 
@@ -696,14 +764,17 @@ def station_vlm(
 def test_combined_regular_line_requires_repeated_owner_commute_and_unique_gazetteer_line() -> None:
     first = post("line-a", "私は毎朝根津駅から湯島駅まで通勤する")
     second = post("line-b", "私は平日は根津駅から湯島駅まで通勤している")
-    gaz = Gazetteer(stations=[
-        {"station_name": "根津", "line_name": "千代田線", "operator": "東京メトロ"},
-        {"station_name": "湯島", "line_name": "千代田線", "operator": "東京メトロ"},
-        {"station_name": "根津", "line_name": "別線", "operator": "別会社"},
-    ])
+    gaz = Gazetteer(
+        stations=[
+            {"station_name": "根津", "line_name": "千代田線", "operator": "東京メトロ"},
+            {"station_name": "湯島", "line_name": "千代田線", "operator": "東京メトロ"},
+            {"station_name": "根津", "line_name": "別線", "operator": "別会社"},
+        ]
+    )
     clues = [
         typed_clue(p, name, ClueType.PLACE_TEXT)
-        for p in (first, second) for name in ("根津駅", "湯島駅")
+        for p in (first, second)
+        for name in ("根津駅", "湯島駅")
     ]
     claims = infer_combined_regular_line_claims([first, second], clues, gaz)
     assert len(claims) == 1
@@ -719,12 +790,15 @@ def test_combined_regular_line_requires_repeated_owner_commute_and_unique_gazett
 def test_combined_regular_line_rejects_direct_disclosure_third_party_and_missing_clues() -> None:
     a = post("line-bad-a", "私は毎朝根津駅から湯島駅まで通勤する")
     b = post("line-bad-b", "私は平日は根津駅から湯島駅まで通勤する")
-    clues = [typed_clue(p, name, ClueType.PLACE_TEXT) for p in (a, b)
-             for name in ("根津駅", "湯島駅")]
-    gaz = Gazetteer(stations=[
-        {"station_name": "根津", "line_name": "千代田線", "operator": "東京メトロ"},
-        {"station_name": "湯島", "line_name": "千代田線", "operator": "東京メトロ"},
-    ])
+    clues = [
+        typed_clue(p, name, ClueType.PLACE_TEXT) for p in (a, b) for name in ("根津駅", "湯島駅")
+    ]
+    gaz = Gazetteer(
+        stations=[
+            {"station_name": "根津", "line_name": "千代田線", "operator": "東京メトロ"},
+            {"station_name": "湯島", "line_name": "千代田線", "operator": "東京メトロ"},
+        ]
+    )
     for invalid in (
         a.model_copy(update={"text": "私は毎朝根津駅から湯島駅まで千代田線で通勤する"}),
         a.model_copy(update={"text": "私は毎朝根津駅から湯島駅まで通勤しない"}),
@@ -740,33 +814,59 @@ def test_combined_regular_line_rejects_direct_disclosure_third_party_and_missing
 def test_combined_regular_line_rejects_relative_clause_describing_another_commuter() -> None:
     first = post("line-relative-a", "私は毎朝根津駅から湯島駅まで通勤する人の投稿を見る")
     second = post("line-relative-b", "私は平日は根津駅から湯島駅まで通勤する人の投稿を見る")
-    clues = [typed_clue(p, name, ClueType.PLACE_TEXT) for p in (first, second)
-             for name in ("根津駅", "湯島駅")]
-    gaz = Gazetteer(stations=[
-        {"station_name": "根津", "line_name": "千代田線", "operator": "東京メトロ"},
-        {"station_name": "湯島", "line_name": "千代田線", "operator": "東京メトロ"},
-    ])
+    clues = [
+        typed_clue(p, name, ClueType.PLACE_TEXT)
+        for p in (first, second)
+        for name in ("根津駅", "湯島駅")
+    ]
+    gaz = Gazetteer(
+        stations=[
+            {"station_name": "根津", "line_name": "千代田線", "operator": "東京メトロ"},
+            {"station_name": "湯島", "line_name": "千代田線", "operator": "東京メトロ"},
+        ]
+    )
     assert infer_combined_regular_line_claims([first, second], clues, gaz) == []
 
 
 def test_combined_regular_line_rejects_ambiguous_or_unavailable_station_table() -> None:
     a = post("line-gaz-a", "私は毎朝根津駅から湯島駅まで通勤する")
     b = post("line-gaz-b", "私は平日は根津駅から湯島駅まで通勤する")
-    clues = [typed_clue(p, name, ClueType.PLACE_TEXT) for p in (a, b)
-             for name in ("根津駅", "湯島駅")]
+    clues = [
+        typed_clue(p, name, ClueType.PLACE_TEXT) for p in (a, b) for name in ("根津駅", "湯島駅")
+    ]
     base = [
         {"station_name": "根津", "line_name": "千代田線", "operator": "東京メトロ"},
         {"station_name": "湯島", "line_name": "千代田線", "operator": "東京メトロ"},
     ]
     assert infer_combined_regular_line_claims([a, b], clues, Gazetteer()) == []
-    assert infer_combined_regular_line_claims([a, b], clues, Gazetteer(stations=[
-        *base, {"station_name": "根津", "line_name": "別線", "operator": "別会社"},
-        {"station_name": "湯島", "line_name": "別線", "operator": "別会社"}
-    ])) == []
-    assert infer_combined_regular_line_claims([a, b], clues, Gazetteer(stations=[
-        *base, {"station_name": "根津", "line_name": "別線", "operator": "別会社"},
-        {"station_name": "湯島", "line_name": "別線", "operator": "別会社"},
-    ])) == []
+    assert (
+        infer_combined_regular_line_claims(
+            [a, b],
+            clues,
+            Gazetteer(
+                stations=[
+                    *base,
+                    {"station_name": "根津", "line_name": "別線", "operator": "別会社"},
+                    {"station_name": "湯島", "line_name": "別線", "operator": "別会社"},
+                ]
+            ),
+        )
+        == []
+    )
+    assert (
+        infer_combined_regular_line_claims(
+            [a, b],
+            clues,
+            Gazetteer(
+                stations=[
+                    *base,
+                    {"station_name": "根津", "line_name": "別線", "operator": "別会社"},
+                    {"station_name": "湯島", "line_name": "別線", "operator": "別会社"},
+                ]
+            ),
+        )
+        == []
+    )
 
 
 def test_regular_station_requires_habit_post_and_separate_usual_station_photo() -> None:
@@ -797,72 +897,163 @@ def test_regular_station_requires_habit_post_and_separate_usual_station_photo() 
 
 
 def test_home_nearest_origin_plus_independent_routine_makes_weak_regular_station_path() -> None:
-    origin = post("origin", "私の自宅最寄り駅は根津駅です").model_copy(update={
-        "created_at": datetime.fromisoformat("2026-10-20T08:31:00+09:00")
-    })
-    routine = post("routine-origin", "私は毎朝、自宅最寄りから通勤しています").model_copy(update={
-        "created_at": datetime.fromisoformat("2026-10-21T08:31:00+09:00")
-    })
-    clues = [typed_clue(origin, "根津駅", ClueType.PLACE_TEXT),
-             typed_clue(routine, routine.text, ClueType.ROUTINE_TEXT)]
+    origin = post("origin", "私の自宅最寄り駅は根津駅です").model_copy(
+        update={"created_at": datetime.fromisoformat("2026-10-20T08:31:00+09:00")}
+    )
+    routine = post("routine-origin", "私は毎朝、自宅最寄りから通勤しています").model_copy(
+        update={"created_at": datetime.fromisoformat("2026-10-21T08:31:00+09:00")}
+    )
+    clues = [
+        typed_clue(origin, "根津駅", ClueType.PLACE_TEXT),
+        typed_clue(routine, routine.text, ClueType.ROUTINE_TEXT),
+    ]
     claims = infer_regular_station_from_home_origin([origin, routine], clues, STATIONS)
     assert len(claims) == 1
     claim = claims[0]
-    assert claim.value == "根津駅" and claim.confidence == 0.55 and claim.status is ProfileStatus.WEAK
+    assert (
+        claim.value == "根津駅" and claim.confidence == 0.55 and claim.status is ProfileStatus.WEAK
+    )
     path = claim.evidence_paths[0]
     assert path.provenance is EvidencePathProvenance.COMBINED_INFERENCE
     assert {ref.post_id for ref in path.evidence} == {origin.post_id, routine.post_id}
     assert {ref.clue_index for ref in path.evidence if ref.clue_index is not None} == {0, 1}
-    duplicated = infer_regular_station_from_home_origin([origin, routine], [*clues, *clues], STATIONS)
+    duplicated = infer_regular_station_from_home_origin(
+        [origin, routine], [*clues, *clues], STATIONS
+    )
     assert len(duplicated) == 1 and duplicated[0].confidence == claim.confidence
     assert recalculate_after_deletion(claim, {origin.post_id}) is None
     assert recalculate_after_deletion(claim, {routine.post_id}) is None
     ambiguous_origin = [*clues, typed_clue(origin, "湯島駅", ClueType.PLACE_TEXT)]
-    assert infer_regular_station_from_home_origin([origin, routine], ambiguous_origin, STATIONS) == []
+    assert (
+        infer_regular_station_from_home_origin([origin, routine], ambiguous_origin, STATIONS) == []
+    )
     pronoun_home = origin.model_copy(update={"text": "私は自宅最寄り駅は根津駅です"})
     pronoun_clues = [typed_clue(pronoun_home, "根津駅", ClueType.PLACE_TEXT), clues[1]]
     assert infer_regular_station_from_home_origin([pronoun_home, routine], pronoun_clues, STATIONS)
     assert infer_regular_station_from_home_origin([origin], clues, STATIONS) == []
     missing_time = routine.model_copy(update={"created_at": None})
-    assert infer_regular_station_from_home_origin([origin, missing_time], [clues[0], clues[1]], STATIONS) == []
+    assert (
+        infer_regular_station_from_home_origin(
+            [origin, missing_time], [clues[0], clues[1]], STATIONS
+        )
+        == []
+    )
     naive_origin = origin.model_copy(update={"created_at": datetime(2026, 10, 20, 8, 31)})
     assert infer_regular_station_from_home_origin([naive_origin, routine], clues, STATIONS) == []
     naive_routine = routine.model_copy(update={"created_at": datetime(2026, 10, 21, 8, 31)})
     assert infer_regular_station_from_home_origin([origin, naive_routine], clues, STATIONS) == []
-    intervening_move = post("intervening-move", "転居しました").model_copy(update={
-        "created_at": datetime.fromisoformat("2026-10-20T20:00:00+09:00")
-    })
-    assert infer_regular_station_from_home_origin([origin, intervening_move, routine], clues, STATIONS) == []
-    naive_intervening_move = intervening_move.model_copy(update={"created_at": datetime(2026, 10, 20, 20, 0)})
-    assert infer_regular_station_from_home_origin([origin, naive_intervening_move, routine], clues, STATIONS) == []
-    distant = routine.model_copy(update={"created_at": datetime.fromisoformat("2027-02-01T08:31:00+09:00")})
+    intervening_move = post("intervening-move", "転居しました").model_copy(
+        update={"created_at": datetime.fromisoformat("2026-10-20T20:00:00+09:00")}
+    )
+    assert (
+        infer_regular_station_from_home_origin([origin, intervening_move, routine], clues, STATIONS)
+        == []
+    )
+    naive_intervening_move = intervening_move.model_copy(
+        update={"created_at": datetime(2026, 10, 20, 20, 0)}
+    )
+    assert (
+        infer_regular_station_from_home_origin(
+            [origin, naive_intervening_move, routine], clues, STATIONS
+        )
+        == []
+    )
+    distant = routine.model_copy(
+        update={"created_at": datetime.fromisoformat("2027-02-01T08:31:00+09:00")}
+    )
     assert infer_regular_station_from_home_origin([origin, distant], clues, STATIONS) == []
     moved = routine.model_copy(update={"text": "私は毎朝、自宅最寄りから通勤。転居しました"})
-    assert infer_regular_station_from_home_origin([origin, moved], [clues[0], typed_clue(moved, moved.text, ClueType.ROUTINE_TEXT)], STATIONS) == []
+    assert (
+        infer_regular_station_from_home_origin(
+            [origin, moved],
+            [clues[0], typed_clue(moved, moved.text, ClueType.ROUTINE_TEXT)],
+            STATIONS,
+        )
+        == []
+    )
     quoted = routine.model_copy(update={"text": "『私は毎朝、自宅最寄りから通勤しています』"})
-    assert infer_regular_station_from_home_origin([origin, quoted], [clues[0], typed_clue(quoted, quoted.text, ClueType.ROUTINE_TEXT)], STATIONS) == []
+    assert (
+        infer_regular_station_from_home_origin(
+            [origin, quoted],
+            [clues[0], typed_clue(quoted, quoted.text, ClueType.ROUTINE_TEXT)],
+            STATIONS,
+        )
+        == []
+    )
     friend_a = origin.model_copy(update={"text": "友人の自宅最寄り駅は根津駅です"})
-    assert infer_regular_station_from_home_origin([friend_a, routine], [typed_clue(friend_a, "根津駅", ClueType.PLACE_TEXT), clues[1]], STATIONS) == []
+    assert (
+        infer_regular_station_from_home_origin(
+            [friend_a, routine],
+            [typed_clue(friend_a, "根津駅", ClueType.PLACE_TEXT), clues[1]],
+            STATIONS,
+        )
+        == []
+    )
     friend_b = routine.model_copy(update={"text": "彼は毎朝、自宅最寄りから通勤しています"})
-    assert infer_regular_station_from_home_origin([origin, friend_b], [clues[0], typed_clue(friend_b, friend_b.text, ClueType.ROUTINE_TEXT)], STATIONS) == []
-    friend_home = routine.model_copy(update={"text": "私は毎朝、友人の自宅最寄りから通勤しています"})
-    assert infer_regular_station_from_home_origin([origin, friend_home], [clues[0], typed_clue(friend_home, friend_home.text, ClueType.ROUTINE_TEXT)], STATIONS) == []
+    assert (
+        infer_regular_station_from_home_origin(
+            [origin, friend_b],
+            [clues[0], typed_clue(friend_b, friend_b.text, ClueType.ROUTINE_TEXT)],
+            STATIONS,
+        )
+        == []
+    )
+    friend_home = routine.model_copy(
+        update={"text": "私は毎朝、友人の自宅最寄りから通勤しています"}
+    )
+    assert (
+        infer_regular_station_from_home_origin(
+            [origin, friend_home],
+            [clues[0], typed_clue(friend_home, friend_home.text, ClueType.ROUTINE_TEXT)],
+            STATIONS,
+        )
+        == []
+    )
     partner_home = routine.model_copy(update={"text": "私は毎朝、彼の自宅最寄りから通勤しています"})
-    assert infer_regular_station_from_home_origin([origin, partner_home], [clues[0], typed_clue(partner_home, partner_home.text, ClueType.ROUTINE_TEXT)], STATIONS) == []
+    assert (
+        infer_regular_station_from_home_origin(
+            [origin, partner_home],
+            [clues[0], typed_clue(partner_home, partner_home.text, ClueType.ROUTINE_TEXT)],
+            STATIONS,
+        )
+        == []
+    )
     denied = routine.model_copy(update={"text": "私は毎朝、自宅最寄りから通勤しません"})
-    assert infer_regular_station_from_home_origin([origin, denied], [clues[0], typed_clue(denied, denied.text, ClueType.ROUTINE_TEXT)], STATIONS) == []
-    same_post = origin.model_copy(update={"text": "私の自宅最寄り駅は根津駅です。私は毎朝、自宅最寄りから通勤しています"})
-    same_clues = [typed_clue(same_post, "根津駅", ClueType.PLACE_TEXT), typed_clue(same_post, same_post.text, ClueType.ROUTINE_TEXT)]
+    assert (
+        infer_regular_station_from_home_origin(
+            [origin, denied],
+            [clues[0], typed_clue(denied, denied.text, ClueType.ROUTINE_TEXT)],
+            STATIONS,
+        )
+        == []
+    )
+    same_post = origin.model_copy(
+        update={"text": "私の自宅最寄り駅は根津駅です。私は毎朝、自宅最寄りから通勤しています"}
+    )
+    same_clues = [
+        typed_clue(same_post, "根津駅", ClueType.PLACE_TEXT),
+        typed_clue(same_post, same_post.text, ClueType.ROUTINE_TEXT),
+    ]
     assert infer_regular_station_from_home_origin([same_post], same_clues, STATIONS) == []
-    future = routine.model_copy(update={"created_at": datetime.fromisoformat("2027-01-01T08:31:00+09:00")})
+    future = routine.model_copy(
+        update={"created_at": datetime.fromisoformat("2027-01-01T08:31:00+09:00")}
+    )
     fixed_now = datetime.fromisoformat("2026-11-13T12:00:00+09:00")
-    assert infer_regular_station_from_home_origin(
-        [origin, future], [clues[0], typed_clue(future, future.text, ClueType.ROUTINE_TEXT)], STATIONS,
-        diagnosis_at=fixed_now,
-    ) == []
-    assert infer_regular_station_from_home_origin(
-        [origin, routine], clues, STATIONS, diagnosis_at=datetime(2026, 11, 13, 12, 0, 0)
-    ) == []
+    assert (
+        infer_regular_station_from_home_origin(
+            [origin, future],
+            [clues[0], typed_clue(future, future.text, ClueType.ROUTINE_TEXT)],
+            STATIONS,
+            diagnosis_at=fixed_now,
+        )
+        == []
+    )
+    assert (
+        infer_regular_station_from_home_origin(
+            [origin, routine], clues, STATIONS, diagnosis_at=datetime(2026, 11, 13, 12, 0, 0)
+        )
+        == []
+    )
 
 
 def test_profile_relations_require_independent_candidates_and_keep_complete_paths() -> None:
@@ -871,25 +1062,64 @@ def test_profile_relations_require_independent_candidates_and_keep_complete_path
         post("routine-b", "私は毎朝、自宅最寄りから通勤しています"),
         post("commute-dest", "私は毎朝通勤先は架空大学"),
     ]
-    home_refs = [ProfileEvidence(post_id=relation_posts[0].post_id, clue_index=None, required=True, source="post_text", excerpt="私の自宅最寄り駅は根津駅です"),
-                 ProfileEvidence(post_id=relation_posts[0].post_id, clue_index=0, required=True)]
-    regular_refs = [*home_refs,
-        ProfileEvidence(post_id=relation_posts[1].post_id, clue_index=None, required=True, source="post_text", excerpt="私は毎朝、自宅最寄りから通勤しています"),
-        ProfileEvidence(post_id=relation_posts[1].post_id, clue_index=1, required=True)]
-    home_path = ProfileEvidencePath(evidence=home_refs, confidence=0.55, provenance=EvidencePathProvenance.DIRECT_DISCLOSURE)
-    regular_path = ProfileEvidencePath(evidence=regular_refs, confidence=0.55, provenance=EvidencePathProvenance.COMBINED_INFERENCE)
-    home_candidate = ProfileItem(attribute=ProfileAttribute.HOME_NEAREST_STATION, value="根津駅", confidence=0.55,
-        status=ProfileStatus.WEAK, evidence=home_refs, evidence_paths=[home_path])
-    regular_candidate = ProfileItem(attribute=ProfileAttribute.REGULAR_STATION, value="根津駅", confidence=0.55,
-        status=ProfileStatus.WEAK, evidence=regular_refs, evidence_paths=[regular_path])
+    home_refs = [
+        ProfileEvidence(
+            post_id=relation_posts[0].post_id,
+            clue_index=None,
+            required=True,
+            source="post_text",
+            excerpt="私の自宅最寄り駅は根津駅です",
+        ),
+        ProfileEvidence(post_id=relation_posts[0].post_id, clue_index=0, required=True),
+    ]
+    regular_refs = [
+        *home_refs,
+        ProfileEvidence(
+            post_id=relation_posts[1].post_id,
+            clue_index=None,
+            required=True,
+            source="post_text",
+            excerpt="私は毎朝、自宅最寄りから通勤しています",
+        ),
+        ProfileEvidence(post_id=relation_posts[1].post_id, clue_index=1, required=True),
+    ]
+    home_path = ProfileEvidencePath(
+        evidence=home_refs, confidence=0.55, provenance=EvidencePathProvenance.DIRECT_DISCLOSURE
+    )
+    regular_path = ProfileEvidencePath(
+        evidence=regular_refs, confidence=0.55, provenance=EvidencePathProvenance.COMBINED_INFERENCE
+    )
+    home_candidate = ProfileItem(
+        attribute=ProfileAttribute.HOME_NEAREST_STATION,
+        value="根津駅",
+        confidence=0.55,
+        status=ProfileStatus.WEAK,
+        evidence=home_refs,
+        evidence_paths=[home_path],
+    )
+    regular_candidate = ProfileItem(
+        attribute=ProfileAttribute.REGULAR_STATION,
+        value="根津駅",
+        confidence=0.55,
+        status=ProfileStatus.WEAK,
+        evidence=regular_refs,
+        evidence_paths=[regular_path],
+    )
     claims = evaluate_profile_candidates([home_candidate, regular_candidate], [], clues=[])
     relations = infer_owner_profile_relations(relation_posts, claims)
     assert len(relations) == 1
     edge = relations[0]
     assert edge.kind.value == "home_nearest_is_commute_origin"
-    assert {ref.post_id for ref in edge.evidence_paths[0].evidence} == {relation_posts[0].post_id, relation_posts[1].post_id}
-    unsupported_regular = regular_candidate.model_copy(update={"evidence_paths": [home_path], "evidence": home_refs})
-    unsupported_claims = evaluate_profile_candidates([home_candidate, unsupported_regular], [], clues=[])
+    assert {ref.post_id for ref in edge.evidence_paths[0].evidence} == {
+        relation_posts[0].post_id,
+        relation_posts[1].post_id,
+    }
+    unsupported_regular = regular_candidate.model_copy(
+        update={"evidence_paths": [home_path], "evidence": home_refs}
+    )
+    unsupported_claims = evaluate_profile_candidates(
+        [home_candidate, unsupported_regular], [], clues=[]
+    )
     assert infer_owner_profile_relations(relation_posts, unsupported_claims) == []
 
 
@@ -897,19 +1127,34 @@ def test_destination_relations_require_matching_independent_school_observation()
     observation = post("school-observation", "私は架空大学に通っています")
     destination = post("school-destination", "私は通学先は架空大学です")
     evidence = [
-        ProfileEvidence(post_id=observation.post_id, clue_index=None, required=True,
-            source="post_text", excerpt=observation.text),
+        ProfileEvidence(
+            post_id=observation.post_id,
+            clue_index=None,
+            required=True,
+            source="post_text",
+            excerpt=observation.text,
+        ),
         ProfileEvidence(post_id=observation.post_id, clue_index=0, required=True),
     ]
-    path = ProfileEvidencePath(evidence=evidence, confidence=0.65,
-        provenance=EvidencePathProvenance.DIRECT_DISCLOSURE)
-    school = ProfileItem(attribute=ProfileAttribute.SCHOOL, value="架空大学", confidence=0.65,
-        status=ProfileStatus.WEAK, evidence=evidence, evidence_paths=[path])
+    path = ProfileEvidencePath(
+        evidence=evidence, confidence=0.65, provenance=EvidencePathProvenance.DIRECT_DISCLOSURE
+    )
+    school = ProfileItem(
+        attribute=ProfileAttribute.SCHOOL,
+        value="架空大学",
+        confidence=0.65,
+        status=ProfileStatus.WEAK,
+        evidence=evidence,
+        evidence_paths=[path],
+    )
     claims = evaluate_profile_candidates([school], [observation])
     relations = infer_owner_profile_relations([observation, destination], claims)
     assert len(relations) == 1
     assert relations[0].kind.value == "commute_destination_is_school"
-    assert {ref.post_id for ref in relations[0].evidence_paths[0].evidence} == {observation.post_id, destination.post_id}
+    assert {ref.post_id for ref in relations[0].evidence_paths[0].evidence} == {
+        observation.post_id,
+        destination.post_id,
+    }
     commuting = post("commuting-to-school", "私は通勤先は架空大学")
     assert infer_owner_profile_relations([observation, commuting], claims) == []
     same_post_claims = evaluate_profile_candidates([school], [observation])
@@ -920,14 +1165,26 @@ def test_employer_destination_does_not_trim_name_ending_in_hiragana_su() -> None
     observation = post("employer-observation", "私は架空バス社の社員です")
     destination = post("employer-destination", "私は勤務先は架空バスです")
     evidence = [
-        ProfileEvidence(post_id=observation.post_id, clue_index=None, required=True,
-            source="post_text", excerpt=observation.text),
+        ProfileEvidence(
+            post_id=observation.post_id,
+            clue_index=None,
+            required=True,
+            source="post_text",
+            excerpt=observation.text,
+        ),
         ProfileEvidence(post_id=observation.post_id, clue_index=0, required=True),
     ]
-    path = ProfileEvidencePath(evidence=evidence, confidence=0.65,
-        provenance=EvidencePathProvenance.DIRECT_DISCLOSURE)
-    employer = ProfileItem(attribute=ProfileAttribute.EMPLOYER_NAME, value="架空バス", confidence=0.65,
-        status=ProfileStatus.WEAK, evidence=evidence, evidence_paths=[path])
+    path = ProfileEvidencePath(
+        evidence=evidence, confidence=0.65, provenance=EvidencePathProvenance.DIRECT_DISCLOSURE
+    )
+    employer = ProfileItem(
+        attribute=ProfileAttribute.EMPLOYER_NAME,
+        value="架空バス",
+        confidence=0.65,
+        status=ProfileStatus.WEAK,
+        evidence=evidence,
+        evidence_paths=[path],
+    )
     claims = evaluate_profile_candidates([employer], [observation])
     relations = infer_owner_profile_relations([observation, destination], claims)
     assert len(relations) == 1
@@ -946,13 +1203,12 @@ def test_home_nearest_station_requires_owner_relation_routine_and_corroborated_s
     assert claim.value == "根津駅" and claim.status is ProfileStatus.WEAK
     assert claim.evidence_paths[0].provenance is EvidencePathProvenance.COMBINED_INFERENCE
     assert {ref.post_id for ref in claim.evidence_paths[0].evidence} == {
-        relation.post_id, habit.post_id
+        relation.post_id,
+        habit.post_id,
     }
     assert recalculate_after_deletion(claim, {relation.post_id}) is None
     assert recalculate_after_deletion(claim, {habit.post_id}) is None
-    assert infer_home_nearest_station_claims(
-        [relation, habit], clues[1:], STATIONS
-    ) == []
+    assert infer_home_nearest_station_claims([relation, habit], clues[1:], STATIONS) == []
 
 
 def test_home_nearest_station_rejects_commute_visit_quotes_partial_and_single_detector() -> None:
@@ -970,9 +1226,9 @@ def test_home_nearest_station_rejects_commute_visit_quotes_partial_and_single_de
         [station_ocr(relation, "根津", confidence=0.79), station_vlm(relation, "根津")],
     ]
     for signs in bad_signs:
-        assert infer_home_nearest_station_claims(
-            [relation, habit], [routine, *signs], STATIONS
-        ) == []
+        assert (
+            infer_home_nearest_station_claims([relation, habit], [routine, *signs], STATIONS) == []
+        )
     for text in (
         "友人の自宅の最寄り駅の写真です",
         "『私の自宅の最寄り駅の写真です』",
@@ -980,11 +1236,14 @@ def test_home_nearest_station_rejects_commute_visit_quotes_partial_and_single_de
         "私は自宅から駅まで毎朝歩いている。友人の話です",
     ):
         candidate_post = relation.model_copy(update={"text": text})
-        assert infer_home_nearest_station_claims(
-            [candidate_post, habit],
-            [routine, station_ocr(candidate_post, "根津"), station_vlm(candidate_post, "根津")],
-            STATIONS,
-        ) == []
+        assert (
+            infer_home_nearest_station_claims(
+                [candidate_post, habit],
+                [routine, station_ocr(candidate_post, "根津"), station_vlm(candidate_post, "根津")],
+                STATIONS,
+            )
+            == []
+        )
 
 
 def test_home_nearest_station_keeps_competing_qualified_signs_as_weak_candidates() -> None:
@@ -993,14 +1252,17 @@ def test_home_nearest_station_keeps_competing_qualified_signs_as_weak_candidates
     second = photo_post("home-sign-two", "私の自宅の最寄り駅の写真です")
     clues = [
         typed_clue(habit, habit.text, ClueType.ROUTINE_TEXT),
-        station_ocr(first, "根津"), station_vlm(first, "根津"),
-        station_ocr(second, "湯島"), station_vlm(second, "湯島"),
+        station_ocr(first, "根津"),
+        station_vlm(first, "根津"),
+        station_ocr(second, "湯島"),
+        station_vlm(second, "湯島"),
     ]
     claims = infer_home_nearest_station_claims([habit, first, second], clues, STATIONS)
     assert {item.value for item in claims} == {"根津駅", "湯島駅"}
     assert all(item.status is ProfileStatus.WEAK for item in claims)
     candidate_set = next(
-        item for item in evaluate_profile_candidates(claims, [habit, first, second], clues=clues)
+        item
+        for item in evaluate_profile_candidates(claims, [habit, first, second], clues=clues)
         if item.attribute is ProfileAttribute.HOME_NEAREST_STATION
     )
     assert candidate_set.status is ProfileCandidateSetStatus.AMBIGUOUS
@@ -1107,8 +1369,11 @@ def test_regular_station_retains_two_equally_grounded_station_candidates() -> No
         station_vlm(second, "湯島"),
     ]
 
-    claims = [item for item in infer_owner_claims([habit, first, second], clues, gazetteer=STATIONS)
-              if item.attribute is ProfileAttribute.REGULAR_STATION]
+    claims = [
+        item
+        for item in infer_owner_claims([habit, first, second], clues, gazetteer=STATIONS)
+        if item.attribute is ProfileAttribute.REGULAR_STATION
+    ]
     assert {item.value for item in claims} == {"根津駅", "湯島駅"}
     sets = evaluate_profile_candidates(claims, [habit, first, second], clues=clues)
     station_set = next(item for item in sets if item.attribute is ProfileAttribute.REGULAR_STATION)
@@ -1121,42 +1386,114 @@ def _explicit_rule_input(attribute: ProfileAttribute) -> tuple[Post, Clue, str]:
         ProfileAttribute.FULL_NAME: ("本名は山田太郎です", ClueType.NAME_TEXT, "山田太郎"),
         ProfileAttribute.GIVEN_NAME: ("下の名前は太郎です", ClueType.NAME_TEXT, "太郎"),
         ProfileAttribute.NICKNAME: ("ニックネームははるです", ClueType.NAME_TEXT, "はる"),
-        ProfileAttribute.OTHER_SOCIAL_ACCOUNT: ("私の別垢は@haru.example", ClueType.HANDLE_TEXT, "@haru.example"),
-        ProfileAttribute.HOME_BUILDING: ("自宅は青葉マンションです", ClueType.LANDMARK, "青葉マンション"),
-        ProfileAttribute.HOME_NEAREST_STATION: ("自宅の最寄り駅は根津駅です", ClueType.PLACE_TEXT, "根津駅"),
+        ProfileAttribute.OTHER_SOCIAL_ACCOUNT: (
+            "私の別垢は@haru.example",
+            ClueType.HANDLE_TEXT,
+            "@haru.example",
+        ),
+        ProfileAttribute.HOME_BUILDING: (
+            "自宅は青葉マンションです",
+            ClueType.LANDMARK,
+            "青葉マンション",
+        ),
+        ProfileAttribute.HOME_NEAREST_STATION: (
+            "自宅の最寄り駅は根津駅です",
+            ClueType.PLACE_TEXT,
+            "根津駅",
+        ),
         ProfileAttribute.REGULAR_LINE: ("通勤路線は千代田線です", ClueType.PLACE_TEXT, "千代田線"),
-        ProfileAttribute.ANNOUNCED_LONG_ABSENCE: ("来週は自宅を空ける予定", ClueType.ROUTINE_TEXT, "来週は自宅を空ける予定"),
-        ProfileAttribute.ACTUAL_HOME_ABSENCE: ("今は自宅にいません", ClueType.ROUTINE_TEXT, "今は自宅にいません"),
+        ProfileAttribute.ANNOUNCED_LONG_ABSENCE: (
+            "来週は自宅を空ける予定",
+            ClueType.ROUTINE_TEXT,
+            "来週は自宅を空ける予定",
+        ),
+        ProfileAttribute.ACTUAL_HOME_ABSENCE: (
+            "今は自宅にいません",
+            ClueType.ROUTINE_TEXT,
+            "今は自宅にいません",
+        ),
         ProfileAttribute.EMPLOYER_NAME: ("勤務先は青空社です", ClueType.ORG_TEXT, "青空社"),
-        ProfileAttribute.WORKPLACE_BUILDING_CANDIDATE: ("勤務先のビルは青空ビルです", ClueType.ORG_TEXT, "青空ビル"),
-        ProfileAttribute.WORKPLACE_AREA: ("職場のエリアは文京区です", ClueType.PLACE_TEXT, "文京区"),
+        ProfileAttribute.WORKPLACE_BUILDING_CANDIDATE: (
+            "勤務先のビルは青空ビルです",
+            ClueType.ORG_TEXT,
+            "青空ビル",
+        ),
+        ProfileAttribute.WORKPLACE_AREA: (
+            "職場のエリアは文京区です",
+            ClueType.PLACE_TEXT,
+            "文京区",
+        ),
         ProfileAttribute.FREQUENT_SHOP: ("毎週青葉カフェに行く", ClueType.SHOP, "青葉カフェ"),
-        ProfileAttribute.VEHICLE_MODEL: ("自分の車はホンダフィットです", ClueType.VEHICLE_MODEL, "ホンダフィット"),
-        ProfileAttribute.PARTIAL_PLATE: ("私の車のナンバーは品川300あ12-34", ClueType.PLATE, "品川300あ12-34"),
+        ProfileAttribute.VEHICLE_MODEL: (
+            "自分の車はホンダフィットです",
+            ClueType.VEHICLE_MODEL,
+            "ホンダフィット",
+        ),
+        ProfileAttribute.PARTIAL_PLATE: (
+            "私の車のナンバーは品川300あ12-34",
+            ClueType.PLATE,
+            "品川300あ12-34",
+        ),
         ProfileAttribute.PARTNER_STATUS: ("私は既婚です", ClueType.RELATION_TEXT, "既婚"),
         ProfileAttribute.PARTNER_ATTRIBUTES: ("私の妻は35歳です", ClueType.AGE_TEXT, "35歳"),
-        ProfileAttribute.CHILD_SCHOOL: ("私の息子の学校は青葉高校です", ClueType.ORG_TEXT, "青葉高校"),
+        ProfileAttribute.CHILD_SCHOOL: (
+            "私の息子の学校は青葉高校です",
+            ClueType.ORG_TEXT,
+            "青葉高校",
+        ),
     }
     text, clue_type, value = cases[attribute]
-    source = ClueSource.VLM if clue_type in {ClueType.LANDMARK, ClueType.SHOP, ClueType.PLATE} else ClueSource.TEXT
+    source = (
+        ClueSource.VLM
+        if clue_type in {ClueType.LANDMARK, ClueType.SHOP, ClueType.PLATE}
+        else ClueSource.TEXT
+    )
     p = post(f"explicit-{attribute.value}", text)
     image_index = None
     if source is ClueSource.VLM:
-        p = p.model_copy(update={"images": [PostImage(index=0, url="https://cdn.bsky.app/img/feed_fullsize/example", alt="", width=640, height=480)]})
+        p = p.model_copy(
+            update={
+                "images": [
+                    PostImage(
+                        index=0,
+                        url="https://cdn.bsky.app/img/feed_fullsize/example",
+                        alt="",
+                        width=640,
+                        height=480,
+                    )
+                ]
+            }
+        )
         image_index = 0
-    clue = Clue(post_id=p.post_id, image_index=image_index, type=clue_type, value=value,
-                region=None, confidence=0.95, source=source)
+    clue = Clue(
+        post_id=p.post_id,
+        image_index=image_index,
+        type=clue_type,
+        value=value,
+        region=None,
+        confidence=0.95,
+        source=source,
+    )
     return p, clue, text
 
 
 def test_explicit_self_report_rules_emit_candidates_with_matching_typed_observations() -> None:
     now = datetime.fromisoformat("2026-10-20T08:31:00+09:00")
-    generic_attributes = [attribute for attribute in ProfileAttribute if attribute not in {
-        ProfileAttribute.FACIAL_APPEARANCE, ProfileAttribute.HOME_ROOM,
-        ProfileAttribute.RESIDENTIAL_AREA, ProfileAttribute.REGULAR_STATION,
-        ProfileAttribute.SCHOOL, ProfileAttribute.CHILD_AGE, ProfileAttribute.REALTIME_LOCATION,
-        ProfileAttribute.FREQUENT_SHOP,
-    }]
+    generic_attributes = [
+        attribute
+        for attribute in ProfileAttribute
+        if attribute
+        not in {
+            ProfileAttribute.FACIAL_APPEARANCE,
+            ProfileAttribute.HOME_ROOM,
+            ProfileAttribute.RESIDENTIAL_AREA,
+            ProfileAttribute.REGULAR_STATION,
+            ProfileAttribute.SCHOOL,
+            ProfileAttribute.CHILD_AGE,
+            ProfileAttribute.REALTIME_LOCATION,
+            ProfileAttribute.FREQUENT_SHOP,
+        }
+    ]
     for attribute in generic_attributes:
         p, clue, _ = _explicit_rule_input(attribute)
         claims = infer_explicit_observation_claims([p], [clue], diagnosis_at=now)
@@ -1180,12 +1517,30 @@ def test_explicit_rules_reject_denial_quotes_visits_and_third_party_statements()
         p = post(f"reject-{index}", text)
         clue = template.model_copy(update={"post_id": p.post_id, "value": value})
         if clue.image_index is not None:
-            p = p.model_copy(update={"images": [PostImage(index=0, url="https://cdn.bsky.app/img/feed_fullsize/example", alt="", width=640, height=480)]})
-        assert all(claim.attribute is not attribute for claim in infer_explicit_observation_claims([p], [clue]))
+            p = p.model_copy(
+                update={
+                    "images": [
+                        PostImage(
+                            index=0,
+                            url="https://cdn.bsky.app/img/feed_fullsize/example",
+                            alt="",
+                            width=640,
+                            height=480,
+                        )
+                    ]
+                }
+            )
+        assert all(
+            claim.attribute is not attribute
+            for claim in infer_explicit_observation_claims([p], [clue])
+        )
 
 
 def test_explicit_self_name_clause_does_not_capture_later_third_party_name() -> None:
-    p = post("mixed-names", "本名は山田太郎です。友達の名前は佐藤花子です。詳しい話はまた別の投稿で共有する予定です。")
+    p = post(
+        "mixed-names",
+        "本名は山田太郎です。友達の名前は佐藤花子です。詳しい話はまた別の投稿で共有する予定です。",
+    )
     owner_name = typed_clue(p, "山田太郎", ClueType.NAME_TEXT)
     friend_name = typed_clue(p, "佐藤花子", ClueType.NAME_TEXT)
     claims = infer_explicit_observation_claims([p], [owner_name, friend_name])
@@ -1212,9 +1567,13 @@ def test_family_attribute_rules_reject_friend_subject_even_with_long_trailing_te
 
 
 def test_family_attribute_rules_require_positive_owner_relation() -> None:
-    cousin_school = post("cousin-school", "いとこの息子の学校は架空高校です。詳しい話はまた別の投稿に書く予定です。")
+    cousin_school = post(
+        "cousin-school", "いとこの息子の学校は架空高校です。詳しい話はまた別の投稿に書く予定です。"
+    )
     cousin_clue = typed_clue(cousin_school, "架空高校", ClueType.ORG_TEXT)
-    brother_spouse = post("brother-spouse", "兄の妻は35歳です。仕事や趣味のことも話してくれました。")
+    brother_spouse = post(
+        "brother-spouse", "兄の妻は35歳です。仕事や趣味のことも話してくれました。"
+    )
     spouse_clue = typed_clue(brother_spouse, "35歳", ClueType.AGE_TEXT)
     claims = infer_explicit_observation_claims(
         [cousin_school, brother_spouse], [cousin_clue, spouse_clue]
@@ -1224,18 +1583,38 @@ def test_family_attribute_rules_require_positive_owner_relation() -> None:
 
 
 def test_facial_appearance_requires_self_reference_and_same_post_face_clue() -> None:
-    p = post("self-face", "私の顔が写っている写真です").model_copy(update={
-        "images": [PostImage(index=0, url="https://cdn.bsky.app/img/feed_fullsize/example", alt="", width=640, height=480)]
-    })
-    face = Clue(post_id=p.post_id, image_index=0, type=ClueType.FACE, value="1人",
-                region=(10, 10, 100, 100), confidence=0.9, source=ClueSource.VLM)
+    p = post("self-face", "私の顔が写っている写真です").model_copy(
+        update={
+            "images": [
+                PostImage(
+                    index=0,
+                    url="https://cdn.bsky.app/img/feed_fullsize/example",
+                    alt="",
+                    width=640,
+                    height=480,
+                )
+            ]
+        }
+    )
+    face = Clue(
+        post_id=p.post_id,
+        image_index=0,
+        type=ClueType.FACE,
+        value="1人",
+        region=(10, 10, 100, 100),
+        confidence=0.9,
+        source=ClueSource.VLM,
+    )
     claims = infer_explicit_observation_claims([p], [face])
-    candidate = next(item for item in claims if item.attribute is ProfileAttribute.FACIAL_APPEARANCE)
+    candidate = next(
+        item for item in claims if item.attribute is ProfileAttribute.FACIAL_APPEARANCE
+    )
     assert candidate.value == "本人が自分の顔と書いた写真あり"
     assert "person" not in candidate.value.lower()
     assert {ref.source for ref in candidate.evidence} == {"post_text", "clue"}
     positive_set = next(
-        item for item in evaluate_profile_candidates(claims, [p], clues=[face])
+        item
+        for item in evaluate_profile_candidates(claims, [p], clues=[face])
         if item.attribute is ProfileAttribute.FACIAL_APPEARANCE
     )
     assert positive_set.status is ProfileCandidateSetStatus.CANDIDATE
@@ -1243,7 +1622,8 @@ def test_facial_appearance_requires_self_reference_and_same_post_face_clue() -> 
     missing = infer_explicit_observation_claims([p], [])
     assert all(item.attribute is not ProfileAttribute.FACIAL_APPEARANCE for item in missing)
     unknown_set = next(
-        item for item in evaluate_profile_candidates(missing, [p])
+        item
+        for item in evaluate_profile_candidates(missing, [p])
         if item.attribute is ProfileAttribute.FACIAL_APPEARANCE
     )
     assert unknown_set.status is ProfileCandidateSetStatus.UNKNOWN
@@ -1251,17 +1631,28 @@ def test_facial_appearance_requires_self_reference_and_same_post_face_clue() -> 
         ("friend-face", "友人の顔が写っている写真です"),
         ("quoted-face", "『私の顔が写っている写真』です"),
     ]:
-        other = p.model_copy(update={"post_id": f"at://did:plc:owner/app.bsky.feed.post/{key}", "text": text})
+        other = p.model_copy(
+            update={"post_id": f"at://did:plc:owner/app.bsky.feed.post/{key}", "text": text}
+        )
         other_clue = face.model_copy(update={"post_id": other.post_id})
-        assert all(item.attribute is not ProfileAttribute.FACIAL_APPEARANCE
-                   for item in infer_explicit_observation_claims([other], [other_clue]))
+        assert all(
+            item.attribute is not ProfileAttribute.FACIAL_APPEARANCE
+            for item in infer_explicit_observation_claims([other], [other_clue])
+        )
 
 
 def test_explicit_denial_evidence_is_retained_for_unknown_and_matching_candidates() -> None:
     positive = post("name-positive", "本名は山田太郎です")
     negative = post("name-negative", "本名は山田太郎ではありません")
-    positive_clue = Clue(post_id=positive.post_id, image_index=None, type=ClueType.NAME_TEXT,
-                         value="山田太郎", region=None, confidence=0.9, source=ClueSource.TEXT)
+    positive_clue = Clue(
+        post_id=positive.post_id,
+        image_index=None,
+        type=ClueType.NAME_TEXT,
+        value="山田太郎",
+        region=None,
+        confidence=0.9,
+        source=ClueSource.TEXT,
+    )
     negative_clue = positive_clue.model_copy(update={"post_id": negative.post_id})
     all_posts, all_clues = [positive, negative], [positive_clue, negative_clue]
     claims = infer_explicit_observation_claims(all_posts, all_clues)
@@ -1281,10 +1672,13 @@ def test_candidate_sets_cover_24_items_and_keep_equal_grounded_values_ambiguous(
     a = post("candidate-a", "自宅近くの青葉商店街")
     b = post("candidate-b", "青葉商店街は文京区")
     c = post("candidate-c", "青葉商店街は台東区")
-    claims = infer_owner_claims([a, b, c], [
-        typed_clue(b, "文京区", ClueType.PLACE_TEXT),
-        typed_clue(c, "台東区", ClueType.PLACE_TEXT),
-    ])
+    claims = infer_owner_claims(
+        [a, b, c],
+        [
+            typed_clue(b, "文京区", ClueType.PLACE_TEXT),
+            typed_clue(c, "台東区", ClueType.PLACE_TEXT),
+        ],
+    )
     sets = evaluate_profile_candidates(claims, [a, b, c])
     assert len(sets) == 24
     assert all(item.attribute is not ProfileAttribute.HOME_ROOM for item in sets)
@@ -1296,8 +1690,10 @@ def test_candidate_sets_cover_24_items_and_keep_equal_grounded_values_ambiguous(
 
 
 def test_realtime_location_requires_recent_first_person_post_and_matching_place_clue() -> None:
-    now = datetime(2026, 10, 20, 8, 31, tzinfo=timezone.utc)
-    current = post("current", "今は根津駅にいる").model_copy(update={"created_at": now - timedelta(minutes=10)})
+    now = datetime(2026, 10, 20, 8, 31, tzinfo=UTC)
+    current = post("current", "今は根津駅にいる").model_copy(
+        update={"created_at": now - timedelta(minutes=10)}
+    )
     clue = typed_clue(current, "根津駅", ClueType.PLACE_TEXT)
     claim = infer_realtime_location_claim([current], [clue], diagnosis_at=now)
     assert claim is not None and claim.value == "根津駅"
@@ -1305,21 +1701,44 @@ def test_realtime_location_requires_recent_first_person_post_and_matching_place_
     for created_at in (None, now + timedelta(minutes=1), now - timedelta(minutes=16)):
         stale = current.model_copy(update={"created_at": created_at})
         assert infer_realtime_location_claim([stale], [clue], diagnosis_at=now) is None
-    third_party = post("third-party", "友人が今は根津駅にいる").model_copy(update={"created_at": now})
-    assert infer_realtime_location_claim([third_party], [typed_clue(third_party, "根津駅", ClueType.PLACE_TEXT)], diagnosis_at=now) is None
-    quoted_report = post("quoted-report", "「今は根津駅にいる」と友人から連絡が来た").model_copy(update={"created_at": now})
-    assert infer_realtime_location_claim(
-        [quoted_report], [typed_clue(quoted_report, "根津駅", ClueType.PLACE_TEXT)], diagnosis_at=now
-    ) is None
+    third_party = post("third-party", "友人が今は根津駅にいる").model_copy(
+        update={"created_at": now}
+    )
+    assert (
+        infer_realtime_location_claim(
+            [third_party],
+            [typed_clue(third_party, "根津駅", ClueType.PLACE_TEXT)],
+            diagnosis_at=now,
+        )
+        is None
+    )
+    quoted_report = post("quoted-report", "「今は根津駅にいる」と友人から連絡が来た").model_copy(
+        update={"created_at": now}
+    )
+    assert (
+        infer_realtime_location_claim(
+            [quoted_report],
+            [typed_clue(quoted_report, "根津駅", ClueType.PLACE_TEXT)],
+            diagnosis_at=now,
+        )
+        is None
+    )
     ascii_quoted = post("ascii-quoted", '"今は根津駅にいる"').model_copy(update={"created_at": now})
-    assert infer_realtime_location_claim(
-        [ascii_quoted], [typed_clue(ascii_quoted, "根津駅", ClueType.PLACE_TEXT)], diagnosis_at=now
-    ) is None
+    assert (
+        infer_realtime_location_claim(
+            [ascii_quoted],
+            [typed_clue(ascii_quoted, "根津駅", ClueType.PLACE_TEXT)],
+            diagnosis_at=now,
+        )
+        is None
+    )
 
 
 def test_candidate_singleton_is_not_a_truth_label_and_realtime_carries_observed_at() -> None:
-    now = datetime(2026, 10, 20, 8, 31, tzinfo=timezone.utc)
-    current = post("candidate-current", "今は根津駅にいる").model_copy(update={"created_at": now - timedelta(minutes=2)})
+    now = datetime(2026, 10, 20, 8, 31, tzinfo=UTC)
+    current = post("candidate-current", "今は根津駅にいる").model_copy(
+        update={"created_at": now - timedelta(minutes=2)}
+    )
     clue = typed_clue(current, "根津駅", ClueType.PLACE_TEXT)
     claims = [infer_realtime_location_claim([current], [clue], diagnosis_at=now)]
     sets = evaluate_profile_candidates([claim for claim in claims if claim is not None], [current])
@@ -1327,13 +1746,56 @@ def test_candidate_singleton_is_not_a_truth_label_and_realtime_carries_observed_
     assert realtime.status is ProfileCandidateSetStatus.CANDIDATE
     assert realtime.candidates[0].observed_at == current.created_at
     assert realtime.candidates[0].status is ProfileStatus.FOUND
-    assert realtime.candidates[0].evidence_paths[0].provenance is EvidencePathProvenance.DIRECT_DISCLOSURE
+    assert (
+        realtime.candidates[0].evidence_paths[0].provenance
+        is EvidencePathProvenance.DIRECT_DISCLOSURE
+    )
+
+
+def test_realtime_candidate_uses_freshest_complete_path_and_drops_stale_alternatives() -> None:
+    now = datetime(2026, 10, 20, 8, 31, tzinfo=UTC)
+    stale = post("candidate-stale", "今は根津駅にいる").model_copy(
+        update={"created_at": now - timedelta(minutes=40)}
+    )
+    stale_support = post("candidate-stale-support", "今は根津駅にいる").model_copy(
+        update={"created_at": now - timedelta(minutes=40)}
+    )
+    current = post("candidate-live", "今は根津駅にいる").model_copy(
+        update={"created_at": now - timedelta(minutes=2)}
+    )
+    current_support = post("candidate-live-support", "今は根津駅にいる").model_copy(
+        update={"created_at": now - timedelta(minutes=2)}
+    )
+    claims = [
+        _claim_with_paths(ProfileAttribute.REALTIME_LOCATION, [[stale, stale_support]]).model_copy(
+            update={"value": "根津駅"}
+        ),
+        _claim_with_paths(
+            ProfileAttribute.REALTIME_LOCATION, [[current, current_support]]
+        ).model_copy(update={"value": "根津駅"}),
+    ]
+    sets = evaluate_profile_candidates(claims, [stale, stale_support, current, current_support])
+    realtime = next(item for item in sets if item.attribute is ProfileAttribute.REALTIME_LOCATION)
+    assert realtime.candidates[0].observed_at == current.created_at
+
+    after = recalculate_profile_candidate_sets(
+        sets, {current.post_id}, [stale, stale_support], diagnosis_at=now
+    )
+    recalculated = next(
+        item for item in after if item.attribute is ProfileAttribute.REALTIME_LOCATION
+    )
+    assert recalculated.status is ProfileCandidateSetStatus.UNKNOWN
+    assert recalculated.candidate_pool == []
 
 
 def test_candidate_normalization_matches_javascript_unicode_lowercase() -> None:
     a, b = post("unicode-a", "根拠A"), post("unicode-b", "根拠B")
-    first = _claim_with_paths(ProfileAttribute.RESIDENTIAL_AREA, [[a, b]]).model_copy(update={"value": "Straße"})
-    second = _claim_with_paths(ProfileAttribute.RESIDENTIAL_AREA, [[a, b]]).model_copy(update={"value": "STRASSE"})
+    first = _claim_with_paths(ProfileAttribute.RESIDENTIAL_AREA, [[a, b]]).model_copy(
+        update={"value": "Straße"}
+    )
+    second = _claim_with_paths(ProfileAttribute.RESIDENTIAL_AREA, [[a, b]]).model_copy(
+        update={"value": "STRASSE"}
+    )
     sets = evaluate_profile_candidates([first, second], [a, b])
     result = next(item for item in sets if item.attribute is ProfileAttribute.RESIDENTIAL_AREA)
     assert result.status is ProfileCandidateSetStatus.AMBIGUOUS
@@ -1343,16 +1805,27 @@ def test_candidate_normalization_matches_javascript_unicode_lowercase() -> None:
 def test_explicit_conflict_is_unknown_and_weak_values_show_even_with_large_score_gap() -> None:
     a, b = post("score-a", "自宅近くの青葉商店街"), post("score-b", "青葉商店街は文京区")
     strong = infer_owner_claims([a, b], [typed_clue(b, "文京区", ClueType.PLACE_TEXT)])[0]
-    weaker = strong.model_copy(update={"value": "台東区", "confidence": 0.54,
-        "evidence_paths": [strong.evidence_paths[0].model_copy(update={"confidence": 0.54})]})
+    weaker = strong.model_copy(
+        update={
+            "value": "台東区",
+            "confidence": 0.54,
+            "evidence_paths": [strong.evidence_paths[0].model_copy(update={"confidence": 0.54})],
+        }
+    )
     sets = evaluate_profile_candidates([strong, weaker], [a, b])
     residence = next(item for item in sets if item.attribute is ProfileAttribute.RESIDENTIAL_AREA)
     assert residence.status is ProfileCandidateSetStatus.AMBIGUOUS
     assert [candidate.value for candidate in residence.candidates] == ["文京区", "台東区"]
-    conflict_sets = evaluate_profile_candidates([strong], [a, b], {
-        ProfileAttribute.RESIDENTIAL_AREA: "directly_conflicting_self_reports",
-    })
-    residence_conflict = next(item for item in conflict_sets if item.attribute is ProfileAttribute.RESIDENTIAL_AREA)
+    conflict_sets = evaluate_profile_candidates(
+        [strong],
+        [a, b],
+        {
+            ProfileAttribute.RESIDENTIAL_AREA: "directly_conflicting_self_reports",
+        },
+    )
+    residence_conflict = next(
+        item for item in conflict_sets if item.attribute is ProfileAttribute.RESIDENTIAL_AREA
+    )
     assert residence_conflict.status is ProfileCandidateSetStatus.UNKNOWN
     assert residence_conflict.candidates == []
 
@@ -1360,8 +1833,9 @@ def test_explicit_conflict_is_unknown_and_weak_values_show_even_with_large_score
 def test_weak_leader_shows_three_qualifying_values_across_large_score_gaps() -> None:
     posts = [post(f"weak-{index}", "根拠") for index in range(6)]
     claims = [
-        _claim_with_paths(ProfileAttribute.RESIDENTIAL_AREA, [[posts[index], posts[index + 3]]], [score])
-        .model_copy(update={"value": f"候補{index}"})
+        _claim_with_paths(
+            ProfileAttribute.RESIDENTIAL_AREA, [[posts[index], posts[index + 3]]], [score]
+        ).model_copy(update={"value": f"候補{index}"})
         for index, score in enumerate((0.91, 0.74, 0.53))
     ]
     sets = evaluate_profile_candidates(claims, posts)
@@ -1388,7 +1862,10 @@ def test_found_leader_uses_same_grade_and_relative_margin_without_score_grade_cu
     residence = next(item for item in sets if item.attribute is ProfileAttribute.RESIDENTIAL_AREA)
     assert [candidate.value for candidate in residence.candidates] == ["直接値", "近い直接値"]
     assert [candidate.value for candidate in residence.candidate_pool] == [
-        "直接値", "弱い値", "近い直接値", "遠い直接値"
+        "直接値",
+        "弱い値",
+        "近い直接値",
+        "遠い直接値",
     ]
 
 
@@ -1397,16 +1874,30 @@ def test_mixed_direct_and_combined_paths_stay_one_candidate_and_deletion_reclass
     direct = _claim_with_paths(
         ProfileAttribute.RESIDENTIAL_AREA, [[direct_a, direct_b]], [0.8]
     ).model_copy(update={"value": "同じ候補", "status": ProfileStatus.FOUND})
-    direct = direct.model_copy(update={"evidence_paths": [
-        direct.evidence_paths[0].model_copy(update={"provenance": EvidencePathProvenance.DIRECT_DISCLOSURE})
-    ]})
+    direct = direct.model_copy(
+        update={
+            "evidence_paths": [
+                direct.evidence_paths[0].model_copy(
+                    update={"provenance": EvidencePathProvenance.DIRECT_DISCLOSURE}
+                )
+            ]
+        }
+    )
     combined = _claim_with_paths(
         ProfileAttribute.RESIDENTIAL_AREA, [[combined_a, combined_b]], [0.7]
     ).model_copy(update={"value": "同じ候補"})
-    combined = combined.model_copy(update={"evidence_paths": [
-        combined.evidence_paths[0].model_copy(update={"provenance": EvidencePathProvenance.COMBINED_INFERENCE})
-    ]})
-    sets = evaluate_profile_candidates([direct, combined], [direct_a, direct_b, combined_a, combined_b])
+    combined = combined.model_copy(
+        update={
+            "evidence_paths": [
+                combined.evidence_paths[0].model_copy(
+                    update={"provenance": EvidencePathProvenance.COMBINED_INFERENCE}
+                )
+            ]
+        }
+    )
+    sets = evaluate_profile_candidates(
+        [direct, combined], [direct_a, direct_b, combined_a, combined_b]
+    )
     residence = next(item for item in sets if item.attribute is ProfileAttribute.RESIDENTIAL_AREA)
     assert len(residence.candidate_pool) == 1
     assert {path.provenance for path in residence.candidate_pool[0].evidence_paths} == {
@@ -1437,33 +1928,165 @@ def test_full_candidate_pool_promotes_rank_four_after_top_candidate_is_excluded(
         item = _claim_with_paths(ProfileAttribute.RESIDENTIAL_AREA, [[posts[index], posts[4]]])
         claims.append(item.model_copy(update={"value": f"架空区{index}"}))
     sets = evaluate_profile_candidates(claims, posts)
-    no_op = recalculate_profile_candidate_sets(sets, set(), posts, diagnosis_at=datetime.now(timezone.utc))
+    no_op = recalculate_profile_candidate_sets(sets, set(), posts, diagnosis_at=datetime.now(UTC))
     before = next(item for item in sets if item.attribute is ProfileAttribute.RESIDENTIAL_AREA)
-    after_no_op = next(item for item in no_op if item.attribute is ProfileAttribute.RESIDENTIAL_AREA)
-    assert [candidate.value for candidate in after_no_op.candidate_pool] == [candidate.value for candidate in before.candidate_pool]
-    assert [candidate.confidence for candidate in after_no_op.candidate_pool] == [candidate.confidence for candidate in before.candidate_pool]
+    after_no_op = next(
+        item for item in no_op if item.attribute is ProfileAttribute.RESIDENTIAL_AREA
+    )
+    assert [candidate.value for candidate in after_no_op.candidate_pool] == [
+        candidate.value for candidate in before.candidate_pool
+    ]
+    assert [candidate.confidence for candidate in after_no_op.candidate_pool] == [
+        candidate.confidence for candidate in before.candidate_pool
+    ]
     residence = next(item for item in sets if item.attribute is ProfileAttribute.RESIDENTIAL_AREA)
     assert [item.value for item in residence.candidates] == ["架空区0", "架空区1", "架空区2"]
     assert [item.rank for item in residence.candidate_pool] == [1, 2, 3, 4]
 
     remaining_posts = posts[1:]
     recalculated = recalculate_profile_candidate_sets(sets, {posts[0].post_id}, remaining_posts)
-    updated = next(item for item in recalculated if item.attribute is ProfileAttribute.RESIDENTIAL_AREA)
+    updated = next(
+        item for item in recalculated if item.attribute is ProfileAttribute.RESIDENTIAL_AREA
+    )
     assert updated.status is ProfileCandidateSetStatus.AMBIGUOUS
     assert [item.value for item in updated.candidates] == ["架空区1", "架空区2", "架空区3"]
     assert [item.rank for item in updated.candidate_pool] == [1, 2, 3]
 
 
+def test_profile_relations_keep_alternative_paths_and_drop_missing_endpoints() -> None:
+    home_a, home_b = (
+        post("relation-home-a", "自宅駅の写真"),
+        post("relation-home-b", "自宅駅の写真"),
+    )
+    home_a_support, home_b_support = (
+        post("relation-home-a-support", "自宅駅の記録"),
+        post("relation-home-b-support", "自宅駅の記録"),
+    )
+    regular_a, regular_b = (
+        post("relation-regular-a", "通勤駅の写真"),
+        post("relation-regular-b", "通勤駅の写真"),
+    )
+    regular_a_support, regular_b_support = (
+        post("relation-regular-a-support", "通勤駅の記録"),
+        post("relation-regular-b-support", "通勤駅の記録"),
+    )
+    home = _claim_with_paths(
+        ProfileAttribute.HOME_NEAREST_STATION,
+        [[home_a, home_a_support], [home_b, home_b_support]],
+    ).model_copy(update={"value": "根津駅"})
+    regular = _claim_with_paths(
+        ProfileAttribute.REGULAR_STATION,
+        [[regular_a, regular_a_support], [regular_b, regular_b_support]],
+    ).model_copy(update={"value": "根津駅"})
+    claims = evaluate_profile_candidates(
+        [home, regular],
+        [
+            home_a,
+            home_a_support,
+            home_b,
+            home_b_support,
+            regular_a,
+            regular_a_support,
+            regular_b,
+            regular_b_support,
+        ],
+    )
+    relation_paths = [
+        ProfileEvidencePath(
+            evidence=[
+                ProfileEvidence(
+                    post_id=home_a.post_id,
+                    clue_index=None,
+                    required=True,
+                    source="post_text",
+                    excerpt="自宅駅",
+                ),
+                ProfileEvidence(
+                    post_id=regular_a.post_id,
+                    clue_index=None,
+                    required=True,
+                    source="post_text",
+                    excerpt="通勤駅",
+                ),
+            ],
+            confidence=0.65,
+        ),
+        ProfileEvidencePath(
+            evidence=[
+                ProfileEvidence(
+                    post_id=home_b.post_id,
+                    clue_index=None,
+                    required=True,
+                    source="post_text",
+                    excerpt="自宅駅",
+                ),
+                ProfileEvidence(
+                    post_id=regular_b.post_id,
+                    clue_index=None,
+                    required=True,
+                    source="post_text",
+                    excerpt="通勤駅",
+                ),
+            ],
+            confidence=0.6,
+        ),
+    ]
+    relation = ProfileRelation(
+        kind=ProfileRelationKind.HOME_NEAREST_IS_COMMUTE_ORIGIN,
+        left=ProfileRelationEndpoint(
+            kind=ProfileRelationEndpointKind.PROFILE_CANDIDATE,
+            attribute=ProfileAttribute.HOME_NEAREST_STATION,
+            value="根津駅",
+        ),
+        right=ProfileRelationEndpoint(
+            kind=ProfileRelationEndpointKind.PROFILE_CANDIDATE,
+            attribute=ProfileAttribute.REGULAR_STATION,
+            value="根津駅",
+        ),
+        evidence_paths=relation_paths,
+    )
+
+    after_one = profile_relations_after_deletion([relation], {home_a.post_id}, claims)
+    assert len(after_one) == 1
+    assert after_one[0].evidence_paths == [relation_paths[1]]
+
+    after_both = recalculate_profile_candidate_sets(
+        claims,
+        {home_a.post_id, home_b.post_id, regular_a.post_id, regular_b.post_id},
+        [],
+    )
+    assert (
+        profile_relations_after_deletion(
+            [relation],
+            {home_a.post_id, home_b.post_id, regular_a.post_id, regular_b.post_id},
+            after_both,
+        )
+        == []
+    )
+
+
 def test_planner_does_not_count_top_rank_change_as_broken_when_alternatives_survive() -> None:
-    top, second, collapse, shared = [post(key, "明示された根拠") for key in ("top", "second", "collapse", "shared")]
-    top_candidate = _claim_with_paths(ProfileAttribute.RESIDENTIAL_AREA, [[top, shared]]).model_copy(update={"value": "候補A"})
-    second_candidate = _claim_with_paths(ProfileAttribute.RESIDENTIAL_AREA, [[second, shared]]).model_copy(update={"value": "候補B"})
-    separate = _claim_with_paths(ProfileAttribute.EMPLOYER_NAME, [[collapse, shared]]).model_copy(update={"value": "勤務先候補"})
-    sets = evaluate_profile_candidates([top_candidate, second_candidate, separate], [top, second, collapse, shared])
+    top, second, collapse, shared = [
+        post(key, "明示された根拠") for key in ("top", "second", "collapse", "shared")
+    ]
+    top_candidate = _claim_with_paths(
+        ProfileAttribute.RESIDENTIAL_AREA, [[top, shared]]
+    ).model_copy(update={"value": "候補A"})
+    second_candidate = _claim_with_paths(
+        ProfileAttribute.RESIDENTIAL_AREA, [[second, shared]]
+    ).model_copy(update={"value": "候補B"})
+    separate = _claim_with_paths(ProfileAttribute.EMPLOYER_NAME, [[collapse, shared]]).model_copy(
+        update={"value": "勤務先候補"}
+    )
+    sets = evaluate_profile_candidates(
+        [top_candidate, second_candidate, separate], [top, second, collapse, shared]
+    )
 
     plan = plan_profile_candidate_deletion(sets, [top, second, collapse, shared])
     assert plan != [top.post_id]
     after_top = recalculate_profile_candidate_sets(sets, {top.post_id}, [second, collapse, shared])
-    residence = next(item for item in after_top if item.attribute is ProfileAttribute.RESIDENTIAL_AREA)
+    residence = next(
+        item for item in after_top if item.attribute is ProfileAttribute.RESIDENTIAL_AREA
+    )
     assert residence.status is ProfileCandidateSetStatus.CANDIDATE
     assert [item.value for item in residence.candidates] == ["候補B"]

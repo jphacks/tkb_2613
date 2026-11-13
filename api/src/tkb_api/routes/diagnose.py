@@ -26,8 +26,7 @@ import json
 import logging
 import time
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
-from dataclasses import asdict
-from datetime import datetime
+from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Any
@@ -53,6 +52,7 @@ from tkb_api.limits import (
     next_jst_midnight,
 )
 from tkb_api.pipeline import (
+    conclusions_json,
     diagnose_events,
     load_gazetteer,
     mock_extractions,
@@ -75,8 +75,11 @@ from tkb_common.schemas import (
 from tkb_detect.batch import PostExtraction
 from tkb_detect.errors import DetectError
 from tkb_detect.extract import Extractor, build_extractor
+from tkb_engine.cross_post import (
+    profile_relations_after_deletion,
+    recalculate_profile_candidate_sets,
+)
 from tkb_engine.gazetteer import Gazetteer
-from tkb_engine.rules import infer
 
 router = APIRouter(prefix="/api")
 logger = logging.getLogger(__name__)
@@ -358,15 +361,31 @@ def read_diagnosis(
     diagnosis = store.get_diagnosis(session_id)
     if diagnosis is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "復元できる診断結果はありません")
-    posts, clues = diagnosis.posts, diagnosis.clues
+    posts, clues, deleted = diagnosis.posts, diagnosis.clues, diagnosis.deleted
+    deleted_ids = set(deleted)
+    remaining_posts = [post for post in posts if post.post_id not in deleted_ids]
+    remaining_clues = [clue for clue in clues if clue.post_id not in deleted_ids]
+    profile_claims = recalculate_profile_candidate_sets(
+        diagnosis.profile_claims,
+        deleted_ids,
+        remaining_posts,
+        clues=remaining_clues,
+        diagnosis_at=diagnosis.diagnosis_at,
+    )
+    profile_relations = profile_relations_after_deletion(
+        diagnosis.profile_relations, deleted, profile_claims
+    )
     return {
         "posts": [post.model_dump(mode="json") for post in posts],
         "clues": [clue.model_dump(mode="json") for clue in clues],
-        "conclusions": [asdict(conclusion) for conclusion in infer(clues, posts, gazetteer)],
-        "plan": plan_json(clues, posts, gazetteer),
-        "profile_claims": [claim.model_dump(mode="json") for claim in diagnosis.profile_claims],
-        "profile_relations": [relation.model_dump(mode="json") for relation in diagnosis.profile_relations],
-        "profile_claim_suggestions": list(diagnosis.profile_claim_suggestions),
+        "deleted": list(deleted),
+        "conclusions": conclusions_json(clues, posts, gazetteer, deleted),
+        "plan": plan_json(clues, posts, gazetteer, deleted),
+        "profile_claims": [claim.model_dump(mode="json") for claim in profile_claims],
+        "profile_relations": [relation.model_dump(mode="json") for relation in profile_relations],
+        "profile_claim_suggestions": [
+            post_id for post_id in diagnosis.profile_claim_suggestions if post_id not in deleted
+        ],
         "web_facts": [fact.model_dump(mode="json") for fact in diagnosis.web_facts],
         "web_lookup_status": diagnosis.web_lookup_status,
         "external_profile_results": [
@@ -389,10 +408,16 @@ def _ensure_open(settings: Settings, now: datetime) -> None:
 
 
 def _acquire(
-    limiter: DiagnoseLimiter, settings: Settings, session_id: str, did: str, now: datetime
+    limiter: DiagnoseLimiter,
+    settings: Settings,
+    session_id: str,
+    did: str,
+    now: datetime,
+    *,
+    check_daily: bool = True,
 ) -> Lease:
     try:
-        return limiter.acquire(session_id, did)
+        return limiter.acquire(session_id, did, check_daily=check_daily)
     except AlreadyRunningError:
         raise refusal(
             status.HTTP_409_CONFLICT, "already_running", "このアカウントの別の診断が進んでいます"
@@ -485,17 +510,20 @@ async def diagnose(
                 finally:
                     await profile_client.request.close()
         except bluesky.BlueskyUnavailableError:
-            raise HTTPException(
-                status.HTTP_502_BAD_GATEWAY, "Bluesky からプロフィールを取得できませんでした"
-            ) from None
+            # 投稿の診断は続ける。プロフィール文は補助的な根拠にすぎない。
+            owner_profile_text = ""
         if owner_profile_text:
-            profile_extractor = _build_extractor(extractor_factory)
+            try:
+                profile_extractor = _build_extractor(extractor_factory)
+            except BaseException:
+                lease.release()
+                raise
 
             def analyze_profile(text: str) -> Awaitable[list[Clue]]:
                 return profile_extractor.extract_profile_text(session.did, text)
 
             owner_profile_analyzer = analyze_profile
-        if public_web_lookup_consent:
+        if public_web_lookup_consent and settings.public_web_lookup_available:
 
             async def lookup_external() -> ExternalLookupResult:
                 lookup = await external_searcher(session.handle)
@@ -504,8 +532,11 @@ async def diagnose(
                 )
 
             external_lookup = lookup_external
+        elif public_web_lookup_consent:
+            external_lookup_status = ExternalLookupStatus.UNAVAILABLE
 
     profile_result: dict[str, Any] = {}
+    diagnosis_at = datetime.now(UTC)
 
     def save_profile_result(result: dict[str, Any]) -> None:
         profile_result.update(result)
@@ -529,6 +560,7 @@ async def diagnose(
                 ),
                 owner_profile_text=profile_result.get("owner_profile_text", ""),
                 self_report_clues=tuple(profile_result.get("self_report_clues", ())),
+                diagnosis_at=diagnosis_at,
             ),
         )
 
@@ -539,6 +571,7 @@ async def diagnose(
         interval,
         on_finished=save,
         on_result=save_profile_result,
+        diagnosis_at=diagnosis_at,
         owner_profile_text=owner_profile_text,
         owner_profile_analyzer=owner_profile_analyzer,
         web_facts=web_facts,

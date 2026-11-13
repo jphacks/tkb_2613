@@ -5,9 +5,10 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { messages } from "@/lib/messages";
 import type { Clue } from "@/types/clue";
 import type { Conclusion } from "@/types/diagnose";
-import { profileRelationsAfterDeletion, PROFILE_ATTRIBUTE_CATALOG, type ExternalLookupStatus, type ExternalProfileResult, type ProfileCandidateSet, type ProfileEvidence, type ProfileEvidencePath, type ProfileRelation, type WebFact } from "@/types/profile";
+import { openDataCitations, profileRelationsAfterDeletion, PROFILE_ATTRIBUTE_CATALOG, type ExternalLookupStatus, type ExternalProfileResult, type ProfileCandidateSet, type ProfileEvidence, type ProfileEvidencePath, type ProfileRelation, type WebFact } from "@/types/profile";
 import type { Post } from "@/types/post";
 import { ProfileClaimWhatIf } from "./ProfileClaimWhatIf";
+import { ReasoningChain } from "./ReasoningChain";
 
 const t = messages.board;
 
@@ -139,10 +140,13 @@ export function ConclusionBoard({
   const visibleRelations = profileRelationsAfterDeletion(profileRelations, new Set(deletedPostIds), profileClaims);
 
   useEffect(() => {
-    setNowMs(Date.now());
     if (!hasTimedLocationCandidate) return;
+    const initialTimer = window.setTimeout(() => setNowMs(Date.now()), 0);
     const timer = window.setInterval(() => setNowMs(Date.now()), 30_000);
-    return () => window.clearInterval(timer);
+    return () => {
+      window.clearTimeout(initialTimer);
+      window.clearInterval(timer);
+    };
   }, [hasTimedLocationCandidate]);
 
   // 消したらどうなるかで全部「不明」になっても、演出は出したままにする（出し直さない）
@@ -237,6 +241,7 @@ export function ConclusionBoard({
                 </p>
                 <p className="mt-1 text-xl font-bold">{conclusion.value}</p>
                 {conclusion.note && <p className="mt-1 text-sm text-ink/70">{conclusion.note}</p>}
+                {posts.length > 0 && <ReasoningChain conclusion={conclusion} clues={clues} posts={posts} />}
                 <p className="mt-3 text-xs tracking-widest text-ink/60">
                   {t.reasons(conclusion.clue_indices.length)}
                 </p>
@@ -287,6 +292,9 @@ export function ConclusionBoard({
                     const recentLocation = claimSet.attribute === "realtime_location" && ageMs >= 0 && ageMs <= 15 * 60_000;
                     return <li key={candidate.value} className="rounded border border-ink/15 px-3 py-2">
                       <p className="text-xl font-bold">{candidate.value}</p>
+                      {openDataCitations(candidate).map((citation) => (
+                        <p key={citation} className="mt-1 text-xs text-ink/70">{citation}</p>
+                      ))}
                       <ul aria-label="値の根拠経路" className="mt-1 flex flex-wrap gap-2 text-xs">
                         {provenanceLabels(candidate).map((label) => <li key={label} className="rounded border border-ink/25 px-2 py-0.5">{label}</li>)}
                       </ul>

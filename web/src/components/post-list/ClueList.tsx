@@ -25,11 +25,11 @@ export function ClueList({ clues, error, label }: ClueListProps) {
       {clues.map((clue, i) => (
         <li
           key={i}
-          className="inline-flex items-baseline gap-2 rounded-sm border border-seeker/40 bg-seeker/10 px-2.5 py-1 text-sm"
+          className="inline-flex max-w-full items-baseline gap-2 rounded-sm border border-seeker/40 bg-seeker/10 px-2.5 py-1 text-sm"
         >
-          <span className="text-xs tracking-widest text-ink/60">{messages.clues.typeLabels[clue.type]}</span>
-          <span className="font-bold">{clue.value}</span>
-          <span className="tabular-nums text-xs text-ink/60">{Math.round(clue.confidence * 100)}%</span>
+          <span className="shrink-0 whitespace-nowrap text-xs tracking-widest text-ink/60">{messages.clues.typeLabels[clue.type]}</span>
+          <span className="min-w-0 break-words font-bold">{clue.value}</span>
+          <span className="shrink-0 tabular-nums text-xs text-ink/60">{Math.round(clue.confidence * 100)}%</span>
         </li>
       ))}
     </ul>

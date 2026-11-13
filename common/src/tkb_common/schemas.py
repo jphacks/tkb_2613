@@ -332,6 +332,9 @@ class EvidenceSource(StrEnum):
     PROFILE_TEXT = "profile_text"
     IMAGE_ALT = "image_alt"
     PUBLIC_WEB = "public_web"
+    # 事前に取得した公的な公開データ（国土地理院の避難所など）。本人についての事実ではなく、
+    # 「X は Y」という一般的な知識。excerpt に出典と注記を書き、投稿は指さない
+    OPEN_DATA = "open_data"
 
 
 class WebSourceKind(StrEnum):
@@ -510,6 +513,13 @@ class ProfileEvidence(BaseModel):
             or self.excerpt is not None
         ):
             raise ValueError("public_web evidence requires only web_fact_id")
+        elif self.source is EvidenceSource.OPEN_DATA and (
+            self.post_id is not None
+            or self.clue_index is not None
+            or self.image_index is not None
+            or not self.excerpt
+        ):
+            raise ValueError("open_data evidence requires only excerpt (the citation)")
         return self
 
 
@@ -555,7 +565,10 @@ class ProfileRelationEndpoint(BaseModel):
     def _check_attribute(self) -> Self:
         if self.kind is ProfileRelationEndpointKind.PROFILE_CANDIDATE and self.attribute is None:
             raise ValueError("profile candidate relation endpoint requires attribute")
-        if self.kind is ProfileRelationEndpointKind.COMMUTE_DESTINATION and self.attribute is not None:
+        if (
+            self.kind is ProfileRelationEndpointKind.COMMUTE_DESTINATION
+            and self.attribute is not None
+        ):
             raise ValueError("commute destination relation endpoint has no profile attribute")
         return self
 
@@ -573,24 +586,43 @@ class ProfileRelation(BaseModel):
     @model_validator(mode="after")
     def _check_endpoints(self) -> Self:
         endpoints = (self.left, self.right)
-        candidates = [endpoint for endpoint in endpoints
-                      if endpoint.kind is ProfileRelationEndpointKind.PROFILE_CANDIDATE]
-        destinations = [endpoint for endpoint in endpoints
-                        if endpoint.kind is ProfileRelationEndpointKind.COMMUTE_DESTINATION]
+        candidates = [
+            endpoint
+            for endpoint in endpoints
+            if endpoint.kind is ProfileRelationEndpointKind.PROFILE_CANDIDATE
+        ]
+        destinations = [
+            endpoint
+            for endpoint in endpoints
+            if endpoint.kind is ProfileRelationEndpointKind.COMMUTE_DESTINATION
+        ]
         if self.kind is ProfileRelationKind.HOME_NEAREST_IS_COMMUTE_ORIGIN:
             if len(candidates) != 2 or destinations:
                 raise ValueError("home-to-commute relation requires two candidate endpoints")
             attrs = {endpoint.attribute for endpoint in candidates}
             values = {endpoint.value for endpoint in candidates}
-            if attrs != {ProfileAttribute.HOME_NEAREST_STATION, ProfileAttribute.REGULAR_STATION} or len(values) != 1:
+            if (
+                attrs != {ProfileAttribute.HOME_NEAREST_STATION, ProfileAttribute.REGULAR_STATION}
+                or len(values) != 1
+            ):
                 raise ValueError("home-to-commute relation requires the same station candidate")
         else:
-            expected = (ProfileAttribute.EMPLOYER_NAME if self.kind is ProfileRelationKind.COMMUTE_DESTINATION_IS_EMPLOYER
-                        else ProfileAttribute.SCHOOL)
+            expected = (
+                ProfileAttribute.EMPLOYER_NAME
+                if self.kind is ProfileRelationKind.COMMUTE_DESTINATION_IS_EMPLOYER
+                else ProfileAttribute.SCHOOL
+            )
             if len(candidates) != 1 or len(destinations) != 1:
-                raise ValueError("commute destination relation requires one destination and one candidate")
-            if candidates[0].attribute is not expected or candidates[0].value != destinations[0].value:
-                raise ValueError("commute destination must exactly match the linked affiliation candidate")
+                raise ValueError(
+                    "commute destination relation requires one destination and one candidate"
+                )
+            if (
+                candidates[0].attribute is not expected
+                or candidates[0].value != destinations[0].value
+            ):
+                raise ValueError(
+                    "commute destination must exactly match the linked affiliation candidate"
+                )
         return self
 
 
@@ -728,31 +760,50 @@ class ProfileCandidateSet(BaseModel):
                 raise ValueError("realtime location candidates require observed_at")
         elif any(candidate.observed_at is not None for candidate in self.candidate_pool):
             raise ValueError("observed_at is only valid for realtime_location candidates")
-        normalized = [unicodedata.normalize("NFKC", c.value).lower().strip() for c in self.candidates]
+        normalized = [
+            unicodedata.normalize("NFKC", c.value).lower().strip() for c in self.candidates
+        ]
         if len(normalized) != len(set(normalized)):
             raise ValueError("profile candidate values must be distinct")
-        pool_normalized = [unicodedata.normalize("NFKC", c.value).lower().strip() for c in self.candidate_pool]
+        pool_normalized = [
+            unicodedata.normalize("NFKC", c.value).lower().strip() for c in self.candidate_pool
+        ]
         if len(pool_normalized) != len(set(pool_normalized)):
             raise ValueError("profile candidate pool values must be distinct")
-        if [candidate.rank for candidate in self.candidate_pool] != list(range(1, len(self.candidate_pool) + 1)):
+        if [candidate.rank for candidate in self.candidate_pool] != list(
+            range(1, len(self.candidate_pool) + 1)
+        ):
             raise ValueError("candidate pool ranks must be contiguous and start at one")
-        ranked_pool = sorted(self.candidate_pool, key=lambda candidate: (
-            -candidate.confidence, unicodedata.normalize("NFKC", candidate.value).lower().strip()
-        ))
+        ranked_pool = sorted(
+            self.candidate_pool,
+            key=lambda candidate: (
+                -candidate.confidence,
+                unicodedata.normalize("NFKC", candidate.value).lower().strip(),
+            ),
+        )
         if self.candidate_pool != ranked_pool:
             raise ValueError("candidate pool must be sorted by confidence then normalized value")
         expected_display = []
         if self.candidate_pool:
             strongest = self.candidate_pool[0]
             if strongest.status is ProfileStatus.WEAK:
-                expected_display = [candidate for candidate in self.candidate_pool
-                                    if candidate.status is ProfileStatus.WEAK][:3]
+                expected_display = [
+                    candidate
+                    for candidate in self.candidate_pool
+                    if candidate.status is ProfileStatus.WEAK
+                ][:3]
             else:
-                expected_display = [candidate for candidate in self.candidate_pool
-                                    if candidate.status is strongest.status
-                                    and strongest.confidence - candidate.confidence <= 0.15][:3]
+                expected_display = [
+                    candidate
+                    for candidate in self.candidate_pool
+                    if candidate.status is strongest.status
+                    and strongest.confidence - candidate.confidence <= 0.15
+                ][:3]
         if self.candidates != expected_display:
-            raise ValueError("display candidates must be the top three candidates in the leading grade/score band")
+            raise ValueError(
+                "display candidates must be the top three candidates in the "
+                "leading grade/score band"
+            )
         count = len(self.candidates)
         if self.status is ProfileCandidateSetStatus.CONFLICT and not self.conflicting_evidence:
             raise ValueError("conflict status requires contradictory evidence")
@@ -761,7 +812,10 @@ class ProfileCandidateSet(BaseModel):
         if count and not self.candidate_pool:
             raise ValueError("candidate set requires the full eligible candidate pool")
         if count == 0:
-            if self.status not in {ProfileCandidateSetStatus.UNKNOWN, ProfileCandidateSetStatus.CONFLICT}:
+            if self.status not in {
+                ProfileCandidateSetStatus.UNKNOWN,
+                ProfileCandidateSetStatus.CONFLICT,
+            }:
                 raise ValueError("empty candidate set must be unknown or conflict")
             if not self.reason:
                 raise ValueError("empty candidate set requires a reason")
@@ -770,7 +824,10 @@ class ProfileCandidateSet(BaseModel):
             raise ValueError("candidate set must contain exactly one candidate")
         if self.status is ProfileCandidateSetStatus.AMBIGUOUS and not 2 <= count <= 3:
             raise ValueError("ambiguous candidate set must contain two or three candidates")
-        if self.status not in {ProfileCandidateSetStatus.CANDIDATE, ProfileCandidateSetStatus.AMBIGUOUS}:
+        if self.status not in {
+            ProfileCandidateSetStatus.CANDIDATE,
+            ProfileCandidateSetStatus.AMBIGUOUS,
+        }:
             raise ValueError("unknown or conflict candidate set cannot expose candidate values")
         if count > 1:
             grades = {candidate.status for candidate in self.candidates}
@@ -779,5 +836,7 @@ class ProfileCandidateSet(BaseModel):
                 next(iter(grades)) is ProfileStatus.FOUND
                 and max(confidences) - min(confidences) > 0.15
             ):
-                raise ValueError("ambiguous candidates must share a grade; found candidates must be within 0.15")
+                raise ValueError(
+                    "ambiguous candidates must share a grade; found candidates must be within 0.15"
+                )
         return self

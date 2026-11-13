@@ -1,7 +1,13 @@
 from datetime import datetime
 
 from tkb_common.schemas import (
-    Clue, ClueSource, ClueType, EvidencePathProvenance, Post, ProfileStatus, WebFact,
+    Clue,
+    ClueSource,
+    ClueType,
+    EvidencePathProvenance,
+    Post,
+    ProfileStatus,
+    WebFact,
 )
 from tkb_engine.cross_post import (
     evaluate_profile_candidates,
@@ -221,16 +227,27 @@ def test_company_possessive_bridge_does_not_establish_owner_employment() -> None
 
 
 def test_multiple_independently_verified_employers_are_retained_as_candidates() -> None:
-    blue_anchor, blue_bridge = post("blue-anchor", "勤務先は青空社"), post("blue-bridge", "青空社の資料")
-    water_anchor, water_bridge = post("water-anchor", "勤務先は水色社"), post("water-bridge", "水色社の資料")
-    water_fact = web_fact(key="water", company="株式会社水色").model_copy(update={"subject": "水色社"})
+    blue_anchor, blue_bridge = (
+        post("blue-anchor", "勤務先は青空社"),
+        post("blue-bridge", "青空社の資料"),
+    )
+    water_anchor, water_bridge = (
+        post("water-anchor", "勤務先は水色社"),
+        post("water-bridge", "水色社の資料"),
+    )
+    water_fact = web_fact(key="water", company="株式会社水色").model_copy(
+        update={"subject": "水色社"}
+    )
     claims = infer_owner_claims_with_web(
-        [blue_anchor, blue_bridge, water_anchor, water_bridge], [],
+        [blue_anchor, blue_bridge, water_anchor, water_bridge],
+        [],
         [web_fact(company="株式会社青空"), water_fact],
     )
     employer_claims = [claim for claim in claims if claim.attribute.value == "employer_name"]
     assert {claim.value for claim in employer_claims} == {"株式会社青空", "株式会社水色"}
-    sets = evaluate_profile_candidates(claims, [blue_anchor, blue_bridge, water_anchor, water_bridge])
+    sets = evaluate_profile_candidates(
+        claims, [blue_anchor, blue_bridge, water_anchor, water_bridge]
+    )
     employers = next(item for item in sets if item.attribute.value == "employer_name")
     assert employers.status.value == "ambiguous"
     assert [candidate.rank for candidate in employers.candidates] == [1, 2]

@@ -122,7 +122,8 @@ resource "aws_cloudfront_distribution" "main" {
   # ログの保存先は作らない（決定事項 14.1 の5）
 }
 
-# --- WAF（4章）。ログは保存せず、サンプル表示と CloudWatch のメトリクスだけで見張る ---
+# --- WAF（4章）。OAuth コードを残さないためサンプリングを無効にする。
+# CloudWatch の集計メトリクスは維持し、ログの保存先は作らない。 ---
 
 # 全遮断：ふだんは空。全遮断のときは 0.0.0.0/1 と 128.0.0.0/1 を入れる（README の手順）。
 # 手で入れた値を terraform apply が戻さないよう、addresses の変更は無視する
@@ -168,7 +169,7 @@ resource "aws_wafv2_web_acl" "main" {
     visibility_config {
       cloudwatch_metrics_enabled = true
       metric_name                = "kill-switch"
-      sampled_requests_enabled   = true
+      sampled_requests_enabled   = false
     }
   }
 
@@ -222,7 +223,7 @@ resource "aws_wafv2_web_acl" "main" {
       visibility_config {
         cloudwatch_metrics_enabled = true
         metric_name                = "oauth-test-team-only"
-        sampled_requests_enabled   = true
+        sampled_requests_enabled   = false
       }
     }
   }
@@ -242,7 +243,7 @@ resource "aws_wafv2_web_acl" "main" {
     visibility_config {
       cloudwatch_metrics_enabled = true
       metric_name                = "ip-reputation"
-      sampled_requests_enabled   = true
+      sampled_requests_enabled   = false
     }
   }
 
@@ -277,7 +278,48 @@ resource "aws_wafv2_web_acl" "main" {
     visibility_config {
       cloudwatch_metrics_enabled = true
       metric_name                = "block-detect"
-      sampled_requests_enabled   = true
+      sampled_requests_enabled   = false
+    }
+  }
+
+  # Next.js の内部経路（/__internal/oauth/*）は api からだけ使う。外からは共有秘密がなくても届かないよう、
+  # 入口で遮断する（いまは CloudFront の既定の behavior が GET/HEAD/OPTIONS だけなので届かないが、それに頼らない）。
+  # /%5F%5Finternal や二重のエンコードですり抜けないよう、2回デコードしてから比べる
+  rule {
+    name     = "block-internal"
+    priority = 7
+    action {
+      block {}
+    }
+    statement {
+      byte_match_statement {
+        search_string         = "/__internal"
+        positional_constraint = "STARTS_WITH"
+        field_to_match {
+          uri_path {}
+        }
+        text_transformation {
+          priority = 0
+          type     = "URL_DECODE"
+        }
+        text_transformation {
+          priority = 1
+          type     = "URL_DECODE"
+        }
+        text_transformation {
+          priority = 2
+          type     = "NORMALIZE_PATH"
+        }
+        text_transformation {
+          priority = 3
+          type     = "LOWERCASE"
+        }
+      }
+    }
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "block-internal"
+      sampled_requests_enabled   = false
     }
   }
 
@@ -361,7 +403,7 @@ resource "aws_wafv2_web_acl" "main" {
     visibility_config {
       cloudwatch_metrics_enabled = true
       metric_name                = "rate-login"
-      sampled_requests_enabled   = true
+      sampled_requests_enabled   = false
     }
   }
 
@@ -376,24 +418,32 @@ resource "aws_wafv2_web_acl" "main" {
         limit                 = var.rate_limit_diagnose
         evaluation_window_sec = 300
         aggregate_key_type    = "IP"
+        # GPU を使う診断の入口。X・Threads の診断と下書き確認も本体と同じ上限で数える
         scope_down_statement {
-          byte_match_statement {
-            search_string         = "/api/diagnose"
-            positional_constraint = "STARTS_WITH"
-            field_to_match {
-              uri_path {}
-            }
-            text_transformation {
-              priority = 0
-              type     = "URL_DECODE"
-            }
-            text_transformation {
-              priority = 1
-              type     = "NORMALIZE_PATH"
-            }
-            text_transformation {
-              priority = 2
-              type     = "LOWERCASE"
+          or_statement {
+            dynamic "statement" {
+              for_each = ["/api/diagnose", "/api/x/diagnose", "/api/threads/diagnose", "/api/draft-check"]
+              content {
+                byte_match_statement {
+                  search_string         = statement.value
+                  positional_constraint = "STARTS_WITH"
+                  field_to_match {
+                    uri_path {}
+                  }
+                  text_transformation {
+                    priority = 0
+                    type     = "URL_DECODE"
+                  }
+                  text_transformation {
+                    priority = 1
+                    type     = "NORMALIZE_PATH"
+                  }
+                  text_transformation {
+                    priority = 2
+                    type     = "LOWERCASE"
+                  }
+                }
+              }
             }
           }
         }
@@ -402,7 +452,7 @@ resource "aws_wafv2_web_acl" "main" {
     visibility_config {
       cloudwatch_metrics_enabled = true
       metric_name                = "rate-diagnose"
-      sampled_requests_enabled   = true
+      sampled_requests_enabled   = false
     }
   }
 
@@ -441,13 +491,13 @@ resource "aws_wafv2_web_acl" "main" {
     visibility_config {
       cloudwatch_metrics_enabled = true
       metric_name                = "rate-all"
-      sampled_requests_enabled   = true
+      sampled_requests_enabled   = false
     }
   }
 
   visibility_config {
     cloudwatch_metrics_enabled = true
     metric_name                = "tkb_2613"
-    sampled_requests_enabled   = true
+    sampled_requests_enabled   = false
   }
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { InvalidDiagnoseEventError, toDiagnoseEvent } from "./diagnose";
+import { InvalidDiagnoseEventError, isDiagnosisSnapshot, toDiagnoseEvent } from "./diagnose";
 import { PROFILE_DIAGNOSED_ATTRIBUTES } from "./profile";
 
 const POST = {
@@ -27,6 +27,21 @@ const CONCLUSION = {
   clue_indices: [0],
   note: "",
 };
+
+describe("isDiagnosisSnapshot", () => {
+  const snapshot = {
+    posts: [POST], clues: [CLUE], conclusions: [CONCLUSION],
+    plan: { delete: [], broken: [], after: [CONCLUSION], posts: [] },
+  };
+
+  it("accepts deletion-aware snapshots and rejects IDs outside the snapshot", () => {
+    expect(isDiagnosisSnapshot(snapshot)).toBe(true);
+    expect(isDiagnosisSnapshot({ ...snapshot, deleted: [POST.post_id] })).toBe(true);
+    expect(isDiagnosisSnapshot({ ...snapshot, deleted: [] })).toBe(true);
+    expect(isDiagnosisSnapshot({ ...snapshot, deleted: ["at://did:plc:other/app.bsky.feed.post/missing"] })).toBe(false);
+    expect(isDiagnosisSnapshot({ ...snapshot, deleted: [1] })).toBe(false);
+  });
+});
 
 describe("toDiagnoseEvent", () => {
   it("reads a clues event", () => {

@@ -8,7 +8,7 @@ import type { RiskyPost, Simulation } from "@/types/diagnose";
 import type { Post } from "@/types/post";
 import type { ProfileCandidateSet } from "@/types/profile";
 
-import { RiskyPosts } from "./RiskyPosts";
+import { RiskyPosts, inviteComposeUrl } from "./RiskyPosts";
 
 const t = messages.risky;
 
@@ -195,6 +195,76 @@ describe("RiskyPosts", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(messages.errors.diagnoseFirst);
   });
 
+  it("hands an expired session to the caller instead of showing an error", async () => {
+    vi.mocked(simulate).mockRejectedValue(new ApiError("unauthorized", messages.errors.sessionExpired, 401));
+    const onSessionExpired = vi.fn();
+    render(
+      <RiskyPosts posts={[GYM, ADDRESS]} risky={RISKY} clueCount={20} onSimulated={vi.fn()} onSessionExpired={onSessionExpired} />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: t.simulate }));
+
+    await vi.waitFor(() => expect(onSessionExpired).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("hands an expired session to the caller when deleting", async () => {
+    vi.mocked(simulate).mockResolvedValue(ALL_BROKEN);
+    vi.mocked(deletePosts).mockRejectedValue(new ApiError("unauthorized", messages.errors.sessionExpired, 401));
+    const onSessionExpired = vi.fn();
+    render(
+      <RiskyPosts posts={[GYM, ADDRESS]} risky={RISKY} clueCount={20} onSimulated={vi.fn()} onSessionExpired={onSessionExpired} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: t.simulate }));
+    fireEvent.click(await screen.findByRole("button", { name: t.deleteForReal }));
+    fireEvent.click(screen.getByRole("button", { name: t.confirm }));
+
+    await vi.waitFor(() => expect(onSessionExpired).toHaveBeenCalledTimes(1));
+  });
+
+  it("shows how many items could be inferred before and after the simulated deletion", async () => {
+    const before = [
+      { rule: "R4", attribute: "station", value: "根津", clue_indices: [0], note: "" },
+      { rule: "R4", attribute: "station", value: "湯島", clue_indices: [1], note: "" },
+      { rule: "R3", attribute: "routine", value: "毎週火曜", clue_indices: [2], note: "" },
+      { rule: "R6", attribute: "active_time", value: "夜", clue_indices: [3], note: "" },
+    ];
+    vi.mocked(simulate).mockResolvedValue({ ...ALL_BROKEN, broken: ["station", "active_time"], after: [before[2]] });
+    render(<RiskyPosts posts={[GYM, ADDRESS]} risky={RISKY} clueCount={20} onSimulated={vi.fn()} conclusions={before} />);
+    expect(screen.queryByRole("figure")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: t.simulate }));
+
+    // 同じ項目（最寄り駅）の結論が2つあっても1と数える：3 → 1
+    const figure = await screen.findByRole("figure", { name: t.countLabel(3, 1) });
+    expect(figure).toHaveTextContent(t.countHeading);
+    expect(figure).toHaveTextContent("3→1");
+  });
+
+  it("keeps showing the counts after deleting for real", async () => {
+    const before = [{ rule: "R3", attribute: "routine", value: "毎週火曜", clue_indices: [0], note: "" }];
+    vi.mocked(simulate).mockResolvedValue(ALL_BROKEN);
+    vi.mocked(deletePosts).mockResolvedValue({ ...ALL_BROKEN, failed: [] });
+    render(<RiskyPosts posts={[GYM, ADDRESS]} risky={RISKY} clueCount={20} onSimulated={vi.fn()} conclusions={before} />);
+    fireEvent.click(screen.getByRole("button", { name: t.simulate }));
+    fireEvent.click(await screen.findByRole("button", { name: t.deleteForReal }));
+
+    fireEvent.click(screen.getByRole("button", { name: t.confirm }));
+
+    expect(await screen.findByText(messages.escaped.heading)).toBeInTheDocument();
+    expect(screen.getByRole("figure", { name: t.countLabel(1, 0) })).toBeInTheDocument();
+  });
+
+  it("does not show the counts without the conclusions before deletion", async () => {
+    vi.mocked(simulate).mockResolvedValue(ALL_BROKEN);
+    renderRisky();
+
+    fireEvent.click(screen.getByRole("button", { name: t.simulate }));
+
+    expect(await screen.findByText(t.result(2, 3))).toBeInTheDocument();
+    expect(screen.queryByRole("figure")).not.toBeInTheDocument();
+  });
+
   it("offers to delete for real only after simulating", async () => {
     vi.mocked(simulate).mockResolvedValue(ALL_BROKEN);
     renderRisky();
@@ -325,4 +395,36 @@ it("does not report escape while the home block can still be inferred", async ()
   fireEvent.click(screen.getByRole("button", { name: t.simulate }));
   expect(await screen.findByText(t.result(2, 3))).toBeInTheDocument();
   expect(screen.queryByText(t.safe)).not.toBeInTheDocument();
+});
+
+describe("InviteLink", () => {
+  it("invites friends with only the fixed text and the site URL, never the diagnosis", async () => {
+    vi.mocked(simulate).mockResolvedValue(ALL_BROKEN);
+    renderRisky();
+    fireEvent.click(screen.getByRole("button", { name: t.simulate }));
+    await screen.findByText(t.result(2, 3));
+
+    const link = screen.getByRole("link", { name: messages.invite.link });
+    const href = link.getAttribute("href") ?? "";
+    expect(href.startsWith("https://bsky.app/intent/compose?text=")).toBe(true);
+    expect(link).toHaveAttribute("target", "_blank");
+    expect(link).toHaveAttribute("rel", "noopener noreferrer");
+    const text = new URL(href).searchParams.get("text");
+    expect(text).toBe(`${messages.invite.text}\n${window.location.origin}/`);
+    // 投稿の本文・ハンドル・項目名・件数は入らない
+    for (const leak of [GYM.text, ADDRESS.text, "did:plc", "最寄り駅", "決まった外出", "2 件", "3 つ"]) {
+      expect(text).not.toContain(leak);
+    }
+  });
+
+  it("offers the invite even when there is nothing to delete", () => {
+    render(<RiskyPosts posts={[]} risky={[]} clueCount={0} onSimulated={vi.fn()} />);
+
+    expect(screen.getByRole("link", { name: messages.invite.link })).toBeInTheDocument();
+  });
+
+  it("builds the compose URL from the origin alone", () => {
+    const text = new URL(inviteComposeUrl("https://d111.cloudfront.net")).searchParams.get("text");
+    expect(text).toBe(`${messages.invite.text}\nhttps://d111.cloudfront.net/`);
+  });
 });

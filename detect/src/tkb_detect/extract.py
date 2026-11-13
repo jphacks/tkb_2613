@@ -189,7 +189,9 @@ class Extractor:
     async def _extract_image_with_models(self, post_id: str, index: int, data: bytes) -> list[Clue]:
         prepare_started = time.monotonic()
         try:
-            prepared = prepare_image(data)
+            # 画像の縮小・変換は CPU を使うので、別のスレッドで行う
+            # （ほかの人の応答と keep-alive を止めない）
+            prepared = await asyncio.to_thread(prepare_image, data)
         finally:
             logger.info("診断の内訳：画像準備 %.2f 秒", time.monotonic() - prepare_started)
         vlm_task = _timed(
@@ -233,11 +235,13 @@ class Extractor:
         if region is None:  # select_zoom_targets は region のあるものだけを選ぶ
             return [target]
         try:
+            # 切り出しと拡大は CPU を使うので別のスレッドで1回だけ行い、再試行では同じ画像を送る
+            cropped = await asyncio.to_thread(crop_and_enlarge, data, region)
             raw = await _timed(
                 "拡大VLM",
                 _retry_if_cut_off(
                     lambda penalty: self._vlm.complete(
-                        crop_and_enlarge(data, region),
+                        cropped,
                         SENT_MIME_TYPE,
                         ZOOM_USER_PROMPT,
                         system=PHOTO_SYSTEM_PROMPT,
@@ -333,36 +337,12 @@ class Extractor:
             raise DetectError("Ollama の応答形式が不正です") from None
         clues: list[Clue] = []
         for item in items:
-            if not isinstance(item, dict) or set(item) != {"type", "value", "quote", "confidence"}:
-                raise DetectError("Ollama の手がかり形式が不正です")
-            quote, value = item["quote"], item["value"]
-            if (
-                not isinstance(quote, str)
-                or not isinstance(value, str)
-                or not quote
-                or quote not in text
-                or not value
-                or value not in quote
-            ):
-                raise DetectError("Ollama の根拠が投稿本文と一致しません")
-            confidence = item["confidence"]
-            if (
-                not isinstance(confidence, int | float)
-                or isinstance(confidence, bool)
-                or not 0 <= confidence <= 1
-            ):
-                raise DetectError("Ollama の確信度が不正です")
-            clue = _build_clue(
-                item,
-                post_id=post_id,
-                image_index=image_index,
-                region_box=None,
-                source=source,
-                to_region=lambda _b: None,
-            )
-            if clue is None or clue.type not in TEXT_CLUE_TYPES:
-                raise DetectError("Ollama の手がかり型が不正です")
-            clues.append(clue.model_copy(update={"quote": quote}))
+            clue = _ollama_clue(item, text, post_id, image_index, source)
+            if clue is not None:
+                clues.append(clue)
+        if len(clues) < len(items):
+            # 本文に根拠がない・形が違う手がかりだけを捨て、残りは使う（件数だけを出す）
+            logger.info("本文Ollama：%d 件の手がかりを捨てました", len(items) - len(clues))
         return _dedupe(clues)
 
     def _require_space(self) -> CoordinateSpace:
@@ -493,6 +473,47 @@ def _build_clue(
         )
     except (ValueError, ValidationError):
         return None
+
+
+def _ollama_clue(
+    item: object,
+    text: str,
+    post_id: str,
+    image_index: int | None,
+    source: ClueSource,
+) -> Clue | None:
+    """Ollama の手がかり1件を Clue にする。引用が本文になく値が引用にない、形・確信度・型が
+    違うものは None（その1件だけを捨てる。モデルの作り話や本文中の指示に引きずられた値を使わない）。
+    """
+    if not isinstance(item, dict) or set(item) != {"type", "value", "quote", "confidence"}:
+        return None
+    quote, value, confidence = item["quote"], item["value"], item["confidence"]
+    if not (
+        isinstance(quote, str)
+        and isinstance(value, str)
+        and quote
+        and value
+        and quote in text
+        and value in quote
+    ):
+        return None
+    if (
+        not isinstance(confidence, int | float)
+        or isinstance(confidence, bool)
+        or not 0 <= confidence <= 1
+    ):
+        return None
+    clue = _build_clue(
+        item,
+        post_id=post_id,
+        image_index=image_index,
+        region_box=None,
+        source=source,
+        to_region=lambda _b: None,
+    )
+    if clue is None or clue.type not in TEXT_CLUE_TYPES:
+        return None
+    return clue.model_copy(update={"quote": quote})
 
 
 def _dedupe(clues: list[Clue]) -> list[Clue]:

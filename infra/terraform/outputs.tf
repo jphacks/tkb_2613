@@ -25,6 +25,11 @@ output "vlm_secret_name" {
   value       = aws_secretsmanager_secret.vlm_api_key.name
 }
 
+output "x_client_secret_name" {
+  description = "X OAuth Client Secret を入れる Secrets Manager のシークレット（値は別に入れる）"
+  value       = aws_secretsmanager_secret.x_client_secret.name
+}
+
 output "kill_switch_ip_set" {
   description = "全遮断の IP セット（README の手順で使う）"
   value = {

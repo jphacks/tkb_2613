@@ -32,6 +32,33 @@ class Paths:
     def stations_zip(self) -> Path:
         return self.raw_dir / "ksj" / "N02-24_GML.zip"
 
+    def ksj_bus_stop_zip(self, pref_code: str) -> Path:
+        """国土数値情報「バス停留所（P11）」令和4年度版の都道府県ごとの zip。"""
+        return self.raw_dir / "ksj" / f"P11-22_{pref_code}_SHP.zip"
+
+    def ksj_boundary_zip(self, pref_code: str) -> Path:
+        """国土数値情報「行政区域（N03）」2026年1月1日時点の都道府県ごとの zip。"""
+        return self.raw_dir / "ksj" / f"N03-20260101_{pref_code}_GML.zip"
+
+    def ksj_school_district_zip(self, prefix: str, pref_code: str) -> Path:
+        """国土数値情報「小学校区（A27）」「中学校区（A32）」令和3年度版の都道府県ごとの zip。"""
+        return self.raw_dir / "ksj" / f"{prefix}-21_{pref_code}_GML.zip"
+
+    @property
+    def ksj_school_terms_xlsx(self) -> Path:
+        """小学校区・中学校区の、自治体ごとの利用条件の一覧。"""
+        return self.raw_dir / "ksj" / "R3_Terms_of_use_municipality_data.xlsx"
+
+    @property
+    def ridership_zip(self) -> Path:
+        """国土数値情報「駅別乗降客数（S12）」2025年度整備版（全国1ファイル）。"""
+        return self.raw_dir / "ksj" / "S12-25_GML.zip"
+
+    @property
+    def bunkyo_collection_csv(self) -> Path:
+        """文京区オープンデータ「ごみと資源の収集日」。"""
+        return self.raw_dir / "bunkyo" / "syusyubi.csv"
+
     @property
     def estat_dir(self) -> Path:
         return self.raw_dir / "estat"
@@ -39,6 +66,15 @@ class Paths:
     @property
     def mext_dir(self) -> Path:
         return self.raw_dir / "mext"
+
+    @property
+    def houjin_dir(self) -> Path:
+        """法人番号公表サイトの全件データ（ブラウザで取得して手で置く）。"""
+        return self.raw_dir / "houjin"
+
+    @property
+    def gsi_dir(self) -> Path:
+        return self.raw_dir / "gsi"
 
     @property
     def area_codes_csv(self) -> Path:

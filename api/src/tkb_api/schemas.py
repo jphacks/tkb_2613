@@ -46,11 +46,11 @@ __all__ = [
     "ClueType",
     "DeleteRequest",  # api の入出力
     "DetectResponse",
-    "EvidencePathProvenance",
     "DraftCheckRequest",
     "DraftCheckResponse",
     "DraftEvidence",
     "DraftOverlap",
+    "EvidencePathProvenance",
     "NonNegativeInt",
     "ProfileAttribute",
     "ProfileCandidate",

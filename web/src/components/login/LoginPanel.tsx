@@ -12,6 +12,13 @@ import { normalizeHandle } from "@/types/session";
 
 const t = messages.login;
 
+/** web/src/app/auth/callback/route.ts が失敗時に付けるクエリ */
+const AUTH_ERROR_PARAM = "auth_error";
+
+function hasAuthError(): boolean {
+  return typeof window !== "undefined" && new URLSearchParams(window.location.search).has(AUTH_ERROR_PARAM);
+}
+
 interface LoginFormState {
   error: string | null;
   /** 失敗したときに、ハンドル名を入力欄に戻すため */
@@ -28,7 +35,8 @@ export function LoginPanel() {
   const { state: session, login, logout } = useSession();
   const [authMode, setAuthMode] = useState<"oauth" | "app_password" | null>(null);
   const [oauthPending, setOauthPending] = useState(false);
-  const [oauthError, setOauthError] = useState<string | null>(null);
+  // OAuth の戻り（auth/callback）が失敗すると /?auth_error=1 に戻るので、その文言から始める
+  const [oauthError, setOauthError] = useState<string | null>(() => (hasAuthError() ? t.oauthFailed : null));
 
   useEffect(() => {
     const controller = new AbortController();
@@ -36,6 +44,14 @@ export function LoginPanel() {
       if (!controller.signal.aborted) setAuthMode(features.auth_mode ?? "app_password");
     });
     return () => controller.abort();
+  }, []);
+
+  // 再読み込みで同じ文言を繰り返さないよう、auth_error をクエリから消す
+  useEffect(() => {
+    if (!hasAuthError()) return;
+    const url = new URL(window.location.href);
+    url.searchParams.delete(AUTH_ERROR_PARAM);
+    window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
   }, []);
 
   async function startOAuth(handle: string) {
@@ -101,6 +117,11 @@ export function LoginPanel() {
 
   return (
     <form action={authMode === "oauth" ? (formData) => { void startOAuth(normalizeHandle(String(formData.get("handle") ?? ""))); } : formAction} aria-label={t.formLabel} className="max-w-md">
+      {session.expired && (
+        <p role="alert" className="mb-5 border-l-4 border-seeker bg-seeker/10 px-4 py-3">
+          {t.expired}
+        </p>
+      )}
       <p className="mb-5 flex items-center gap-2.5 font-bold">
         <BlueskyLogo className="size-7" />
         {t.heading}

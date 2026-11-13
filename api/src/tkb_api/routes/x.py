@@ -1,15 +1,15 @@
-"""X 専用の本人認証・テキスト診断。実 X 投稿の処理は用途と費用の承認で閉じる。"""
+"""X 専用の本人認証・明記情報チェック。実投稿は用途と費用の承認で閉じる。"""
 
 import base64
 import hashlib
 import logging
+import re
 import secrets
 import time
-from collections.abc import AsyncIterator
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from threading import RLock
-from typing import Any, Literal
-from urllib.parse import urlencode, urlparse
+from typing import Any
+from urllib.parse import unquote, urlencode, urlparse
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request, Response, status
@@ -17,38 +17,58 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, ConfigDict
 
 from tkb_api.config import Settings
-from tkb_api.pipeline import (
-    diagnose_events,
-    load_gazetteer,
-    plan_json,
-    real_extractions,
-    simulation_json,
-)
+from tkb_api.origin import check_origin
 from tkb_api.schemas import SimulateRequest
-from tkb_api.x_poc import XPocError, fetch_posts_for_owner, get_my_user, to_post
-from tkb_common.schemas import Clue, ClueSource, ClueType, Post
-from tkb_detect.batch import PostExtraction
-from tkb_detect.errors import DetectError
-from tkb_detect.extract import build_extractor
-from tkb_engine.planner import simulate as simulate_deletion
-from tkb_engine.rules import infer
+from tkb_api.x_budget import (
+    USER_READ_RESOURCES,
+    DailyResourceBudget,
+    one_check_cost,
+    posts_read_cost,
+)
+from tkb_api.x_display import (
+    XAuthor,
+    XPostDisplay,
+    author_from_profile,
+    post_display,
+    synthetic_author,
+    synthetic_display,
+)
+from tkb_api.x_poc import X_API, XPocError, fetch_posts_for_owner, get_my_profile, to_post
+from tkb_api.x_public_info import (
+    highlights_report,
+    public_information_json,
+    public_information_report,
+)
+from tkb_common.schemas import Post
 
 router = APIRouter(prefix="/api/x", tags=["x"])
 SESSION_COOKIE = "x_tkb_session"
 START_COOKIE = "x_oauth_start"
 START_TTL_S = 300
+# 未認証の POST でも増えるので、件数に上限を付ける（超えたら古い順に捨てる）
+MAX_PENDING = 500
+MAX_SESSIONS = 500
+
+
+def _is_x_path(path: str) -> bool:
+    """/api/x 配下か。末尾スラッシュ・重ねたスラッシュ・%エンコードの変形も含めて判定する。"""
+    plain = re.sub(r"/+", "/", unquote(path.split("?", 1)[0])).lower()
+    return plain == "/api/x" or plain.startswith("/api/x/")
 
 
 class XCallbackAccessFilter(logging.Filter):
-    """uvicorn のアクセスログから OAuth code と state のクエリを除く。"""
+    """uvicorn のアクセスログから、/api/x 配下のクエリ（OAuth の code・state）を除く。
+
+    X の API はクエリを使わないので、コールバック以外も含めて /api/x 配下はクエリを丸ごと落とす。
+    """
 
     def filter(self, record: logging.LogRecord) -> bool:
         args = record.args
         if isinstance(args, tuple) and len(args) >= 3:
             path = args[2]
-            if isinstance(path, str) and path.startswith("/api/x/callback?"):
+            if isinstance(path, str) and "?" in path and _is_x_path(path):
                 clean = list(args)
-                clean[2] = "/api/x/callback"
+                clean[2] = path.split("?", 1)[0]
                 record.args = tuple(clean)
         return True
 
@@ -68,25 +88,43 @@ class XSession:
     expires_at: float
     snapshot: dict[str, Any] | None = None
     posts: list[Post] = field(default_factory=list)
-    clues: list[Clue] = field(default_factory=list)
     busy: bool = False
     fetched: bool = False
-    demo_backend: Literal["preset", "vlm"] = "preset"
+    # X の表示要件に使う投稿者と投稿ごとの表示情報（合成デモは架空の値）
+    author: XAuthor | None = None
+    display: dict[str, XPostDisplay] = field(default_factory=dict)
 
 
 class XSessionStore:
     """X の PKCE 情報、トークン、診断結果をプロセスメモリだけに置く。"""
 
-    def __init__(self, ttl_s: int) -> None:
+    def __init__(
+        self, ttl_s: int, max_pending: int = MAX_PENDING, max_sessions: int = MAX_SESSIONS
+    ) -> None:
         self.ttl_s = ttl_s
+        self.max_pending = max_pending
+        self.max_sessions = max_sessions
         self.pending: dict[str, PendingAuth] = {}
         self.sessions: dict[str, XSession] = {}
         self.lock = RLock()
+
+    def _purge(self) -> None:
+        """期限切れを捨て、上限を超えた分を古い順（dict は入れた順）に捨てる。lock の中で呼ぶ。"""
+        now = time.monotonic()
+        for state in [k for k, v in self.pending.items() if v.expires_at <= now]:
+            del self.pending[state]
+        for session_id in [k for k, v in self.sessions.items() if v.expires_at <= now]:
+            del self.sessions[session_id]
+        while len(self.pending) > self.max_pending:
+            del self.pending[next(iter(self.pending))]
+        while len(self.sessions) > self.max_sessions:
+            del self.sessions[next(iter(self.sessions))]
 
     def start(self, verifier: str, nonce: str) -> str:
         state = secrets.token_urlsafe(32)
         with self.lock:
             self.pending[state] = PendingAuth(verifier, nonce, time.monotonic() + START_TTL_S)
+            self._purge()
         return state
 
     def consume(self, state: str, nonce: str | None) -> str | None:
@@ -101,7 +139,7 @@ class XSessionStore:
         token: str | None,
         owner_id: str,
         username: str,
-        demo_backend: Literal["preset", "vlm"] = "preset",
+        author: XAuthor | None = None,
     ) -> str:
         session_id = secrets.token_urlsafe(32)
         with self.lock:
@@ -110,8 +148,9 @@ class XSessionStore:
                 owner_id,
                 username,
                 time.monotonic() + self.ttl_s,
-                demo_backend=demo_backend,
+                author=author,
             )
+            self._purge()
         return session_id
 
     def get(self, session_id: str | None) -> XSession | None:
@@ -145,9 +184,37 @@ def _store(request: Request) -> XSessionStore:
     return store
 
 
+def _x_api(settings: Settings) -> str:
+    """X API の向き先。偽の API は手元の E2E テストだけで設定できる（config の検証）。"""
+    return settings.x_fake_api_base_url.rstrip("/") or X_API
+
+
+def _budget(request: Request) -> DailyResourceBudget:
+    budget: DailyResourceBudget = request.app.state.x_budget
+    return budget
+
+
+def _seconds_until_utc_midnight() -> int:
+    now = time.time()
+    return max(60, 86400 - int(now) % 86400)
+
+
+def _daily_limit_reached() -> HTTPException:
+    return HTTPException(
+        status.HTTP_429_TOO_MANY_REQUESTS,
+        "本日の X の取得上限に達しました",
+        headers={"Retry-After": str(_seconds_until_utc_midnight())},
+    )
+
+
+def _reserve(request: Request, amount: int) -> None:
+    """X を呼ぶ前に、読む可能性のある最大リソース数を予約する。足りなければ X を呼ばない。"""
+    if not _budget(request).reserve(amount):
+        raise _daily_limit_reached()
+
+
 def _origin(request: Request) -> None:
-    if request.headers.get("origin") != _settings(request).x_public_origin:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "同じサイトから操作してください")
+    check_origin(request, [_settings(request).x_public_origin])
 
 
 def _live_ready(settings: Settings) -> bool:
@@ -155,7 +222,8 @@ def _live_ready(settings: Settings) -> bool:
         settings.x_use_case_approved
         and settings.x_paid_reads_approved
         and settings.x_query_logs_redacted
-        and settings.x_client_id
+        and settings.x_client_id.strip()
+        and settings.x_client_secret.get_secret_value().strip()
         and not settings.x_mock_mode
     )
 
@@ -185,13 +253,13 @@ def _cookie(response: Response, settings: Settings, session_id: str) -> None:
 
 
 @router.get("/config")
-async def config(request: Request) -> dict[str, bool | int]:
+async def config(request: Request) -> dict[str, bool | int | str]:
     settings = _settings(request)
     return {
         "mock_enabled": settings.x_mock_mode,
-        "gpu_demo_enabled": settings.x_mock_mode and settings.x_gpu_demo_enabled,
         "live_enabled": _live_ready(settings),
         "max_posts": settings.x_max_posts,
+        "info_view": settings.x_info_view,
     }
 
 
@@ -208,24 +276,6 @@ async def mock_session(
     return {"username": "架空のXアカウント", "mock": True}
 
 
-@router.post("/mock/gpu-session")
-async def mock_gpu_session(
-    body: StartRequest, request: Request, response: Response
-) -> dict[str, str | bool]:
-    """架空投稿だけを既存VLMに送る専用セッション。X APIには接続しない。"""
-    _origin(request)
-    settings = _settings(request)
-    if not (settings.x_mock_mode and settings.x_gpu_demo_enabled and body.consent):
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "GPU デモは利用できません")
-    _store(request).delete(request.cookies.get(SESSION_COOKIE))
-    _cookie(
-        response,
-        settings,
-        _store(request).create(None, "0", "架空のXアカウント", demo_backend="vlm"),
-    )
-    return {"username": "架空のXアカウント", "mock": True}
-
-
 @router.post("/start")
 async def start(body: StartRequest, request: Request, response: Response) -> dict[str, str]:
     _origin(request)
@@ -233,6 +283,9 @@ async def start(body: StartRequest, request: Request, response: Response) -> dic
     _require_live(settings)
     if not body.consent:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "診断への同意が必要です")
+    # 本人確認と1回の投稿取得の分が残っていなければ、X の認可画面へ進ませない
+    if not _budget(request).can_afford(one_check_cost(settings.x_max_posts)):
+        raise _daily_limit_reached()
     callback = urlparse(settings.x_callback_url)
     public = urlparse(settings.x_public_origin)
     if (
@@ -290,7 +343,7 @@ async def _exchange(code: str, verifier: str, settings: Settings) -> str:
             auth=httpx.BasicAuth(settings.x_client_id, secret) if secret else None,
         ) as client:
             response = await client.post(
-                "https://api.x.com/2/oauth2/token",
+                f"{_x_api(settings)}/2/oauth2/token",
                 data=data,
             )
             response.raise_for_status()
@@ -320,13 +373,19 @@ async def callback(request: Request, state: str = "", code: str = "") -> Respons
     if not verifier or not code:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "X の認証状態が一致しません")
     token = await _exchange(code, verifier, settings)
+    _reserve(request, USER_READ_RESOURCES)
     try:
-        owner_id, username = await get_my_user(token)
+        profile = await get_my_profile(token, base_url=_x_api(settings))
     except XPocError as exc:
         raise _x_error(exc) from None
+    owner_id, username = profile["id"], profile["username"]
     result = RedirectResponse("/x", status_code=303)
     _store(request).delete(request.cookies.get(SESSION_COOKIE))
-    _cookie(result, settings, _store(request).create(token, owner_id, username))
+    _cookie(
+        result,
+        settings,
+        _store(request).create(token, owner_id, username, author_from_profile(profile)),
+    )
     result.delete_cookie(START_COOKIE, path="/api/x")
     return result
 
@@ -364,39 +423,33 @@ async def logout(request: Request, response: Response) -> None:
     response.delete_cookie(SESSION_COOKIE, path="/api/x")
 
 
-def _mock_data() -> tuple[list[Post], list[Clue]]:
+def _mock_data() -> list[Post]:
     raw = [
-        ("9001", "毎週火曜はジムに行く", "2026-11-03T18:00:00+09:00"),
-        ("9002", "今週も火曜のジムを終えた", "2026-11-10T18:00:00+09:00"),
+        ("9001", "渋谷駅、日曜10時に集合", "2026-11-03T18:00:00+09:00"),
+        ("9002", "渋谷駅 日曜日10時、東京都渋谷区、青空大学へ", "2026-11-10T18:00:00+09:00"),
+        ("9003", "青空大学の学園祭を見に行った", "2026-11-11T18:00:00+09:00"),
     ]
     posts = [
         to_post({"id": id_, "author_id": "0", "text": text, "created_at": when}, "0")
         for id_, text, when in raw
     ]
-    valid_posts = [post for post in posts if post is not None]
-    clues = [
-        Clue(
-            post_id=post.post_id,
-            image_index=None,
-            type=ClueType.ROUTINE_TEXT,
-            value=quote,
-            region=None,
-            confidence=0.9,
-            source=ClueSource.TEXT,
-            quote=quote,
-        )
-        for post, quote in zip(valid_posts, ("毎週火曜はジム", "火曜のジム"), strict=True)
-    ]
-    return valid_posts, clues
+    return [post for post in posts if post is not None]
 
 
-async def _preset_extractions(
-    posts: list[Post], clues: list[Clue]
-) -> AsyncIterator[PostExtraction]:
-    for post in posts:
-        yield PostExtraction(
-            post_id=post.post_id, clues=[c for c in clues if c.post_id == post.post_id]
-        )
+def _display_json(current: XSession, posts: list[Post]) -> dict[str, Any]:
+    """表示要件の情報。合成デモは synthetic=true で、X へのリンクやロゴを出さない。"""
+    synthetic = current.token is None
+    author = current.author or synthetic_author(current.username)
+    return {
+        "synthetic": synthetic,
+        "author": author.model_dump(mode="json"),
+        "posts": {
+            post.post_id: current.display.get(post.post_id, synthetic_display()).model_dump(
+                mode="json"
+            )
+            for post in posts
+        },
+    }
 
 
 @router.post("/diagnose")
@@ -404,6 +457,12 @@ async def diagnose(request: Request) -> dict[str, Any]:
     _origin(request)
     settings = _settings(request)
     current = _session(request)
+    if current.token is not None:
+        _require_live(settings)
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "実Xアカウントでは投稿の原文表示だけを利用できます",
+        )
     if current.snapshot is not None:
         return current.snapshot
     with _store(request).lock:
@@ -411,83 +470,16 @@ async def diagnose(request: Request) -> dict[str, Any]:
             raise HTTPException(status.HTTP_409_CONFLICT, "診断中です")
         current.busy = True
     try:
-        if current.token is None:
-            if not settings.x_mock_mode:
-                raise HTTPException(status.HTTP_403_FORBIDDEN, "モック診断は無効です")
-            posts, preset_clues = _mock_data()
-            if current.demo_backend == "vlm":
-                try:
-                    extractor = build_extractor(
-                        mock_mode=False,
-                        vlm_base_url=settings.vlm_base_url,
-                        vlm_api_key=settings.vlm_api_key.get_secret_value(),
-                        vlm_model=settings.vlm_model,
-                        ocr_base_url="",
-                        allowed_hosts=settings.model_allowed_host_suffixes.split(","),
-                        text_backend="vlm",
-                    )
-                except DetectError:
-                    raise HTTPException(
-                        status.HTTP_503_SERVICE_UNAVAILABLE, "GPU モデルの設定を確認してください"
-                    ) from None
-                if not await extractor.model_reachable(settings.model_probe_timeout_seconds):
-                    raise HTTPException(
-                        status.HTTP_503_SERVICE_UNAVAILABLE, "GPU モデルを利用できません"
-                    )
-                extractions = real_extractions(extractor, posts)
-            else:
-                extractions = _preset_extractions(posts, preset_clues)
-        else:
-            _require_live(settings)
-            try:
-                extractor = build_extractor(
-                    mock_mode=False,
-                    vlm_base_url="",
-                    vlm_api_key="",
-                    vlm_model="",
-                    ocr_base_url="",
-                    allowed_hosts=[],
-                    text_backend="ollama",
-                    ollama_base_url=settings.ollama_base_url,
-                    ollama_model=settings.ollama_model,
-                )
-            except DetectError:
-                raise HTTPException(
-                    status.HTTP_503_SERVICE_UNAVAILABLE, "ローカルモデルを利用できません"
-                ) from None
-            if not await extractor.model_reachable(settings.model_probe_timeout_seconds):
-                raise HTTPException(
-                    status.HTTP_503_SERVICE_UNAVAILABLE, "ローカルモデルを利用できません"
-                )
-            if current.fetched:
-                posts = current.posts
-            else:
-                try:
-                    posts = await fetch_posts_for_owner(
-                        current.token, current.owner_id, settings.x_max_posts
-                    )
-                except XPocError as exc:
-                    raise _x_error(exc) from None
-                current.posts = posts
-                current.fetched = True
-            extractions = real_extractions(extractor, posts)
-        gazetteer = load_gazetteer(settings.gazetteer_dir)
+        if not settings.x_mock_mode:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "モック診断は無効です")
+        posts = _mock_data()
+        current.display = {post.post_id: synthetic_display() for post in posts}
         started = time.monotonic()
-        events = [event async for event in diagnose_events(posts, extractions, gazetteer)]
-        results = {name: data for name, data in events if name in {"conclusions", "plan"}}
-        failures = sum(1 for name, data in events if name == "clues" and data["error"])
-        if failures:
-            raise HTTPException(
-                status.HTTP_503_SERVICE_UNAVAILABLE, "一部の投稿の抽出に失敗しました"
-            )
-        conclusion = results["conclusions"]
         current.posts = posts
-        current.clues = [Clue.model_validate(item) for item in conclusion["clues"]]
         current.snapshot = {
             "posts": [post.model_dump(mode="json") for post in posts],
-            "clues": conclusion["clues"],
-            "conclusions": conclusion["conclusions"],
-            "plan": results["plan"],
+            **_result_json(settings.x_info_view, posts),
+            "x_display": _display_json(current, posts),
             "elapsed_ms": round((time.monotonic() - started) * 1000),
             "mock": current.token is None,
         }
@@ -497,9 +489,80 @@ async def diagnose(request: Request) -> dict[str, Any]:
             current.busy = False
 
 
+@router.post("/posts")
+async def live_posts(request: Request) -> dict[str, Any]:
+    """本人の投稿を取得し、加工・抽出・推論をせず表示用データだけを返す。"""
+    _origin(request)
+    settings = _settings(request)
+    current = _session(request)
+    if current.token is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "実Xアカウントでログインしてください")
+    _require_live(settings)
+    if current.snapshot is not None:
+        return current.snapshot
+    with _store(request).lock:
+        if current.busy:
+            raise HTTPException(status.HTTP_409_CONFLICT, "投稿を取得中です")
+        current.busy = True
+    try:
+        _reserve(request, posts_read_cost(settings.x_max_posts))
+        raw: list[dict[str, Any]] = []
+        try:
+            posts = await fetch_posts_for_owner(
+                current.token,
+                current.owner_id,
+                settings.x_max_posts,
+                base_url=_x_api(settings),
+                raw_out=raw,
+            )
+        except XPocError as exc:
+            raise _x_error(exc) from None
+        author = current.author or synthetic_author(current.username)
+        current.display = {f"x:{item['id']}": post_display(item, author) for item in raw}
+        current.posts = posts
+        current.fetched = True
+        current.snapshot = {
+            "posts": [post.model_dump(mode="json") for post in posts],
+            "view": "posts",
+            "information": [],
+            "post_errors": [],
+            "x_display": _display_json(current, posts),
+            "mock": False,
+        }
+        return current.snapshot
+    finally:
+        with _store(request).lock:
+            current.busy = False
+
+
+def _result_json(view: str, posts: list[Post]) -> dict[str, Any]:
+    """結果の本体。highlight は投稿ごとの地名・駅名の位置だけで、値ごとに数えない。
+
+    post_errors は読み取りに失敗した投稿。理由は固定の文言で、投稿の本文は入らない。
+    """
+    if view == "highlight":
+        highlights, post_errors = highlights_report(posts)
+        return {
+            "view": "highlight",
+            "information": [],
+            "highlights": highlights,
+            "post_errors": post_errors,
+        }
+    information, post_errors = public_information_report(posts)
+    return {"view": "aggregate", "information": information, "post_errors": post_errors}
+
+
+def _view(current: XSession) -> str:
+    """そのセッションで診断したときの表示。設定を途中で変えても混ざらない。"""
+    snapshot = current.snapshot or {}
+    return str(snapshot.get("view", "aggregate"))
+
+
 def _selected(body: SimulateRequest, current: XSession) -> None:
     if current.snapshot is None:
         raise HTTPException(status.HTTP_409_CONFLICT, "先に診断してください")
+    if _view(current) == "posts":
+        raise HTTPException(status.HTTP_409_CONFLICT, "実Xアカウントでは原文表示だけを利用できます")
     known = {post.post_id for post in current.posts}
     if any(post_id not in known for post_id in body.delete):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "診断した投稿から選んでください")
@@ -510,26 +573,32 @@ async def simulate(body: SimulateRequest, request: Request) -> dict[str, Any]:
     _origin(request)
     current = _session(request)
     _selected(body, current)
-    gazetteer = load_gazetteer(_settings(request).gazetteer_dir)
-    return simulation_json(
-        simulate_deletion(current.clues, current.posts, gazetteer, body.delete), current.clues
-    )
+    if _view(current) == "highlight":
+        # 集計しない表示では、値ごとの件数の比較を作らない
+        raise HTTPException(status.HTTP_409_CONFLICT, "この表示では比較を使いません")
+    gone = set(body.delete)
+    kept = [post for post in current.posts if post.post_id not in gone]
+    before = public_information_json(current.posts)
+    after = public_information_json(kept)
+    after_keys = {(item["category"], item["value"]) for item in after}
+    removed = [
+        {"category": item["category"], "value": item["value"]}
+        for item in before
+        if (item["category"], item["value"]) not in after_keys
+    ]
+    return {"delete": body.delete, "before": before, "after": after, "removed": removed}
 
 
 @router.post("/rediagnose")
 async def rediagnose(body: SimulateRequest, request: Request) -> dict[str, Any]:
-    """仮除外後の投稿・手がかりだけから推論し直す。X API とモデルは再呼出ししない。"""
+    """仮除外後の投稿だけを再集計する。X API や外部モデルは呼ばない。"""
     _origin(request)
     current = _session(request)
     _selected(body, current)
     gone = set(body.delete)
     posts = [post for post in current.posts if post.post_id not in gone]
-    clues = [clue for clue in current.clues if clue.post_id not in gone]
-    gazetteer = load_gazetteer(_settings(request).gazetteer_dir)
     return {
         "posts": [post.model_dump(mode="json") for post in posts],
-        "clues": [clue.model_dump(mode="json") for clue in clues],
-        "conclusions": [asdict(c) for c in infer(clues, posts, gazetteer)],
-        "plan": plan_json(clues, posts, gazetteer),
+        **_result_json(_view(current), posts),
         "mock": current.token is None,
     }

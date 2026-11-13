@@ -99,7 +99,7 @@ describe("ConclusionBoard", () => {
     expect(screen.queryByText(messages.board.attributeLabels.full_name)).not.toBeInTheDocument();
   });
 
-  it("labels stale location as post-time information and exposes candidate counter-evidence", () => {
+  it("labels stale location as post-time information and exposes candidate counter-evidence", async () => {
     const oldEvidence = { post_id: CLUE.post_id, clue_index: null, required: true, source: "post_text" as const, excerpt: "投稿時点の駅前" };
     const counterEvidence = { ...oldEvidence, excerpt: "これは別の日の投稿だと書いてある" };
     const assessment = {
@@ -120,7 +120,7 @@ describe("ConclusionBoard", () => {
 
     expect(screen.getByText("投稿時点の位置候補 ・候補（正解とは限りません）")).toBeInTheDocument();
     expect(screen.getByText(/投稿時点：/)).toBeInTheDocument();
-    expect(screen.getByText(/15分経過。最新情報ではありません/)).toBeInTheDocument();
+    expect(await screen.findByText(/15分経過。最新情報ではありません/)).toBeInTheDocument();
     expect(screen.queryByText("リアルタイムの現在地")).not.toBeInTheDocument();
     expect(screen.getByText("架空駅前")).toBeInTheDocument();
 

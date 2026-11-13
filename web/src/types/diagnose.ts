@@ -25,6 +25,20 @@ export interface Conclusion {
   readonly value: string;
   readonly clue_indices: readonly number[];
   readonly note: string;
+  /**
+   * 確からしさ（0〜1）。根拠の手がかりの confidence を 1 − ∏(1 − c) で合成した値（engine の infer）。
+   * 以前に保存した閲覧リンクにはないので省略可
+   */
+  readonly confidence?: number;
+}
+
+/** これ以上の確からしさの推定を「強い」と見せる（写真の顔の FACE_MIN_CONFIDENCE と同じ境目） */
+export const STRONG_CONFIDENCE = 0.8;
+
+/** 確からしさの2段階。値がない（古い閲覧リンク）ときは null で、印を出さない */
+export function confidenceLevel(conclusion: Conclusion): "strong" | "weak" | null {
+  if (conclusion.confidence === undefined) return null;
+  return conclusion.confidence >= STRONG_CONFIDENCE ? "strong" : "weak";
 }
 
 /**
@@ -61,6 +75,11 @@ export interface RiskyPost {
 export interface DiagnosisSnapshot {
   readonly posts: readonly Post[];
   readonly clues: readonly Clue[];
+  /**
+   * 診断のあとに Bluesky から消した投稿の ID（GET /api/diagnosis だけが返す）。posts と clues は診断時のまま
+   * （番号を変えない）で、conclusions と plan はここの投稿を除いて計算してある
+   */
+  readonly deleted?: readonly string[];
   readonly conclusions: readonly Conclusion[];
   readonly plan: Simulation & { readonly posts: readonly RiskyPost[] };
   readonly profile_claims?: readonly ProfileCandidateSet[];
@@ -141,6 +160,8 @@ function isConclusion(value: unknown, clueCount: number): value is Conclusion {
     typeof value.attribute === "string" &&
     typeof value.value === "string" &&
     typeof value.note === "string" &&
+    (!Object.hasOwn(value, "confidence") ||
+      (typeof value.confidence === "number" && value.confidence >= 0 && value.confidence <= 1)) &&
     Array.isArray(value.clue_indices) &&
     value.clue_indices.every(
       (i) => Number.isInteger(i) && i >= 0 && i < clueCount,
@@ -187,9 +208,23 @@ function isRiskyPost(value: unknown): value is RiskyPost {
   );
 }
 
+/**
+ * ログインなしの体験デモの結果（GET /api/demo/diagnosis）。架空アカウントの診断で、形は DiagnosisSnapshot と同じ。
+ * api/src/tkb_api/routes/demo.py と同時に変更すること
+ */
+export type DemoDiagnosis = DiagnosisSnapshot & { readonly demo: true };
+
+export function isDemoDiagnosis(value: unknown): value is DemoDiagnosis {
+  return isRecord(value) && value.demo === true && isDiagnosisSnapshot(value);
+}
+
 export function isDiagnosisSnapshot(value: unknown): value is DiagnosisSnapshot {
   if (!isRecord(value) || !Array.isArray(value.posts) || !value.posts.every(isPost) || !isClueList(value.clues)) return false;
   const clueCount = value.clues.length;
+  if (Object.hasOwn(value, "deleted")) {
+    const postIds = new Set(value.posts.map((post) => post.post_id));
+    if (!isStringList(value.deleted) || !value.deleted.every((id) => postIds.has(id))) return false;
+  }
   if (!Array.isArray(value.conclusions) || !value.conclusions.every((c) => isConclusion(c, clueCount))) return false;
   const plan = value.plan;
   if (!isSimulation(plan, clueCount) || !isRecord(plan) || !Array.isArray(plan.posts) || !plan.posts.every(isRiskyPost)) return false;

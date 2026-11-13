@@ -7,18 +7,21 @@ from typing import Any, cast
 import pytest
 from atproto import AsyncClient
 from fastapi.testclient import TestClient
+from pydantic import SecretStr
 
 from tkb_api.bluesky import BlueskyUnavailableError, LoginResult, PostsFetcher
 from tkb_api.config import Settings, get_settings
 from tkb_api.main import create_app
+from tkb_api.public_web_identity import ExternalLookupResult
 from tkb_api.routes.diagnose import (
+    get_external_profile_searcher,
     get_extractor_factory,
     get_fetch_posts,
     get_fetch_profile_text,
     get_gazetteer,
 )
 from tkb_api.routes.session import get_login
-from tkb_common.schemas import Clue, ClueSource, ClueType, Post
+from tkb_common.schemas import Clue, ClueSource, ClueType, ExternalLookupStatus, Post
 from tkb_detect.errors import ForbiddenEndpointError
 from tkb_detect.extract import Extractor
 from tkb_detect.vlm_client import VlmClient, VlmConfig
@@ -87,6 +90,7 @@ def test_completed_diagnosis_can_be_read_again_only_in_its_session(client: TestC
     data = restored.json()
     assert len(data["posts"]) == DEMO_POST_COUNT
     assert len(data["clues"]) > 0
+    assert data["deleted"] == []
     assert data["conclusions"] == _events(result.text)[-3][1]["conclusions"]
     assert data["plan"] == _events(result.text)[-2][1]
     streamed_claims = _events(result.text)[-3][1]
@@ -116,9 +120,57 @@ def test_completed_diagnosis_can_be_read_again_only_in_its_session(client: TestC
     assert data["external_profile_results"] == streamed_claims["external_profile_results"]
     assert data["external_lookup_status"] == streamed_claims["external_lookup_status"]
 
-    # 同じブラウザでもログインし直すと別セッション。前の結果には入れない。
     _login(client)
     assert client.get("/api/diagnosis").status_code == 404
+
+
+def test_completed_diagnosis_restore_recalculates_candidate_snapshot_after_deletion(
+    client: TestClient,
+) -> None:
+    _login(client)
+    result = client.post("/api/diagnose", json={"public_web_lookup_consent": True})
+    assert result.status_code == 200
+    original = client.get("/api/diagnosis").json()
+    session_id = client.cookies.get("tkb_session")
+    assert isinstance(session_id, str)
+    suggested = original["profile_claim_suggestions"]
+    candidate_post_ids = [
+        reference["post_id"]
+        for claim in original["profile_claims"]
+        for candidate in claim["candidate_pool"]
+        for path in candidate["evidence_paths"]
+        for reference in path["evidence"]
+        if reference["post_id"] is not None
+    ]
+    deleted_post_id = (suggested or candidate_post_ids)[0]
+    client.app.state.sessions.mark_deleted(session_id, [deleted_post_id])  # type: ignore[attr-defined]
+
+    restored = client.get("/api/diagnosis")
+    assert restored.status_code == 200
+    data = restored.json()
+    assert data["deleted"] == [deleted_post_id]
+    assert data["posts"] == original["posts"]
+    assert data["clues"] == original["clues"]
+    assert all(
+        reference["post_id"] != deleted_post_id
+        for claim in data["profile_claims"]
+        for candidate in claim["candidate_pool"]
+        for path in candidate["evidence_paths"]
+        for reference in path["evidence"]
+    )
+    assert all(
+        reference["post_id"] != deleted_post_id
+        for relation in data["profile_relations"]
+        for path in relation["evidence_paths"]
+        for reference in path["evidence"]
+    )
+    assert deleted_post_id not in data["profile_claim_suggestions"]
+    assert deleted_post_id not in data["plan"]["delete"]
+    assert all(
+        data["clues"][index]["post_id"] != deleted_post_id
+        for conclusion in data["conclusions"]
+        for index in conclusion["clue_indices"]
+    )
 
 
 def test_mock_diagnose_streams_posts_clues_conclusions_plan_then_done(client: TestClient) -> None:
@@ -189,13 +241,17 @@ class FakeExtractor(Extractor):
         ]
 
 
-def _real_client(fetch_posts: PostsFetcher, extractor: Extractor | None = None) -> TestClient:
+def _real_client(
+    fetch_posts: PostsFetcher,
+    extractor: Extractor | None = None,
+    settings: Settings | None = None,
+) -> TestClient:
     """MOCK_MODE=0 の api。ログイン・投稿の取得・手がかりの取り出しを偽物に差し替える。"""
 
     async def login(handle: str, _password: str) -> LoginResult:
         return LoginResult(handle=handle, did=REAL_DID, client=REAL_CLIENT)
 
-    client = _client(Settings(mock_mode=False, max_posts=5))
+    client = _client(settings or Settings(mock_mode=False, max_posts=5))
     overrides = client.app.dependency_overrides  # type: ignore[attr-defined]
     overrides[get_login] = lambda: login
     overrides[get_fetch_posts] = lambda: fetch_posts
@@ -399,3 +455,68 @@ def test_diagnose_sends_keep_alive_comments_while_waiting_between_events() -> No
         "done",
         {"posts_seen": DEMO_POST_COUNT},
     )
+
+
+# --- 公開Web検索（Brave）が使えるか ---
+
+FAKE_BRAVE_KEY = "brave-test-key-not-real"  # テスト用の架空の値
+
+
+@pytest.mark.parametrize(
+    ("mock_mode", "key", "available"),
+    [
+        (True, "", True),  # モックは通信せず固定候補を返すので出す
+        (False, "", False),
+        (False, "   ", False),
+        (False, FAKE_BRAVE_KEY, True),
+    ],
+)
+def test_features_tell_whether_public_web_lookup_is_available_without_the_key(
+    mock_mode: bool, key: str, available: bool
+) -> None:
+    settings = Settings(
+        mock_mode=mock_mode, demo_fixture_path=FIXTURE, brave_search_api_key=SecretStr(key)
+    )
+    with _client(settings) as client:
+        res = client.get("/api/features")
+    assert res.status_code == 200
+    assert res.json()["public_web_lookup_available"] is available
+    # キーの値そのものは返さない
+    assert FAKE_BRAVE_KEY not in res.text
+
+
+def _diagnose_with_consent(key: str) -> tuple[list[str], dict[str, Any]]:
+    raw = json.loads(FIXTURE.read_text(encoding="utf-8"))["posts"][3]
+    post = Post.model_validate({**raw, "images": []})
+    searched: list[str] = []
+
+    async def fetch_posts(_client: AsyncClient, _did: str, _limit: int) -> list[Post]:
+        return [post]
+
+    async def search(handle: str) -> ExternalLookupResult:
+        searched.append(handle)
+        return ExternalLookupResult(ExternalLookupStatus.SEARCHED)
+
+    settings = Settings(mock_mode=False, max_posts=5, brave_search_api_key=SecretStr(key))
+    with _real_client(fetch_posts, settings=settings) as client:
+        client.app.dependency_overrides[get_external_profile_searcher] = lambda: search  # type: ignore[attr-defined]
+        _login(client)
+        res = client.post("/api/diagnose", json={"public_web_lookup_consent": True})
+    assert res.status_code == 200
+    conclusions = next(data for name, data in _events(res.text) if name == "conclusions")
+    return searched, conclusions
+
+
+def test_consent_without_a_brave_key_is_not_searched_and_reports_unavailable() -> None:
+    searched, conclusions = _diagnose_with_consent("")
+
+    assert searched == []
+    assert conclusions["external_lookup_status"] == "unavailable"
+    assert conclusions["external_profile_results"] == []
+
+
+def test_consent_with_a_brave_key_runs_the_search_with_the_session_handle() -> None:
+    searched, conclusions = _diagnose_with_consent(FAKE_BRAVE_KEY)
+
+    assert searched == ["alice.bsky.social"]
+    assert conclusions["external_lookup_status"] == "searched"

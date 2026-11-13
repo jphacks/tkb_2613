@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { ApiError, deletePosts, simulate } from "@/lib/api";
 import { messages } from "@/lib/messages";
-import { isLikelyNameText } from "@/lib/reveal";
+import { isLikelyNameText, validNameConclusions } from "@/lib/reveal";
 import type { Clue } from "@/types/clue";
 import type { Deletion, RiskyPost, Simulation } from "@/types/diagnose";
 import type { Post } from "@/types/post";
@@ -31,8 +31,11 @@ interface RiskyPostsProps {
   clueCount: number;
   /** Candidate-based profiles are the authoritative escape check for the new result model. */
   profileClaims?: readonly ProfileCandidateSet[];
+  onSessionExpired?: () => void;
+  conclusions?: readonly import("@/types/diagnose").Conclusion[];
   /** 消したらどうなるか・実際に消した結果。元に戻したり選び直したりしたら null */
   onSimulated: (simulation: Simulation | null) => void;
+  onDeleted?: (deletion: Deletion) => void;
 }
 
 function labelsOf(attributes: readonly string[]): string {
@@ -53,7 +56,7 @@ function withoutLegacyNameBreakage(attributes: readonly string[]): string[] {
  * 結果は捜査ボードに渡して、崩れた項目を「不明」にする。
  * 試したあと、確認ダイアログで OK したときだけ Bluesky から実際に消す（もういいよ）。消したあとは選び直せない。
  */
-export function RiskyPosts({ posts, risky, clues = [], clueCount, profileClaims = [], onSimulated }: RiskyPostsProps) {
+export function RiskyPosts({ posts, risky, clues = [], clueCount, profileClaims = [], onSimulated, onDeleted, onSessionExpired, conclusions }: RiskyPostsProps) {
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set(risky.map((r) => r.post_id)));
   const [result, setResult] = useState<Simulation | null>(null);
   const [pending, setPending] = useState(false);
@@ -62,6 +65,12 @@ export function RiskyPosts({ posts, risky, clues = [], clueCount, profileClaims 
   const [deleting, setDeleting] = useState(false);
   const [deletion, setDeletion] = useState<Deletion | null>(null);
   const controller = useRef<AbortController | null>(null);
+
+  function expiredBy(error: unknown): boolean {
+    if (!(error instanceof ApiError) || error.kind !== "unauthorized" || !onSessionExpired) return false;
+    onSessionExpired();
+    return true;
+  }
 
   useEffect(() => () => controller.current?.abort(), []);
 
@@ -72,6 +81,7 @@ export function RiskyPosts({ posts, risky, clues = [], clueCount, profileClaims 
           {t.heading}
         </h3>
         <p className="text-ink/70">{t.none}</p>
+        <InviteLink />
       </section>
     );
   }
@@ -106,9 +116,11 @@ export function RiskyPosts({ posts, risky, clues = [], clueCount, profileClaims 
       const deleted = await deletePosts(result.delete, clueCount);
       setDeletion(deleted);
       onSimulated(deleted);
+      onDeleted?.(deleted);
       setConfirming(false);
     } catch (e) {
       setConfirming(false);
+      if (expiredBy(e)) return;
       setError(e instanceof ApiError ? e.message : t.deleteFailed);
     } finally {
       setDeleting(false);
@@ -131,6 +143,7 @@ export function RiskyPosts({ posts, risky, clues = [], clueCount, profileClaims 
       onSimulated(simulation);
     } catch (e) {
       if (current.signal.aborted) return;
+      if (expiredBy(e)) return;
       setError(e instanceof ApiError ? e.message : t.failed);
     } finally {
       if (!current.signal.aborted) setPending(false);
@@ -138,7 +151,9 @@ export function RiskyPosts({ posts, risky, clues = [], clueCount, profileClaims 
   }
 
   const shown = deletion ?? result;
-  const gone = new Set(shown?.delete ?? []);
+  const gone = new Set(deletion
+    ? deletion.delete.filter((id) => !deletion.failed.includes(id))
+    : result?.delete ?? []);
   const directCluesLeft = clues.some((c) => !gone.has(c.post_id) && directClueLabel(c) !== null);
   const profileCandidateLeft = shown !== null && profileClaims.some((claimSet) =>
     profileCandidateAfterDeletion(claimSet, gone).candidates.length > 0,
@@ -146,6 +161,9 @@ export function RiskyPosts({ posts, risky, clues = [], clueCount, profileClaims 
   const escaped = shown !== null && !directCluesLeft && IMPORTANT_ATTRIBUTES
     .filter((attribute) => !LEGACY_NAME_ATTRIBUTES.has(attribute))
     .every((attribute) => !shown.after.some((conclusion) => conclusion.attribute === attribute)) && !profileCandidateLeft;
+  const counts = shown !== null && conclusions !== undefined
+    ? { before: new Set(conclusions.map((item) => item.attribute)).size, after: new Set(validNameConclusions(shown.after).map((item) => item.attribute)).size }
+    : null;
 
   return (
     <section aria-labelledby="risky-heading" aria-busy={pending} className="max-w-2xl space-y-4">
@@ -153,6 +171,7 @@ export function RiskyPosts({ posts, risky, clues = [], clueCount, profileClaims 
         {t.heading}
       </h3>
       <p className="text-ink/80">{t.lead}</p>
+      {counts && <CountChange before={counts.before} after={counts.after} />}
 
       <ol aria-label={t.listLabel} className="space-y-3">
         {risky.map((r) => {
@@ -255,6 +274,7 @@ export function RiskyPosts({ posts, risky, clues = [], clueCount, profileClaims 
           onCancel={() => setConfirming(false)}
         />
       )}
+      <InviteLink />
     </section>
   );
 }
@@ -264,6 +284,25 @@ function directClueLabel(clue: Clue): string | null {
   if (clue.type === "face" && clue.confidence < 0.8) return null;
   if (clue.type === "name_text" && !isLikelyNameText(clue.value)) return null;
   return messages.clues.typeLabels[clue.type];
+}
+
+function CountChange({ before, after }: { before: number; after: number }) {
+  return <figure aria-label={t.countLabel(before, after)} className="border-y-2 border-ink py-4 text-center">
+    <figcaption className="text-sm tracking-widest text-ink/70">{t.countHeading}</figcaption>
+    <p aria-hidden className="mt-1 font-display text-6xl leading-none tabular-nums sm:text-7xl"><span>{before}</span><span className="mx-3 text-ink/40 sm:mx-5">→</span><span className={after < before ? "text-seeker" : ""}>{after}</span></p>
+  </figure>;
+}
+
+export function inviteComposeUrl(origin: string): string {
+  const text = `${messages.invite.text}\n${origin}/`;
+  return `https://bsky.app/intent/compose?text=${encodeURIComponent(text)}`;
+}
+
+function InviteLink() {
+  return <p className="border-t border-ink/15 pt-4">
+    <a href={inviteComposeUrl(window.location.origin)} target="_blank" rel="noopener noreferrer" className="font-bold underline underline-offset-2">{messages.invite.link}</a>
+    <span className="mt-1 block text-sm text-ink/60">{messages.invite.note}</span>
+  </p>;
 }
 
 /** 実際に消したあと：消せた数、消せなかった数、逃げ切れたか */

@@ -9,9 +9,9 @@ import asyncio
 import json
 import logging
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Sequence
 from dataclasses import asdict
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -29,11 +29,14 @@ from tkb_common.schemas import (
 )
 from tkb_detect.batch import PostExtraction, extract_posts
 from tkb_detect.extract import Extractor
-from tkb_engine.cross_post import (infer_owner_candidate_sets_with_web,
-    infer_owner_profile_relations, plan_profile_candidate_deletion)
+from tkb_engine.cross_post import (
+    infer_owner_candidate_sets_with_web,
+    infer_owner_profile_relations,
+    plan_profile_candidate_deletion,
+)
 from tkb_engine.gazetteer import Gazetteer, Knowledge
 from tkb_engine.planner import Simulation, plan, simulate
-from tkb_engine.rules import infer
+from tkb_engine.rules import Conclusion, infer
 
 logger = logging.getLogger(__name__)
 
@@ -138,31 +141,88 @@ async def _replay(
         yield extraction
 
 
-def simulation_json(sim: Simulation, clues: Sequence[Clue]) -> dict[str, Any]:
+def _kept_indices(clues: Sequence[Clue], gone: Iterable[str]) -> list[int]:
+    """gone の投稿を除いた手がかりが、clues（診断の全手がかり）で何番だったか。"""
+    removed = set(gone)
+    return [i for i, c in enumerate(clues) if c.post_id not in removed]
+
+
+def _remaining(
+    clues: Sequence[Clue], posts: Sequence[Post], excluded: Sequence[str]
+) -> tuple[list[Clue], list[Post]]:
+    gone = set(excluded)
+    return [c for c in clues if c.post_id not in gone], [p for p in posts if p.post_id not in gone]
+
+
+def _renumbered(conclusions: Sequence[Conclusion], kept: Sequence[int]) -> list[dict[str, Any]]:
+    return [{**asdict(c), "clue_indices": [kept[i] for i in c.clue_indices]} for c in conclusions]
+
+
+def conclusions_json(
+    clues: Sequence[Clue],
+    posts: Sequence[Post],
+    gazetteer: Gazetteer,
+    excluded: Sequence[str] = (),
+) -> list[dict[str, Any]]:
+    """excluded（もう消した投稿）を除いて推理する。
+
+    clue_indices は clues（診断の全手がかり）での番号。
+    """
+    remaining_clues, remaining_posts = _remaining(clues, posts, excluded)
+    return _renumbered(
+        infer(remaining_clues, remaining_posts, gazetteer), _kept_indices(clues, excluded)
+    )
+
+
+def simulation_json(
+    sim: Simulation, clues: Sequence[Clue], excluded: Sequence[str] = ()
+) -> dict[str, Any]:
     """消したらどうなるかを、画面に渡す形にする。
 
     after の clue_indices は、消したあとの手がかりの番号から、clues（診断の全手がかり）での
     番号に直す。画面は conclusions イベントの clues をそのまま使える。
+    excluded は、sim を作る前にもう除いてあった投稿（すでに消した投稿）。
     """
-    gone = set(sim.delete)
-    kept = [i for i, c in enumerate(clues) if c.post_id not in gone]
     return {
         "delete": sim.delete,
         "broken": sim.broken,
-        "after": [
-            {**asdict(c), "clue_indices": [kept[i] for i in c.clue_indices]} for c in sim.after
-        ],
+        "after": _renumbered(sim.after, _kept_indices(clues, [*excluded, *sim.delete])),
     }
 
 
-def plan_json(clues: Sequence[Clue], posts: Sequence[Post], gazetteer: Gazetteer) -> dict[str, Any]:
-    """危ない投稿と、それを全部消したときの結果。投稿ごとに、それだけを消したときに崩れる項目も添える。"""
-    proposal = plan(clues, posts, gazetteer)
+def simulate_json(
+    clues: Sequence[Clue],
+    posts: Sequence[Post],
+    gazetteer: Gazetteer,
+    delete: Sequence[str],
+    excluded: Sequence[str] = (),
+) -> dict[str, Any]:
+    """excluded（もう消した投稿）を除いた状態から、delete を消したらどうなるか。"""
+    remaining_clues, remaining_posts = _remaining(clues, posts, excluded)
+    sim = simulate(remaining_clues, remaining_posts, gazetteer, delete)
+    return simulation_json(sim, clues, excluded)
+
+
+def plan_json(
+    clues: Sequence[Clue],
+    posts: Sequence[Post],
+    gazetteer: Gazetteer,
+    excluded: Sequence[str] = (),
+) -> dict[str, Any]:
+    """危ない投稿と、それを全部消したときの結果。投稿ごとに、それだけを消したときに崩れる項目も添える。
+
+    excluded（もう消した投稿）は候補にせず、除いた状態から計算する。番号は clues での番号。
+    """
+    remaining_clues, remaining_posts = _remaining(clues, posts, excluded)
+    proposal = plan(remaining_clues, remaining_posts, gazetteer)
     per_post = [
-        {"post_id": post_id, "broken": simulate(clues, posts, gazetteer, [post_id]).broken}
+        {
+            "post_id": post_id,
+            "broken": simulate(remaining_clues, remaining_posts, gazetteer, [post_id]).broken,
+        }
         for post_id in proposal.delete
     ]
-    return {**simulation_json(proposal, clues), "posts": per_post}
+    return {**simulation_json(proposal, clues, excluded), "posts": per_post}
 
 
 async def diagnose_events(
@@ -182,6 +242,7 @@ async def diagnose_events(
     external_lookup_status: ExternalLookupStatus = ExternalLookupStatus.NOT_REQUESTED,
     external_lookup: Callable[[], Awaitable[ExternalLookupResult]] | None = None,
     diagnosis_date: date | None = None,
+    diagnosis_at: datetime | None = None,
 ) -> AsyncIterator[Event]:
     """診断のイベントを順に返す。
 
@@ -227,7 +288,9 @@ async def diagnose_events(
             external_lookup_status = ExternalLookupStatus.UNAVAILABLE
             external_profile_results = ()
 
-    conclusions = infer(all_clues, list(posts), gazetteer)
+    # 推理と危ない投稿の選び方は CPU を使うので、別のスレッドで行う
+    # （診断中も、ほかの人の応答と SSE の keep-alive を止めない）
+    conclusions = await asyncio.to_thread(infer, all_clues, list(posts), gazetteer)
     self_report_clues = (
         await owner_profile_analyzer(owner_profile_text)
         if owner_profile_text and owner_profile_analyzer
@@ -241,6 +304,7 @@ async def diagnose_events(
         self_report_clues,
         gazetteer=gazetteer,
         diagnosis_date=diagnosis_date,
+        diagnosis_at=diagnosis_at,
     )
     profile_claim_suggestions = plan_profile_candidate_deletion(profile_claims, posts)
     profile_relations = infer_owner_profile_relations(list(posts), profile_claims)
@@ -279,7 +343,7 @@ async def diagnose_events(
                 "self_report_clues": self_report_clues,
             }
         )
-    yield "plan", plan_json(all_clues, posts, gazetteer)
+    yield "plan", await asyncio.to_thread(plan_json, all_clues, posts, gazetteer)
     logger.info(
         "診断の時間：手がかりの取り出し %.1f 秒"
         "（投稿 %d 件、写真 %d 枚、手がかり %d 件、失敗 %d 件）、推理と危ない投稿 %.2f 秒",

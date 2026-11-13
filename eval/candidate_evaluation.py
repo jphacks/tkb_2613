@@ -69,16 +69,9 @@ def _candidate_refs(
     for path in raw_paths:
         if not isinstance(path, Mapping) or not isinstance(path.get("evidence", []), list):
             continue
-        if (
-            provenance_scope != "all"
-            and path.get("provenance", "unclassified") != provenance_scope
-        ):
+        if provenance_scope != "all" and path.get("provenance", "unclassified") != provenance_scope:
             continue
-        refs = {
-            _ref_key(ref)
-            for ref in path.get("evidence", [])
-            if isinstance(ref, Mapping)
-        }
+        refs = {_ref_key(ref) for ref in path.get("evidence", []) if isinstance(ref, Mapping)}
         paths.append(refs)
         all_refs.update(refs)
     return paths, all_refs
@@ -87,8 +80,7 @@ def _candidate_refs(
 def _has_provenance(candidate: Mapping[str, Any], provenance: str) -> bool:
     raw_paths = candidate.get("evidence_paths", [])
     return isinstance(raw_paths, list) and any(
-        isinstance(path, Mapping)
-        and path.get("provenance", "unclassified") == provenance
+        isinstance(path, Mapping) and path.get("provenance", "unclassified") == provenance
         for path in raw_paths
     )
 
@@ -204,7 +196,7 @@ def evaluate_candidate_sets(
             displayed_count += 1
             if eligible and _canonical_value(candidate["value"]) not in truth_values:
                 wrong_candidates.append(_pair(attribute, candidate["value"]))
-            paths, refs = _candidate_refs(candidate, provenance_scope)
+            paths, _refs = _candidate_refs(candidate, provenance_scope)
             for path_index, path in enumerate(paths):
                 for ref in path:
                     post_id, clue_index, image_index, web_fact_id = ref
@@ -215,7 +207,7 @@ def evaluate_candidate_sets(
                     if not checked:
                         continue
                     reference_checked += 1
-                    valid = (post_id is None or post_ids is None or post_id in post_ids)
+                    valid = post_id is None or post_ids is None or post_id in post_ids
                     if clue_index is not None:
                         valid = valid and clues is not None and 0 <= clue_index < len(clues)
                         if valid and post_id is not None:
@@ -249,9 +241,7 @@ def evaluate_candidate_sets(
         expected_paths = truth_claim["evidence_paths"]
         if not isinstance(expected_paths, list):
             raise ValueError("truth evidence_paths must be an array")
-        expected_path_sets: list[
-            set[tuple[str | None, int | None, int | None, str | None]]
-        ] = []
+        expected_path_sets: list[set[tuple[str | None, int | None, int | None, str | None]]] = []
         for expected_path in expected_paths:
             if not isinstance(expected_path, list) or not all(
                 isinstance(ref, Mapping) for ref in expected_path
@@ -267,8 +257,7 @@ def evaluate_candidate_sets(
                 for candidate in row_candidates
                 if isinstance(candidate, Mapping)
                 and isinstance(candidate.get("value"), str)
-                and _canonical_value(candidate["value"])
-                == _canonical_value(truth_claim["value"])
+                and _canonical_value(candidate["value"]) == _canonical_value(truth_claim["value"])
             ),
             None,
         )
@@ -340,21 +329,15 @@ def evaluate_candidate_sets(
         "provenance_scoped_status_rates": {
             "scope": "status derived from candidates with selected provenance",
             "candidate_rate": (
-                scoped_status_counts["candidate"] / len(candidate_sets)
-                if candidate_sets
-                else 0.0
+                scoped_status_counts["candidate"] / len(candidate_sets) if candidate_sets else 0.0
             ),
             "candidate_count": scoped_status_counts["candidate"],
             "ambiguous_rate": (
-                scoped_status_counts["ambiguous"] / len(candidate_sets)
-                if candidate_sets
-                else 0.0
+                scoped_status_counts["ambiguous"] / len(candidate_sets) if candidate_sets else 0.0
             ),
             "ambiguous_count": scoped_status_counts["ambiguous"],
             "unknown_rate": (
-                scoped_status_counts["unknown"] / len(candidate_sets)
-                if candidate_sets
-                else 0.0
+                scoped_status_counts["unknown"] / len(candidate_sets) if candidate_sets else 0.0
             ),
             "unknown_count": scoped_status_counts["unknown"],
             "set_count": len(candidate_sets),
@@ -371,9 +354,7 @@ def evaluate_candidate_sets(
             "annotated_claims": evidence_annotated,
             "exact_path_matches": evidence_exact_path_matches,
             "exact_path_match_rate": (
-                evidence_exact_path_matches / evidence_annotated
-                if evidence_annotated
-                else None
+                evidence_exact_path_matches / evidence_annotated if evidence_annotated else None
             ),
             "reference_precision": (
                 reference_tp / (reference_tp + reference_fp)

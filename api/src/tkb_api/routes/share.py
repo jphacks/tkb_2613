@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from tkb_api.bluesky import BlueskySession, SessionStore
 from tkb_api.errors import refusal
+from tkb_api.origin import same_origin
 from tkb_api.routes.diagnose import get_gazetteer, read_diagnosis
 from tkb_api.routes.session import current_session, current_session_id, get_session_store
 from tkb_api.shares import ShareStore
@@ -31,7 +32,7 @@ def get_share_store(request: Request) -> ShareStore:
     return store
 
 
-@router.post("/result-link")
+@router.post("/result-link", dependencies=[Depends(same_origin)])
 def create_result_link(
     sessions: Annotated[SessionStore, Depends(get_session_store)],
     session_id: Annotated[str, Depends(current_session_id)],
@@ -50,7 +51,9 @@ def create_result_link(
     return {"token": token}
 
 
-@router.delete("/result-link", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/result-link", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(same_origin)]
+)
 def revoke_result_link(
     body: SharedResultRequest,
     session: Annotated[BlueskySession, Depends(current_session)],

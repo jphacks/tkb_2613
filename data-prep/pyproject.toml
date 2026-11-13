@@ -1,11 +1,13 @@
 [project]
 name = "tkb-data-prep"
 version = "0.0.0"
-description = "公開データ（郵便番号、メッシュ、駅、世帯数、市外局番）を表に変換する"
+description = "公開データ（郵便番号、メッシュ、駅、世帯数、市外局番、避難所、バス停、行政区域、法人番号）を表に変換する"
 requires-python = ">=3.13,<3.14"
 dependencies = [
   "jismesh>=2.1",
   "pyarrow>=18.0",
+  "shapely>=2.0",
+  "tkb-common",
 ]
 
 [build-system]
@@ -14,3 +16,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/tkb_data_prep"]
+
+[tool.uv.sources]
+tkb-common = { workspace = true }

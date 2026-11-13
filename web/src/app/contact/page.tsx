@@ -1,14 +1,14 @@
 import type { Metadata } from "next";
 
 import { LegalPage } from "@/components/legal/LegalPage";
-import { contact, ISSUES_URL } from "@/lib/legal";
+import { ISSUES_URL, support } from "@/lib/legal";
 import { messages } from "@/lib/messages";
 
-export const metadata: Metadata = { title: `${contact.title} | ${messages.app.name}` };
+export const metadata: Metadata = { title: `問い合わせ | ${messages.app.name}` };
 
 export default function ContactPage() {
   return (
-    <LegalPage document={contact}>
+    <LegalPage document={support}>
       <section aria-labelledby="legal-issue-link" className="space-y-3">
         <h2 id="legal-issue-link" className="border-l-4 border-seeker pl-3 text-xl font-bold">
           Issue を開く

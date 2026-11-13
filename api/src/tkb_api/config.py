@@ -1,11 +1,15 @@
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Self
+from urllib.parse import urlparse
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from tkb_api.limits import PublicWindow
+
+# 偽の X API を許す手元のホスト
+LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
 
 class Settings(BaseSettings):
@@ -74,6 +78,18 @@ class Settings(BaseSettings):
     model_probe_timeout_seconds: float = Field(default=3, gt=0)
 
     # X 専用。X の用途承認と有料 API の予算承認を得るまでは実接続しない。
+    threads_app_id: str = ""
+    threads_app_secret: SecretStr = SecretStr("")
+    threads_callback_url: str = ""
+    threads_public_origin: str = "http://localhost:3000"
+    threads_enabled: bool = False
+    threads_query_logs_redacted: bool = False
+    threads_mock_mode: bool = True
+    threads_gpu_demo_enabled: bool = False
+    threads_max_posts: int = Field(default=30, ge=1, le=30)
+    # Threads の本文を読むモデル。既定は Bluesky と同じ vLLM（VLM_*・MODEL_ALLOWED_HOST_SUFFIXES）。
+    # ollama にすると OLLAMA_BASE_URL・OLLAMA_MODEL で読む。写真は読まない
+    threads_text_backend: Literal["vlm", "ollama"] = "vlm"
     x_client_id: str = ""
     x_client_secret: SecretStr = SecretStr("")
     x_callback_url: str = "http://localhost:3000/api/x/callback"
@@ -82,9 +98,70 @@ class Settings(BaseSettings):
     x_paid_reads_approved: bool = False
     x_query_logs_redacted: bool = False
     x_mock_mode: bool = True
-    # 架空のX投稿だけを既存VLMへ送る実験経路。実X投稿は常にOllama経路のまま。
-    x_gpu_demo_enabled: bool = False
-    x_max_posts: int = Field(default=30, ge=1, le=30)
+    x_max_posts: int = Field(default=5, ge=1, le=30)
+    # X API で1日（UTC）に読んでよいリソース数の上限。超えたら X を呼ばずに断る。
+    # 既定は本人確認1件と投稿5件の2回分。0 なら実取得をすべて断る
+    x_daily_resource_limit: int = Field(default=12, ge=0, le=10000)
+    # X の結果の出し方。aggregate は地名・駅名などを値ごとに数える今の表示、
+    # highlight は本文中の地名・駅名に色を付けるだけで、値ごとに数えない
+    x_info_view: Literal["aggregate", "highlight"] = "aggregate"
+    # E2E テスト専用：偽の X API の向き先（例 http://127.0.0.1:4010）。空なら本物の https://api.x.com。
+    # 手元の http の loopback だけを許し、COOKIE_SECURE=1 や公開オリジンが loopback でない設定
+    # （本番）では起動時に失敗させる（_fake_x_api_only_in_local_tests）
+    x_fake_api_base_url: str = ""
+
+    @model_validator(mode="after")
+    def _fake_x_api_only_in_local_tests(self) -> Self:
+        if not self.x_fake_api_base_url:
+            return self
+        fake = urlparse(self.x_fake_api_base_url)
+        public = urlparse(self.x_public_origin)
+        if (
+            fake.scheme != "http"
+            or fake.hostname not in LOOPBACK_HOSTS
+            or fake.path not in ("", "/")
+            or fake.query
+            or self.cookie_secure
+            or public.scheme != "http"
+            or public.hostname not in LOOPBACK_HOSTS
+        ):
+            raise ValueError(
+                "X_FAKE_API_BASE_URL は手元の E2E テスト専用です"
+                "（http の loopback、COOKIE_SECURE=0）"
+            )
+        return self
+
+    def origin_warnings(self) -> list[str]:
+        """本番（COOKIE_SECURE=1）なのに、開けている X・Threads の公開オリジンが手元のままのとき。
+
+        X_PUBLIC_ORIGIN・THREADS_PUBLIC_ORIGIN が未設定だと既定の http://localhost:3000 になり、
+        /api/x・/api/threads の POST がすべて Origin の確認（check_origin）で 403 になる。
+        起動は止めず、ログに出す警告の文だけを返す。
+        """
+        if not self.cookie_secure:
+            return []
+        warnings: list[str] = []
+        if self.x_mock_mode and urlparse(self.x_public_origin).hostname in LOOPBACK_HOSTS:
+            warnings.append(
+                "X_MOCK_MODE=1 ですが X_PUBLIC_ORIGIN が手元のオリジンのままです。"
+                "/x の合成デモの POST は 403 になります（公開の HTTPS オリジンを設定してください）"
+            )
+        threads_open = self.threads_mock_mode or self.threads_enabled
+        if threads_open and urlparse(self.threads_public_origin).hostname in LOOPBACK_HOSTS:
+            warnings.append(
+                "Threads を開けていますが THREADS_PUBLIC_ORIGIN が手元のオリジンのままです。"
+                "/threads の POST は 403 になります（公開の HTTPS オリジンを設定してください）"
+            )
+        return warnings
+
+    @property
+    def public_web_lookup_available(self) -> bool:
+        """公開Web検索の同意欄を出せるか。
+
+        モックは外へ通信せず固定の架空候補を返すので、デモで流れを見せられるよう常に真。
+        実モードは BRAVE_SEARCH_API_KEY が空でないときだけ真。キーの値や長さは外へ出さない。
+        """
+        return self.mock_mode or bool(self.brave_search_api_key.get_secret_value().strip())
 
 
 @lru_cache

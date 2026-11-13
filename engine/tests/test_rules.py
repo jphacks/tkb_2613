@@ -10,6 +10,7 @@ from tkb_common.schemas import TEXT_ONLY_TYPES, Clue, ClueSource, ClueType, Post
 from tkb_engine import Conclusion, Gazetteer, infer, rule_r1, rule_r2, rule_r3
 from tkb_engine.gazetteer import CollectionArea, Knowledge, TrashBag, University
 from tkb_engine.rules import (
+    combined_confidence,
     rule_birthday,
     rule_r4,
     rule_r5,
@@ -950,10 +951,14 @@ def test_x1_does_not_join_a_school_and_commute_mentioned_only_in_one_post() -> N
 
 def test_x1_demo_fixture_matches_the_published_post_texts() -> None:
     doc = json.loads(
-        (Path(__file__).resolve().parents[2] / "eval/fixtures/demo_x1.json").read_text()
+        (Path(__file__).resolve().parents[2] / "eval/fixtures/demo_x1.json").read_text(
+            encoding="utf-8"
+        )
     )
     plan = json.loads(
-        (Path(__file__).resolve().parents[2] / "eval/demo_account/x1_posts.json").read_text()
+        (Path(__file__).resolve().parents[2] / "eval/demo_account/x1_posts.json").read_text(
+            encoding="utf-8"
+        )
     )
     posts = [Post.model_validate(post) for post in doc["posts"]]
     clues = [Clue.model_validate(clue) for clue in doc["clues"]]
@@ -962,3 +967,141 @@ def test_x1_demo_fixture_matches_the_published_post_texts() -> None:
     cross = [c for c in infer(clues, posts, GAZ) if c.attribute == "home_school_commute"]
     assert len(cross) == 1
     assert cross[0].clue_indices == [0, 1, 2, 3]
+
+
+def test_combined_confidence_uses_one_minus_product_of_doubts() -> None:
+    clues = [
+        _clue("p1", ClueType.ROUTINE_TEXT, "毎週火曜"),
+        _clue("p2", ClueType.ROUTINE_TEXT, "ジム"),
+    ]
+    clues[1] = clues[1].model_copy(update={"confidence": 0.5})
+
+    # 1 − (1 − 0.9)(1 − 0.5) = 0.95。同じ手がかりは2回数えない。根拠がなければ 0
+    assert combined_confidence(clues, [0, 1]) == 0.95
+    assert combined_confidence(clues, [0, 0]) == 0.9
+    assert combined_confidence(clues, []) == 0.0
+
+
+def test_infer_attaches_the_combined_confidence_to_every_conclusion() -> None:
+    doc = json.loads(
+        (Path(__file__).resolve().parents[2] / "eval/fixtures/demo_observations.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    posts = [Post.model_validate(p) for p in doc["posts"]]
+    clues = [Clue.model_validate(c) for c in doc["clues"]]
+
+    conclusions = infer(clues, posts, GAZ)
+
+    assert conclusions
+    for conclusion in conclusions:
+        assert 0 <= conclusion.confidence <= 1
+        assert conclusion.confidence == combined_confidence(clues, conclusion.clue_indices)
+
+
+RIDERSHIP_GAZ = Gazetteer(
+    stations=[
+        {
+            "station_code": "003483",
+            "station_name": "根津",
+            "mesh_1km": "m-bunkyo",
+            "lat": 35.7176,
+            "lon": 139.7653,
+        },
+        {
+            "station_code": "003484",
+            "station_name": "千駄木",
+            "mesh_1km": "m-bunkyo",
+            "lat": 35.7255,
+            "lon": 139.7631,
+        },
+    ],
+    ridership={"003483": 27937, "003484": 28507},
+    ridership_year=2024,
+)
+
+
+def test_r1_adds_ridership_as_reference_only_when_other_candidates_remain() -> None:
+    clues = [
+        _clue("p1", ClueType.STATION_SIGN, "根津"),
+        _clue("p2", ClueType.PLACE_TEXT, "根津駅"),
+        _clue("p3", ClueType.PLACE_TEXT, "千駄木駅"),
+    ]
+
+    station = _by_attribute(rule_r1(clues, RIDERSHIP_GAZ))["station"]
+
+    # 乗降客数は千駄木のほうが多いが、どの駅かは票で決めたまま変えない
+    assert station.value == "根津駅"
+    assert "参考" in station.note
+    assert "根津駅 27,937人" in station.note
+    assert "千駄木駅 28,507人" in station.note
+    assert "2024年度" in station.note
+    assert "国土数値情報（駅別乗降客数データ）" in station.note
+    assert "推定には使っていません" in station.note
+
+
+def test_r1_note_is_unchanged_without_other_candidates_or_ridership() -> None:
+    only = [_clue("p1", ClueType.STATION_SIGN, "根津"), _clue("p2", ClueType.PLACE_TEXT, "根津駅")]
+    assert _by_attribute(rule_r1(only, RIDERSHIP_GAZ))["station"].note == (
+        "駅名の手がかりの票がいちばん多い駅"
+    )
+    both = [*only, _clue("p3", ClueType.PLACE_TEXT, "千駄木駅")]
+    no_data = Gazetteer(stations=RIDERSHIP_GAZ.stations)
+    assert (
+        _by_attribute(rule_r1(both, no_data))["station"].note
+        == "駅名の手がかりの票がいちばん多い駅"
+    )
+
+
+BUNKYO_GAZ = Gazetteer(
+    postal=[
+        {"postal_code": "1130032", "muni_code": "13105", "city": "文京区", "town": "弥生"},
+        {"postal_code": "1130031", "muni_code": "13105", "city": "文京区", "town": "根津"},
+    ],
+    knowledge=Knowledge(
+        collection_areas=[
+            CollectionArea("文京区", "弥生1・2丁目", "月木", ["弥生1・2丁目"]),
+            CollectionArea("文京区", "根津1・2丁目", "月木", ["根津1・2丁目"]),
+            CollectionArea("文京区", "本郷1・2丁目", "火金", ["本郷1・2丁目"]),
+        ]
+    ),
+)
+
+
+def _forgot(when: str) -> tuple[Post, Clue]:
+    return _post("pg", when), _clue("pg", ClueType.ROUTINE_TEXT, "燃えるゴミ出し忘れた")
+
+
+def test_r5_reads_the_weekday_of_a_morning_garbage_post_and_the_city_from_the_address() -> None:
+    # 2026-10-22 は木曜。23区には指定ゴミ袋がないので、区は住所の手がかりから決める
+    post, forgot = _forgot("2026-10-22 07:50")
+    address = _clue("pa", ClueType.ADDRESS_TEXT, "文京区弥生二丁目xx")
+
+    [district] = rule_r5([forgot, address], BUNKYO_GAZ, [], [post])
+
+    assert district.value == "文京区 弥生1・2丁目"
+    assert district.clue_indices == [0, 1]
+    assert "投稿の時刻（木曜の朝）" in district.note
+
+
+def test_r5_with_only_the_weekday_names_the_days_shared_by_every_candidate() -> None:
+    post, forgot = _forgot("2026-10-22 07:50")
+    postal = _clue("pa", ClueType.POSTAL_CODE, "113-00xx")
+
+    [district] = rule_r5([forgot, postal], BUNKYO_GAZ, [], [post])
+
+    # 弥生と根津はどちらも月・木。本郷（火・金）は外れる
+    assert district.value == "文京区 燃やすごみが月・木の地区"
+
+
+def test_r5_ignores_a_garbage_post_at_night_or_on_a_day_that_matches_no_area() -> None:
+    address = _clue("pa", ClueType.ADDRESS_TEXT, "文京区弥生二丁目xx")
+    night, forgot = _forgot("2026-10-22 21:00")
+    assert rule_r5([forgot, address], BUNKYO_GAZ, [], [night]) == []
+    sunday, forgot = _forgot("2026-10-25 07:50")
+    assert rule_r5([forgot, address], BUNKYO_GAZ, [], [sunday]) == []
+
+
+def test_r5_needs_a_city() -> None:
+    post, forgot = _forgot("2026-10-22 07:50")
+    assert rule_r5([forgot], BUNKYO_GAZ, [], [post]) == []
