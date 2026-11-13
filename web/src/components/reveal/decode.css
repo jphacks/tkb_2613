@@ -1,0 +1,37 @@
+/* 身元カードの推定の値：ランダムな漢字が回ってから、左から 1 文字ずつ止まる（DecodeText）。
+   1 文字ぶんの枠に、本当の文字（幅を決めるだけで見えない）と、縦に並べた帯を重ねる。
+   止まる位置・長さ・遅れ・steps の数は style で渡す。動きを減らす設定では止まった位置だけが見える */
+.decode-cell {
+  position: relative;
+  display: inline-block;
+  height: 1.3em;
+  overflow: hidden;
+  line-height: 1.3em;
+  vertical-align: bottom;
+}
+
+.decode-sizer {
+  visibility: hidden;
+}
+
+.decode-strip {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  white-space: nowrap;
+  animation-name: decode-spin;
+  animation-fill-mode: backwards;
+}
+
+.decode-strip > span {
+  height: 1.3em;
+}
+
+@keyframes decode-spin {
+  from {
+    transform: translate(-50%, 0);
+  }
+}
