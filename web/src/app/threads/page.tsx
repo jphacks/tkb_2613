@@ -10,6 +10,7 @@ import { checkThreadsPublicText } from "@/lib/threads-public-check";
 import { useThreadsLang } from "@/lib/useThreadsLang";
 import { isDiagnosisSnapshot, isSimulation, type DiagnosisSnapshot, type Simulation } from "@/types/diagnose";
 import { isPost, type Post } from "@/types/post";
+import { profileClaimsAfterDeletion } from "@/types/profile";
 
 type ThreadsDiagnosis = DiagnosisSnapshot & { readonly elapsed_ms?: number; readonly mock?: boolean };
 type ThreadsConfig = { mock_enabled: boolean; gpu_demo_enabled: boolean; live_enabled: boolean; max_posts: number };
@@ -136,6 +137,11 @@ export default function ThreadsPage() {
   }
 
   const current = view ?? original;
+  // 仮除外を試している間は、選んだ投稿を根拠から除いた推定を出す（Bluesky の画面・GET /api/diagnosis と同じ規則）。
+  // 再診断の結果は api が除いて返すので、そのまま使う
+  const previewExcluded = new Set(preview?.delete ?? []);
+  const profileClaims = profileClaimsAfterDeletion(current?.profile_claims ?? [], previewExcluded);
+  const profileClaimSuggestions = (current?.profile_claim_suggestions ?? []).filter((id) => !previewExcluded.has(id));
   const publicFindings = fetchedPosts ? checkThreadsPublicText(fetchedPosts) : [];
   return (
     <main className="mx-auto max-w-4xl px-5 py-12">
@@ -260,7 +266,9 @@ export default function ThreadsPage() {
           <p className="text-sm text-ink/70">{t.resultCount(current.posts.length, current.clues.length, current.conclusions.length)}
             {typeof original.elapsed_ms === "number" && view === original ? t.elapsed(original.elapsed_ms) : ""}</p>
         </div>
-        <ConclusionBoard clues={current.clues} conclusions={current.conclusions} unknown={preview?.broken} />
+        <ConclusionBoard key={view === original ? "full" : "rediagnosed"} clues={current.clues}
+          conclusions={current.conclusions} unknown={preview?.broken} posts={current.posts}
+          profileClaims={profileClaims} profileClaimSuggestions={profileClaimSuggestions} />
 
         <section aria-labelledby="threads-evidence-heading" className="space-y-4">
           <h2 id="threads-evidence-heading" className="font-display text-xl">{t.evidenceTitle}</h2>

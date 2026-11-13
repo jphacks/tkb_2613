@@ -1,0 +1,426 @@
+{
+ "snapshot": {
+  "posts": [
+   {
+    "post_id": "threads:9001",
+    "text": "毎週火曜はジムに行く",
+    "created_at": "2026-11-03T18:00:00+09:00",
+    "images": []
+   },
+   {
+    "post_id": "threads:9002",
+    "text": "今週も火曜のジムを終えた",
+    "created_at": "2026-11-10T18:00:00+09:00",
+    "images": []
+   },
+   {
+    "post_id": "threads:9003",
+    "text": "燃えるゴミ出し忘れた。朝はお弁当作りでバタバタ。",
+    "created_at": "2026-11-04T07:50:00+09:00",
+    "images": []
+   },
+   {
+    "post_id": "threads:9004",
+    "text": "娘の小学校のあおぞらフェスタ、今年は輪投げ係になった。",
+    "created_at": "2026-11-05T21:05:00+09:00",
+    "images": []
+   },
+   {
+    "post_id": "threads:9005",
+    "text": "あおぞらフェスタは林町小学校の秋の行事で、地域の人も来られるらしい。",
+    "created_at": "2026-11-06T12:10:00+09:00",
+    "images": []
+   }
+  ],
+  "clues": [
+   {
+    "post_id": "threads:9001",
+    "image_index": null,
+    "type": "routine_text",
+    "value": "毎週火曜はジム",
+    "region": null,
+    "confidence": 0.9,
+    "source": "text",
+    "quote": "毎週火曜はジム"
+   },
+   {
+    "post_id": "threads:9002",
+    "image_index": null,
+    "type": "routine_text",
+    "value": "火曜のジム",
+    "region": null,
+    "confidence": 0.9,
+    "source": "text",
+    "quote": "火曜のジム"
+   },
+   {
+    "post_id": "threads:9003",
+    "image_index": null,
+    "type": "routine_text",
+    "value": "燃えるゴミ出し忘れた",
+    "region": null,
+    "confidence": 0.9,
+    "source": "text",
+    "quote": "燃えるゴミ出し忘れた"
+   },
+   {
+    "post_id": "threads:9004",
+    "image_index": null,
+    "type": "relation_text",
+    "value": "娘",
+    "region": null,
+    "confidence": 0.9,
+    "source": "text",
+    "quote": "娘"
+   },
+   {
+    "post_id": "threads:9005",
+    "image_index": null,
+    "type": "org_text",
+    "value": "林町小学校",
+    "region": null,
+    "confidence": 0.9,
+    "source": "text",
+    "quote": "林町小学校"
+   }
+  ],
+  "conclusions": [
+   {
+    "rule": "R3",
+    "attribute": "routine",
+    "value": "毎週火曜（毎週火曜はジム）",
+    "clue_indices": [
+     0
+    ],
+    "note": "本文の曜日",
+    "confidence": 0.9
+   },
+   {
+    "rule": "R3",
+    "attribute": "routine",
+    "value": "毎週火曜（火曜のジム）",
+    "clue_indices": [
+     1
+    ],
+    "note": "本文の曜日",
+    "confidence": 0.9
+   }
+  ],
+  "plan": {
+   "delete": [
+    "threads:9001",
+    "threads:9002"
+   ],
+   "broken": [
+    "routine"
+   ],
+   "after": [],
+   "posts": [
+    {
+     "post_id": "threads:9001",
+     "broken": []
+    },
+    {
+     "post_id": "threads:9002",
+     "broken": []
+    }
+   ]
+  },
+  "profile_claims": [
+   {
+    "attribute": "child_school",
+    "value": "林町小学校",
+    "confidence": 0.65,
+    "status": "weak",
+    "evidence": [
+     {
+      "post_id": "threads:9004",
+      "clue_index": null,
+      "required": true,
+      "source": "post_text",
+      "image_index": null,
+      "excerpt": "娘の小学校のあおぞらフェスタ",
+      "web_fact_id": null
+     },
+     {
+      "post_id": "threads:9005",
+      "clue_index": 4,
+      "required": true,
+      "source": "clue",
+      "image_index": null,
+      "excerpt": null,
+      "web_fact_id": null
+     }
+    ],
+    "evidence_paths": [
+     {
+      "evidence": [
+       {
+        "post_id": "threads:9004",
+        "clue_index": null,
+        "required": true,
+        "source": "post_text",
+        "image_index": null,
+        "excerpt": "娘の小学校のあおぞらフェスタ",
+        "web_fact_id": null
+       },
+       {
+        "post_id": "threads:9005",
+        "clue_index": 4,
+        "required": true,
+        "source": "clue",
+        "image_index": null,
+        "excerpt": null,
+        "web_fact_id": null
+       }
+      ],
+      "confidence": 0.65
+     }
+    ],
+    "assessment": {
+     "minimal_scope": "bluesky",
+     "offline_subtype": null,
+     "psychological_resistance": null,
+     "persona_context": null,
+     "inference_ease": null,
+     "inference_ease_basis": null,
+     "harm_severity": null,
+     "harm_scenario": "子どもの通う学校がわかると、登下校の時間や場所で子どもに近づく、学校を名乗って保護者をだますなどの材料になりうる",
+     "harm_prerequisites": [
+      "子どもを識別できる情報が別途得られる",
+      "攻撃者がその情報を悪用する"
+     ],
+     "harm_status": "prerequisites_unmet"
+    }
+   },
+   {
+    "attribute": "residential_area",
+    "value": "文京区",
+    "confidence": 0.65,
+    "status": "weak",
+    "evidence": [
+     {
+      "post_id": "threads:9004",
+      "clue_index": null,
+      "required": true,
+      "source": "post_text",
+      "image_index": null,
+      "excerpt": "娘の小学校のあおぞらフェスタ",
+      "web_fact_id": null
+     },
+     {
+      "post_id": "threads:9005",
+      "clue_index": 4,
+      "required": true,
+      "source": "clue",
+      "image_index": null,
+      "excerpt": null,
+      "web_fact_id": null
+     },
+     {
+      "post_id": null,
+      "clue_index": null,
+      "required": true,
+      "source": "open_data",
+      "image_index": null,
+      "excerpt": "林町小学校の通学区域は文京区（出典：「国土数値情報（小学校区データ）」（国土交通省）を加工して作成。令和3年度のデータで、境界には推定が含まれ、公式な資料ではありません）",
+      "web_fact_id": null
+     }
+    ],
+    "evidence_paths": [
+     {
+      "evidence": [
+       {
+        "post_id": "threads:9004",
+        "clue_index": null,
+        "required": true,
+        "source": "post_text",
+        "image_index": null,
+        "excerpt": "娘の小学校のあおぞらフェスタ",
+        "web_fact_id": null
+       },
+       {
+        "post_id": "threads:9005",
+        "clue_index": 4,
+        "required": true,
+        "source": "clue",
+        "image_index": null,
+        "excerpt": null,
+        "web_fact_id": null
+       },
+       {
+        "post_id": null,
+        "clue_index": null,
+        "required": true,
+        "source": "open_data",
+        "image_index": null,
+        "excerpt": "林町小学校の通学区域は文京区（出典：「国土数値情報（小学校区データ）」（国土交通省）を加工して作成。令和3年度のデータで、境界には推定が含まれ、公式な資料ではありません）",
+        "web_fact_id": null
+       }
+      ],
+      "confidence": 0.65
+     }
+    ],
+    "assessment": {
+     "minimal_scope": "bluesky",
+     "offline_subtype": null,
+     "psychological_resistance": null,
+     "persona_context": null,
+     "inference_ease": null,
+     "inference_ease_basis": null,
+     "harm_severity": null,
+     "harm_scenario": null,
+     "harm_prerequisites": [],
+     "harm_status": "unknown"
+    }
+   }
+  ],
+  "profile_claim_suggestions": [
+   "threads:9004"
+  ],
+  "mock": true
+ },
+ "simulate": {
+  "delete": [
+   "threads:9005"
+  ],
+  "broken": [],
+  "after": [
+   {
+    "rule": "R3",
+    "attribute": "routine",
+    "value": "毎週火曜（毎週火曜はジム）",
+    "clue_indices": [
+     0
+    ],
+    "note": "本文の曜日",
+    "confidence": 0.9
+   },
+   {
+    "rule": "R3",
+    "attribute": "routine",
+    "value": "毎週火曜（火曜のジム）",
+    "clue_indices": [
+     1
+    ],
+    "note": "本文の曜日",
+    "confidence": 0.9
+   }
+  ]
+ },
+ "rediagnose": {
+  "posts": [
+   {
+    "post_id": "threads:9001",
+    "text": "毎週火曜はジムに行く",
+    "created_at": "2026-11-03T18:00:00+09:00",
+    "images": []
+   },
+   {
+    "post_id": "threads:9002",
+    "text": "今週も火曜のジムを終えた",
+    "created_at": "2026-11-10T18:00:00+09:00",
+    "images": []
+   },
+   {
+    "post_id": "threads:9003",
+    "text": "燃えるゴミ出し忘れた。朝はお弁当作りでバタバタ。",
+    "created_at": "2026-11-04T07:50:00+09:00",
+    "images": []
+   },
+   {
+    "post_id": "threads:9004",
+    "text": "娘の小学校のあおぞらフェスタ、今年は輪投げ係になった。",
+    "created_at": "2026-11-05T21:05:00+09:00",
+    "images": []
+   }
+  ],
+  "clues": [
+   {
+    "post_id": "threads:9001",
+    "image_index": null,
+    "type": "routine_text",
+    "value": "毎週火曜はジム",
+    "region": null,
+    "confidence": 0.9,
+    "source": "text",
+    "quote": "毎週火曜はジム"
+   },
+   {
+    "post_id": "threads:9002",
+    "image_index": null,
+    "type": "routine_text",
+    "value": "火曜のジム",
+    "region": null,
+    "confidence": 0.9,
+    "source": "text",
+    "quote": "火曜のジム"
+   },
+   {
+    "post_id": "threads:9003",
+    "image_index": null,
+    "type": "routine_text",
+    "value": "燃えるゴミ出し忘れた",
+    "region": null,
+    "confidence": 0.9,
+    "source": "text",
+    "quote": "燃えるゴミ出し忘れた"
+   },
+   {
+    "post_id": "threads:9004",
+    "image_index": null,
+    "type": "relation_text",
+    "value": "娘",
+    "region": null,
+    "confidence": 0.9,
+    "source": "text",
+    "quote": "娘"
+   }
+  ],
+  "conclusions": [
+   {
+    "rule": "R3",
+    "attribute": "routine",
+    "value": "毎週火曜（毎週火曜はジム）",
+    "clue_indices": [
+     0
+    ],
+    "note": "本文の曜日",
+    "confidence": 0.9
+   },
+   {
+    "rule": "R3",
+    "attribute": "routine",
+    "value": "毎週火曜（火曜のジム）",
+    "clue_indices": [
+     1
+    ],
+    "note": "本文の曜日",
+    "confidence": 0.9
+   }
+  ],
+  "plan": {
+   "delete": [
+    "threads:9001",
+    "threads:9002"
+   ],
+   "broken": [
+    "routine"
+   ],
+   "after": [],
+   "posts": [
+    {
+     "post_id": "threads:9001",
+     "broken": []
+    },
+    {
+     "post_id": "threads:9002",
+     "broken": []
+    }
+   ]
+  },
+  "profile_claims": [],
+  "profile_claim_suggestions": [],
+  "mock": true
+ }
+}

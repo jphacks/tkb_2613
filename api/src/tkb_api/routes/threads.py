@@ -31,10 +31,11 @@ from tkb_api.pipeline import (
 )
 from tkb_api.schemas import SimulateRequest
 from tkb_api.threads_poc import THREADS_API, ThreadsPocError, _get, fetch_own_posts, to_post
-from tkb_common.schemas import Clue, ClueSource, ClueType, Post
+from tkb_common.schemas import Clue, ClueSource, ClueType, Post, ProfileEvidence, ProfileItem
 from tkb_detect.batch import PostExtraction
 from tkb_detect.errors import DetectError
 from tkb_detect.extract import Extractor, build_extractor
+from tkb_engine.cross_post import claims_after_deletion
 from tkb_engine.planner import simulate as simulate_deletion
 from tkb_engine.rules import infer
 
@@ -74,6 +75,8 @@ class ThreadsSession:
     snapshot: dict[str, Any] | None = None
     posts: list[Post] = field(default_factory=list)
     clues: list[Clue] = field(default_factory=list)
+    profile_claims: list[ProfileItem] = field(default_factory=list)
+    profile_claim_suggestions: list[str] = field(default_factory=list)
     busy: bool = False
     fetched: bool = False
     demo_backend: Literal["preset", "vlm"] = "preset"
@@ -598,11 +601,17 @@ async def diagnose(request: Request) -> dict[str, Any]:
         conclusion = results["conclusions"]
         current.posts = posts
         current.clues = [Clue.model_validate(item) for item in conclusion["clues"]]
+        current.profile_claims = [
+            ProfileItem.model_validate(item) for item in conclusion["profile_claims"]
+        ]
+        current.profile_claim_suggestions = list(conclusion["profile_claim_suggestions"])
         current.snapshot = {
             "posts": [post.model_dump(mode="json") for post in posts],
             "clues": conclusion["clues"],
             "conclusions": conclusion["conclusions"],
             "plan": results["plan"],
+            "profile_claims": conclusion["profile_claims"],
+            "profile_claim_suggestions": current.profile_claim_suggestions,
             "elapsed_ms": round((time.monotonic() - started) * 1000),
             "mock": current.token is None,
         }
@@ -646,5 +655,56 @@ async def rediagnose(body: SimulateRequest, request: Request) -> dict[str, Any]:
         "clues": [clue.model_dump(mode="json") for clue in clues],
         "conclusions": [asdict(c) for c in infer(clues, posts, gazetteer)],
         "plan": plan_json(clues, posts, gazetteer),
+        **_claims_without(current, gone),
         "mock": current.token is None,
     }
+
+
+def _claims_without(current: ThreadsSession, gone: set[str]) -> dict[str, Any]:
+    """仮除外した投稿を根拠から除いたプロフィール推定と、削除候補。
+
+    推定は Bluesky の GET /api/diagnosis と同じ規則（claims_after_deletion）で除く。
+    再診断の clues は除いた投稿の分を詰めて返すので、根拠の clue_index もその並びに直す。
+    残った推定の根拠は除いた投稿を含まない（claims_after_deletion がその経路を落とす）。
+    削除候補は、残った推定の根拠経路に出てくる投稿だけにする（画面の検証と同じ条件）。
+    """
+    claims = claims_after_deletion(current.profile_claims, gone)
+    still_evidence = {
+        evidence.post_id
+        for claim in claims
+        for path in claim.evidence_paths
+        for evidence in path.evidence
+    }
+    return {
+        "profile_claims": _renumbered_claims(claims, current.clues, gone),
+        "profile_claim_suggestions": [
+            post_id
+            for post_id in current.profile_claim_suggestions
+            if post_id not in gone and post_id in still_evidence
+        ],
+    }
+
+
+def _renumbered_claims(
+    claims: list[ProfileItem], clues: list[Clue], gone: set[str]
+) -> list[dict[str, Any]]:
+    kept = [i for i, clue in enumerate(clues) if clue.post_id not in gone]
+    renumber = {old: new for new, old in enumerate(kept)}
+
+    def ref(evidence: ProfileEvidence) -> ProfileEvidence:
+        if evidence.clue_index is None:
+            return evidence
+        return evidence.model_copy(update={"clue_index": renumber[evidence.clue_index]})
+
+    return [
+        claim.model_copy(
+            update={
+                "evidence": [ref(e) for e in claim.evidence],
+                "evidence_paths": [
+                    path.model_copy(update={"evidence": [ref(e) for e in path.evidence]})
+                    for path in claim.evidence_paths
+                ],
+            }
+        ).model_dump(mode="json")
+        for claim in claims
+    ]
