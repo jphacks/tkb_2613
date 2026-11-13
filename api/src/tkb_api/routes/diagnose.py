@@ -405,6 +405,60 @@ async def diagnose(
     # ここで診断を本当に始める。今日の回数はここで数える（混雑やモデル・Bluesky の不調で
     # 始められなかった分は数えない）
     lease.count()
+    try:
+        return await _start_stream(
+            settings,
+            session,
+            session_id,
+            store,
+            events,
+            fetch_profile_text,
+            extractor_factory,
+            gazetteer,
+            external_searcher,
+            public_web_lookup_consent,
+            lease,
+        )
+    except BaseException:
+        # 応答を返す前に失敗したら、枠を返す（返さないと DIAGNOSE_SLOT_TIMEOUT_SECONDS の間
+        # この人も、枠が埋まれば全員も、診断を始められなくなる）
+        lease.release()
+        raise
+
+
+async def _fetch_owner_profile_text(
+    settings: Settings, session: BlueskySession, fetch_profile_text: ProfileTextFetcher
+) -> str:
+    """本人のプロフィール文を取る。取れなくても診断は止めず、空のプロフィール文として続ける。"""
+    try:
+        if session.client is not None:
+            return await fetch_profile_text(session.client, session.did)
+        if session.auth_method == "oauth" and settings.auth_mode == "oauth":
+            profile_client = AsyncClient(base_url="https://public.api.bsky.app/xrpc")
+            try:
+                return await fetch_profile_text(profile_client, session.did)
+            finally:
+                await profile_client.request.close()
+    except Exception as e:
+        # プロフィール文は補助なので、どんな失敗でも診断を続ける。
+        # 例外の中身には DID などが入りうるので、種類だけを出す
+        logger.warning("プロフィール文を取得できず、空として続けます（%s）", type(e).__name__)
+    return ""
+
+
+async def _start_stream(
+    settings: Settings,
+    session: BlueskySession,
+    session_id: str,
+    store: SessionStore,
+    events: tuple[list[Post], AsyncIterator[PostExtraction], float],
+    fetch_profile_text: ProfileTextFetcher,
+    extractor_factory: ExtractorFactory,
+    gazetteer: Gazetteer,
+    external_searcher: ExternalProfileSearcher,
+    public_web_lookup_consent: bool,
+    lease: Lease,
+) -> StreamingResponse:
     store.set_diagnosis(session_id, None)
     posts, extractions, interval = events
 
@@ -425,19 +479,7 @@ async def diagnose(
             )
             external_lookup_status = ExternalLookupStatus.FIXTURE
     else:
-        try:
-            if session.client is not None:
-                owner_profile_text = await fetch_profile_text(session.client, session.did)
-            elif session.auth_method == "oauth" and settings.auth_mode == "oauth":
-                profile_client = AsyncClient(base_url="https://public.api.bsky.app/xrpc")
-                try:
-                    owner_profile_text = await fetch_profile_text(profile_client, session.did)
-                finally:
-                    await profile_client.request.close()
-        except bluesky.BlueskyUnavailableError:
-            raise HTTPException(
-                status.HTTP_502_BAD_GATEWAY, "Bluesky からプロフィールを取得できませんでした"
-            ) from None
+        owner_profile_text = await _fetch_owner_profile_text(settings, session, fetch_profile_text)
         if owner_profile_text:
             profile_extractor = _build_extractor(extractor_factory)
 
