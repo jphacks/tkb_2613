@@ -3,13 +3,15 @@
 import type { ReactNode } from "react";
 
 import { messages } from "@/lib/messages";
+import { postImageSrc } from "@/lib/post-image";
+import { pickFace, pickSpotlight, validNameConclusions, type RevealItem } from "@/lib/reveal";
 import { paced } from "@/lib/motion";
-import { identityName, pickFace, pickSpotlight, type RevealItem } from "@/lib/reveal";
 import { toPercentBox } from "@/lib/region";
 import { useLoadedSize } from "@/lib/useLoadedSize";
 import type { Clue } from "@/types/clue";
 import type { Conclusion } from "@/types/diagnose";
 import type { Post } from "@/types/post";
+import type { ProfileCandidate, ProfileCandidateSet } from "@/types/profile";
 
 import { IdentityCard } from "./IdentityCard";
 
@@ -30,14 +32,15 @@ function tilt(i: number): string {
 /** 写真全体に手がかりの位置を示す。 */
 function PhotoEvidence({ item, label }: { item: RevealItem; label: string }) {
   const { image, clue } = item;
-  const loaded = useLoadedSize(image && clue.region ? image.url : null);
+  const imageUrl = image ? postImageSrc(image) : null;
+  const loaded = useLoadedSize(image && clue.region ? imageUrl : null);
   if (!image || !clue.region || !loaded) return <TextEvidence item={item} label={label} />;
   return (
     <figure className="space-y-4">
       <p className="text-xs tracking-widest text-ink/60">{t.originalPhoto}</p>
       <div className="relative mx-auto w-full max-w-xl overflow-hidden bg-paper" style={{ aspectRatio: `${loaded.width} / ${loaded.height}` }}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={image.url} alt={t.photoAlt(label, clue.value)} referrerPolicy="no-referrer" className="absolute inset-0 size-full" />
+        <img src={postImageSrc(image)} alt={t.photoAlt(label, clue.value)} referrerPolicy="no-referrer" className="absolute inset-0 size-full" />
         <span aria-hidden="true" className="reveal-mark" style={toPercentBox(clue.region, loaded)} />
       </div>
       <figcaption>
@@ -75,8 +78,34 @@ interface RevealProps {
   posts: readonly Post[];
   clues: readonly Clue[];
   conclusions: readonly Conclusion[];
-  /** 身元カードのすぐ下に置くもの（消す投稿の要約）。推定が何もないときは、これだけを出す */
+  profileClaims?: readonly ProfileCandidateSet[];
+  excludedPostIds?: ReadonlySet<string>;
   children?: ReactNode;
+}
+
+function profileName(profileClaims: readonly ProfileCandidateSet[]): { candidate: ProfileCandidate | null; provenance: string[]; ambiguous: boolean } {
+  const fullNameSet = profileClaims.find((set) => set.attribute === "full_name");
+  const fullNameCandidates = fullNameSet?.candidates ?? [];
+  // An explicit full-name candidate takes priority over a shorter name, but an
+  // ambiguous full-name set never gets collapsed to rank #1.
+  const candidates = fullNameCandidates.length > 0
+    ? fullNameCandidates
+    : profileClaims.filter((set) => set.attribute === "given_name" || set.attribute === "nickname")
+      .flatMap((set) => set.candidates);
+  if (candidates.length !== 1) {
+    return { candidate: null, provenance: [], ambiguous: candidates.length > 1 };
+  }
+  const candidate = candidates[0];
+  const provenance = [...new Set(candidate.evidence_paths.map((path) => {
+    if (path.provenance === "direct_disclosure") return "自分で直接公開";
+    if (path.provenance === "combined_inference") {
+      return path.evidence.some((reference) => reference.source === "public_web")
+        ? "投稿と公開Webから推定"
+        : "投稿の組み合わせから推定";
+    }
+    return "根拠経路未分類";
+  }))];
+  return { candidate, provenance, ambiguous: false };
 }
 
 /**
@@ -84,12 +113,15 @@ interface RevealProps {
  * 推定できたことを大きく出し、続けて証拠を 1 枚ずつ机に投げ出すように並べる。
  * 動きを減らす設定の人には、動きなしで並べて見せる（globals.css）。
  */
-export function Reveal({ posts, clues, conclusions, children }: RevealProps) {
-  const items = pickSpotlight(posts, clues, conclusions);
-  if (items.length === 0 && conclusions.length === 0) return children ?? null;
-  const postCount = new Set(clues.map((c) => c.post_id)).size;
-
-  const identity = identityName(clues, conclusions);
+export function Reveal({ posts, clues, conclusions, profileClaims = [], excludedPostIds = new Set(), children }: RevealProps) {
+  const items = pickSpotlight(posts, clues, conclusions, excludedPostIds);
+  const identity = profileName(profileClaims);
+  if (items.length === 0 && conclusions.length === 0 && !identity.candidate && !identity.ambiguous) return children ?? null;
+  const visibleClues = clues.filter((clue) => !excludedPostIds.has(clue.post_id));
+  const postCount = new Set(visibleClues.map((c) => c.post_id)).size;
+  const otherConclusions = validNameConclusions(conclusions).filter(
+    (conclusion) => conclusion.attribute !== "full_name" && conclusion.attribute !== "given_name_or_nickname",
+  );
 
   return (
     <section aria-labelledby="reveal-heading" className="reveal space-y-10">
@@ -98,18 +130,20 @@ export function Reveal({ posts, clues, conclusions, children }: RevealProps) {
         <h2 id="reveal-heading" className="horror-title reveal-heading text-4xl leading-tight sm:text-8xl">
           {t.heading}
         </h2>
-        <p className="mt-3 text-ink/70">{t.count(clues.length, postCount)}</p>
+        <p className="mt-3 text-ink/70">{t.count(visibleClues.length, postCount)}</p>
       </div>
 
       <IdentityCard
-        name={identity.name}
+        name={identity.candidate?.value ?? null}
+        nameProvenance={identity.provenance}
+        nameAmbiguous={identity.ambiguous}
         face={pickFace(posts, clues)}
-        conclusions={identity.rest}
+        conclusions={otherConclusions}
         highlights={items
           .filter((item) => item.clue.type !== "name_text" && item.clue.type !== "face" && !item.used)
           .slice(0, MAX_HIGHLIGHTS)
           .map((item) => ({ label: messages.clues.typeLabels[item.clue.type], value: item.clue.value }))}
-        clueCount={clues.length}
+        clueCount={visibleClues.length}
       />
 
       {children}

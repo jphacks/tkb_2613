@@ -68,7 +68,7 @@ def test_covers_all_documented_types_and_sources() -> None:
         "station_sign", "rail_view", "reflection", "shop", "landmark", "address_text",
         "postal_code", "phone", "plate", "uniform", "face", "key", "code", "local_item", "notice",
         "name_text", "org_text", "handle_text", "place_text",
-        "age_text", "routine_text", "relation_text",
+        "age_text", "routine_text", "relation_text", "vehicle_model",
     }  # fmt: skip
     assert {s.value for s in ClueSource} == {"ocr", "vlm", "text", "meta", "alt", "profile_text"}
 

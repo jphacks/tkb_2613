@@ -176,4 +176,3 @@ Support and privacy contact: `komekami7110@gmail.com`
 - Meta Threads API changelog: <https://developers.facebook.com/docs/threads/changelog>
 - リポジトリ内の認証・配備メモ: [threads-browser.md](threads-browser.md)
 - API契約: [api-sse-contract.md](api-sse-contract.md)
-

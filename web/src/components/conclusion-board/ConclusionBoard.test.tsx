@@ -1,11 +1,10 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { messages } from "@/lib/messages";
 import type { Clue } from "@/types/clue";
 import type { Conclusion } from "@/types/diagnose";
-import type { Post } from "@/types/post";
-import type { ProfileItem } from "@/types/profile";
+import type { ProfileCandidateSet } from "@/types/profile";
 
 import { ConclusionBoard } from "./ConclusionBoard";
 
@@ -93,89 +92,101 @@ describe("ConclusionBoard", () => {
     expect(screen.queryByText(messages.board.empty)).not.toBeInTheDocument();
   });
 
-  it("marks only weak inferences, without showing the number", () => {
-    const conclusions: Conclusion[] = [
-      { ...CONCLUSION, confidence: 0.92 },
-      { ...CONCLUSION, attribute: "active_time", value: "平日の朝", confidence: 0.4 },
-      { ...CONCLUSION, attribute: "routine", value: "毎朝" },
-    ];
-    render(<ConclusionBoard clues={[CLUE]} conclusions={conclusions} />);
+  it("does not show legacy R8 name breakage among simulated unknown items", () => {
+    render(<ConclusionBoard clues={[]} conclusions={[]} unknown={["full_name", "station"]} />);
 
-    const cards = within(screen.getByRole("list", { name: messages.board.conclusionsLabel })).getAllByRole(
-      "listitem",
-    ).filter((item) => item.parentElement?.getAttribute("aria-label") === messages.board.conclusionsLabel);
-    // 強い推定には印を出さない
-    expect(cards[0]).not.toHaveTextContent(messages.board.confidence.weak);
-    expect(cards[1]).toHaveTextContent(messages.board.confidence.weak);
-    // 確からしさのない古い閲覧リンクにも出さない
-    expect(cards[2]).not.toHaveTextContent(messages.board.confidence.weak);
-    expect(screen.getAllByText(messages.board.confidence.weak)).toHaveLength(1);
-    expect(screen.queryByText(/0\.92|0\.4|92%|40%/)).not.toBeInTheDocument();
+    expect(screen.getByText(messages.board.attributeLabels.station)).toBeInTheDocument();
+    expect(screen.queryByText(messages.board.attributeLabels.full_name)).not.toBeInTheDocument();
   });
 
-  it("lets the user follow the reasoning chain only when the posts are given", () => {
-    const post = { post_id: CLUE.post_id, text: "新宿で乗り換え", created_at: "2026-10-20T08:31:00+09:00", images: [] };
-    const { rerender } = render(<ConclusionBoard clues={[CLUE]} conclusions={[CONCLUSION]} />);
-    expect(screen.queryByText(messages.board.chain.summary)).not.toBeInTheDocument();
-
-    rerender(<ConclusionBoard clues={[CLUE]} conclusions={[CONCLUSION]} posts={[post]} />);
-
-    expect(screen.getByText(messages.board.chain.summary)).toBeInTheDocument();
-    expect(screen.getByRole("list", { name: messages.board.chain.label })).toHaveTextContent("新宿で乗り換え");
-  });
-
-  it("shows cross-post estimates like the board: an estimate tag, a weak mark only when weak, and no percentage", () => {
-    const reference = { post_id: CLUE.post_id, clue_index: null, required: true, source: "post_text" as const, excerpt: "架空の記述" };
-    const weak: ProfileItem = { attribute: "residential_area", value: "架空の区", confidence: 0.65, status: "weak", evidence: [reference] };
-    const found: ProfileItem = { attribute: "school", value: "架空の学校", confidence: 0.9, status: "found", evidence: [reference] };
-    render(<ConclusionBoard clues={[CLUE]} conclusions={[CONCLUSION]} profileClaims={[weak, found]} />);
-
-    const section = screen.getByRole("region", { name: "投稿を横断したプロフィール推定" });
-    const [weakItem, foundItem] = within(section).getAllByRole("listitem");
-    expect(weakItem).toHaveTextContent(messages.board.confidence.weak);
-    expect(foundItem).not.toHaveTextContent(messages.board.confidence.weak);
-    expect(section).not.toHaveTextContent("%");
-  });
-
-  it("shows the citation of public open data under the estimate", () => {
-    const reference = { post_id: CLUE.post_id, clue_index: null, required: true, source: "post_text" as const, excerpt: "自宅近くの架空小学校" };
-    const cited = { post_id: null, clue_index: null, required: true, source: "open_data" as const, excerpt: "架空小学校は架空の区の指定避難所（出典：国土地理院。最新でない場合があります）" };
-    const claim: ProfileItem = {
-      attribute: "residential_area", value: "架空の区", confidence: 0.65, status: "weak",
-      evidence: [reference, cited, cited],
+  it("labels stale location as post-time information and exposes candidate counter-evidence", async () => {
+    const oldEvidence = { post_id: CLUE.post_id, clue_index: null, required: true, source: "post_text" as const, excerpt: "投稿時点の駅前" };
+    const counterEvidence = { ...oldEvidence, excerpt: "これは別の日の投稿だと書いてある" };
+    const assessment = {
+      minimal_scope: "bluesky" as const, offline_subtype: null, psychological_resistance: null, persona_context: null,
+      inference_ease: null, inference_ease_basis: null, harm_severity: null, harm_scenario: null,
+      harm_prerequisites: [], harm_status: "unknown" as const,
     };
-    render(<ConclusionBoard clues={[CLUE]} conclusions={[CONCLUSION]} profileClaims={[claim]} />);
+    const candidate = {
+      rank: 1, value: "架空駅前", confidence: 0.65, status: "weak" as const,
+      evidence: [oldEvidence], evidence_paths: [{ evidence: [oldEvidence, { ...oldEvidence, post_id: "at://did:plc:test/app.bsky.feed.post/other" }], confidence: 0.65, provenance: "combined_inference" as const }],
+      assessment, observed_at: new Date(Date.now() - 16 * 60_000).toISOString(), counter_evidence: [counterEvidence],
+    };
+    const locationSet: ProfileCandidateSet = {
+      attribute: "realtime_location", status: "candidate", candidates: [candidate], candidate_pool: [candidate],
+      reason: null, conflicting_evidence: [],
+    };
+    render(<ConclusionBoard clues={[]} conclusions={[]} profileClaims={[locationSet]} />);
 
-    const section = screen.getByRole("region", { name: "投稿を横断したプロフィール推定" });
-    const item = within(section).getByRole("listitem");
-    expect(within(item).getAllByText(/出典：国土地理院/)).toHaveLength(1);
-    expect(item).toHaveTextContent("最新でない場合があります");
+    expect(screen.getByText("投稿時点の位置候補 ・候補（正解とは限りません）")).toBeInTheDocument();
+    expect(screen.getByText(/投稿時点：/)).toBeInTheDocument();
+    expect(await screen.findByText(/15分経過。最新情報ではありません/)).toBeInTheDocument();
+    expect(screen.queryByText("リアルタイムの現在地")).not.toBeInTheDocument();
+    expect(screen.getByText("架空駅前")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("根拠と反対の根拠を確認"));
+    expect(screen.getByText(/これは別の日の投稿だと書いてある/)).toBeInTheDocument();
   });
 
-  const REFERENCE = { post_id: CLUE.post_id, clue_index: null, required: true, source: "post_text" as const, excerpt: "架空の記述" };
-
-  it("folds the per-path what-if comparison so the board stays short", () => {
-    const claim: ProfileItem = {
-      attribute: "residential_area", value: "架空の区", confidence: 0.65, status: "weak",
-      evidence: [REFERENCE],
-      evidence_paths: [{ evidence: [REFERENCE], confidence: 0.65 }],
+  it("shows only candidate attributes and keeps direct and combined provenance on one value", () => {
+    const firstPost = { post_id: CLUE.post_id, clue_index: null, required: true, source: "post_text" as const, excerpt: "私の勤務先は青空社です" };
+    const secondPost = { ...firstPost, post_id: "at://did:plc:test/app.bsky.feed.post/second", excerpt: "青空社の正式社名は株式会社青空" };
+    const assessment = {
+      minimal_scope: "bluesky" as const, offline_subtype: null, psychological_resistance: null, persona_context: null,
+      inference_ease: null, inference_ease_basis: null, harm_severity: null, harm_scenario: null,
+      harm_prerequisites: [], harm_status: "unknown" as const,
     };
-    const post: Post = { post_id: CLUE.post_id, text: "架空の投稿", created_at: "2026-10-20T08:31:00+09:00", images: [] };
-    render(<ConclusionBoard clues={[CLUE]} conclusions={[CONCLUSION]} profileClaims={[claim]} posts={[post]} />);
+    const candidate = {
+      rank: 1, value: "株式会社青空", confidence: 0.7, status: "weak" as const,
+      evidence: [firstPost, secondPost],
+      evidence_paths: [
+        { evidence: [firstPost, secondPost], confidence: 0.7, provenance: "direct_disclosure" as const },
+        { evidence: [firstPost, secondPost], confidence: 0.68, provenance: "combined_inference" as const },
+      ], assessment, observed_at: null, counter_evidence: [],
+    };
+    const candidateSet: ProfileCandidateSet = {
+      attribute: "employer_name", status: "candidate", candidates: [candidate], candidate_pool: [candidate], reason: null, conflicting_evidence: [],
+    };
+    const unknownSet: ProfileCandidateSet = {
+      attribute: "school", status: "unknown", candidates: [], candidate_pool: [], reason: "no_grounded_rule", conflicting_evidence: [],
+    };
+    render(<ConclusionBoard clues={[]} conclusions={[]} profileClaims={[candidateSet, unknownSet]} />);
 
-    const summary = screen.getByText(messages.board.whatIfSummary);
-    const details = summary.closest("details");
-    expect(details).not.toBeNull();
-    expect(details).not.toHaveAttribute("open");
-    expect(within(details!).getByText("投稿を仮に外して比べる")).toBeInTheDocument();
+    expect(screen.getAllByText("自分で直接公開")).toHaveLength(2);
+    expect(screen.getAllByText("投稿の組み合わせから推定")).toHaveLength(2);
+    expect(screen.getAllByText("株式会社青空")).toHaveLength(1);
+    expect(screen.queryByText("通学先（大学・キャンパス・学校）")).not.toBeInTheDocument();
   });
 
-  it("does not show an empty fold when there are no evidence paths to compare", () => {
-    const claim: ProfileItem = {
-      attribute: "residential_area", value: "架空の区", confidence: 0.65, status: "weak", evidence: [REFERENCE],
+  it("shows names only in provenance-labelled profile candidate cards, not legacy R8 conclusions", () => {
+    const evidence = {
+      post_id: CLUE.post_id, clue_index: 0, required: true, source: "post_text" as const, excerpt: "内藤大貴",
     };
-    render(<ConclusionBoard clues={[CLUE]} conclusions={[CONCLUSION]} profileClaims={[claim]} />);
+    const assessment = {
+      minimal_scope: "bluesky" as const, offline_subtype: null, psychological_resistance: null, persona_context: null,
+      inference_ease: null, inference_ease_basis: null, harm_severity: null, harm_scenario: null,
+      harm_prerequisites: [], harm_status: "unknown" as const,
+    };
+    const candidate = {
+      rank: 1, value: "内藤大貴", confidence: 0.86, status: "found" as const,
+      evidence: [evidence],
+      evidence_paths: [{ evidence: [evidence], confidence: 0.86, provenance: "direct_disclosure" as const }],
+      assessment, observed_at: null, counter_evidence: [],
+    };
+    const nameSet: ProfileCandidateSet = {
+      attribute: "full_name", status: "candidate", candidates: [candidate], candidate_pool: [candidate],
+      reason: null, conflicting_evidence: [],
+    };
+    render(<ConclusionBoard
+      clues={[{ ...CLUE, type: "name_text", value: "内藤大貴" }]}
+      conclusions={[{ rule: "R8", attribute: "full_name", value: "内藤大貴", clue_indices: [0], note: "宛名・名札などの姓と名" }]}
+      profileClaims={[nameSet]}
+    />);
 
-    expect(screen.queryByText(messages.board.whatIfSummary)).not.toBeInTheDocument();
+    expect(screen.getAllByText("内藤大貴")).toHaveLength(1);
+    expect(screen.getAllByText("自分で直接公開")).toHaveLength(2);
+    expect(screen.getByRole("heading", { name: "プロフィール候補" })).toBeInTheDocument();
+    expect(screen.queryByText("宛名・名札などの姓と名")).not.toBeInTheDocument();
+    expect(within(screen.getByRole("list", { name: messages.board.conclusionsLabel })).queryAllByRole("listitem")).toHaveLength(0);
   });
 });

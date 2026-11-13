@@ -8,7 +8,7 @@ import { messages } from "@/lib/messages";
 import type { Clue } from "@/types/clue";
 import type { DiagnoseEvent } from "@/types/diagnose";
 import type { Post } from "@/types/post";
-import type { ProfileItem } from "@/types/profile";
+import type { ProfileCandidateSet } from "@/types/profile";
 
 import { DiagnosePanel } from "./DiagnosePanel";
 
@@ -431,10 +431,17 @@ describe("DiagnosePanel", () => {
     const other = post(3, "文京区の公園");
     const gym = clue(gymPost.post_id, "毎週火曜のジム");
     const ref = (postId: string) => ({ post_id: postId, clue_index: null, required: true, source: "post_text" as const, excerpt: "架空" });
-    const claim: ProfileItem = {
-      attribute: "residential_area", value: "架空の区", confidence: 0.85, status: "found",
+    const candidate = {
+      rank: 1, value: "架空の区", confidence: 0.85, status: "found" as const,
       evidence: [ref(gymPost.post_id), ref(other.post_id)],
-      evidence_paths: [{ evidence: [ref(gymPost.post_id), ref(other.post_id)], confidence: 0.85 }],
+      evidence_paths: [{ evidence: [ref(gymPost.post_id), ref(other.post_id)], confidence: 0.85, provenance: "combined_inference" as const }],
+      assessment: { minimal_scope: "bluesky" as const, offline_subtype: null, psychological_resistance: null, persona_context: null,
+        inference_ease: null, inference_ease_basis: null, harm_severity: null, harm_scenario: null, harm_prerequisites: [], harm_status: "unknown" as const },
+      observed_at: null, counter_evidence: [],
+    };
+    const claim: ProfileCandidateSet = {
+      attribute: "residential_area", status: "candidate", candidates: [candidate], candidate_pool: [candidate],
+      reason: null, conflicting_evidence: [],
     };
     vi.mocked(diagnose).mockImplementation(async function* () {
       yield { event: "post", post: gymPost };
@@ -511,7 +518,7 @@ describe("DiagnosePanel public web lookup consent", () => {
     // 利用者は払わないこと、検索語の保持期間の注意の両方を出す
     expect(d.publicWebConsentNote).toContain("料金が請求されることはなく");
     expect(d.publicWebConsentNote).toContain("最大90日保持");
-    expect(screen.getByText(d.publicWebConsentNote)).toBeInTheDocument();
+    expect(screen.getByText(/Braveへ送ります。検索語は最大90日保持され/)).toBeInTheDocument();
 
     fireEvent.click(checkbox);
     fireEvent.click(start);
