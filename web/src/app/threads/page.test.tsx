@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { THREADS_LANG_KEY } from "@/lib/threads-i18n";
 
+import profileFixture from "./fixtures/threads-profile.json";
 import ThreadsPage from "./page";
 
 function json(body: unknown, status = 200): Response {
@@ -234,5 +235,71 @@ describe("English display survives OAuth and later visits", () => {
     render(<ThreadsPage />);
 
     expect(await screen.findByRole("button", { name: "Threadsでログイン" })).toBeInTheDocument();
+  });
+});
+
+/**
+ * Threads の診断結果のプロフィール推定。fixtures/threads-profile.json は、架空投稿5件と林町小学校の学区1行で
+ * api（POST /api/threads/diagnose・simulate・rediagnose）が返した応答をそのまま保存したもの
+ */
+describe("profile claims on the Threads diagnosis", () => {
+  function stubDiagnosedApi() {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path.endsWith("/config")) return json({ mock_enabled: true, gpu_demo_enabled: false, live_enabled: false, max_posts: 30 });
+      if (path.endsWith("/session")) return json({ username: "架空のThreadsアカウント", mock: true });
+      if (path.endsWith("/diagnosis")) return json(profileFixture.snapshot);
+      if (path.endsWith("/simulate")) return json(profileFixture.simulate);
+      if (path.endsWith("/rediagnose")) return json(profileFixture.rediagnose);
+      throw new Error(`unexpected fetch: ${path} ${init?.method ?? "GET"}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  function profileSection(): HTMLElement {
+    return screen.getByRole("heading", { name: "投稿を横断したプロフィール推定" }).closest("section") as HTMLElement;
+  }
+
+  function excludeSchoolPost() {
+    const box = screen.getAllByRole("checkbox", { name: "仮除外する" })
+      .find((checkbox) => checkbox.closest("li")?.textContent?.includes("あおぞらフェスタは林町小学校の秋の行事"));
+    if (!box) throw new Error("the school post is not listed");
+    fireEvent.click(box);
+  }
+
+  it("shows the child's school and the residential area inferred from text-only posts", async () => {
+    stubDiagnosedApi();
+    render(<ThreadsPage />);
+
+    expect(await screen.findByRole("heading", { name: "投稿を横断したプロフィール推定" })).toBeInTheDocument();
+    expect(within(profileSection()).getByText("林町小学校")).toBeInTheDocument();
+    expect(within(profileSection()).getByText("文京区")).toBeInTheDocument();
+  });
+
+  it("drops the claims built on a post while that post is tentatively excluded", async () => {
+    stubDiagnosedApi();
+    render(<ThreadsPage />);
+    await screen.findByRole("heading", { name: "投稿を横断したプロフィール推定" });
+
+    excludeSchoolPost();
+    fireEvent.click(screen.getByRole("button", { name: "仮除外を試す" }));
+
+    await waitFor(() => expect(screen.queryByRole("heading", { name: "投稿を横断したプロフィール推定" })).not.toBeInTheDocument());
+    expect(screen.queryByText("文京区")).not.toBeInTheDocument();
+  });
+
+  it("uses the claims returned by the rediagnosis and restores them for all posts", async () => {
+    stubDiagnosedApi();
+    render(<ThreadsPage />);
+    await screen.findByRole("heading", { name: "投稿を横断したプロフィール推定" });
+
+    excludeSchoolPost();
+    fireEvent.click(screen.getByRole("button", { name: "選択した投稿を除いて再診断" }));
+    await waitFor(() => expect(screen.queryByRole("heading", { name: "投稿を横断したプロフィール推定" })).not.toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "全投稿の結果に戻す" }));
+    expect(await screen.findByRole("heading", { name: "投稿を横断したプロフィール推定" })).toBeInTheDocument();
+    expect(within(profileSection()).getByText("林町小学校")).toBeInTheDocument();
   });
 });
