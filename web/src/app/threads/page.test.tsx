@@ -309,7 +309,7 @@ describe("profile claims on the Threads diagnosis", () => {
 
     const reveal = (await screen.findByRole("heading", { name: "ぜんぶ、みえてる" })).closest("section") as HTMLElement;
     // 身元カードに推定、証拠のカードに本文の手がかりが出る
-    expect(within(reveal).getByRole("article", { name: "推定した身元" })).toBeInTheDocument();
+    expect(within(reveal).getByRole("article", { name: "プロフィールと手がかり" })).toBeInTheDocument();
     expect(within(reveal).getByText("毎週火曜（毎週火曜はジム）")).toBeInTheDocument();
     expect(within(reveal).getByRole("list", { name: "見つかった証拠" })).toBeInTheDocument();
 

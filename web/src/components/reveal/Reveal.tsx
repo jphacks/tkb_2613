@@ -6,7 +6,6 @@ import { messages } from "@/lib/messages";
 import { postImageSrc } from "@/lib/post-image";
 import { pickFace, pickSpotlight, validNameConclusions, type RevealItem } from "@/lib/reveal";
 import { paced } from "@/lib/motion";
-import { identityName, pickFace, pickSpotlight, type RevealItem } from "@/lib/reveal";
 import { toPercentBox } from "@/lib/region";
 import { useLoadedSize } from "@/lib/useLoadedSize";
 import type { Clue } from "@/types/clue";
