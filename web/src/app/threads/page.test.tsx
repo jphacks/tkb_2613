@@ -303,3 +303,35 @@ describe("profile claims on the Threads diagnosis", () => {
     expect(within(profileSection()).getByText("林町小学校")).toBeInTheDocument();
   });
 });
+
+describe("posts that could not be read", () => {
+  it("tells how many posts were left out of the diagnosis", async () => {
+    const snapshot = { ...profileFixture.snapshot, post_errors: [{ post_id: "threads:9006", error: "この投稿は読み取れませんでした" }] };
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path.endsWith("/config")) return json({ mock_enabled: true, gpu_demo_enabled: true, live_enabled: false, max_posts: 30 });
+      if (path.endsWith("/session")) return json({ username: "架空のThreadsアカウント", mock: true });
+      if (path.endsWith("/diagnosis")) return json(snapshot);
+      throw new Error(`unexpected fetch: ${path}`);
+    }));
+    render(<ThreadsPage />);
+
+    expect(await screen.findByText("1 件の投稿は読み取れなかったため、診断に含めていません。")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "投稿を横断したプロフィール推定" })).toBeInTheDocument();
+  });
+
+  it("rejects a malformed post_errors list", async () => {
+    const snapshot = { ...profileFixture.snapshot, post_errors: [{ post_id: 1 }] };
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path.endsWith("/config")) return json({ mock_enabled: true, gpu_demo_enabled: false, live_enabled: false, max_posts: 30 });
+      if (path.endsWith("/session")) return json({ username: "架空のThreadsアカウント", mock: true });
+      if (path.endsWith("/diagnosis")) return json(snapshot);
+      throw new Error(`unexpected fetch: ${path}`);
+    }));
+    render(<ThreadsPage />);
+
+    expect(await screen.findByText("架空のThreadsアカウント")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "投稿を横断したプロフィール推定" })).not.toBeInTheDocument();
+  });
+});

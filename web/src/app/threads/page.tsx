@@ -12,7 +12,13 @@ import { isDiagnosisSnapshot, isSimulation, type DiagnosisSnapshot, type Simulat
 import { isPost, type Post } from "@/types/post";
 import { profileClaimsAfterDeletion } from "@/types/profile";
 
-type ThreadsDiagnosis = DiagnosisSnapshot & { readonly elapsed_ms?: number; readonly mock?: boolean };
+type PostError = { readonly post_id: string; readonly error: string };
+type ThreadsDiagnosis = DiagnosisSnapshot & {
+  readonly elapsed_ms?: number;
+  readonly mock?: boolean;
+  /** 読み取りに失敗して診断から外した投稿（api の post_errors）。再診断の応答にはない */
+  readonly post_errors?: readonly PostError[];
+};
 type ThreadsConfig = { mock_enabled: boolean; gpu_demo_enabled: boolean; live_enabled: boolean; max_posts: number };
 type ThreadsSession = { username: string; mock: boolean };
 
@@ -68,8 +74,15 @@ async function call(path: string, method: "GET" | "POST" | "DELETE" = "GET", bod
   return response.json() as Promise<unknown>;
 }
 
+function isPostErrors(value: unknown): value is readonly PostError[] {
+  return value === undefined || (Array.isArray(value) && value.every((item) =>
+    isRecord(item) && typeof item.post_id === "string" && typeof item.error === "string"));
+}
+
 function requireDiagnosis(value: unknown): ThreadsDiagnosis {
-  if (!isDiagnosisSnapshot(value)) throw new ThreadsError("diagnosisUnreadable");
+  if (!isDiagnosisSnapshot(value) || !isPostErrors((value as { post_errors?: unknown }).post_errors)) {
+    throw new ThreadsError("diagnosisUnreadable");
+  }
   return value as ThreadsDiagnosis;
 }
 
@@ -265,6 +278,7 @@ export default function ThreadsPage() {
           <p className="font-bold">{view === original ? t.resultFull : t.resultRe}</p>
           <p className="text-sm text-ink/70">{t.resultCount(current.posts.length, current.clues.length, current.conclusions.length)}
             {typeof original.elapsed_ms === "number" && view === original ? t.elapsed(original.elapsed_ms) : ""}</p>
+          {(original.post_errors?.length ?? 0) > 0 && <p className="mt-1 text-sm">{t.postErrors(original.post_errors?.length ?? 0)}</p>}
         </div>
         <ConclusionBoard key={view === original ? "full" : "rediagnosed"} clues={current.clues}
           conclusions={current.conclusions} unknown={preview?.broken} posts={current.posts}
