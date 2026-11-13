@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -56,6 +56,30 @@ describe("HomeScreen", () => {
     );
 
     expect(await screen.findByRole("link", { name: messages.demo.entry })).toHaveAttribute("href", "/demo");
+  });
+
+  it("lists the supported networks next to the demo, linking Threads and X to their pages", async () => {
+    vi.mocked(getSession).mockResolvedValue(null);
+    render(
+      <SessionProvider>
+        <HomeScreen />
+      </SessionProvider>,
+    );
+
+    const s = messages.home.sns;
+    const list = await screen.findByRole("list", { name: s.heading });
+    const items = within(list).getAllByRole("listitem");
+    expect(items.map((item) => item.textContent)).toEqual([
+      s.bluesky,
+      `${s.threads}${s.threadsNote}`,
+      `${s.x}${s.xNote}`,
+    ]);
+    expect(s.threadsNote).toContain("テスター限定");
+    expect(s.xNote).toContain("合成デモ・X の承認待ち");
+    // Bluesky はこのページでログインするのでリンクにしない
+    expect(within(items[0]).queryByRole("link")).not.toBeInTheDocument();
+    expect(within(list).getByRole("link", { name: s.threads })).toHaveAttribute("href", "/threads");
+    expect(within(list).getByRole("link", { name: s.x })).toHaveAttribute("href", "/x");
   });
 
   it("shows the draft check only after the diagnosis result is revealed", async () => {
