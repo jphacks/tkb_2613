@@ -49,6 +49,7 @@ files = [
   "engine/tests",
   "data-prep/src",
   "data-prep/tests",
+  "infra/prod_smoke.py",
   "infra/tests",
 ]
 plugins = ["pydantic.mypy"]
