@@ -1,16 +1,9 @@
 /**
- * 診断（POST /api/diagnose）で SSE として届くイベント。TypeScript 側の正。
- * api/src/tkb_api/routes/diagnose.py と同時に変更すること。
+ * TypeScript representation of the Bluesky /api/diagnose SSE contract.
+ * Keep synchronized with api/src/tkb_api/routes/diagnose.py.
  *
- *   event: post         data: {"post": 投稿}                             投稿を 1 件取得するたびに
- *   event: clues        data: {"post_id", "clues": [手がかり], "error"}  手がかりの取り出しが終わった順
- *   event: conclusions  data: {"clues": [全手がかり], "conclusions": [推理],
- *                             "profile_claim_suggestions": [最大3件の投稿ID]} 最後に 1 回
- *   event: plan         data: {"delete", "broken", "after", "posts"}      危ない投稿。最後に 1 回
- *   event: done         data: {"posts_seen": 件数}                       最後に 1 回
- *
- * 推理の clue_indices は、同じ conclusions イベントの clues の並びでの番号。
- * plan の after（消したあとの結論）の clue_indices も、conclusions イベントの clues での番号。
+ * The legacy `conclusions` event name remains for transport compatibility;
+ * its data contains profile_claims and never exposes internal Conclusion values.
  */
 
 import { type Clue, isClue } from "./clue";
@@ -123,15 +116,11 @@ export interface PhotoPlaceResult {
 export interface DiagnosisSnapshot {
   readonly posts: readonly Post[];
   readonly clues: readonly Clue[];
-  /**
-   * 診断のあとに Bluesky から消した投稿の ID（GET /api/diagnosis だけが返す）。posts と clues は診断時のまま
-   * （番号を変えない）で、conclusions と plan はここの投稿を除いて計算してある
-   */
+  /** Deleted post IDs are present on the owner restore snapshot only. */
   readonly deleted?: readonly string[];
-  readonly conclusions: readonly Conclusion[];
   readonly photo_place_results?: readonly PhotoPlaceResult[];
   readonly plan: Simulation & { readonly posts: readonly RiskyPost[] };
-  readonly profile_claims?: readonly ProfileCandidateSet[];
+  readonly profile_claims: readonly ProfileCandidateSet[];
   readonly profile_relations?: readonly ProfileRelation[];
   readonly profile_claim_suggestions?: readonly string[];
   readonly web_facts?: readonly WebFact[];
@@ -140,6 +129,25 @@ export interface DiagnosisSnapshot {
   readonly external_profile_results?: readonly ExternalProfileResult[];
   readonly owner_profile_text?: string;
   readonly self_report_clues?: readonly Clue[];
+}
+
+/** Existing links created before candidate sets were stored remain readable until expiry. */
+export interface LegacySharedSnapshot {
+  readonly posts: readonly Post[];
+  readonly clues: readonly Clue[];
+  readonly conclusions: readonly Conclusion[];
+  readonly plan: Simulation & { readonly posts: readonly RiskyPost[] };
+}
+
+export type SharedResultSnapshot = DiagnosisSnapshot | LegacySharedSnapshot;
+
+export function isLegacySharedSnapshot(value: unknown): value is LegacySharedSnapshot {
+  if (!isRecord(value) || Object.hasOwn(value, "profile_claims") ||
+    !Array.isArray(value.posts) || !value.posts.every(isPost) || !isClueList(value.clues)) return false;
+  const clueCount = value.clues.length;
+  return Array.isArray(value.conclusions) && value.conclusions.every((item) => isConclusion(item, clueCount)) &&
+    isRecord(value.plan) && isSimulation(value.plan, clueCount) && Array.isArray(value.plan.posts) &&
+    value.plan.posts.every(isRiskyPost);
 }
 
 export type DiagnoseEvent =
@@ -154,9 +162,8 @@ export type DiagnoseEvent =
   | {
       readonly event: "conclusions";
       readonly clues: readonly Clue[];
-      readonly conclusions: readonly Conclusion[];
       readonly photo_place_results?: readonly PhotoPlaceResult[];
-      readonly profile_claims?: readonly ProfileCandidateSet[];
+      readonly profile_claims: readonly ProfileCandidateSet[];
       readonly profile_claims_error?: boolean;
       readonly profile_relations?: readonly ProfileRelation[];
       /** Up to three diagnosis-order-stable post IDs selected by exact claim-path removal. */
@@ -331,16 +338,17 @@ export function isDiagnosisSnapshot(value: unknown): value is DiagnosisSnapshot 
     const postIds = new Set(value.posts.map((post) => post.post_id));
     if (!isStringList(value.deleted) || !value.deleted.every((id) => postIds.has(id))) return false;
   }
-  if (!Array.isArray(value.conclusions) || !value.conclusions.every((c) => isConclusion(c, clueCount))) return false;
+  if (Object.hasOwn(value, "conclusions") &&
+    (!Array.isArray(value.conclusions) || !value.conclusions.every((c) => isConclusion(c, clueCount)))) return false;
+  if (!isProfileCandidateSetList(value.profile_claims)) return false;
   const plan = value.plan;
   if (!isSimulation(plan, clueCount) || !isRecord(plan) || !Array.isArray(plan.posts) || !plan.posts.every(isRiskyPost)) return false;
   let conclusionsEvent: DiagnoseEvent | null;
   try {
     conclusionsEvent = toDiagnoseEvent("conclusions", JSON.stringify({
       clues: value.clues,
-      conclusions: value.conclusions,
       ...(Object.hasOwn(value, "photo_place_results") ? { photo_place_results: value.photo_place_results } : {}),
-      ...(Object.hasOwn(value, "profile_claims") ? { profile_claims: value.profile_claims } : {}),
+      profile_claims: value.profile_claims,
       ...(Object.hasOwn(value, "profile_relations") ? { profile_relations: value.profile_relations } : {}),
       ...(Object.hasOwn(value, "profile_claim_suggestions") ? { profile_claim_suggestions: value.profile_claim_suggestions } : {}),
       ...(Object.hasOwn(value, "web_facts") ? { web_facts: value.web_facts } : {}),
@@ -386,7 +394,6 @@ export function toDiagnoseEvent(
   }
   if (event === "conclusions" && isRecord(value) && isClueList(value.clues)) {
     const clueCount = value.clues.length;
-    const { conclusions } = value;
     const profileClaims = value.profile_claims ?? [];
     const profileRelations = value.profile_relations ?? [];
     const hasProfileRelations = Object.hasOwn(value, "profile_relations");
@@ -428,7 +435,7 @@ export function toDiagnoseEvent(
         )),
       )));
     if (
-      Array.isArray(conclusions) && conclusions.every((c) => isConclusion(c, clueCount)) &&
+      hasProfileClaims &&
       (!hasPhotoPlaceResults || isPhotoPlaceResultList(photoPlaceResults, value.clues)) &&
       typeof profileText === "string" &&
       (!hasProfileRelations || isProfileRelationList(profileRelations)) &&
@@ -443,9 +450,8 @@ export function toDiagnoseEvent(
       return {
         event,
         clues: value.clues,
-        conclusions: conclusions as Conclusion[],
         ...(hasPhotoPlaceResults ? { photo_place_results: photoPlaceResults as readonly PhotoPlaceResult[] } : {}),
-        ...(hasProfileClaims ? { profile_claims: safeProfileClaims } : {}),
+        profile_claims: safeProfileClaims,
         ...(profileClaimsError ? { profile_claims_error: true } : {}),
         ...(hasProfileRelations ? { profile_relations: profileRelations as readonly ProfileRelation[] } : {}),
         ...(Object.hasOwn(value, "profile_claim_suggestions") ? { profile_claim_suggestions: profileClaimsError ? [] : profileClaimSuggestions } : {}),

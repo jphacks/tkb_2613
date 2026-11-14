@@ -10,7 +10,7 @@ import { Reveal } from "@/components/reveal/Reveal";
 import { THREADS_TEXT, ThreadsError, type ThreadsErrorKey, type ThreadsLang } from "@/lib/threads-i18n";
 import { checkThreadsPublicText } from "@/lib/threads-public-check";
 import { useThreadsLang } from "@/lib/useThreadsLang";
-import { isDiagnosisSnapshot, isSimulation, type DiagnosisSnapshot, type Simulation } from "@/types/diagnose";
+import { isDiagnosisSnapshot, isSimulation, type Conclusion, type DiagnosisSnapshot, type Simulation } from "@/types/diagnose";
 import { isPost, type Post } from "@/types/post";
 import {
   PROFILE_DIAGNOSED_ATTRIBUTES,
@@ -25,6 +25,8 @@ import {
 
 type PostError = { readonly post_id: string; readonly error: string };
 type ThreadsDiagnosis = DiagnosisSnapshot & {
+  /** Thread compatibility still returns its own legacy inference list. */
+  readonly conclusions: readonly Conclusion[];
   readonly elapsed_ms?: number;
   readonly mock?: boolean;
   /** 読み取りに失敗して診断から外した投稿（api の post_errors）。再診断の応答にはない */
@@ -90,6 +92,13 @@ function isPostErrors(value: unknown): value is readonly PostError[] {
     isRecord(item) && typeof item.post_id === "string" && typeof item.error === "string"));
 }
 
+function isLegacyConclusions(value: unknown): value is readonly Conclusion[] {
+  return Array.isArray(value) && value.every((item) => isRecord(item) &&
+    typeof item.rule === "string" && typeof item.attribute === "string" &&
+    typeof item.value === "string" && typeof item.note === "string" &&
+    Array.isArray(item.clue_indices) && item.clue_indices.every((index) => Number.isInteger(index) && index >= 0));
+}
+
 const EMPTY_ASSESSMENT: ClaimAssessment = {
   minimal_scope: "bluesky", offline_subtype: null, psychological_resistance: null,
   persona_context: null, inference_ease: null, inference_ease_basis: null,
@@ -139,16 +148,16 @@ function threadsCandidateSets(raw: unknown, posts: readonly Post[]): readonly Pr
 }
 
 function requireDiagnosis(value: unknown): ThreadsDiagnosis {
-  if (!isRecord(value) || !isPostErrors(value.post_errors)) {
+  if (!isRecord(value) || !isPostErrors(value.post_errors) || !isLegacyConclusions(value.conclusions)) {
     throw new ThreadsError("diagnosisUnreadable");
   }
   if (isDiagnosisSnapshot(value) && (value.profile_claims === undefined ||
-    isProfileCandidateSetList(value.profile_claims))) return value as ThreadsDiagnosis;
+    isProfileCandidateSetList(value.profile_claims))) return value as unknown as ThreadsDiagnosis;
   const profileClaims = threadsCandidateSets(value.profile_claims, Array.isArray(value.posts)
     ? value.posts.filter(isPost) : []);
   const adapted = profileClaims === null ? value : { ...value, profile_claims: profileClaims };
   if (!isDiagnosisSnapshot(adapted)) throw new ThreadsError("diagnosisUnreadable");
-  return adapted as ThreadsDiagnosis;
+  return adapted as unknown as ThreadsDiagnosis;
 }
 
 export default function ThreadsPage() {

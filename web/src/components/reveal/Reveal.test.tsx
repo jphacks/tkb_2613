@@ -197,6 +197,22 @@ describe("Reveal", () => {
     expect(within(card).queryByText(messages.identity.nameUnknown)).not.toBeInTheDocument();
   });
 
+  it("warns when a profile name candidate comes from a boarding pass", () => {
+    const codeClue: Clue = { ...PHOTO_CLUE, type: "code", value: "PDF417: M1MASKED", source: "ocr" };
+    const set = nameCandidateSet("full_name", ["KAKURE HARUKI"]);
+    const evidence = [{ post_id: POST.post_id, clue_index: 0, required: true, source: "clue" as const }];
+    const candidate = set.candidates[0];
+    const boardingCandidate = {
+      ...candidate,
+      evidence,
+      evidence_paths: [{ evidence, confidence: candidate.confidence, provenance: "combined_inference" as const }],
+    };
+    render(<Reveal posts={[POST]} clues={[codeClue]} conclusions={[]} profileClaims={[{
+      ...set, candidates: [boardingCandidate], candidate_pool: [boardingCandidate],
+    }]} />);
+    expect(screen.getByRole("note")).toHaveTextContent("搭乗券の旅客名です。投稿者本人とは確認できません。");
+  });
+
   it("does not promote rank one when multiple profile name candidates exist", () => {
     render(<Reveal posts={[POST]} clues={[]} conclusions={[]} profileClaims={[nameCandidateSet("full_name", ["内藤大貴", "佐藤はるき"])]} />);
     const card = screen.getByRole("article", { name: messages.identity.label });

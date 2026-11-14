@@ -48,7 +48,6 @@ const DEMO: DemoDiagnosis = {
   clues: [
     { post_id: GYM, image_index: null, type: "routine_text", value: "毎週火曜はジム", region: null, confidence: 0.9, source: "text" },
   ],
-  conclusions: [],
   profile_claims: demoProfileClaims("毎週火曜 20時ごろ"),
   profile_relations: [],
   profile_claim_suggestions: [GYM],

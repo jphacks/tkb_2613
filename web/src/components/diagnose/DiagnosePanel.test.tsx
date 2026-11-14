@@ -121,7 +121,6 @@ describe("DiagnosePanel", () => {
     vi.mocked(getSession).mockResolvedValue(ALICE);
     vi.mocked(getDiagnosis).mockResolvedValue({
       posts: [savedPost], clues: [savedClue],
-      conclusions: [],
       profile_claims: claims,
       plan: { delete: [savedPost.post_id], broken: ["routine"], after: profileClaimsWith(), posts: [{ post_id: savedPost.post_id, broken: ["routine"] }] },
     });
@@ -142,7 +141,6 @@ describe("DiagnosePanel", () => {
     vi.mocked(getSession).mockResolvedValue(ALICE);
     vi.mocked(getDiagnosis).mockResolvedValue({
       posts: [savedPost], clues: [clue(savedPost.post_id, "毎週火曜はジム")],
-      conclusions: [],
       profile_claims: claims,
       plan: { delete: [savedPost.post_id], broken: ["routine"], after: profileClaimsWith(), posts: [{ post_id: savedPost.post_id, broken: ["routine"] }] },
     });
@@ -171,7 +169,6 @@ describe("DiagnosePanel", () => {
       posts: [gone, kept],
       clues: [clue(gone.post_id, "毎週火曜はジム"), clue(kept.post_id, "夜勤明け")],
       deleted: [gone.post_id],
-      conclusions: [],
       profile_claims: claims,
       // api は消した投稿を候補から除いて返す。画面でも念のため外す
       plan: {
@@ -341,7 +338,6 @@ describe("DiagnosePanel", () => {
       {
         event: "conclusions",
         clues: [gym],
-        conclusions: [],
         profile_claims: profileClaimsWith({
           routine: {
             value: "毎週火曜 20時ごろに出かけている",
@@ -379,7 +375,7 @@ describe("DiagnosePanel", () => {
   it("offers a quiet re-diagnose button after the result that warns it uses one of today's diagnoses", async () => {
     vi.mocked(diagnose).mockImplementation(async function* () {
       yield { event: "post", post: post(1, "夜勤明け。電車混んでる") };
-      yield { event: "conclusions", clues: [], conclusions: [] };
+      yield { event: "conclusions", clues: [], profile_claims: profileClaimsWith() };
       yield { event: "done", posts_seen: 1 };
     });
     fireEvent.click(await renderLoggedIn());
@@ -398,7 +394,7 @@ describe("DiagnosePanel", () => {
   it("returns to the top after the result replaces the loading screen", async () => {
     const scroll = vi.spyOn(window, "scrollTo").mockImplementation(() => {});
     vi.mocked(diagnose).mockImplementation(async function* () {
-      yield { event: "conclusions", clues: [clue(post(1, "本文").post_id, "本文")], conclusions: [] };
+      yield { event: "conclusions", clues: [clue(post(1, "本文").post_id, "本文")], profile_claims: profileClaimsWith() };
       yield { event: "done", posts_seen: 1 };
     });
 
@@ -410,7 +406,7 @@ describe("DiagnosePanel", () => {
 
   it("says when nothing could be inferred", async () => {
     vi.mocked(diagnose).mockImplementation(async function* () {
-      yield { event: "conclusions", clues: [], conclusions: [] };
+      yield { event: "conclusions", clues: [], profile_claims: profileClaimsWith() };
       yield { event: "done", posts_seen: 0 };
     });
 
@@ -434,7 +430,6 @@ describe("DiagnosePanel", () => {
       yield {
         event: "conclusions",
         clues: [gym],
-        conclusions: [],
         profile_claims: claims,
       };
       yield {
@@ -480,7 +475,6 @@ describe("DiagnosePanel", () => {
       yield {
         event: "conclusions",
         clues: [gym],
-        conclusions: [],
         profile_claims: claims,
       };
       yield {
@@ -516,7 +510,6 @@ describe("DiagnosePanel", () => {
       yield {
         event: "conclusions",
         clues: [gym],
-        conclusions: [],
         profile_claims: [],
         profile_claims_error: true,
       };
