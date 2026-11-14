@@ -141,7 +141,7 @@ def test_place_search_sends_only_allowlisted_name_and_keeps_unverified_candidate
     [candidate] = result.candidates
     assert candidate.photo_relation.value == "visible_in_frame"
     assert candidate.score is None
-    assert candidate.area_label == "東京都 府中市"
+    assert candidate.area_label == "府中市"
     assert candidate.evidence[0].clue_index == 0
     [source] = candidate.sources
     assert source.source_url == "https://example.org/place"

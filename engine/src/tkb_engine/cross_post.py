@@ -1667,6 +1667,7 @@ def _photo_home_area_facts(
                 PhotoPlaceLookupStatus.LOCAL_ONLY,
                 PhotoPlaceLookupStatus.REFERENCE_CHECKED,
                 PhotoPlaceLookupStatus.UNAVAILABLE,
+                PhotoPlaceLookupStatus.WEB_SEARCHED,
             }
             or _forbidden_context(photo_post.text)
             or _has_quoted_or_fiction_context(photo_post.text)
@@ -1677,6 +1678,14 @@ def _photo_home_area_facts(
         if (
             candidate.place_type not in {PhotoPlaceType.FACILITY, PhotoPlaceType.LANDMARK}
             or candidate.photo_relation is not PhotoPlaceRelation.VISIBLE_IN_FRAME
+        ):
+            continue
+        # Brave結果は検証済みの事実ではない。ちょうど1件のBrave由来候補（ローカル候補と
+        # 混ざらない）で、市区町村が分かる場合に限り、弱い根拠として扱う。
+        if result.lookup_status is PhotoPlaceLookupStatus.WEB_SEARCHED and (
+            len(result.candidates) != 1
+            or not candidate.place_id.startswith("brave-place:")
+            or any(source.provider != "Brave Search Place Search" for source in candidate.sources)
         ):
             continue
         home_match = _photo_home_place_match(photo_post.text, candidate.label)
