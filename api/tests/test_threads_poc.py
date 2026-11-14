@@ -103,6 +103,13 @@ async def test_threads_post_flows_through_existing_extraction_and_inference() ->
             [post], real_extractions(FakeExtractor.__new__(FakeExtractor), [post]), Gazetteer()
         )
     ]
-    assert [name for name, _ in events] == ["post", "clues", "conclusions", "plan", "done"]
+    assert [name for name, _ in events] == [
+        "post",
+        "clues",
+        "conclusions",
+        "plan",
+        "residence",
+        "done",
+    ]
     assert events[2][1]["conclusions"][0]["attribute"] == "routine"
     assert events[-1][1] == {"posts_seen": 1}

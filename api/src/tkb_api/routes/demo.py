@@ -25,7 +25,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 
 from tkb_api.config import Settings, get_settings
-from tkb_api.pipeline import conclusions_json, plan_json, simulate_json
+from tkb_api.pipeline import conclusions_json, plan_json, residence_json, simulate_json
 from tkb_api.routes.diagnose import get_gazetteer
 from tkb_api.schemas import SimulateRequest
 from tkb_common.schemas import Clue, Post
@@ -77,6 +77,7 @@ def _render_diagnosis(
         "clues": [clue.model_dump(mode="json") for clue in clues],
         "conclusions": conclusions_json(clues, posts, gazetteer),
         "plan": plan_json(clues, posts, gazetteer),
+        "residence": residence_json(clues, posts, gazetteer),
     }
     # FastAPI の JSONResponse と同じ書き出し方
     return json.dumps(doc, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode()

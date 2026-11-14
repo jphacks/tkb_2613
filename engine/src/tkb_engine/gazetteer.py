@@ -22,6 +22,8 @@ import pyarrow.parquet as pq
 
 from tkb_common.corporate_name import normalize_corporate_name
 from tkb_common.schemas import Clue, ClueType
+from tkb_engine.scoring import tables as scoring_tables
+from tkb_engine.scoring.tables import ScoringTables
 
 DATA_DIR = Path(__file__).resolve().parents[3] / "data" / "processed"
 KNOWLEDGE_PATH = Path(__file__).resolve().parents[3] / "data-prep" / "manual" / "knowledge.json"
@@ -143,6 +145,8 @@ class Gazetteer:
     # 法人番号の公表データの SQLite（data-prep の corporations.sqlite）。行はメモリに載せず、
     # 引くたびに読み取り専用で開く。なければ None
     corporations_path: Path | None = None
+    # 住まいの推定（点数の地図）の表（data-prep の scoring_*.parquet）。なければ None
+    scoring: ScoringTables | None = None
 
     @classmethod
     def load(cls, data_dir: Path = DATA_DIR, knowledge: Knowledge | None = None) -> "Gazetteer":
@@ -168,6 +172,7 @@ class Gazetteer:
                 if (data_dir / "corporations.sqlite").is_file()
                 else None
             ),
+            scoring=scoring_tables.load(data_dir),
         )
 
     def city_munis(self, city: str) -> set[str]:

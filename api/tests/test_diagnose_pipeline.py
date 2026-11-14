@@ -149,7 +149,15 @@ async def test_events_keep_failed_posts_and_index_conclusions_into_all_clues() -
         )
     ]
 
-    assert [name for name, _ in events] == ["post", "clues", "clues", "conclusions", "plan", "done"]
+    assert [name for name, _ in events] == [
+        "post",
+        "clues",
+        "clues",
+        "conclusions",
+        "plan",
+        "residence",
+        "done",
+    ]
     assert events[1][1]["error"] == "写真を取得できませんでした"
     result = events[3][1]
     assert result["clues"] == [clue.model_dump(mode="json")]
@@ -232,6 +240,6 @@ async def test_events_run_inference_and_planning_off_the_event_loop(
         )
     ]
 
-    assert [name for name, _ in events][-3:] == ["conclusions", "plan", "done"]
+    assert [name for name, _ in events][-4:] == ["conclusions", "plan", "residence", "done"]
     assert set(threads) == {"infer", "plan_json"}
     assert loop_thread not in threads.values()

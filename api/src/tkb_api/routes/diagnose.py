@@ -58,6 +58,7 @@ from tkb_api.pipeline import (
     mock_extractions,
     plan_json,
     real_extractions,
+    residence_json,
 )
 from tkb_api.public_web_identity import (
     ExternalLookupResult,
@@ -317,6 +318,7 @@ def read_diagnosis(
         "deleted": list(deleted),
         "conclusions": conclusions_json(clues, posts, gazetteer, deleted),
         "plan": plan_json(clues, posts, gazetteer, deleted),
+        "residence": residence_json(clues, posts, gazetteer, deleted),
         "profile_claims": [
             claim.model_dump(mode="json")
             for claim in claims_after_deletion(diagnosis.profile_claims, deleted)

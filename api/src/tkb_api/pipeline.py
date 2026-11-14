@@ -33,6 +33,8 @@ from tkb_engine.cross_post import infer_owner_claims_with_web, plan_profile_clai
 from tkb_engine.gazetteer import Gazetteer, Knowledge
 from tkb_engine.planner import Simulation, plan, simulate
 from tkb_engine.rules import Conclusion, infer
+from tkb_engine.scoring.estimate import estimate
+from tkb_engine.scoring.output import residence_model
 
 logger = logging.getLogger(__name__)
 
@@ -186,6 +188,29 @@ def simulation_json(
     }
 
 
+def residence_json(
+    clues: Sequence[Clue],
+    posts: Sequence[Post],
+    gazetteer: Gazetteer,
+    excluded: Sequence[str] = (),
+) -> dict[str, Any] | None:
+    """住まいの推定（点数の地図）。excluded（消した・仮に除いた投稿）を除いて計算する。
+
+    表がない・場所の手がかりがないときは None。evidence の clue_indices は clues での番号。
+    """
+    tables = gazetteer.scoring
+    if tables is None:
+        return None
+    remaining_clues, remaining_posts = _remaining(clues, posts, excluded)
+    result = estimate(
+        remaining_posts, remaining_clues, tables, gazetteer.knowledge.collection_areas
+    )
+    if result is None:
+        return None
+    model = residence_model(result, tables, _kept_indices(clues, excluded))
+    return model.model_dump(mode="json")
+
+
 def simulate_json(
     clues: Sequence[Clue],
     posts: Sequence[Post],
@@ -196,7 +221,10 @@ def simulate_json(
     """excluded（もう消した投稿）を除いた状態から、delete を消したらどうなるか。"""
     remaining_clues, remaining_posts = _remaining(clues, posts, excluded)
     sim = simulate(remaining_clues, remaining_posts, gazetteer, delete)
-    return simulation_json(sim, clues, excluded)
+    return {
+        **simulation_json(sim, clues, excluded),
+        "residence": residence_json(clues, posts, gazetteer, [*excluded, *delete]),
+    }
 
 
 def plan_json(
@@ -242,7 +270,7 @@ async def diagnose_events(
     """診断のイベントを順に返す。
 
     post（投稿ごと）→ clues（手がかりの取り出しが終わった順）→ conclusions（推理）
-    → plan（危ない投稿）→ done
+    → plan（危ない投稿）→ residence（住まいの推定。表がなければ null）→ done
     conclusions の clue_indices は、同じイベントの clues の並びでの番号。plan の after も同じ番号。
     on_finished は推理まで終わったときに全手がかりで呼ぶ（セッションに置いて simulate に使う）。
 
@@ -335,6 +363,10 @@ async def diagnose_events(
             }
         )
     yield "plan", await asyncio.to_thread(plan_json, all_clues, posts, gazetteer)
+    yield (
+        "residence",
+        {"residence": await asyncio.to_thread(residence_json, all_clues, posts, gazetteer)},
+    )
     logger.info(
         "診断の時間：手がかりの取り出し %.1f 秒"
         "（投稿 %d 件、写真 %d 枚、手がかり %d 件、失敗 %d 件）、推理と危ない投稿 %.2f 秒",

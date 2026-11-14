@@ -7,6 +7,7 @@
  *   event: conclusions  data: {"clues": [全手がかり], "conclusions": [推理],
  *                             "profile_claim_suggestions": [最大3件の投稿ID]} 最後に 1 回
  *   event: plan         data: {"delete", "broken", "after", "posts"}      危ない投稿。最後に 1 回
+ *   event: residence    data: {"residence": 住まいの推定 | null}          点数の地図。最後に 1 回
  *   event: done         data: {"posts_seen": 件数}                       最後に 1 回
  *
  * 推理の clue_indices は、同じ conclusions イベントの clues の並びでの番号。
@@ -15,6 +16,7 @@
 
 import { type Clue, isClue } from "./clue";
 import { isPost, type Post } from "./post";
+import { isResidenceOrNull, type ResidenceEstimate } from "./residence";
 import { isExternalProfileResult, isProfileItem, isWebFact, type ExternalLookupStatus, type ExternalProfileResult, type ProfileItem, type WebFact } from "./profile";
 
 /** 推理ルールが出した結論 1 つ（engine の Conclusion） */
@@ -52,6 +54,11 @@ export interface Simulation {
   readonly broken: readonly string[];
   /** 消したあとに残る結論 */
   readonly after: readonly Conclusion[];
+  /**
+   * 消したあとの住まいの推定（POST /api/simulate・/api/delete・/api/demo/simulate だけが返す）。
+   * 表がない・場所の手がかりがなければ null。plan イベントにはない
+   */
+  readonly residence?: ResidenceEstimate | null;
 }
 
 /**
@@ -82,6 +89,8 @@ export interface DiagnosisSnapshot {
   readonly deleted?: readonly string[];
   readonly conclusions: readonly Conclusion[];
   readonly plan: Simulation & { readonly posts: readonly RiskyPost[] };
+  /** 住まいの推定。古い閲覧リンクにはないので省略可 */
+  readonly residence?: ResidenceEstimate | null;
   readonly profile_claims?: readonly ProfileItem[];
   readonly profile_claim_suggestions?: readonly string[];
   readonly web_facts?: readonly WebFact[];
@@ -119,9 +128,10 @@ export type DiagnoseEvent =
       readonly event: "plan";
       readonly posts: readonly RiskyPost[];
     } & Simulation)
+  | { readonly event: "residence"; readonly residence: ResidenceEstimate | null }
   | { readonly event: "done"; readonly posts_seen: number };
 
-const KNOWN_EVENTS = ["post", "clues", "conclusions", "plan", "done"] as const;
+const KNOWN_EVENTS = ["post", "clues", "conclusions", "plan", "residence", "done"] as const;
 
 export class InvalidDiagnoseEventError extends Error {
   constructor(readonly event: string) {
@@ -184,7 +194,8 @@ export function isSimulation(
     isStringList(value.delete) &&
     isStringList(value.broken) &&
     Array.isArray(value.after) &&
-    value.after.every((c) => isConclusion(c, clueCount))
+    value.after.every((c) => isConclusion(c, clueCount)) &&
+    (value.residence === undefined || isResidenceOrNull(value.residence, clueCount))
   );
 }
 
@@ -226,6 +237,7 @@ export function isDiagnosisSnapshot(value: unknown): value is DiagnosisSnapshot 
   if (!Array.isArray(value.conclusions) || !value.conclusions.every((c) => isConclusion(c, clueCount))) return false;
   const plan = value.plan;
   if (!isSimulation(plan, clueCount) || !isRecord(plan) || !Array.isArray(plan.posts) || !plan.posts.every(isRiskyPost)) return false;
+  if (Object.hasOwn(value, "residence") && !isResidenceOrNull(value.residence, clueCount)) return false;
   let conclusionsEvent: DiagnoseEvent | null;
   try {
     conclusionsEvent = toDiagnoseEvent("conclusions", JSON.stringify({
@@ -339,6 +351,9 @@ export function toDiagnoseEvent(
         posts: posts as RiskyPost[],
       };
     }
+  }
+  if (event === "residence" && isRecord(value) && isResidenceOrNull(value.residence)) {
+    return { event, residence: value.residence };
   }
   if (
     event === "done" &&
