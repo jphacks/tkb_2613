@@ -211,5 +211,3 @@ def _walk_minutes(text: str, station: str) -> int | None:
             if 1 <= minutes <= MAX_MINUTES:
                 return minutes
     return None
-
-
