@@ -27,6 +27,16 @@ def test_production_values_are_read_from_the_environment(monkeypatch: pytest.Mon
     assert settings.cors_origins == ["https://d111.cloudfront.net"]
 
 
+def test_compose_passes_repository_env_only_to_api() -> None:
+    compose = Path(__file__).resolve().parents[2] / "infra" / "docker-compose.yml"
+    api_and_header, web_service = compose.read_text(encoding="utf-8").split("  web:", maxsplit=1)
+
+    assert "path: ../.env" in api_and_header
+    assert "path: ../.env" not in web_service
+    assert "BRAVE_SEARCH_API_KEY" not in web_service
+    assert "path: /run/tkb_2613/web-secrets.env" in web_service
+
+
 def test_tests_do_not_read_a_local_env_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
