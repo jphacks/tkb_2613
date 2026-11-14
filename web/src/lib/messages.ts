@@ -261,6 +261,18 @@ export const messages = {
     inferred: "推定",
   },
   /** 結果の先頭に出す、消す投稿の要約と、いまどの段階か */
+  narrowing: {
+    heading: "ここまで、しぼれる",
+    summary: (steps: readonly string[]) => `絞り込み：${steps.join("、")}`,
+    region: (label: string) => `${label}のすべての世帯`,
+    walk: (station: string, radius: number, minutes: number) => `${station}から半径${radius}m（徒歩${minutes}分）`,
+    block: "番地",
+    households: (n: string) => `約${n}世帯`,
+    oneBlock: "1区画",
+    manHouseholds: (man: string) => `約${man}万世帯`,
+    note: "マスは国勢調査の500mメッシュ（濃さは世帯数）。範囲にかかるメッシュは、重なる面積の割合で数えています。番地の印の位置は模式です。",
+    sourcesLabel: "出典",
+  },
   plan: {
     label: "消す投稿の要約",
     stepsLabel: "診断の流れ",

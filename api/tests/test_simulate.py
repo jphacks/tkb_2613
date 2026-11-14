@@ -111,6 +111,7 @@ def test_simulate_breaks_the_station_when_the_address_post_is_deleted(client: Te
     assert body["delete"] == [ADDRESS_POST]
     assert "home_nearest_station" in body["broken"]
     assert len(body["after"]) == 29
+    assert "narrowing" in body
     # 残った候補の根拠経路は、消した投稿の手がかりを指さない
     for claim_set in body["after"]:
         for candidate in claim_set["candidate_pool"]:
@@ -155,6 +156,7 @@ def test_simulate_starts_from_the_posts_left_after_a_delete(client: TestClient) 
     assert routine["candidates"] == []
     # 復元した候補セットと同じ
     assert body["after"] == client.get("/api/diagnosis").json()["profile_claims"]
+    assert "narrowing" in body
 
 
 def test_simulate_matches_the_restored_plan_after_a_delete(client: TestClient) -> None:

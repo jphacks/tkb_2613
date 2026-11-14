@@ -70,6 +70,7 @@ from tkb_engine.cross_post import (
     recalculate_profile_candidate_sets,
 )
 from tkb_engine.gazetteer import Gazetteer
+from tkb_engine.narrowing import narrowing
 
 router = APIRouter(prefix="/api")
 logger = logging.getLogger(__name__)
@@ -384,6 +385,7 @@ def read_diagnosis(
     profile_relations = profile_relations_after_deletion(
         diagnosis.profile_relations, deleted, profile_claims
     )
+    narrowed = narrowing(clues, remaining_posts, profile_claims, gazetteer)
     return {
         "posts": [post.model_dump(mode="json") for post in posts],
         "clues": [clue.model_dump(mode="json") for clue in clues],
@@ -400,6 +402,7 @@ def read_diagnosis(
             diagnosis_at=diagnosis.diagnosis_at,
         ),
         "profile_claims": [claim.model_dump(mode="json") for claim in profile_claims],
+        "narrowing": narrowed,
         "profile_relations": [relation.model_dump(mode="json") for relation in profile_relations],
         "profile_claim_suggestions": [
             post_id for post_id in diagnosis.profile_claim_suggestions if post_id not in deleted

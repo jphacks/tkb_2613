@@ -26,6 +26,7 @@ from tkb_engine.cross_post import (
     infer_owner_profile_relations,
 )
 from tkb_engine.gazetteer import Gazetteer
+from tkb_engine.narrowing import narrowing
 from tkb_engine.rules import infer
 
 router = APIRouter(prefix="/api/demo")
@@ -80,12 +81,14 @@ def _render_diagnosis(
         list(posts), profile_claims, clues=list(clues), gazetteer=gazetteer,
         rule_conclusions=rule_conclusions,
     )
+    narrowed = narrowing(list(clues), list(posts), profile_claims, gazetteer)
     plan = plan_claims_json(profile_claims, clues, posts)
     doc = {
         "demo": True,
         "posts": [post.model_dump(mode="json") for post in posts],
         "clues": [clue.model_dump(mode="json") for clue in clues],
         "profile_claims": [item.model_dump(mode="json") for item in profile_claims],
+        "narrowing": narrowed,
         "profile_relations": [item.model_dump(mode="json") for item in profile_relations],
         "profile_claim_suggestions": list(plan["delete"]),
         "plan": plan,
@@ -158,4 +161,4 @@ def simulate(
             status.HTTP_422_UNPROCESSABLE_CONTENT, "デモの投稿の中から選んでください"
         )
     profile_claims = _diagnosis_entry(settings.demo_fixture_path, data, gazetteer).profile_claims
-    return simulate_claims_json(profile_claims, clues, posts, body.delete)
+    return simulate_claims_json(profile_claims, clues, posts, body.delete, gazetteer=gazetteer)

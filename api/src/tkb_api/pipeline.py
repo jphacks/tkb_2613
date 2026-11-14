@@ -39,6 +39,7 @@ from tkb_engine.cross_post import (
     simulate_profile_candidate_sets,
 )
 from tkb_engine.gazetteer import Gazetteer, Knowledge
+from tkb_engine.narrowing import narrowing
 from tkb_engine.photo_place import infer_photo_places
 from tkb_engine.planner import Simulation, plan, simulate
 from tkb_engine.rules import Conclusion, infer
@@ -241,6 +242,7 @@ def simulate_claims_json(
     excluded: Sequence[str] = (),
     *,
     diagnosis_at: datetime | None = None,
+    gazetteer: Gazetteer | None = None,
 ) -> dict[str, Any]:
     """excluded を除いた状態から、delete を消したときの 29 項目候補集合の変化を返す。"""
     sim = simulate_profile_candidate_sets(
@@ -251,11 +253,18 @@ def simulate_claims_json(
         excluded_post_ids=excluded,
         diagnosis_at=diagnosis_at,
     )
-    return {
+    result = {
         "delete": sim.delete,
         "broken": sim.broken,
         "after": [item.model_dump(mode="json") for item in sim.after],
     }
+    if gazetteer is not None:
+        gone = set(excluded) | set(delete)
+        _, remaining_posts = _remaining(clues, posts, gone)
+        result["narrowing"] = narrowing(
+            clues, remaining_posts, sim.after, gazetteer
+        )
+    return result
 
 
 def plan_claims_json(
@@ -439,12 +448,14 @@ async def diagnose_events(
         gazetteer=gazetteer,
         rule_conclusions=conclusions,
     )
+    narrowing_result = narrowing(all_clues, list(posts), profile_claims, gazetteer)
     yield (
         "conclusions",
         {
             "clues": [c.model_dump(mode="json") for c in all_clues],
             "photo_place_results": [item.model_dump(mode="json") for item in photo_place_results],
             "profile_claims": [item.model_dump(mode="json") for item in profile_claims],
+            "narrowing": narrowing_result,
             "profile_relations": [item.model_dump(mode="json") for item in profile_relations],
             "profile_claim_suggestions": profile_claim_suggestions,
             "web_facts": [fact.model_dump(mode="json") for fact in web_facts],

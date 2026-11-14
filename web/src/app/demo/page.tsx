@@ -4,11 +4,13 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
 import { ConclusionBoard } from "@/components/conclusion-board/ConclusionBoard";
+import { NarrowingStages } from "@/components/narrowing/NarrowingStages";
 import { PostCard } from "@/components/post-list/PostCard";
 import { Reveal } from "@/components/reveal/Reveal";
 import { ApiError, getDemoDiagnosis, simulateDemo } from "@/lib/api";
 import { attributeLabel, messages } from "@/lib/messages";
 import { isProfileSimulationAfter, type DemoDiagnosis, type Simulation } from "@/types/diagnose";
+import { visibleNarrowing } from "@/types/narrowing";
 import { profileClaimsAfterDeletion } from "@/types/profile";
 
 const t = messages.demo;
@@ -58,7 +60,9 @@ export default function DemoPage() {
         {error && <p role="alert" className="border-l-4 border-seeker bg-seeker/10 px-4 py-3">{error}</p>}
         {result && (
           <>
-            <Reveal posts={result.posts} clues={result.clues} conclusions={[]} profileClaims={visibleProfileClaims} excludedPostIds={excluded} />
+            <Reveal posts={result.posts} clues={result.clues} conclusions={[]} profileClaims={visibleProfileClaims} excludedPostIds={excluded}>
+              <NarrowingStages narrowing={visibleNarrowing(simulation ? simulation.narrowing : result.narrowing, excluded)} />
+            </Reveal>
             <ConclusionBoard
               clues={result.clues}
               conclusions={[]}

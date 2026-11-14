@@ -55,6 +55,7 @@ def test_demo_diagnosis_needs_no_login_and_returns_the_fictional_account(
     assert [p["post_id"] for p in body["posts"]] == POST_IDS
     assert len(body["clues"]) == len(DOC["clues"])
     assert "conclusions" not in body
+    assert "narrowing" in body
     assert len(body["profile_claims"]) == 29
     assert isinstance(body["profile_relations"], list)
     assert body["profile_claim_suggestions"] == body["plan"]["delete"]
@@ -71,6 +72,7 @@ def test_demo_simulate_drops_the_selected_posts(client: TestClient) -> None:
     assert body["delete"] == [GYM_POST]
     assert "routine" in body["broken"]
     assert len(body["after"]) == 29
+    assert "narrowing" in body
     for claim_set in body["after"]:
         for candidate in claim_set["candidate_pool"]:
             assert all(ref["post_id"] != GYM_POST for ref in candidate["evidence"])

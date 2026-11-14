@@ -158,6 +158,8 @@ class Gazetteer:
     # 推定の結果には使わず、候補の説明に参考として添えるだけ
     ridership: dict[str, int] = field(default_factory=dict)
     ridership_year: int = 0
+    # Census household totals by 500m mesh, used only for the narrowing display.
+    households: dict[str, int] = field(default_factory=dict)
     # 法人番号の公表データの SQLite（data-prep の corporations.sqlite）。行はメモリに載せず、
     # 引くたびに読み取り専用で開く。なければ None
     corporations_path: Path | None = None
@@ -199,6 +201,10 @@ class Gazetteer:
             ),
             ridership={str(r["station_code"]): int(r["passengers"]) for r in ridership_rows},
             ridership_year=max((int(r["year"]) for r in ridership_rows), default=0),
+            households={
+                str(r["mesh_500m"]): int(r["households"])
+                for r in _optional_table(data_dir / "households_500m.parquet", HOUSEHOLD_COLUMNS)
+            },
             corporations_path=(
                 data_dir / "corporations.sqlite"
                 if (data_dir / "corporations.sqlite").is_file()
@@ -552,6 +558,7 @@ def _optional_table(path: Path, columns: list[str] | None = None) -> list[dict[s
 SHELTER_COLUMNS = ["name", "kind", "city"]
 BUS_STOP_COLUMNS = ["name", "operator", "cities"]
 SCHOOL_DISTRICT_COLUMNS = ["kind", "name", "city", "terms", "note"]
+HOUSEHOLD_COLUMNS = ["mesh_500m", "households"]
 
 
 def _school_key(name: str) -> str:

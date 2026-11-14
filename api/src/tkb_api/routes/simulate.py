@@ -16,8 +16,10 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from tkb_api.bluesky import SessionStore
 from tkb_api.pipeline import simulate_claims_json
+from tkb_api.routes.diagnose import get_gazetteer
 from tkb_api.routes.session import current_session_id, get_session_store
 from tkb_api.schemas import SimulateRequest
+from tkb_engine.gazetteer import Gazetteer
 
 router = APIRouter(prefix="/api")
 
@@ -27,6 +29,7 @@ def simulate(
     body: SimulateRequest,
     store: Annotated[SessionStore, Depends(get_session_store)],
     session_id: Annotated[str, Depends(current_session_id)],
+    gazetteer: Annotated[Gazetteer, Depends(get_gazetteer)],
 ) -> dict[str, Any]:
     diagnosis = store.get_diagnosis(session_id)
     if diagnosis is None:
@@ -44,4 +47,5 @@ def simulate(
         body.delete,
         diagnosis.deleted,
         diagnosis_at=diagnosis.diagnosis_at,
+        gazetteer=gazetteer,
     )
