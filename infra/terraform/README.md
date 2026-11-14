@@ -239,6 +239,49 @@ mv processed processed.bad && mv processed.prev processed && systemctl restart t
 - アプリの EC2 で `docker logs tkb_2613-api-1 2>&1 | grep 閲覧リンク` が「閲覧リンク：オフ（SHARE_ENABLED）」
 - GPU を止めた状態で診断すると「ただいま準備中です」
 
+## GitHub Actions から本番デプロイする
+
+リポジトリに書き込めるメンバーなら誰でも、Actions の「本番デプロイ」→「Run workflow」（ブランチは main のまま）で、**その時点の最新の main** を本番に出せる。中身は上の「既存 EC2 の起動スクリプト更新」と同じ手順（checkout → 起動スクリプトを入れ直す → `systemctl restart tkb-app`）。
+
+| 段階 | 場所 | すること |
+|---|---|---|
+| 1 | Actions（`.github/workflows/deploy.yml`） | 最新の main か、そのコミットの CI が成功しているかを確かめる。違えば何もしない |
+| 2 | Actions | OIDC でロール `tkb_2613-github-deploy` を引き受ける（長期のキーなし。main のジョブだけ） |
+| 3 | Actions → SSM | ドキュメント `tkb_2613-deploy` をアプリの EC2 に送る。渡すのはコミット SHA だけ |
+| 4 | アプリの EC2（`infra/deploy.sh`） | ロック → 最新の main かを再確認 → 前のイメージを `:rollback-<前のSHA>` で残す → checkout → 起動し直す |
+| 5 | アプリの EC2 | api の healthcheck、web の `/` と `/api/features`、公開オリジンでの `infra/prod_smoke.py` |
+| 6 | アプリの EC2 | 5 が失敗したら前のコミットに戻して起動し直し、もう一度確かめる |
+| 7 | Actions | 実行者・コミット・前のコミット・結果・所要時間を、実行の Summary に出す |
+
+- ロールにできるのは、このドキュメントをアプリの EC2 に送ることと、結果を読むことだけ。任意のシェル（`AWS-RunShellScript`）は送れず、GPU の起動・停止もできない
+- `.env`・`data/processed`・`eval/local` は git の管理外なので、checkout でも変わらない。秘密は起動スクリプトが毎回 Secrets Manager から読む
+- 同時には動かない（Actions の `concurrency` と、EC2 の `flock`）。追跡しているファイルを EC2 で手で直してあると、消さないように止まる
+- Actions を途中で止めても、EC2 側のデプロイとロールバックは最後まで進む。結果は SSM のコマンド ID（Summary にある）で確かめる
+- ロールバックは前のコミットから作り直す（ビルドのキャッシュがあれば1〜2分）。それも失敗したときは、残した `:rollback-<SHA>` のイメージと `git checkout <前のSHA>` で手で戻す
+
+### 初回の準備（インフラ担当が1回だけ）
+
+1. Terraform でロールとドキュメントを作る。**`-target` で、この3つだけを apply する**（2026-11-14 時点で、WAF にも main のコードとの差がある。診断のレート制限に `/api/draft-check` を足す変更で、これは別に判断する）
+
+   ```bash
+   cd infra/terraform
+   terraform plan -out=deploy.tfplan \
+     -target=aws_ssm_document.deploy \
+     -target=aws_iam_role.github_deploy \
+     -target=aws_iam_role_policy.github_deploy
+   terraform apply deploy.tfplan
+   # apply のたびに state をリポジトリの外へコピーする（上の「apply のたびに state を…」）
+   ```
+
+2. ロールの ARN を GitHub の **secret** `AWS_DEPLOY_ROLE_ARN` に入れる（アカウント番号を公開のログに出さないため、variable ではなく secret にする）。画面にも履歴にも出さずに入れる：
+
+   ```bash
+   aws iam get-role --role-name tkb_2613-github-deploy --query Role.Arn --output text \
+     | gh secret set AWS_DEPLOY_ROLE_ARN -R jphacks/tkb_2613
+   ```
+
+3. 一度、Actions から実行して Summary が「成功」になることを確かめる
+
 ## 全遮断・停止（docs/aws-migration.md の 7章）
 
 ### OAuth の公開前試験と採用判定（11/12 21:00 JST）
