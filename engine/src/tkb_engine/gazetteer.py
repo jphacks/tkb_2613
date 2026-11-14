@@ -334,6 +334,29 @@ class Gazetteer:
         """市区町村名（「八王子市」など）の区市町村コード。"""
         return {r["muni_code"] for r in self.postal if r["city"] == city}
 
+    def muni_cities(self, muni_codes: set[str]) -> set[str]:
+        """区市町村コードに対応する市区町村名（郵便番号の表の city）。"""
+        if not muni_codes:
+            return set()
+        return {r["city"] for r in self.postal if r["muni_code"] in muni_codes and r["city"]}
+
+    def station_cities(self, station_name: str) -> set[str]:
+        """駅の1kmメッシュがかかる市区町村名。同名の離れた駅がある・位置が不明なら空。"""
+        name = station_name.strip().removesuffix("駅")
+        if not name or self.station_point(name) is None:
+            return set()
+        station_meshes = {
+            str(s["mesh_1km"]).strip().removesuffix("*")
+            for s in self.stations
+            if s["station_name"] == name and s.get("mesh_1km")
+        }
+        muni_codes = {
+            code
+            for code, meshes in self.muni_meshes.items()
+            if station_meshes & {str(m).strip().removesuffix("*") for m in meshes}
+        }
+        return self.muni_cities(muni_codes)
+
     def cities_in(self, text: str) -> set[str]:
         """文字の中に出てくる市区町村名（郵便番号の表と知識表にあるもの）。"""
         names = {r["city"] for r in self.postal} | {b.city for b in self.knowledge.trash_bags}

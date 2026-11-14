@@ -2572,6 +2572,168 @@ def test_brave_residential_area_rejects_weak_inputs() -> None:
     assert _residence(plain_posts, plain_clues, [brave_area_result(plain_photo, 0)]) == []
 
 
+def _indirect_gazetteer(*, duplicate_nezu: bool = False) -> Gazetteer:
+    stations = [
+        {"station_name": "根津", "mesh_1km": "m-bunkyo*", "lat": 35.717, "lon": 139.766},
+        {"station_name": "新宿", "mesh_1km": "m-shinjuku", "lat": 35.690, "lon": 139.700},
+    ]
+    if duplicate_nezu:
+        stations.append(
+            {"station_name": "根津", "mesh_1km": "m-far", "lat": 34.700, "lon": 135.500}
+        )
+    return Gazetteer(
+        stations=stations,
+        postal=[
+            {"postal_code": "1130031", "muni_code": "13105", "city": "文京区", "town": "根津"},
+            {"postal_code": "1600022", "muni_code": "13104", "city": "新宿区", "town": "新宿"},
+            *(
+                {
+                    "postal_code": f"99900{i:02d}",
+                    "muni_code": f"9{i:04d}",
+                    "city": f"架空{i}市",
+                    "town": "あ",
+                }
+                for i in range(11)
+            ),
+        ],
+        muni_meshes={"13105": {"m-bunkyo"}, "13104": {"m-shinjuku"}, "99999": {"m-far"}},
+    )
+
+
+def _indirect_residence(
+    posts: list[Post],
+    clues: list[Clue],
+    results: list[PhotoPlaceResult],
+    gazetteer: Gazetteer | None,
+) -> list[ProfileItem]:
+    return [
+        item
+        for item in infer_owner_claims(
+            posts, clues, photo_place_results=results, gazetteer=gazetteer
+        )
+        if item.attribute is ProfileAttribute.RESIDENTIAL_AREA
+    ]
+
+
+def _assert_weak_and_fragile(
+    claim: ProfileItem, photo: Post, supporting: Post, area: str = "文京区"
+) -> None:
+    assert claim.value == area
+    assert claim.status is ProfileStatus.WEAK
+    assert claim.confidence <= 0.65
+    assert recalculate_after_deletion(claim, {photo.post_id}) is None
+    assert recalculate_after_deletion(claim, {supporting.post_id}) is None
+
+
+def _indirect_fixture(
+    text: str, clue: Clue | None = None, kind: ClueType = ClueType.PLACE_TEXT, value: str = "根津"
+) -> tuple[list[Post], list[Clue], Post, Post]:
+    posts, clues, photo, _ = _brave_fixture(area_text=None)
+    support = post("indirect-support", text)
+    posts.append(support)
+    if clue is None and kind is ClueType.POSTAL_CODE:
+        clue = Clue(
+            post_id=support.post_id,
+            image_index=0,
+            type=kind,
+            value=value,
+            region=None,
+            confidence=0.9,
+            source=ClueSource.VLM,
+        )
+    clues.append(clue if clue is not None else typed_clue(support, value, kind))
+    return posts, clues, photo, support
+
+
+def test_indirect_station_text_anchors_photo_area() -> None:
+    posts, clues, photo, support = _indirect_fixture("今朝も根津駅で電車を待つ")
+    [claim] = _indirect_residence(
+        posts, clues, [brave_area_result(photo, 0)], _indirect_gazetteer()
+    )
+    _assert_weak_and_fragile(claim, photo, support)
+
+
+def test_indirect_station_sign_photo_anchors_photo_area() -> None:
+    support = post("indirect-sign", "写真")
+    sign = Clue(
+        post_id=support.post_id,
+        image_index=0,
+        type=ClueType.STATION_SIGN,
+        value="根津",
+        region=(0, 0, 10, 10),
+        confidence=0.9,
+        source=ClueSource.VLM,
+    )
+    posts, clues, photo, _ = _brave_fixture(area_text=None)
+    posts.append(support)
+    clues.append(sign)
+    [claim] = _indirect_residence(
+        posts, clues, [brave_area_result(photo, 0)], _indirect_gazetteer()
+    )
+    _assert_weak_and_fragile(claim, photo, support)
+
+
+def test_indirect_postal_code_anchors_photo_area() -> None:
+    posts, clues, photo, support = _indirect_fixture(
+        "届いた", kind=ClueType.POSTAL_CODE, value="113-00xx"
+    )
+    [claim] = _indirect_residence(
+        posts, clues, [brave_area_result(photo, 0)], _indirect_gazetteer()
+    )
+    _assert_weak_and_fragile(claim, photo, support)
+
+
+def test_indirect_second_photo_place_anchors_photo_area() -> None:
+    posts, clues, photo, _ = _brave_fixture(area_text=None)
+    other = post("indirect-other-photo", "散歩")
+    other_clue = Clue(
+        post_id=other.post_id,
+        image_index=0,
+        type=ClueType.LANDMARK,
+        value="青葉 市場",
+        region=None,
+        confidence=0.9,
+        source=ClueSource.VLM,
+    )
+    posts.append(other)
+    clues.append(other_clue)
+    first = brave_area_result(photo, 0)
+    second = brave_area_result(other, 1)
+    second.candidates[0] = second.candidates[0].model_copy(update={"place_id": "brave-place:xyz"})
+    [claim] = _indirect_residence(posts, clues, [first, second], None)
+    _assert_weak_and_fragile(claim, photo, other)
+    # same place id is not an independent anchor
+    same = brave_area_result(other, 1)
+    assert _indirect_residence(posts, clues, [first, same], None) == []
+
+
+def test_indirect_area_anchor_rejects_weak_inputs() -> None:
+    result_for = brave_area_result
+    # station in another ward
+    posts, clues, photo, _ = _indirect_fixture("今朝も新宿駅で電車を待つ", value="新宿")
+    assert _indirect_residence(posts, clues, [result_for(photo, 0)], _indirect_gazetteer()) == []
+    # same station name located far apart
+    posts, clues, photo, _ = _indirect_fixture("今朝も根津駅で電車を待つ")
+    gaz = _indirect_gazetteer(duplicate_nezu=True)
+    assert _indirect_residence(posts, clues, [result_for(photo, 0)], gaz) == []
+    # travel context
+    posts, clues, photo, _ = _indirect_fixture("旅行で根津駅に来た")
+    assert _indirect_residence(posts, clues, [result_for(photo, 0)], _indirect_gazetteer()) == []
+    # text station without living context
+    posts, clues, photo, _ = _indirect_fixture("根津駅は古い建物")
+    assert _indirect_residence(posts, clues, [result_for(photo, 0)], _indirect_gazetteer()) == []
+    # postal code matching more than 10 municipalities
+    posts, clues, photo, _ = _indirect_fixture("届いた", kind=ClueType.POSTAL_CODE, value="999xxxx")
+    assert _indirect_residence(posts, clues, [result_for(photo, 0)], _indirect_gazetteer()) == []
+    # no gazetteer: station and postal anchors do not apply
+    posts, clues, photo, _ = _indirect_fixture("今朝も根津駅で電車を待つ")
+    assert _indirect_residence(posts, clues, [result_for(photo, 0)], None) == []
+    posts, clues, photo, _ = _indirect_fixture(
+        "届いた", kind=ClueType.POSTAL_CODE, value="113-00xx"
+    )
+    assert _indirect_residence(posts, clues, [result_for(photo, 0)], None) == []
+
+
 def test_profile_attribute_weights_cover_all_attributes() -> None:
     assert set(PROFILE_ATTRIBUTE_WEIGHTS) == set(ProfileAttribute)
 
