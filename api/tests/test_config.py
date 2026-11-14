@@ -1,9 +1,11 @@
+import sqlite3
 from pathlib import Path
 
 import pytest
 
 from tkb_api.config import Settings
 from tkb_api.main import create_app
+from tkb_common.place_names import PLACE_INDEX_SCHEMA_VERSION
 
 
 def test_defaults_are_for_local_development() -> None:
@@ -85,23 +87,42 @@ def test_explicit_gazetteer_dir_overrides_autoselection(
     assert Settings(_env_file=None).gazetteer_dir == explicit
 
 
-def test_commons_reference_lookup_requires_explicit_enablement_live_mode_and_finite_cap() -> None:
-    assert Settings(_env_file=None).commons_reference_lookup_available is False
-    assert (
-        Settings(
+def test_commons_reference_lookup_requires_enabled_live_cap_and_compatible_index(
+    tmp_path: Path,
+) -> None:
+    def is_available(directory: Path) -> bool:
+        return Settings(
             _env_file=None,
             mock_mode=False,
             commons_reference_lookup_enabled=True,
             diagnose_daily_limit=3,
+            gazetteer_dir=directory,
         ).commons_reference_lookup_available
-        is True
-    )
+
+    assert Settings(_env_file=None).commons_reference_lookup_available is False
+    absent_dir = tmp_path / "absent"
+    assert is_available(absent_dir) is False
+
+    mismatch_dir = tmp_path / "mismatch"
+    mismatch_dir.mkdir()
+    place_index = mismatch_dir / "places.sqlite3"
+    with sqlite3.connect(place_index) as db:
+        db.execute("PRAGMA user_version = 999")
+    assert is_available(mismatch_dir) is False
+
+    compatible_dir = tmp_path / "compatible"
+    compatible_dir.mkdir()
+    with sqlite3.connect(compatible_dir / "places.sqlite3") as db:
+        db.execute(f"PRAGMA user_version = {PLACE_INDEX_SCHEMA_VERSION}")
+    assert is_available(compatible_dir) is True
+
     assert (
         Settings(
             _env_file=None,
             mock_mode=False,
             commons_reference_lookup_enabled=True,
             diagnose_daily_limit=0,
+            gazetteer_dir=tmp_path,
         ).commons_reference_lookup_available
         is False
     )
@@ -111,6 +132,7 @@ def test_commons_reference_lookup_requires_explicit_enablement_live_mode_and_fin
             mock_mode=True,
             commons_reference_lookup_enabled=True,
             diagnose_daily_limit=3,
+            gazetteer_dir=tmp_path,
         ).commons_reference_lookup_available
         is False
     )

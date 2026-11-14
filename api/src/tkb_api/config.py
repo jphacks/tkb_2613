@@ -1,3 +1,4 @@
+import sqlite3
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal, Self
@@ -7,6 +8,7 @@ from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from tkb_api.limits import PublicWindow
+from tkb_common.place_names import PLACE_INDEX_SCHEMA_VERSION
 
 # 偽の X API を許す手元のホスト
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
@@ -15,6 +17,20 @@ GAZETTEER_REQUIRED_FILES = ("stations.parquet", "postal.parquet", "muni_mesh.par
 
 def _has_complete_gazetteer(directory: Path) -> bool:
     return all((directory / filename).is_file() for filename in GAZETTEER_REQUIRED_FILES)
+
+
+def _has_compatible_place_index(directory: Path) -> bool:
+    """Check only that the local POI index exists and uses the supported schema."""
+    path = directory / "places.sqlite3"
+    if not path.is_file():
+        return False
+    try:
+        uri = f"{path.resolve().as_uri()}?mode=ro&immutable=1"
+        with sqlite3.connect(uri, uri=True) as db:
+            row = db.execute("PRAGMA user_version").fetchone()
+    except (OSError, sqlite3.Error, ValueError):
+        return False
+    return row is not None and row[0] == PLACE_INDEX_SCHEMA_VERSION
 
 
 def _default_gazetteer_dir() -> Path:
@@ -192,11 +208,12 @@ class Settings(BaseSettings):
 
     @property
     def commons_reference_lookup_available(self) -> bool:
-        """Commons requests require a finite daily diagnosis cap and a live-mode opt-in."""
+        """Require explicit live opt-in, a finite cap, and a compatible local POI index."""
         return (
             not self.mock_mode
             and self.diagnose_daily_limit > 0
             and self.commons_reference_lookup_enabled
+            and _has_compatible_place_index(self.gazetteer_dir)
         )
 
 
