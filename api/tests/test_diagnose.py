@@ -91,12 +91,14 @@ def test_completed_diagnosis_can_be_read_again_only_in_its_session(client: TestC
     assert restored.status_code == 200
     assert restored.headers["cache-control"] == "no-store, no-transform"
     data = restored.json()
+    assert "conclusions" not in data
     assert len(data["posts"]) == DEMO_POST_COUNT
     assert len(data["clues"]) > 0
     assert data["deleted"] == []
-    assert data["conclusions"] == _events(result.text)[-3][1]["conclusions"]
+    assert "conclusions" not in data
     assert data["plan"] == _events(result.text)[-2][1]
     streamed_claims = _events(result.text)[-3][1]
+    assert "conclusions" not in streamed_claims
     assert data["photo_place_results"] == streamed_claims["photo_place_results"]
     assert {(entry["post_id"], entry["image_index"]) for entry in data["photo_place_results"]} == {
         (post["post_id"], image["index"]) for post in data["posts"] for image in post["images"]
@@ -174,9 +176,11 @@ def test_completed_diagnosis_restore_recalculates_candidate_snapshot_after_delet
     assert deleted_post_id not in data["profile_claim_suggestions"]
     assert deleted_post_id not in data["plan"]["delete"]
     assert all(
-        data["clues"][index]["post_id"] != deleted_post_id
-        for conclusion in data["conclusions"]
-        for index in conclusion["clue_indices"]
+        reference["post_id"] != deleted_post_id
+        for claim in data["profile_claims"]
+        for candidate in claim["candidate_pool"]
+        for path in candidate["evidence_paths"]
+        for reference in path["evidence"]
     )
 
 
@@ -205,12 +209,14 @@ def test_mock_diagnose_streams_posts_clues_conclusions_plan_then_done(client: Te
     assert sum(len(e["clues"]) for e in clue_events) == len(clues)
 
     # 推理の根拠の番号は、conclusions の clues の並びでの番号
+    # The legacy event name is retained, but its public payload contains candidate sets only.
     _, result = events[-3]
-    by_attribute = {c["attribute"]: c for c in result["conclusions"]}
-    station = by_attribute["station"]
-    assert station["value"] == "根津駅"
-    assert {result["clues"][i]["value"] for i in station["clue_indices"]} >= {"根x"}
-    assert by_attribute["routine"]["value"].startswith("毎週火曜 20時ごろ")
+    assert "conclusions" not in result
+    assert len(result["profile_claims"]) == 29
+    assert {claim["attribute"] for claim in result["profile_claims"]} >= {
+        "regular_station",
+        "routine",
+    }
     assert events[-1] == ("done", {"posts_seen": len(posts)})
 
 

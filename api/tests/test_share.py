@@ -56,11 +56,60 @@ def test_result_link_requires_the_owners_finished_diagnosis_and_is_read_only(
         assert shared.status_code == 200
         assert shared.headers["cache-control"] == "no-store, no-transform"
         assert shared.json()["posts"]
-        assert shared.json()["conclusions"]
+        assert "conclusions" not in shared.json()
+        assert len(shared.json()["profile_claims"]) == 29
         assert shared.json()["plan"]["posts"]
         assert viewer.post("/api/delete", json={"delete": []}).status_code == 401
         assert viewer.post("/api/simulate", json={"delete": []}).status_code == 401
         assert viewer.post("/api/shared-result", json={"token": "y" * 43}).status_code == 404
+
+
+def test_legacy_shared_links_are_returned_unchanged_until_expiry(tmp_path: Path) -> None:
+    settings = _mock_settings(tmp_path / "legacy.sqlite3", share_enabled=True)
+    legacy = {
+        "posts": [],
+        "clues": [],
+        "conclusions": [
+            {
+                "rule": "R3",
+                "attribute": "routine",
+                "value": "毎週火曜",
+                "clue_indices": [],
+                "note": "",
+            }
+        ],
+        "plan": {
+            "delete": [],
+            "broken": ["routine"],
+            "before": [
+                {
+                    "rule": "R3",
+                    "attribute": "routine",
+                    "value": "火曜の夜勤",
+                    "clue_indices": [],
+                    "note": "保存済み",
+                }
+            ],
+            "after": [
+                {
+                    "rule": "R3",
+                    "attribute": "routine",
+                    "value": "火曜の夜勤",
+                    "clue_indices": [],
+                    "note": "保存済み",
+                }
+            ],
+            "posts": [],
+        },
+    }
+    with _client(settings) as client:
+        store = client.app.state.shares
+        token = store.create(legacy, "did:plc:legacy")
+        response = client.post("/api/shared-result", json={"token": token})
+        assert response.status_code == 200
+        assert response.json() == legacy
+        # Reading does not rewrite or expire the saved snapshot.
+        assert store.get(token) == legacy
 
 
 def test_result_link_expires(tmp_path: Path) -> None:

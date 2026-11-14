@@ -1,24 +1,8 @@
-"""診断。ログインした本人の投稿を読み、結果を Server-Sent Events で 1 件ずつ流す。
+"""Bluesky diagnosis, streamed one post at a time as Server-Sent Events.
 
-イベントの形は web/src/types/diagnose.ts と同時に変更すること。
-  event: post         data: {"post": 投稿}                          投稿ごと
-  event: clues        data: {"post_id", "clues": [手がかり], "error"} 手がかりの取り出しが終わった順
-  event: conclusions  data: {"clues": [全手がかり], "conclusions": [{"rule", "attribute",
-                             "value", "clue_indices", "note"}]}      最後に1回。番号は clues の並び
-  event: plan         data: {"delete": [投稿ID], "broken": [項目], "after": [結論],
-                             "posts": [{"post_id", "broken"}]}       危ない投稿。番号は clues の並び
-  event: done         data: {"posts_seen": 件数}
-
-推理まで終わったら、投稿と手がかりをセッションのメモリに置く（POST /api/simulate で使う）。
-ディスクやログには残さない。診断を始めたときに、前の診断の分は消す。
-
-MOCK_MODE=1 のときは、架空のデモ用アカウントの投稿と手がかりを流す
-（Bluesky にもモデルにも接続しない）。
-MOCK_MODE=0 のときは、セッションの DID 本人の投稿を Bluesky から直近 MAX_POSTS 件取り、
-写真を cdn.bsky.app から取って手がかりを取り出し、推理する。
-
-始める前に、公開時間帯・同じセッションでの診断中・1日の回数・同時実行の枠・モデルの応答を
-確かめ、だめならストリームを始めずに理由のコードつきで断る（tkb_api.errors、tkb_api.limits）。
+The legacy ``conclusions`` event name is retained for transport compatibility;
+its public payload contains the 29 ProfileCandidateSet values. Internal rule
+Conclusion intermediates are not part of this Bluesky API response.
 """
 
 import asyncio
@@ -57,7 +41,6 @@ from tkb_api.photo_place_web import (
     search_photo_places,
 )
 from tkb_api.pipeline import (
-    conclusions_json,
     diagnose_events,
     fetch_single_image,
     load_gazetteer,
@@ -410,7 +393,6 @@ def read_diagnosis(
             if item.post_id not in deleted_ids
         ],
         "deleted": list(deleted),
-        "conclusions": conclusions_json(clues, posts, gazetteer, deleted),
         "plan": plan_claims_json(
             profile_claims,
             remaining_clues,

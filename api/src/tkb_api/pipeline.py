@@ -182,22 +182,6 @@ def _renumbered(conclusions: Sequence[Conclusion], kept: Sequence[int]) -> list[
     return [{**asdict(c), "clue_indices": [kept[i] for i in c.clue_indices]} for c in conclusions]
 
 
-def conclusions_json(
-    clues: Sequence[Clue],
-    posts: Sequence[Post],
-    gazetteer: Gazetteer,
-    excluded: Sequence[str] = (),
-) -> list[dict[str, Any]]:
-    """excluded（もう消した投稿）を除いて推理する。
-
-    clue_indices は clues（診断の全手がかり）での番号。
-    """
-    remaining_clues, remaining_posts = _remaining(clues, posts, excluded)
-    return _renumbered(
-        infer(remaining_clues, remaining_posts, gazetteer), _kept_indices(clues, excluded)
-    )
-
-
 def simulation_json(
     sim: Simulation, clues: Sequence[Clue], excluded: Sequence[str] = ()
 ) -> dict[str, Any]:
@@ -445,16 +429,20 @@ async def diagnose_events(
         diagnosis_date=diagnosis_date,
         diagnosis_at=diagnosis_at,
         photo_place_results=photo_place_results,
+        rule_conclusions=conclusions,
     )
     profile_claim_suggestions = plan_profile_candidate_deletion(profile_claims, posts)
     profile_relations = infer_owner_profile_relations(
-        list(posts), profile_claims, clues=all_clues, gazetteer=gazetteer
+        list(posts),
+        profile_claims,
+        clues=all_clues,
+        gazetteer=gazetteer,
+        rule_conclusions=conclusions,
     )
     yield (
         "conclusions",
         {
             "clues": [c.model_dump(mode="json") for c in all_clues],
-            "conclusions": [asdict(c) for c in conclusions],
             "photo_place_results": [item.model_dump(mode="json") for item in photo_place_results],
             "profile_claims": [item.model_dump(mode="json") for item in profile_claims],
             "profile_relations": [item.model_dump(mode="json") for item in profile_relations],
