@@ -98,6 +98,27 @@ describe("toDiagnoseEvent", () => {
     }))).toThrow(InvalidDiagnoseEventError);
   });
 
+  it("accepts a corroboration only when it points to another candidate in the same result", () => {
+    const photoClue = { ...CLUE, image_index: 0, type: "shop", source: "ocr", region: [1, 1, 5, 5] };
+    const candidate = (place_id: string, extra: object = {}) => ({
+      place_id, label: "市民会館", place_type: "facility", photo_relation: "visible_in_frame",
+      area_label: "府中市", score: null, evidence: [{ kind: "clue", clue_index: 0, reference_id: null }],
+      source_ids: [`source:${place_id}`], sources: [], ...extra,
+    });
+    const result = (candidates: object[]) => ({
+      post_id: POST.post_id, image_index: 0, status: "ambiguous", granularity: "facility",
+      candidates, reason_codes: ["multiple_matches"], lookup_status: "web_searched",
+    });
+    const event = (candidates: object[]) => JSON.stringify({ clues: [photoClue], conclusions: [], photo_place_results: [result(candidates)] });
+
+    expect(toDiagnoseEvent("conclusions", event([candidate("p05:1"), candidate("brave:1", { corroborated_by: ["p05:1"] })])))
+      .toMatchObject({ event: "conclusions" });
+    for (const refs of [["p05:missing"], ["brave:1"], "p05:1", ["p05:1", "p05:1"]]) {
+      expect(() => toDiagnoseEvent("conclusions", event([candidate("p05:1"), candidate("brave:1", { corroborated_by: refs })])))
+        .toThrow(InvalidDiagnoseEventError);
+    }
+  });
+
   it("reads all 29 candidate sets, including attributes that remain unknown", () => {
     const profile_claims = PROFILE_DIAGNOSED_ATTRIBUTES.map((attribute) => ({
       attribute,

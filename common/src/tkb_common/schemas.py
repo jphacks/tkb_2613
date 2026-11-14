@@ -577,6 +577,10 @@ class PhotoPlaceCandidate(BaseModel):
     evidence: list[PhotoPlaceEvidence] = Field(min_length=1)
     source_ids: list[str] = Field(min_length=1)
     sources: list[PhotoPlaceSource] = Field(default_factory=list)
+    # 外部候補（Brave）の名称・都道府県・市区町村が、同じ結果内の公的なローカル記録1件と
+    # 一致したときだけ、その記録の place_id を入れる。表示用の裏付けで、status・score・
+    # 推論の入力は変えない。
+    corroborated_by: list[str] = Field(default_factory=list, max_length=1)
 
 
 class PhotoPlaceResult(BaseModel):
@@ -603,8 +607,13 @@ class PhotoPlaceResult(BaseModel):
             and self.candidates
         ):
             raise ValueError("unknown/unavailable results cannot contain candidates")
-        if len({candidate.place_id for candidate in self.candidates}) != len(self.candidates):
+        place_ids = {candidate.place_id for candidate in self.candidates}
+        if len(place_ids) != len(self.candidates):
             raise ValueError("photo-place candidate IDs must be unique")
+        for candidate in self.candidates:
+            for place_id in candidate.corroborated_by:
+                if place_id == candidate.place_id or place_id not in place_ids:
+                    raise ValueError("corroborated_by must reference another candidate")
         return self
 
 

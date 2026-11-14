@@ -1,6 +1,8 @@
 import asyncio
 import json
 import sys
+from collections.abc import Coroutine
+from typing import Any
 
 import httpx
 import pytest
@@ -16,11 +18,12 @@ from tkb_common.schemas import (
     PhotoPlaceGranularity,
     PhotoPlaceLookupStatus,
     PhotoPlaceResult,
+    PhotoPlaceSource,
     PhotoPlaceStatus,
 )
 
 
-def _run(coroutine):
+def _run[T](coroutine: Coroutine[Any, Any, T]) -> T:
     original_policy = asyncio.get_event_loop_policy()
     if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -73,7 +76,9 @@ def _local_candidate(place_id: str, label: str) -> PhotoPlaceCandidate:
     )
 
 
-def _response(title: str, *, country: str = "JP", url: str = "https://example.org/place") -> dict:
+def _response(
+    title: str, *, country: str = "JP", url: str = "https://example.org/place"
+) -> dict[str, Any]:
     return {
         "results": [
             {
@@ -203,6 +208,147 @@ def test_external_same_name_does_not_merge_into_one_local_branch() -> None:
     assert len(result.candidates) == 3
     assert result.candidates[0].sources == []
     assert result.candidates[2].sources[0].provider == "Brave Search Place Search"
+
+
+def _official_candidate(
+    place_id: str,
+    label: str,
+    area_label: str | None,
+    prefecture_code: str,
+    *,
+    dataset: str = "P05-22",
+) -> PhotoPlaceCandidate:
+    source_id = f"{dataset}:{place_id}"
+    return PhotoPlaceCandidate(
+        place_id=place_id,
+        label=label,
+        place_type="facility",
+        photo_relation="visible_in_frame",
+        area_label=area_label,
+        evidence=[PhotoPlaceEvidence(kind="clue", clue_index=0)],
+        source_ids=[source_id],
+        sources=[
+            PhotoPlaceSource(
+                source_id=source_id,
+                provider="国土交通省 国土数値情報",
+                dataset=dataset,
+                license_id="PDL1.0",
+                record_id=f"{dataset}_{prefecture_code}_000001",
+                version="2022",
+            )
+        ],
+    )
+
+
+def _ambiguous(*candidates: PhotoPlaceCandidate) -> PhotoPlaceResult:
+    return PhotoPlaceResult(
+        post_id="at://demo/post",
+        image_index=0,
+        status=PhotoPlaceStatus.AMBIGUOUS,
+        granularity=PhotoPlaceGranularity.FACILITY,
+        candidates=list(candidates),
+        reason_codes=["multiple_matches"],
+    )
+
+
+def _search_with(result: PhotoPlaceResult, response: dict[str, Any]) -> PhotoPlaceResult:
+    return _run(
+        search_photo_places(
+            [result],
+            [_clue("市民会館")],
+            SecretStr("test-token"),
+            transport=httpx.MockTransport(
+                lambda _request: httpx.Response(
+                    200, headers={"content-type": "application/json"}, json=response
+                )
+            ),
+        )
+    )[0]
+
+
+def test_brave_result_is_corroborated_by_the_one_official_record_in_same_prefecture() -> None:
+    tokyo = _official_candidate("p05:tokyo", "市民会館", "府中市", "13")
+    hiroshima = _official_candidate("p05:hiroshima", "市民会館", "府中市", "34")
+
+    result = _search_with(_ambiguous(tokyo, hiroshima), _response("市民会館"))
+
+    brave = result.candidates[2]
+    assert brave.sources[0].provider == "Brave Search Place Search"
+    assert brave.corroborated_by == ["p05:tokyo"]
+    # 裏付けは表示用で、候補の数・状態・ローカル候補そのものは変えない
+    assert result.status is PhotoPlaceStatus.AMBIGUOUS
+    assert result.candidates[:2] == [tokyo, hiroshima]
+    assert brave.score is None
+
+
+@pytest.mark.parametrize(
+    "address",
+    [
+        {"country": "JP", "addressLocality": "府中市"},  # 都道府県なし
+        {"country": "JP", "addressRegion": "東京都"},  # 市区町村なし
+        {"country": "JP", "addressRegion": "広島県", "addressLocality": "府中市"},
+        {"country": "JP", "addressRegion": "東京都", "addressLocality": "府中"},
+    ],
+)
+def test_brave_result_without_matching_prefecture_and_municipality_stays_unverified(
+    address: dict[str, str],
+) -> None:
+    response = _response("市民会館")
+    response["results"][0]["postal_address"] = address
+    tokyo = _official_candidate("p05:tokyo", "市民会館", "府中市", "13")
+    other = _official_candidate("p05:other", "市民会館", "調布市", "13")
+
+    result = _search_with(_ambiguous(tokyo, other), response)
+
+    assert result.candidates[2].corroborated_by == []
+
+
+def test_two_official_records_in_same_municipality_do_not_corroborate() -> None:
+    first = _official_candidate("p05:1", "市民会館", "府中市", "13")
+    second = _official_candidate("p05:2", "市民会館", "府中市", "13")
+
+    result = _search_with(_ambiguous(first, second), _response("市民会館"))
+
+    assert result.candidates[2].corroborated_by == []
+
+
+def test_non_official_or_unnamed_local_records_do_not_corroborate() -> None:
+    overture = _official_candidate("ov:1", "市民会館", "府中市", "13", dataset="overture-places")
+    other_name = _official_candidate("p05:1", "市民ホール", "府中市", "13")
+    no_area = _official_candidate("p05:2", "市民会館", None, "13")
+
+    result = _search_with(_ambiguous(overture, other_name, no_area), _response("市民会館"))
+
+    assert result.candidates[3].corroborated_by == []
+
+
+def test_display_limit_keeps_the_corroborated_brave_result_and_its_record() -> None:
+    others = [
+        _official_candidate(f"p05:other{index}", "市民会館", f"架空{index}市", "13")
+        for index in range(60)
+    ]
+    target = _official_candidate("p05:target", "市民会館", "府中市", "13")
+
+    result = _search_with(_ambiguous(*others, target), _response("市民会館"))
+
+    ids = [candidate.place_id for candidate in result.candidates]
+    assert len(ids) == 50
+    assert "p05:target" in ids
+    brave = next(c for c in result.candidates if c.place_id.startswith("brave-place:"))
+    assert brave.corroborated_by == ["p05:target"]
+    assert "too_many_matches" in result.reason_codes
+
+
+def test_corroborated_by_must_point_to_another_candidate_in_the_result() -> None:
+    local = _official_candidate("p05:1", "市民会館", "府中市", "13")
+    dangling = _local_candidate("brave-place:1", "市民会館").model_copy(
+        update={"corroborated_by": ["p05:missing"]}
+    )
+    with pytest.raises(ValueError, match="corroborated_by"):
+        _ambiguous(local, dangling)
+    itself = dangling.model_copy(update={"corroborated_by": ["brave-place:1"]})
+    with pytest.raises(ValueError, match="corroborated_by"):
+        _ambiguous(local, itself)
 
 
 def test_unique_local_candidate_is_sufficient_and_skips_brave() -> None:

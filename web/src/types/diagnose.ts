@@ -98,6 +98,8 @@ export interface PhotoPlaceCandidate {
   readonly evidence: readonly PhotoPlaceEvidence[];
   readonly source_ids: readonly string[];
   readonly sources: readonly PhotoPlaceSource[];
+  /** Brave候補の名称・都道府県・市区町村が、同じ結果内の公的記録1件と一致したときのその place_id。表示用の裏付けだけで、状態や推論は変えない。古い応答では省略される。 */
+  readonly corroborated_by?: readonly string[];
 }
 
 export interface PhotoPlaceResult {
@@ -238,6 +240,11 @@ function isPhotoPlaceResultList(value: unknown, clues: readonly Clue[]): value i
         (!Object.hasOwn(source, "source_url") || source.source_url === null ||
           (typeof source.source_url === "string" && source.source_url.startsWith("https://"))));
       return validEvidence && validSources;
+    }) && candidates.every((candidate: unknown) => {
+      if (!isRecord(candidate) || !Object.hasOwn(candidate, "corroborated_by")) return true;
+      const refs = candidate.corroborated_by;
+      return Array.isArray(refs) && refs.length <= 1 && refs.every((id) =>
+        typeof id === "string" && id !== candidate.place_id && ids.has(id));
     });
   });
 }

@@ -7,7 +7,7 @@ import json
 import re
 import unicodedata
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, NamedTuple
 
 import httpx
 from pydantic import SecretStr
@@ -31,6 +31,7 @@ from tkb_common.schemas import (
 BRAVE_PLACE_SEARCH_ENDPOINT = "https://api.search.brave.com/res/v1/local/place_search"
 MAX_QUERIES_PER_DIAGNOSIS = 3
 MAX_RESULTS_PER_QUERY = 5
+MAX_DISPLAYED_CANDIDATES = 50
 MAX_RESPONSE_BYTES = 128_000
 REQUEST_TIMEOUT_SECONDS = 2.5
 MIN_CLUE_CONFIDENCE = 0.8
@@ -46,6 +47,27 @@ _SENSITIVE_OR_UNCLEAR = re.compile(
 _SENTENCE_LIKE = re.compile(
     r"[をへ]|(?:ました|ません|ます|です|でした|だった|ている|ていた|てる|てきた|行った|来た)\Z"
 )
+
+
+# Brave候補の裏付けに使ってよい、公的機関が出すローカル索引のデータセット。
+# Overture など民間・集合データは名称が一致しても裏付けにしない。
+OFFICIAL_PLACE_DATASETS = frozenset({"P05-22"})
+# JIS X 0401 の都道府県コード順（01〜47）。
+_PREFECTURES = (
+    "北海道", "青森県", "岩手県", "宮城県", "秋田県", "山形県", "福島県",
+    "茨城県", "栃木県", "群馬県", "埼玉県", "千葉県", "東京都", "神奈川県",
+    "新潟県", "富山県", "石川県", "福井県", "山梨県", "長野県", "岐阜県",
+    "静岡県", "愛知県", "三重県", "滋賀県", "京都府", "大阪府", "兵庫県",
+    "奈良県", "和歌山県", "鳥取県", "島根県", "岡山県", "広島県", "山口県",
+    "徳島県", "香川県", "愛媛県", "高知県", "福岡県", "佐賀県", "長崎県",
+    "熊本県", "大分県", "宮崎県", "鹿児島県", "沖縄県",
+)  # fmt: skip
+
+
+class _ExternalCandidate(NamedTuple):
+    candidate: PhotoPlaceCandidate
+    region: str | None
+    locality: str | None
 
 
 def _query(value: str) -> str | None:
@@ -131,13 +153,13 @@ def mark_photo_place_lookup_unavailable(
 
 def _external_candidates(
     payload: object, query: str, clue_indices: Sequence[int]
-) -> list[PhotoPlaceCandidate]:
+) -> list[_ExternalCandidate]:
     if not isinstance(payload, dict):
         return []
     raw_results = payload.get("results")
     if not isinstance(raw_results, list):
         return []
-    candidates: list[PhotoPlaceCandidate] = []
+    candidates: list[_ExternalCandidate] = []
     seen: set[str] = set()
     for item in raw_results[:MAX_RESULTS_PER_QUERY]:
         if not isinstance(item, dict):
@@ -174,33 +196,101 @@ def _external_candidates(
             or None
         )
         source_id = f"brave-place-search:{identity}"
+        candidate = PhotoPlaceCandidate(
+            place_id=place_id,
+            label=label,
+            place_type=PhotoPlaceType.FACILITY,
+            photo_relation=PhotoPlaceRelation.VISIBLE_IN_FRAME,
+            area_label=coarse_area,
+            score=None,
+            evidence=[PhotoPlaceEvidence(kind="clue", clue_index=index) for index in clue_indices],
+            source_ids=[source_id],
+            sources=[
+                PhotoPlaceSource(
+                    source_id=source_id,
+                    provider="Brave Search Place Search",
+                    dataset="unverified external place result",
+                    license_id=None,
+                    record_id=None,
+                    version=None,
+                    attribution="Brave Search result; not independently verified",
+                    source_url=source_url,
+                )
+            ],
+        )
         candidates.append(
-            PhotoPlaceCandidate(
-                place_id=place_id,
-                label=label,
-                place_type=PhotoPlaceType.FACILITY,
-                photo_relation=PhotoPlaceRelation.VISIBLE_IN_FRAME,
-                area_label=coarse_area,
-                score=None,
-                evidence=[
-                    PhotoPlaceEvidence(kind="clue", clue_index=index) for index in clue_indices
-                ],
-                source_ids=[source_id],
-                sources=[
-                    PhotoPlaceSource(
-                        source_id=source_id,
-                        provider="Brave Search Place Search",
-                        dataset="unverified external place result",
-                        license_id=None,
-                        record_id=None,
-                        version=None,
-                        attribution="Brave Search result; not independently verified",
-                        source_url=source_url,
-                    )
-                ],
+            _ExternalCandidate(
+                candidate,
+                region.strip() if isinstance(region, str) else None,
+                locality.strip() if isinstance(locality, str) else None,
             )
         )
     return candidates
+
+
+def _official_record_area(candidate: PhotoPlaceCandidate) -> tuple[str, str] | None:
+    """Return (都道府県, 市区町村) only for a single-source official local record."""
+    if len(candidate.sources) != 1 or not candidate.area_label:
+        return None
+    source = candidate.sources[0]
+    if source.dataset not in OFFICIAL_PLACE_DATASETS or source.record_id is None:
+        return None
+    # P05 の record_id は「P05-22_<都道府県コード>_<連番>」。都道府県は行政区域コード由来。
+    match = re.fullmatch(rf"{re.escape(source.dataset)}_(\d{{2}})_\d+", source.record_id)
+    if match is None:
+        return None
+    code = int(match.group(1))
+    if not 1 <= code <= len(_PREFECTURES):
+        return None
+    return _PREFECTURES[code - 1], candidate.area_label
+
+
+def _trim_keeping_corroborations(
+    candidates: Sequence[PhotoPlaceCandidate],
+) -> list[PhotoPlaceCandidate]:
+    """表示上限で切るとき、裏付けのある外部候補とその参照先を先に残す（並び順は保つ）。
+
+    同名の公的施設が上限を超える名前（「中央公民館」など）でも、裏付けが切り捨てられないようにする。
+    """
+    keep: set[str] = set()
+    for candidate in candidates:
+        if candidate.corroborated_by and len(keep) + 2 <= MAX_DISPLAYED_CANDIDATES:
+            keep.update([candidate.place_id, *candidate.corroborated_by])
+    for candidate in candidates:
+        if len(keep) >= MAX_DISPLAYED_CANDIDATES:
+            break
+        keep.add(candidate.place_id)
+    return [candidate for candidate in candidates if candidate.place_id in keep]
+
+
+def _area_key(value: str) -> str:
+    return "".join(unicodedata.normalize("NFKC", value).split())
+
+
+def _corroborating_place_id(
+    external: _ExternalCandidate, local_candidates: Sequence[PhotoPlaceCandidate]
+) -> str | None:
+    """名称・都道府県・市区町村がすべて一致する公的記録がちょうど1件のときだけ返す。
+
+    同名の市区町村（府中市など）を取り違えないよう、都道府県が分からなければ裏付けにしない。
+    """
+    if not external.region or not external.locality:
+        return None
+    region = _area_key(external.region)
+    locality = _area_key(external.locality)
+    if len(locality) < 2 or not locality.endswith(("市", "区", "町", "村")):
+        return None
+    name = _normalized_name(external.candidate.label)
+    matches = []
+    for local in local_candidates:
+        area = _official_record_area(local)
+        if area is None or _normalized_name(local.label) != name:
+            continue
+        prefecture, municipality = area
+        # 「北区」だけでは大阪市北区と堺市北区を区別できないので、末尾一致は使わない。
+        if _area_key(prefecture) == region and _area_key(municipality) == locality:
+            matches.append(local.place_id)
+    return matches[0] if len(matches) == 1 else None
 
 
 async def search_photo_places(
@@ -238,11 +328,11 @@ async def search_photo_places(
     selected: dict[str, list[tuple[str, int]]] = {}
     selected_images: set[tuple[str, int]] = set()
     for query, clue_indices in clue_indices_by_query.items():
-        keys = {
-            (clues[index].post_id, clues[index].image_index)
-            for index in clue_indices
-            if (clues[index].post_id, clues[index].image_index) in needs_lookup
-        }
+        keys: set[tuple[str, int]] = set()
+        for index in clue_indices:
+            image_index = clues[index].image_index
+            if image_index is not None and (clues[index].post_id, image_index) in needs_lookup:
+                keys.add((clues[index].post_id, image_index))
         for result_key in keys:
             selected_images.add(result_key)
             selected.setdefault(query, []).append(result_key)
@@ -250,7 +340,7 @@ async def search_photo_places(
     if not selected:
         return list(local_results)
 
-    candidates_by_image: dict[tuple[str, int], list[PhotoPlaceCandidate]] = {}
+    candidates_by_image: dict[tuple[str, int], list[_ExternalCandidate]] = {}
     searched_images: set[tuple[str, int]] = set()
     failed_images: set[tuple[str, int]] = set()
     async with httpx.AsyncClient(
@@ -301,8 +391,8 @@ async def search_photo_places(
                     for index in clue_indices_by_query[query]
                     if (clues[index].post_id, clues[index].image_index) == image_key
                 ]
-                candidates = _external_candidates(payload, query, image_clue_indices)
-                candidates_by_image.setdefault(image_key, []).extend(candidates)
+                found = _external_candidates(payload, query, image_clue_indices)
+                candidates_by_image.setdefault(image_key, []).extend(found)
 
     updated: list[PhotoPlaceResult] = []
     for result in local_results:
@@ -315,9 +405,14 @@ async def search_photo_places(
             else:
                 updated.append(result)
             continue
-        external = candidates_by_image.get(result_key, [])
         merged = list(result.candidates)
-        merged.extend(external)
+        for external in candidates_by_image.get(result_key, []):
+            corroborating = _corroborating_place_id(external, result.candidates)
+            merged.append(
+                external.candidate.model_copy(update={"corroborated_by": [corroborating]})
+                if corroborating is not None
+                else external.candidate
+            )
         merged_by_id = {candidate.place_id: candidate for candidate in merged}
         candidates = list(merged_by_id.values())
         if len(candidates) == 0:
@@ -332,12 +427,12 @@ async def search_photo_places(
             and all(candidate.place_type is PhotoPlaceType.FACILITY for candidate in candidates)
             else result.granularity
         )
-        if len(candidates) > 50:
-            candidates = candidates[:50]
+        if len(candidates) > MAX_DISPLAYED_CANDIDATES:
+            candidates = _trim_keeping_corroborations(candidates)
         reason_codes: list[str] = []
         if len(candidates) > 1:
             reason_codes.append("multiple_matches")
-        if len(merged_by_id) > 50:
+        if len(merged_by_id) > MAX_DISPLAYED_CANDIDATES:
             reason_codes.append("too_many_matches")
         if not candidates:
             reason_codes.append("no_external_match")

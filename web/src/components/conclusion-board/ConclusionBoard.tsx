@@ -208,6 +208,10 @@ export function ConclusionBoard({
                 {result.candidates.map((candidate) => <li key={candidate.place_id} className="rounded-sm bg-paper-deep px-3 py-2">
                   <p className="font-bold">{candidate.label}<span className="ml-2 text-xs font-normal text-ink/60">{candidate.photo_relation === "visible_in_frame" ? t.photoPlaces.visible : candidate.photo_relation}</span></p>
                   {candidate.area_label && <p className="text-sm">{candidate.area_label}</p>}
+                  {candidate.corroborated_by?.map((id) => {
+                    const record = result.candidates.find((other) => other.place_id === id);
+                    return record ? <p key={id} className="text-xs text-ink/70">{t.photoPlaces.corroborated(record.label, record.area_label)}</p> : null;
+                  })}
                   <p className="text-xs text-ink/60">{candidate.place_id}</p>
                   <ul aria-label={t.reasonsLabel} className="mt-1 text-xs">{candidate.evidence.map((item, index) => {
                     const clue = item.clue_index === null ? undefined : clues[item.clue_index];

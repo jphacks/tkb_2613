@@ -203,6 +203,8 @@ export const messages = {
       externalNotice: "Braveの検索結果は名称検索で見つかった未確認候補です。施設の同一性や、写真の撮影位置・自宅との関係は確認していません。",
       referenceNotice: "Commons参照画像との厳密な複製一致を確認しました。画像の一致だけでは撮影位置・施設・本人の現在地や居住地を確定しません。作者とライセンスは出典欄を確認してください。",
       externalSource: "Braveの検索結果を見る（未確認）",
+      corroborated: (label: string, area: string | null) =>
+        `公的データ「${label}」${area ? `（${area}）` : ""}と、名称・都道府県・市区町村が一致しました。同じ施設かどうかと、写真の撮影位置は確認していません。`,
       image: (index: number) => `写真 ${index} 枚目`,
       visible: "写真内に見える",
       clue: (index: number, value: string, source: string) => `手がかり ${index}: ${value} (${source})`,
