@@ -6,10 +6,13 @@
 # - ドキュメントは、コミット SHA（40桁の16進）だけを受け取り、そのコミットの infra/deploy.sh を実行する。
 #   deploy.sh は、それが origin/main の最新でなければ何もせずに止まる
 
-variable "github_repository" {
-  description = "デプロイを許す GitHub のリポジトリ（owner/name）"
+# GitHub の OIDC トークンの sub の頭。このリポジトリは immutable subject が有効なので、
+# 組織とリポジトリの名前に数値 ID が付く（名前を変えたり同じ名前で作り直されたりしても、別物として断れる）。
+# 確かめ方：gh api repos/jphacks/tkb_2613/actions/oidc/customization/sub の sub_claim_prefix
+variable "github_oidc_sub_prefix" {
+  description = "デプロイを許す GitHub リポジトリの OIDC の sub の頭（repo:<owner>@<id>/<repo>@<id>）"
   type        = string
-  default     = "jphacks/tkb_2613"
+  default     = "repo:jphacks@10176253/tkb_2613@1400399919"
 }
 
 # GitHub の OIDC プロバイダはアカウントに1つだけ作れる。Terraform の外で作ってあるので、参照だけする
@@ -67,7 +70,7 @@ data "aws_iam_policy_document" "github_deploy_assume" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_repository}:ref:refs/heads/main"]
+      values   = ["${var.github_oidc_sub_prefix}:ref:refs/heads/main"]
     }
   }
 }
