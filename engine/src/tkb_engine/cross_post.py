@@ -1107,6 +1107,9 @@ _RULE_CONCLUSION_MAPPING: dict[tuple[str, str], tuple[ProfileAttribute, float]] 
     ("X3", "long_term_home_absence"): (ProfileAttribute.ANNOUNCED_LONG_ABSENCE, 0.58),
     ("X4", "frequent_shop"): (ProfileAttribute.FREQUENT_SHOP, 0.56),
     ("X5", "workplace"): (ProfileAttribute.EMPLOYER_NAME, 0.56),
+    ("BP1", "full_name"): (ProfileAttribute.FULL_NAME, 0.62),
+    ("BP1", "long_term_home_absence"): (ProfileAttribute.ANNOUNCED_LONG_ABSENCE, 0.60),
+    ("BP2", "long_term_home_absence"): (ProfileAttribute.ANNOUNCED_LONG_ABSENCE, 0.62),
 }
 
 
@@ -1181,7 +1184,7 @@ def infer_rule_and_link_claims(
     clues: Sequence[Clue],
     gazetteer: Gazetteer | None = None,
 ) -> list[ProfileItem]:
-    """Convert RulesR (R1..R12) and RulesX (X2..X5) conclusions into ProfileItem candidates."""
+    """Convert RulesR (R1..R12), RulesX (X2..X5) and BP1/BP2 conclusions into candidates."""
     conclusions = infer(list(clues), list(posts), gazetteer or Gazetteer())
     grouped_paths: dict[tuple[ProfileAttribute, str], list[ProfileEvidencePath]] = {}
     for conclusion in conclusions:
