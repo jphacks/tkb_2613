@@ -86,12 +86,12 @@ Python は `common/` の Pydantic モデル（`tkb_common.schemas`）、TypeScri
 ### プロフィールの項目（捜査ボードの1行）
 
 ```json
-{"attribute": "commute_station_or_line", "value": "〇〇駅", "confidence": 0.81, "status": "found",
+{"attribute": "regular_station", "value": "〇〇駅", "confidence": 0.81, "status": "found",
  "evidence": [{"post_id": "at://.../3kxxxx", "clue_index": 3, "required": true}]}
 ```
 
-- `attribute`：`facial_appearance` / `full_name` / `given_name_or_nickname` / `other_social_account` / `realtime_location` / `home_building_or_room` / `commute_station_or_line` / `residential_area` / `long_term_home_absence` / `workplace` / `workplace_area` / `school` / `frequent_shop` / `vehicle_model_or_partial_plate` / `partner_status_and_attributes` / `children_age_and_school`
-- 表示名、4つのカテゴリ、パーソナル度、推測しやすさは Python と TypeScript のプロフィール項目カタログで定義する。これらは診断ごとの推定確度ではない
+- `attribute`：`facial_appearance` / `full_name` / `given_name` / `nickname` / `other_social_account` / `age` / `birthday` / `realtime_location` / `home_building` / `home_room` / `home_nearest_station` / `regular_station` / `regular_line` / `residential_area` / `announced_long_absence` / `actual_home_absence` / `employer_name` / `workplace_building_candidate` / `workplace_area` / `school` / `occupation` / `frequent_shop` / `vehicle_model` / `partial_plate` / `active_time` / `routine` / `partner_status` / `partner_attributes` / `child_age` / `child_school`（29項目）
+- 表示名と4つのカテゴリ（`identity_and_face` / `home_and_location` / `affiliation_and_work` / `activity_and_family`）は Python と TypeScript のプロフィール項目カタログで定義する。旧パーソナル度・推測しやすさは廃止し null。カタログにあることは、実際に推定できるという意味ではない
 - `value`：具体値を示せない場合は null。`status` が unknown のときは null にする
 - `status`：found（推定できた）/ weak（弱い）/ unknown（不明）
 - `evidence`：根拠の手がかり。`required: true` は、その手がかりが消えるとこの項目が成り立たないもの
@@ -99,7 +99,7 @@ Python は `common/` の Pydantic モデル（`tkb_common.schemas`）、TypeScri
 ### 削除の提案
 
 ```json
-{"delete": ["at://.../3kxxxx", "at://.../3myyyy"], "broken": ["workplace", "commute_station_or_line"], "before": [/* 項目 */], "after": [/* 項目 */]}
+{"delete": ["at://.../3kxxxx", "at://.../3myyyy"], "broken": ["employer_name", "regular_station"], "before": [/* 項目 */], "after": [/* 項目 */]}
 ```
 
 ## 推定と最小削除の考え方（engine）
@@ -151,7 +151,7 @@ Python は `common/` の Pydantic モデル（`tkb_common.schemas`）、TypeScri
 
 既存：`MOCK_MODE`、`VLM_BASE_URL`、`VLM_API_KEY`、`VLM_MODEL`、`OCR_BASE_URL`。鍵を `NEXT_PUBLIC_` で始まる変数に入れない。
 
-プロフィール推定は現在 `residential_area`、`regular_station`、`employer_name`、`child_age`、`child_school` の限定ルールのみ。`residential_area` には、事前に取得した国土地理院の避難所の表と、国土数値情報のバス停留所（令和4年度版）を「X は Y にある」という知識として使う経路がある（`engine/src/tkb_engine/open_data.py`、`open_data_bus.py`）。`child_school` は、本人の子どもの学校の X（「娘の小学校のひまわり祭り」）と別の投稿の「X は〇〇小学校」が同じ X でつながり、学区の表で学校が1つに決まるときだけ推定し（`child_school.py`）、その学区の区市町村を居住地域の経路に足す（`open_data_school.py`）。`employer_name` には、本人が明示した勤務先の名前を国税庁の法人番号の表（`data/processed/corporations.sqlite`。api のメモリに載せず、引くたびにディスクから読む）で正式名称に結ぶ経路がある。公開データの根拠は `source=open_data` で、画面に出典を出す。投稿ごとの観測手がかりと、投稿を横断した推定を区別し、根拠経路は `docs/profile-classification-v2.md` に合わせる。ProfileItem用の仮除外候補と、mainのConclusion向けplan/simulate/deleteは別フローとして維持する。
+`residential_area` には、事前に取得した国土地理院の避難所の表と、国土数値情報のバス停留所（令和4年度版）を「X は Y にある」という知識として使う経路がある（`engine/src/tkb_engine/open_data.py`、`open_data_bus.py`）。`child_school` は、本人の子どもの学校の X（「娘の小学校のひまわり祭り」）と別の投稿の「X は〇〇小学校」が同じ X でつながり、学区の表で学校が1つに決まるときだけ推定し（`child_school.py`）、その学区の区市町村を居住地域の経路に足す（`open_data_school.py`）。`employer_name` には、本人が明示した勤務先の名前を国税庁の法人番号の表（`data/processed/corporations.sqlite`。api のメモリに載せず、引くたびにディスクから読む）で正式名称に結ぶ経路がある。公開データの根拠は `source=open_data` で、画面に出典を出す。投稿ごとの観測手がかりと、投稿を横断した推定を区別し、根拠経路は `docs/profile-classification-v2.md` に合わせる。
 
 OAuth：`AUTH_MODE`（ローカル既定 `app_password`、本番は採用試験を通れば `oauth`）、`PUBLIC_URL`（公開の HTTPS オリジン）、`OAUTH_WEB_ORIGIN`（api から web への Docker 内部 URL）、`API_INTERNAL_ORIGIN`（web から api への Docker 内部 URL）、`INTERNAL_AUTH_SECRET`（起動時に生成し、両コンテナへ別の一時ファイルで渡す）。
 
