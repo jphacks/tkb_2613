@@ -50,7 +50,7 @@ STATIONS_URL = "https://nlftp.mlit.go.jp/ksj/gml/data/N02/N02-24/N02-24_GML.zip"
 # railway zip, and small prefecture CSVs. The decompressed station member has a
 # separate cap because it is parsed as a stream.
 MAX_POSTAL_ZIP_BYTES = 4 * 1024 * 1024
-MAX_POSTAL_MEMBER_BYTES = 16 * 1024 * 1024
+MAX_POSTAL_MEMBER_BYTES = 24 * 1024 * 1024
 MAX_STATION_ZIP_BYTES = 32 * 1024 * 1024
 MAX_MESH_CSV_BYTES = 4 * 1024 * 1024
 MAX_TOTAL_INPUT_BYTES = 64 * 1024 * 1024
