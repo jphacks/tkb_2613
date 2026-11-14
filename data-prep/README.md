@@ -45,6 +45,10 @@ make data
 
 e-Stat の zip がないときは、置き場所を案内して止まる。
 
+### 任意: ローカルPOI名索引
+
+施設・地標候補の表示に使う全国POI本体は自動取得しない。必要な場合だけ、ライセンスと出典を確認したGeoJSONLをSQLiteへ流し込む。手順、Overture Placesの現在のschema/利用条件、country filter、dataset別license mappingは [SOURCES.md の任意POI索引](SOURCES.md#任意poi索引の取込) を参照。
+
 2026-10-23 に実行したときの件数（妥当かを確かめるときの目安）：
 
 ```text

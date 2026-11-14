@@ -486,6 +486,127 @@ class WebFact(BaseModel):
         return value
 
 
+class PhotoPlaceStatus(StrEnum):
+    CANDIDATE = "candidate"
+    AMBIGUOUS = "ambiguous"
+    UNKNOWN = "unknown"
+    UNAVAILABLE = "unavailable"
+
+
+class PhotoPlaceType(StrEnum):
+    STATION = "station"
+    FACILITY = "facility"
+    LANDMARK = "landmark"
+    ADDRESS = "address"
+    AREA = "area"
+    UNKNOWN = "unknown"
+
+
+class PhotoPlaceGranularity(StrEnum):
+    STATION = "station"
+    FACILITY = "facility"
+    ADDRESS = "address"
+    AREA = "area"
+    UNKNOWN = "unknown"
+
+
+class PhotoPlaceRelation(StrEnum):
+    VISIBLE_IN_FRAME = "visible_in_frame"
+    CAMERA_NEARBY = "camera_nearby"
+    CAMERA_AT = "camera_at"
+
+
+class PhotoPlaceLookupStatus(StrEnum):
+    LOCAL_ONLY = "local_only"
+    WEB_SEARCHED = "web_searched"
+    UNAVAILABLE = "unavailable"
+
+
+class PhotoPlaceEvidenceKind(StrEnum):
+    CLUE = "clue"
+    REFERENCE = "reference"
+
+
+class PhotoPlaceEvidence(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: PhotoPlaceEvidenceKind
+    clue_index: NonNegativeInt | None = None
+    reference_id: str | None = Field(default=None, min_length=1)
+
+    @model_validator(mode="after")
+    def _check_reference(self) -> Self:
+        if (
+            self.kind is PhotoPlaceEvidenceKind.CLUE
+            and self.clue_index is not None
+            and self.reference_id is None
+        ):
+            return self
+        if (
+            self.kind is PhotoPlaceEvidenceKind.REFERENCE
+            and self.reference_id is not None
+            and self.clue_index is None
+        ):
+            return self
+        raise ValueError("photo-place evidence must reference a clue or reference")
+
+
+class PhotoPlaceSource(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    source_id: str = Field(min_length=1, max_length=300)
+    provider: str = Field(min_length=1, max_length=200)
+    dataset: str = Field(min_length=1, max_length=200)
+    license_id: str | None = Field(default=None, max_length=100)
+    record_id: str | None = Field(default=None, max_length=300)
+    version: str | None = Field(default=None, max_length=100)
+    attribution: str | None = Field(default=None, max_length=500)
+    source_url: str | None = Field(default=None, max_length=2000)
+
+
+class PhotoPlaceCandidate(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    place_id: str = Field(min_length=1, max_length=300)
+    label: str = Field(min_length=1, max_length=300)
+    place_type: PhotoPlaceType
+    photo_relation: PhotoPlaceRelation
+    area_label: str | None = Field(default=None, max_length=200)
+    score: float | None = Field(default=None, ge=0, le=1)
+    evidence: list[PhotoPlaceEvidence] = Field(min_length=1)
+    source_ids: list[str] = Field(min_length=1)
+    sources: list[PhotoPlaceSource] = Field(default_factory=list)
+
+
+class PhotoPlaceResult(BaseModel):
+    """A visible place candidate; it does not assert camera or owner location."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    post_id: str = Field(min_length=1)
+    image_index: NonNegativeInt
+    status: PhotoPlaceStatus
+    granularity: PhotoPlaceGranularity
+    candidates: list[PhotoPlaceCandidate] = Field(default_factory=list)
+    reason_codes: list[str] = Field(default_factory=list)
+    lookup_status: PhotoPlaceLookupStatus = PhotoPlaceLookupStatus.LOCAL_ONLY
+
+    @model_validator(mode="after")
+    def _check_status(self) -> Self:
+        if self.status is PhotoPlaceStatus.CANDIDATE and len(self.candidates) != 1:
+            raise ValueError("candidate status requires one candidate")
+        if self.status is PhotoPlaceStatus.AMBIGUOUS and len(self.candidates) < 2:
+            raise ValueError("ambiguous status requires multiple candidates")
+        if (
+            self.status in {PhotoPlaceStatus.UNKNOWN, PhotoPlaceStatus.UNAVAILABLE}
+            and self.candidates
+        ):
+            raise ValueError("unknown/unavailable results cannot contain candidates")
+        if len({candidate.place_id for candidate in self.candidates}) != len(self.candidates):
+            raise ValueError("photo-place candidate IDs must be unique")
+        return self
+
+
 class ProfileEvidence(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 

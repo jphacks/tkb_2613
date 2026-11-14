@@ -18,6 +18,7 @@ data-prep で使う公開データ。データ本体はリポジトリに含め�
 | 法人番号公表サイト 基本3情報 全件データ（CSV 形式・Shift-JIS、埼玉・千葉・東京・神奈川） | 国税庁 | https://www.houjin-bangou.nta.go.jp/download/zenken/ （ブラウザで取得して `raw/houjin/` に置く） | [法人番号公表サイトの利用規約](https://www.houjin-bangou.nta.go.jp/riyokiyaku/index.html)（公共データ利用規約 第1.0版に準拠。CC BY 4.0 と互換） | 2026-11-12（2026-10-30 版） |
 | ごみと資源の収集日（syusyubi.csv） | 文京区 | https://www.city.bunkyo.lg.jp/documents/6059/syusyubi.csv （案内は https://www.city.bunkyo.lg.jp/b004/p006286.html ） | 文京区オープンデータ（[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/deed.ja)）。データの時点の記載はない（ファイルの更新は 2026-03-23） | 2026-11-12 |
 | 市外局番の一覧（令和8年3月1日現在、Word 版） | 総務省 | https://www.soumu.go.jp/main_content/001072458.doc | [総務省ホームページの利用条件](https://www.soumu.go.jp/menu_kyotsuu/policy/tyosaku.html)（公共データ利用規約 第1.0版に準拠） | 2026-10-23 |
+| 任意ローカルPOI名称索引（`places.sqlite3`。自動取得しない） | 利用者がローカルで準備するGeoJSONL。候補データ: Overture Maps Places | https://docs.overturemaps.org/guides/places/ | 2026-11時点のスキーマは `id,names,basic_category,taxonomy,addresses,sources`。sourceごとにライセンスが異なり、`sources[].license` が欠落する場合もある。`sources[].license` または確認済みのdataset別SPDX mappingを保持し、ライセンス不明の行は検索別名を作らない。[Attribution](https://docs.overturemaps.org/attribution/) と各provider条件を取得前に確認 | スキーマ確認 2026-11-14 |
 
 ## 出典の書き方
 
@@ -37,6 +38,22 @@ data-prep で使う公開データ。データ本体はリポジトリに含め�
 画面で避難所の表を根拠に出すときは、上の注記（最新でない場合や未掲載の場合があること）を必ず添える（`engine/src/tkb_engine/open_data.py` の `SHELTER_CITATION`）。避難の情報としては見せない。
 
 `manual/area_codes.csv` は総務省「市外局番の一覧」から 1都3県を含む行を写したもので、上の出典の書き方に従う。
+
+## 任意POI索引の取込
+
+全国POIのダウンロードは実行せず、データ本体もコミットしない。Overture Placesは全国規模のGeoParquetで、地域別の抽出は[公式getting-dataガイド](https://docs.overturemaps.org/getting-data/)に従う。検索用に全件をPythonメモリへ展開せず、ローカルで1行1featureのGeoJSONLへストリーム変換し、必要なら地域チャンクを連結してから実行する。
+
+```powershell
+uv run --project data-prep python -m tkb_data_prep.import_places `
+  --input C:\data\places-japan.geojsonl `
+  --output engine\data\processed\places.sqlite3 `
+  --provider "Overture Maps" --dataset "places" --version "取得したrelease ID" `
+  --source-license-map C:\data\verified-source-licenses.json
+```
+
+`--source-license-map` は、元条件を人が確認した後で `sources[].dataset` ごとにSPDX IDを与えるJSON object。レコード自身の `sources[].license` を優先し、nullのままで確認済みmappingがないレコードは索引DBには provenance とともに保存するが、検索可能なaliasは作らない。`addresses[].country` が `JP` のデータに限定する。住所の国コードがない入力を使う場合は、入力を地理的に日本へ切り出したことを確認してから `--allow-country-missing` を明示する。変換はSQLiteにバッチで書き込み、既存DBを上書きしない。各名前検索は最大50候補に制限し、上限超過は曖昧として表示する。
+
+取込POIの名称完全一致は未確認候補に過ぎず、Overtureが記載する重複・junk・属性欠落などの品質課題もある。名称だけで所在地を検証済みと表示しない。POI indexはテキスト/座標で、全国の参照画像DBとは別物。参照画像照合を追加する場合は候補周辺の許諾画像だけを個別取得し、別途sourceとライセンスを記録する。
 
 - 文京区オープンデータ「ごみと資源の収集日」（https://www.city.bunkyo.lg.jp/documents/6059/syusyubi.csv）を加工して作成
 
