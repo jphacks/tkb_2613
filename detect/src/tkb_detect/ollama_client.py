@@ -14,7 +14,8 @@ class OllamaConfig:
     base_url: str = "http://localhost:11434"
     model: str = "qwen3:4b-instruct"
     allowed_hosts: tuple[str, ...] | None = None
-    timeout_s: float = 180.0  # 16 GB RAM の CPU 実行を想定
+    # 応答の待ち時間は制限しない（CPU 実行で遅くても止めない）。つながらないときだけ早めに諦める
+    timeout_s: float | None = None
 
 
 class OllamaClient:
@@ -45,7 +46,9 @@ class OllamaClient:
             ],
         }
         try:
-            async with httpx.AsyncClient(timeout=self._timeout, trust_env=False) as client:
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(self._timeout, connect=10.0), trust_env=False
+            ) as client:
                 response = await client.post(f"{self._base_url}/api/chat", json=payload)
                 response.raise_for_status()
                 data = response.json()

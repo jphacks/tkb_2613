@@ -1,11 +1,15 @@
+import asyncio
+import json
+import sqlite3
 from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import httpx
 import pytest
 import respx
 
+from tkb_api.bluesky import Diagnosis, SessionStore
 from tkb_api.pipeline import (
     MAX_IMAGE_BYTES,
     ImageFetchError,
@@ -14,8 +18,29 @@ from tkb_api.pipeline import (
     fetch_images,
     load_gazetteer,
 )
-from tkb_common.schemas import Clue, ClueSource, ClueType, Post
+from tkb_api.routes.diagnose import read_diagnosis
+from tkb_common.place_names import PLACE_INDEX_SCHEMA_VERSION
+from tkb_common.schemas import (
+    PROFILE_DIAGNOSED_ATTRIBUTES,
+    Clue,
+    ClueSource,
+    ClueType,
+    PhotoPlaceCandidate,
+    PhotoPlaceEvidence,
+    PhotoPlaceGranularity,
+    PhotoPlaceLookupStatus,
+    PhotoPlaceRelation,
+    PhotoPlaceResult,
+    PhotoPlaceSource,
+    PhotoPlaceStatus,
+    PhotoPlaceType,
+    Post,
+    ProfileAttribute,
+)
 from tkb_detect.batch import PostExtraction
+from tkb_engine.cross_post import (
+    infer_owner_candidate_sets_with_web,
+)
 from tkb_engine.gazetteer import Gazetteer
 
 FIXTURE = Path(__file__).resolve().parents[2] / "eval" / "fixtures" / "demo_observations.json"
@@ -125,7 +150,7 @@ async def _stream(items: list[PostExtraction]) -> AsyncIterator[PostExtraction]:
 
 
 @pytest.mark.anyio
-async def test_events_keep_failed_posts_and_index_conclusions_into_all_clues() -> None:
+async def test_events_keep_failed_posts_and_return_candidate_sets_only() -> None:
     post = _post(0, text="毎週火曜はジム")
     clue = Clue(
         post_id=post.post_id,
@@ -153,15 +178,346 @@ async def test_events_keep_failed_posts_and_index_conclusions_into_all_clues() -
     assert events[1][1]["error"] == "写真を取得できませんでした"
     result = events[3][1]
     assert result["clues"] == [clue.model_dump(mode="json")]
-    assert result["profile_claims"] == []
-    assert result["profile_claim_suggestions"] == []
+    assert "conclusions" not in result
+    assert len(result["profile_claims"]) == len(PROFILE_DIAGNOSED_ATTRIBUTES)
+    assert result["profile_relations"] == []
+    claims_by_attr = {claim["attribute"]: claim for claim in result["profile_claims"]}
+    assert claims_by_attr["routine"]["status"] == "candidate"
+    assert claims_by_attr["routine"]["candidates"][0]["value"] == "毎週火曜（毎週火曜はジム）"
+    assert all(
+        claim["status"] == "unknown" and claim["candidates"] == []
+        for attr, claim in claims_by_attr.items()
+        if attr != "routine"
+    )
+    assert "home_room" not in claims_by_attr
+    assert result["profile_claim_suggestions"] == [post.post_id]
     assert saved_result["clues"] == [clue]
-    assert saved_result["profile_claims"] == []
-    routine = next(c for c in result["conclusions"] if c["attribute"] == "routine")
-    assert routine["clue_indices"] == [0]
-    assert set(routine) == {"rule", "attribute", "value", "clue_indices", "note", "confidence"}
-    # 根拠は確からしさ 0.9 の手がかり1件だけなので、合成しても 0.9
-    assert routine["confidence"] == 0.9
+    assert len(saved_result["profile_claims"]) == len(PROFILE_DIAGNOSED_ATTRIBUTES)
+    assert saved_result["profile_relations"] == []
+    assert all(
+        (claim.status == "candidate" if claim.attribute == "routine" else claim.status == "unknown")
+        for claim in saved_result["profile_claims"]
+    )
+
+
+@pytest.mark.anyio
+async def test_conclusions_event_returns_photo_unknown_without_changing_profile_candidates() -> (
+    None
+):
+    post = _post(1)
+    saved: dict[str, Any] = {}
+    events = [
+        event
+        async for event in diagnose_events(
+            [post],
+            _stream([PostExtraction(post_id=post.post_id, clues=[])]),
+            Gazetteer(),
+            on_result=saved.update,
+        )
+    ]
+    result = next(data for name, data in events if name == "conclusions")
+    [photo_result] = result["photo_place_results"]
+    assert photo_result["post_id"] == post.post_id
+    assert photo_result["image_index"] == 0
+    assert photo_result["status"] == "unknown"
+    assert saved["photo_place_results"][0].status.value == "unknown"
+    assert all(not claim.candidates for claim in saved["profile_claims"])
+
+
+@pytest.mark.anyio
+async def test_photo_place_candidate_does_not_become_a_profile_location_claim(
+    tmp_path: Path,
+) -> None:
+    post = _post(1)
+    clue = Clue(
+        post_id=post.post_id,
+        image_index=0,
+        type=ClueType.SHOP,
+        value="架空施設",
+        region=(1, 1, 9, 9),
+        confidence=0.95,
+        source=ClueSource.OCR,
+    )
+    index = tmp_path / "places.sqlite3"
+    record = {
+        "place_id": "fixture:place",
+        "label": "架空施設",
+        "sources": [
+            {
+                "source_id": "fixture:record",
+                "provider": "fixture",
+                "dataset": "places",
+                "license_id": "CC-BY-4.0",
+                "record_id": "record",
+                "version": "v1",
+                "attribution": "fixture",
+            }
+        ],
+    }
+    with sqlite3.connect(index) as db:
+        db.execute(f"PRAGMA user_version = {PLACE_INDEX_SCHEMA_VERSION}")
+        db.executescript(
+            """
+            CREATE TABLE poi_place (
+                place_id TEXT PRIMARY KEY,
+                license_verified INTEGER NOT NULL,
+                record_json TEXT NOT NULL
+            );
+            CREATE TABLE poi_alias (
+                name_key TEXT NOT NULL,
+                place_id TEXT NOT NULL,
+                PRIMARY KEY(name_key, place_id)
+            );
+            CREATE INDEX poi_alias_name_idx ON poi_alias(name_key);
+            """
+        )
+        db.execute(
+            "INSERT INTO poi_place VALUES (?, 1, ?)",
+            (record["place_id"], json.dumps(record, ensure_ascii=False)),
+        )
+        db.execute("INSERT INTO poi_alias VALUES (?, ?)", ("架空施設", record["place_id"]))
+    saved: dict[str, Any] = {}
+
+    events = [
+        event
+        async for event in diagnose_events(
+            [post],
+            _stream([PostExtraction(post_id=post.post_id, clues=[clue])]),
+            Gazetteer(places_path=index),
+            on_result=saved.update,
+        )
+    ]
+    conclusions = next(data for name, data in events if name == "conclusions")
+    assert conclusions["photo_place_results"][0]["status"] == "candidate"
+    assert all(not claim.candidate_pool for claim in saved["profile_claims"])
+
+
+def test_photo_home_area_candidate_snapshot_recalculates_and_hides_deleted_photo() -> None:
+    photo_post = _post(1, text="\u81ea\u5b85\u8fd1\u304f\u306e\u67b6\u7a7a\u65bd\u8a2d")
+    area_post = photo_post.model_copy(
+        update={
+            "post_id": "at://did:plc:xxxx/app.bsky.feed.post/2",
+            "text": "\u6587\u4eac\u533a\u304c\u8fd1\u6240\u3067\u6bce\u65e5\u901a\u308b",
+            "images": [],
+        }
+    )
+    photo_clue = Clue(
+        post_id=photo_post.post_id,
+        image_index=0,
+        type=ClueType.SHOP,
+        value="\u67b6\u7a7a\u65bd\u8a2d",
+        region=(1, 1, 9, 9),
+        confidence=0.95,
+        source=ClueSource.OCR,
+    )
+    area_clue = Clue(
+        post_id=area_post.post_id,
+        image_index=None,
+        type=ClueType.PLACE_TEXT,
+        value="\u6587\u4eac\u533a",
+        region=None,
+        confidence=0.9,
+        source=ClueSource.TEXT,
+    )
+    photo_result = PhotoPlaceResult(
+        post_id=photo_post.post_id,
+        image_index=0,
+        status=PhotoPlaceStatus.CANDIDATE,
+        granularity=PhotoPlaceGranularity.FACILITY,
+        lookup_status=PhotoPlaceLookupStatus.REFERENCE_CHECKED,
+        candidates=[
+            PhotoPlaceCandidate(
+                place_id="fixture:place",
+                label="\u67b6\u7a7a\u65bd\u8a2d",
+                place_type=PhotoPlaceType.LANDMARK,
+                photo_relation=PhotoPlaceRelation.VISIBLE_IN_FRAME,
+                area_label="\u6587\u4eac\u533a",
+                evidence=[PhotoPlaceEvidence(kind="clue", clue_index=0)],
+                source_ids=["fixture:record"],
+                sources=[
+                    PhotoPlaceSource(
+                        source_id="fixture:record",
+                        provider="fixture",
+                        dataset="places",
+                        license_id="CC-BY-4.0",
+                    )
+                ],
+            )
+        ],
+    )
+    posts = [photo_post, area_post]
+    clues = [photo_clue, area_clue]
+    claims = infer_owner_candidate_sets_with_web(
+        posts, clues, [], photo_place_results=[photo_result]
+    )
+    diagnosis = Diagnosis(
+        posts=tuple(posts),
+        clues=tuple(clues),
+        photo_place_results=(photo_result,),
+        profile_claims=tuple(claims),
+    )
+
+    class SnapshotStore:
+        value = diagnosis
+
+        def get_diagnosis(self, _: str) -> Diagnosis:
+            return self.value
+
+    store = SnapshotStore()
+    snapshot = read_diagnosis(cast(SessionStore, store), "session", Gazetteer())
+    assert len(snapshot["photo_place_results"]) == 1
+    residential = next(
+        item
+        for item in snapshot["profile_claims"]
+        if item["attribute"] == ProfileAttribute.RESIDENTIAL_AREA.value
+    )
+    assert [item["value"] for item in residential["candidates"]] == ["\u6587\u4eac\u533a"]
+
+    for deleted_id in (photo_post.post_id, area_post.post_id):
+        store.value = diagnosis.__class__(
+            posts=diagnosis.posts,
+            clues=diagnosis.clues,
+            photo_place_results=diagnosis.photo_place_results,
+            profile_claims=diagnosis.profile_claims,
+            deleted=(deleted_id,),
+        )
+        restored = read_diagnosis(cast(SessionStore, store), "session", Gazetteer())
+        restored_residential = next(
+            item
+            for item in restored["profile_claims"]
+            if item["attribute"] == ProfileAttribute.RESIDENTIAL_AREA.value
+        )
+        assert restored_residential["candidates"] == []
+        assert len(restored["photo_place_results"]) == (
+            0 if deleted_id == photo_post.post_id else 1
+        )
+
+
+@pytest.mark.anyio
+async def test_photo_home_area_claim_flows_through_sse_and_deletion_recalculation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    photo_post = _post(1, text="\u81ea\u5b85\u8fd1\u304f\u306e\u67b6\u7a7a\u65bd\u8a2d")
+    area_post = photo_post.model_copy(
+        update={
+            "post_id": "at://did:plc:xxxx/app.bsky.feed.post/2",
+            "text": "\u6587\u4eac\u533a\u304c\u8fd1\u6240\u3067\u6bce\u65e5\u901a\u308b",
+            "images": [],
+        }
+    )
+    photo_clue = Clue(
+        post_id=photo_post.post_id,
+        image_index=0,
+        type=ClueType.SHOP,
+        value="\u67b6\u7a7a\u65bd\u8a2d",
+        region=(1, 1, 9, 9),
+        confidence=0.95,
+        source=ClueSource.OCR,
+    )
+    area_clue = Clue(
+        post_id=area_post.post_id,
+        image_index=None,
+        type=ClueType.PLACE_TEXT,
+        value="\u6587\u4eac\u533a",
+        region=None,
+        confidence=0.9,
+        source=ClueSource.TEXT,
+    )
+    index = tmp_path / "places.sqlite3"
+    record = {
+        "place_id": "fixture:place",
+        "label": "\u67b6\u7a7a\u65bd\u8a2d",
+        "area_label": "\u6587\u4eac\u533a",
+        "basic_category": "facility",
+        "sources": [
+            {
+                "source_id": "fixture:record",
+                "provider": "fixture",
+                "dataset": "places",
+                "license_id": "CC-BY-4.0",
+                "record_id": "record",
+                "version": "v1",
+                "attribution": "fixture",
+            }
+        ],
+    }
+    with sqlite3.connect(index) as db:
+        db.execute(f"PRAGMA user_version = {PLACE_INDEX_SCHEMA_VERSION}")
+        db.executescript(
+            "CREATE TABLE poi_place (place_id TEXT PRIMARY KEY, "
+            "license_verified INTEGER NOT NULL, record_json TEXT NOT NULL);"
+            "CREATE TABLE poi_alias (name_key TEXT NOT NULL, place_id TEXT NOT NULL, "
+            "PRIMARY KEY(name_key, place_id));"
+            "CREATE INDEX poi_alias_name_idx ON poi_alias(name_key);"
+        )
+        db.execute(
+            "INSERT INTO poi_place VALUES (?, 1, ?)",
+            (record["place_id"], json.dumps(record, ensure_ascii=False)),
+        )
+        db.execute(
+            "INSERT INTO poi_alias VALUES (?, ?)",
+            ("\u67b6\u7a7a\u65bd\u8a2d", record["place_id"]),
+        )
+
+    saved: dict[str, Any] = {}
+
+    async def inline_to_thread(function: Any, *args: Any, **kwargs: Any) -> Any:
+        return function(*args, **kwargs)
+
+    monkeypatch.setattr(asyncio, "to_thread", inline_to_thread)
+    events = [
+        event
+        async for event in diagnose_events(
+            [photo_post, area_post],
+            _stream(
+                [
+                    PostExtraction(post_id=photo_post.post_id, clues=[photo_clue]),
+                    PostExtraction(post_id=area_post.post_id, clues=[area_clue]),
+                ]
+            ),
+            Gazetteer(places_path=index),
+            on_result=saved.update,
+        )
+    ]
+    conclusions = next(data for name, data in events if name == "conclusions")
+    [photo_result] = conclusions["photo_place_results"]
+    assert photo_result["status"] == "candidate"
+    residential = next(
+        claim
+        for claim in conclusions["profile_claims"]
+        if claim["attribute"] == ProfileAttribute.RESIDENTIAL_AREA.value
+    )
+    assert residential["status"] == "candidate"
+    assert [candidate["value"] for candidate in residential["candidates"]] == ["\u6587\u4eac\u533a"]
+    candidate = residential["candidates"][0]
+    assert candidate["status"] == "weak"
+
+    assert {ref["post_id"] for ref in candidate["evidence"] if ref["post_id"]} == {
+        photo_post.post_id,
+        area_post.post_id,
+    }
+
+
+@pytest.mark.anyio
+async def test_conclusions_event_returns_photo_unknown_without_creating_profile_claims() -> None:
+    post = _post(1)
+    saved: dict[str, Any] = {}
+    events = [
+        event
+        async for event in diagnose_events(
+            [post],
+            _stream([PostExtraction(post_id=post.post_id, clues=[])]),
+            Gazetteer(),
+            on_result=saved.update,
+        )
+    ]
+    result = next(data for name, data in events if name == "conclusions")
+    [photo_result] = result["photo_place_results"]
+    assert photo_result["post_id"] == post.post_id
+    assert photo_result["image_index"] == 0
+    assert photo_result["status"] == "unknown"
+    assert saved["photo_place_results"][0].status.value == "unknown"
+    assert all(not claim.candidates for claim in saved["profile_claims"])
 
 
 @pytest.mark.anyio
@@ -212,18 +568,18 @@ async def test_events_run_inference_and_planning_off_the_event_loop(
 
     loop_thread = threading.get_ident()
     threads: dict[str, int] = {}
-    real_plan_json = pipeline.plan_json
+    real_plan_claims_json = pipeline.plan_claims_json
 
     def infer(*args: Any) -> Any:
         threads["infer"] = threading.get_ident()
         return real_infer(*args)
 
-    def plan_json(*args: Any) -> Any:
-        threads["plan_json"] = threading.get_ident()
-        return real_plan_json(*args)
+    def plan_claims_json(*args: Any, **kwargs: Any) -> Any:
+        threads["plan_claims_json"] = threading.get_ident()
+        return real_plan_claims_json(*args, **kwargs)
 
     monkeypatch.setattr(pipeline, "infer", infer)
-    monkeypatch.setattr(pipeline, "plan_json", plan_json)
+    monkeypatch.setattr(pipeline, "plan_claims_json", plan_claims_json)
     post = _post(0)
     events = [
         e
@@ -233,5 +589,5 @@ async def test_events_run_inference_and_planning_off_the_event_loop(
     ]
 
     assert [name for name, _ in events][-3:] == ["conclusions", "plan", "done"]
-    assert set(threads) == {"infer", "plan_json"}
+    assert set(threads) == {"infer", "plan_claims_json"}
     assert loop_thread not in threads.values()

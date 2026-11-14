@@ -36,6 +36,7 @@ services:
     # 推理の表（make data で作る）。読み取り専用でつなぐ。なければ最寄り駅のルールだけを飛ばす
     volumes:
       - ../data/processed:/app/data/processed:ro
+      - ../eval/local:/app/eval/local:ro
       - shared-results:/app/data/private
     # 写真をディスクに残さないよう、ファイルシステムを読み取り専用にする
     read_only: true
@@ -55,13 +56,15 @@ services:
         API_ORIGIN: http://api:8001
     # api と同じく、落ちたら自動で起動し直す
     restart: unless-stopped
+    # .env はAPIだけへ渡す。webにはOAuth処理に必要な設定と専用の一時Secretだけを渡す。
     env_file:
-      - path: ../.env
-        required: false
       - path: /run/tkb_2613/web-secrets.env
         required: false
     environment:
       API_INTERNAL_ORIGIN: http://api:8001
+      AUTH_MODE: ${AUTH_MODE:-app_password}
+      SESSION_TTL_MINUTES: ${SESSION_TTL_MINUTES:-30}
+      PUBLIC_URL: ${PUBLIC_URL:-http://127.0.0.1:3000}
     # 既定は 127.0.0.1 だけに公開する。AWS のアプリの EC2 では WEB_BIND=0.0.0.0 にして、
     # CloudFront の VPC origin から届くようにする（届く先はセキュリティグループで絞る）
     ports:

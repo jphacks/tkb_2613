@@ -8,10 +8,10 @@ import { Reveal } from "@/components/reveal/Reveal";
 import { ApiError, getSharedResult } from "@/lib/api";
 import { messages } from "@/lib/messages";
 import { validNameConclusions } from "@/lib/reveal";
-import type { DiagnosisSnapshot } from "@/types/diagnose";
+import type { SharedResultSnapshot } from "@/types/diagnose";
 
 export default function SharedResultPage() {
-  const [result, setResult] = useState<DiagnosisSnapshot | null>(null);
+  const [result, setResult] = useState<SharedResultSnapshot | null>(null);
   const [error, setError] = useState(false);
   // 閲覧リンクの機能がオフのとき（公開中の本番）は、無効・期限切れとは別の文言にする
   const [disabled, setDisabled] = useState(false);
@@ -37,6 +37,11 @@ export default function SharedResultPage() {
     return () => controller.abort();
   }, []);
 
+  const profileClaims = result && "profile_claims" in result ? result.profile_claims ?? [] : [];
+  const conclusions = result && !("profile_claims" in result) && "conclusions" in result
+    ? validNameConclusions(result.conclusions ?? []) : [];
+  const profileRelations = result && "profile_relations" in result ? result.profile_relations ?? [] : [];
+
   return (
     <main className="mx-auto max-w-5xl space-y-10 px-4 py-12 sm:px-8 sm:py-20">
       <h1 className="sr-only">{messages.app.name} の閲覧用診断結果</h1>
@@ -45,8 +50,9 @@ export default function SharedResultPage() {
       {error && <p role="alert">{disabled ? messages.errors.shareDisabled : "リンクが無効か、有効期限が切れています。"}</p>}
       {result && (
         <>
-          <Reveal posts={result.posts} clues={result.clues} conclusions={validNameConclusions(result.conclusions)} />
-          <ConclusionBoard clues={result.clues} conclusions={validNameConclusions(result.conclusions)} />
+          <Reveal posts={result.posts} clues={result.clues} conclusions={conclusions} profileClaims={profileClaims} />
+          <ConclusionBoard clues={result.clues} conclusions={conclusions} profileClaims={profileClaims}
+            profileRelations={profileRelations} posts={result.posts} />
           {result.plan.posts.length > 0 && (
             <section aria-label={messages.risky.heading} className="max-w-2xl space-y-3">
               <h2 className="horror-title text-4xl">{messages.risky.heading}</h2>

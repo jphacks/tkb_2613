@@ -277,9 +277,9 @@ def test_infer_links_separate_posts_into_new_conclusions() -> None:
 
 
 def test_chain_demo_fixture_matches_the_planned_posts_and_finds_every_link() -> None:
-    doc = json.loads((ROOT / "eval/fixtures/demo_chain.json").read_text())
-    x1 = json.loads((ROOT / "eval/demo_account/x1_posts.json").read_text())
-    chain = json.loads((ROOT / "eval/demo_account/chain_posts.json").read_text())
+    doc = json.loads((ROOT / "eval/fixtures/demo_chain.json").read_text(encoding="utf-8"))
+    x1 = json.loads((ROOT / "eval/demo_account/x1_posts.json").read_text(encoding="utf-8"))
+    chain = json.loads((ROOT / "eval/demo_account/chain_posts.json").read_text(encoding="utf-8"))
     posts = [Post.model_validate(post) for post in doc["posts"]]
     clues = [Clue.model_validate(clue) for clue in doc["clues"]]
 

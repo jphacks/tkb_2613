@@ -35,14 +35,21 @@ smoke: Any = _load()
 WAF_BODY = b"<HTML><HEAD><TITLE>403 ERROR</TITLE></HEAD><BODY>Request blocked.</BODY></HTML>"
 DEMO = {
     "demo": True,
-    "conclusions": [
-        {"rule": "R1", "attribute": "station", "value": "根津駅", "confidence": 0.9},
+    "profile_claims": [
         {
-            "rule": "R5",
-            "attribute": "home_district",
-            "value": "文京区 弥生1・2丁目",
-            "confidence": 0.9,
+            "attribute": "home_nearest_station",
+            "status": "candidate",
+            "candidates": [{"rank": 1, "value": "根津駅", "confidence": 0.9}],
         },
+        {
+            "attribute": "residential_area",
+            "status": "ambiguous",
+            "candidates": [
+                {"rank": 1, "value": "文京区", "confidence": 0.8},
+                {"rank": 2, "value": "弥生二丁目付近", "confidence": 0.7},
+            ],
+        },
+        {"attribute": "workplace", "status": "unknown", "candidates": []},
     ],
 }
 
@@ -111,30 +118,38 @@ def test_features_requires_share_disabled_unless_allowed() -> None:
 
 
 def test_demo_matches_attribute_and_value() -> None:
-    ok, detail = smoke.judge_demo(as_json(DEMO), "station", "最寄り駅", "根津駅")
+    ok, detail = smoke.judge_demo(as_json(DEMO), "home_nearest_station", "自宅の最寄り駅", "根津駅")
     assert ok
-    assert detail == "最寄り駅：根津駅"
-    assert smoke.judge_demo(
-        as_json(DEMO), "home_district", "ゴミの収集地区", "文京区 弥生1・2丁目"
-    )[0]
+    assert detail == "自宅の最寄り駅：根津駅"
+    # 曖昧（候補が複数）でも、候補のどれかにあればよい
+    assert smoke.judge_demo(as_json(DEMO), "residential_area", "居住エリア", "文京区")[0]
 
 
 def test_demo_reports_wrong_or_missing_value() -> None:
-    wrong = as_json({"conclusions": [{"attribute": "station", "value": "上野駅"}]})
-    ok, detail = smoke.judge_demo(wrong, "station", "最寄り駅", "根津駅")
+    def claims(attribute: str, *values: str) -> Any:
+        candidates = [{"value": value} for value in values]
+        return as_json({"profile_claims": [{"attribute": attribute, "candidates": candidates}]})
+
+    station = ("home_nearest_station", "自宅の最寄り駅", "根津駅")
+    ok, detail = smoke.judge_demo(claims("home_nearest_station", "上野駅"), *station)
     assert not ok
     assert "上野駅" in detail
     # 値が同じでも項目が違えば数えない（表示名は attribute から引くため）
-    other = as_json({"conclusions": [{"attribute": "line", "value": "根津駅"}]})
-    assert not smoke.judge_demo(other, "station", "最寄り駅", "根津駅")[0]
-    assert not smoke.judge_demo(as_json({"demo": True}), "station", "最寄り駅", "根津駅")[0]
-    assert not smoke.judge_demo(as_json({}, 503), "station", "最寄り駅", "根津駅")[0]
+    assert not smoke.judge_demo(claims("regular_station", "根津駅"), *station)[0]
+    assert not smoke.judge_demo(claims("home_nearest_station"), *station)[0]
+    assert not smoke.judge_demo(as_json({"demo": True}), *station)[0]
+    # 旧形式（conclusions）だけの応答は通さない
+    old = as_json({"conclusions": [{"attribute": "home_nearest_station", "value": "根津駅"}]})
+    assert not smoke.judge_demo(old, *station)[0]
+    assert not smoke.judge_demo(as_json({}, 503), *station)[0]
 
 
-def test_expected_labels_match_web_messages() -> None:
-    messages = (Path(__file__).resolve().parents[2] / "web/src/lib/messages.ts").read_text("utf-8")
+def test_expected_labels_match_the_web_profile_catalog() -> None:
+    catalog = (Path(__file__).resolve().parents[2] / "web/src/types/profile.ts").read_text("utf-8")
     for attribute, label, _ in smoke.EXPECTED_CONCLUSIONS:
-        assert f'{attribute}: "{label}"' in messages
+        # 1行（`x: { label: "…"`）と複数行（`x: {` の次の行に `label: "…"`）の両方の書き方がある
+        compact = " ".join(catalog.split())
+        assert f'{attribute}: {{ label: "{label}"' in compact
 
 
 def test_expected_values_come_from_demo_fixture() -> None:

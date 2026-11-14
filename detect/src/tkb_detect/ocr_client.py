@@ -13,7 +13,9 @@ import httpx
 from tkb_detect.errors import DetectError
 from tkb_detect.guard import ensure_team_endpoint
 
-DEFAULT_TIMEOUT_S = 30.0
+# 応答の待ち時間は制限しない。つながらないときだけ早めに諦める
+DEFAULT_TIMEOUT_S: float | None = None
+CONNECT_TIMEOUT_S = 10.0
 PADDLEX_FILE_TYPE_IMAGE = 1
 
 
@@ -35,7 +37,7 @@ MOCK_OCR_LINES = [
 class OcrConfig:
     base_url: str
     mock_mode: bool = True
-    timeout_s: float = DEFAULT_TIMEOUT_S
+    timeout_s: float | None = DEFAULT_TIMEOUT_S
     # 送り先の許可リスト。None なら環境変数 MODEL_ALLOWED_HOST_SUFFIXES を読む（guard.py）
     allowed_hosts: tuple[str, ...] | None = None
 
@@ -74,7 +76,8 @@ class OcrClient:
     async def _post(self, payload: dict[str, Any]) -> Any:
         try:
             # 環境変数のプロキシ（HTTP_PROXY など）を経由させない。送るのはガードで確認した先だけ
-            async with httpx.AsyncClient(timeout=self._config.timeout_s, trust_env=False) as client:
+            timeout = httpx.Timeout(self._config.timeout_s, connect=CONNECT_TIMEOUT_S)
+            async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
                 res = await client.post(f"{self._base_url}/ocr", json=payload)
                 res.raise_for_status()
                 return res.json()

@@ -3,20 +3,30 @@
 import type { ReactNode } from "react";
 
 import { messages } from "@/lib/messages";
-import { identityName, pickFace, pickSpotlight, type RevealItem } from "@/lib/reveal";
+import { paced, staggerDelay } from "@/lib/motion";
+import { postImageSrc } from "@/lib/post-image";
+import { pickFace, pickSpotlight, validNameConclusions, type RevealItem } from "@/lib/reveal";
 import { toPercentBox } from "@/lib/region";
 import { useLoadedSize } from "@/lib/useLoadedSize";
 import type { Clue } from "@/types/clue";
 import type { Conclusion } from "@/types/diagnose";
 import type { Post } from "@/types/post";
+import type { ProfileCandidate, ProfileCandidateSet } from "@/types/profile";
 
 import { IdentityCard } from "./IdentityCard";
+import "./redaction.css";
 
 const t = messages.reveal;
 
 /** 1 枚ごとに叩きつける間隔（秒）。身元カードの数字が止まってから始める */
 const FIRST_DELAY = 1.6;
 const STEP = 0.5;
+
+/** 証拠のカードが叩きつけられる長さ（globals.css の .reveal-slam） */
+const SLAM = 0.45;
+
+/** 黒い帯がはがれる長さ（redaction.css の .redaction-bar） */
+const PEEL = 0.6;
 
 /** 身元カードに並べる強い手がかりの数 */
 const MAX_HIGHLIGHTS = 4;
@@ -26,17 +36,35 @@ function tilt(i: number): string {
   return `${[-3, 2.5, -1.5, 3.5, -2.5, 1.5, -3.5, 2][i % 8]}deg`;
 }
 
+/** 本文の中の手がかりの位置。見つからなければ -1（写真の手がかりも -1） */
+function textAt(item: RevealItem): number {
+  return item.clue.image_index === null ? item.post.text.indexOf(item.clue.value) : -1;
+}
+
+/**
+ * 黒い帯をはがす遅れ（秒）。証拠のカードがすべて叩きつけられてから、本文に手がかりのあるカードを上から順にはがす。
+ * 一度に動くのは帯だけにし、ずらしは 1 枚 0.4 秒前後で全体を 2 秒以内に収める。
+ */
+function peelDelays(items: readonly RevealItem[]): Map<number, number> {
+  const landed = FIRST_DELAY + (items.length - 1) * STEP + SLAM;
+  const peeled = items.filter((item) => textAt(item) >= 0);
+  return new Map(
+    peeled.map((item, k) => [item.clueIndex, landed + staggerDelay(k, peeled.length, { duration: PEEL })]),
+  );
+}
+
 /** 写真全体に手がかりの位置を示す。 */
-function PhotoEvidence({ item, label }: { item: RevealItem; label: string }) {
+function PhotoEvidence({ item, label, peelAt }: { item: RevealItem; label: string; peelAt?: number }) {
   const { image, clue } = item;
-  const loaded = useLoadedSize(image && clue.region ? image.url : null);
-  if (!image || !clue.region || !loaded) return <TextEvidence item={item} label={label} />;
+  const imageUrl = image ? postImageSrc(image) : null;
+  const loaded = useLoadedSize(image && clue.region ? imageUrl : null);
+  if (!image || !clue.region || !loaded) return <TextEvidence item={item} label={label} peelAt={peelAt} />;
   return (
     <figure className="space-y-4">
       <p className="text-xs tracking-widest text-ink/60">{t.originalPhoto}</p>
       <div className="relative mx-auto w-full max-w-xl overflow-hidden bg-paper" style={{ aspectRatio: `${loaded.width} / ${loaded.height}` }}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={image.url} alt={t.photoAlt(label, clue.value)} referrerPolicy="no-referrer" className="absolute inset-0 size-full" />
+        <img src={postImageSrc(image)} alt={t.photoAlt(label, clue.value)} referrerPolicy="no-referrer" className="absolute inset-0 size-full" />
         <span aria-hidden="true" className="reveal-mark" style={toPercentBox(clue.region, loaded)} />
       </div>
       <figcaption>
@@ -48,10 +76,15 @@ function PhotoEvidence({ item, label }: { item: RevealItem; label: string }) {
   );
 }
 
-/** 本文の手がかりは、投稿の本文の中で該当する言葉に印を付ける。写真が読めないときもここに来る */
-function TextEvidence({ item, label }: { item: RevealItem; label: string }) {
+/**
+ * 本文の手がかりは、投稿の本文の中で該当する言葉を黒い帯で隠しておき、カードが叩きつけられたあとに帯が
+ * 右から左へ縮んで消え、言葉が赤くなる（redaction.css）。動きを減らす設定では、はがれた赤い言葉だけを見せる。
+ * 写真が読めないときもここに来る
+ */
+function TextEvidence({ item, label, peelAt = 0 }: { item: RevealItem; label: string; peelAt?: number }) {
   const { clue, post } = item;
-  const at = clue.image_index === null ? post.text.indexOf(clue.value) : -1;
+  const at = textAt(item);
+  const delay = { animationDelay: paced(peelAt) };
   return (
     <div className="space-y-2">
       <span className="block text-xs tracking-widest text-ink/60">
@@ -62,7 +95,12 @@ function TextEvidence({ item, label }: { item: RevealItem; label: string }) {
       {at >= 0 && (
         <blockquote className="border-l-2 border-ink/30 pl-3 text-sm text-ink/80">
           {post.text.slice(0, at)}
-          <mark className="bg-seeker/30 text-ink">{clue.value}</mark>
+          <span className="redaction">
+            <span className="redaction-word" style={delay}>
+              {clue.value}
+            </span>
+            <span aria-hidden="true" className="redaction-bar" style={delay} />
+          </span>
           {post.text.slice(at + clue.value.length)}
         </blockquote>
       )}
@@ -73,9 +111,40 @@ function TextEvidence({ item, label }: { item: RevealItem; label: string }) {
 interface RevealProps {
   posts: readonly Post[];
   clues: readonly Clue[];
-  conclusions: readonly Conclusion[];
-  /** 身元カードのすぐ下に置くもの（消す投稿の要約）。推定が何もないときは、これだけを出す */
+  conclusions?: readonly Conclusion[];
+  profileClaims?: readonly ProfileCandidateSet[];
+  excludedPostIds?: ReadonlySet<string>;
   children?: ReactNode;
+}
+
+function profileName(profileClaims: readonly ProfileCandidateSet[], clues: readonly Clue[]): { candidate: ProfileCandidate | null; provenance: string[]; ambiguous: boolean; needsOwnerCheck: boolean } {
+  const fullNameSet = profileClaims.find((set) => set.attribute === "full_name");
+  const fullNameCandidates = fullNameSet?.candidates ?? [];
+  // An explicit full-name candidate takes priority over a shorter name, but an
+  // ambiguous full-name set never gets collapsed to rank #1.
+  const candidates = fullNameCandidates.length > 0
+    ? fullNameCandidates
+    : profileClaims.filter((set) => set.attribute === "given_name" || set.attribute === "nickname")
+      .flatMap((set) => set.candidates);
+  if (candidates.length !== 1) {
+    return { candidate: null, provenance: [], ambiguous: candidates.length > 1, needsOwnerCheck: false };
+  }
+  const candidate = candidates[0];
+  const provenance = [...new Set(candidate.evidence_paths.map((path) => {
+    if (path.provenance === "direct_disclosure") return "自分で直接公開";
+    if (path.provenance === "combined_inference") {
+      return path.evidence.some((reference) => reference.source === "public_web")
+        ? "投稿と公開Webから推定"
+        : "投稿の組み合わせから推定";
+    }
+    return "根拠経路未分類";
+  }))];
+  const needsOwnerCheck = candidate.evidence_paths.some((path) => path.evidence.some((evidence) => {
+    if (evidence.clue_index === null) return false;
+    const clue = clues[evidence.clue_index];
+    return clue?.type === "code" && /^(?:PDF417|AZTEC|QRCODE|DATAMATRIX): M[1-4]/i.test(clue.value);
+  }));
+  return { candidate, provenance, ambiguous: false, needsOwnerCheck };
 }
 
 /**
@@ -83,12 +152,25 @@ interface RevealProps {
  * 推定できたことを大きく出し、続けて証拠を 1 枚ずつ机に投げ出すように並べる。
  * 動きを減らす設定の人には、動きなしで並べて見せる（globals.css）。
  */
-export function Reveal({ posts, clues, conclusions, children }: RevealProps) {
-  const items = pickSpotlight(posts, clues, conclusions);
-  if (items.length === 0 && conclusions.length === 0) return children ?? null;
-  const postCount = new Set(clues.map((c) => c.post_id)).size;
-
-  const identity = identityName(clues, conclusions);
+export function Reveal({ posts, clues, conclusions = [], profileClaims = [], excludedPostIds = new Set(), children }: RevealProps) {
+  const items = pickSpotlight(posts, clues, conclusions, excludedPostIds, profileClaims);
+  const identity = profileName(profileClaims, clues);
+  const profileInferences = conclusions.length > 0
+    ? []
+    : profileClaims
+      .filter((set) => set.candidates.length > 0 && set.attribute !== "full_name" && set.attribute !== "given_name" && set.attribute !== "nickname")
+      .map((set) => ({ attribute: set.attribute, value: set.candidates.map((candidate) => candidate.value).join(" / ") }));
+  if (items.length === 0 && conclusions.length === 0 && profileInferences.length === 0 && !identity.candidate && !identity.ambiguous) {
+    return children ?? null;
+  }
+  const visibleClues = clues.filter((clue) => !excludedPostIds.has(clue.post_id));
+  const postCount = new Set(visibleClues.map((c) => c.post_id)).size;
+  const otherConclusions = conclusions.length > 0
+    ? validNameConclusions(conclusions).filter(
+      (conclusion) => conclusion.attribute !== "full_name" && conclusion.attribute !== "given_name_or_nickname",
+    )
+    : profileInferences;
+  const peels = peelDelays(items);
 
   return (
     <section aria-labelledby="reveal-heading" className="reveal space-y-10">
@@ -97,18 +179,21 @@ export function Reveal({ posts, clues, conclusions, children }: RevealProps) {
         <h2 id="reveal-heading" className="horror-title reveal-heading text-4xl leading-tight sm:text-8xl">
           {t.heading}
         </h2>
-        <p className="mt-3 text-ink/70">{t.count(clues.length, postCount)}</p>
+        <p className="mt-3 text-ink/70">{t.count(visibleClues.length, postCount)}</p>
       </div>
 
       <IdentityCard
-        name={identity.name}
+        name={identity.candidate?.value ?? null}
+        nameProvenance={identity.provenance}
+        nameAmbiguous={identity.ambiguous}
+        nameNeedsOwnerCheck={identity.needsOwnerCheck}
         face={pickFace(posts, clues)}
-        conclusions={identity.rest}
+        conclusions={otherConclusions}
         highlights={items
           .filter((item) => item.clue.type !== "name_text" && item.clue.type !== "face" && !item.used)
           .slice(0, MAX_HIGHLIGHTS)
           .map((item) => ({ label: messages.clues.typeLabels[item.clue.type], value: item.clue.value }))}
-        clueCount={clues.length}
+        clueCount={visibleClues.length}
       />
 
       {children}
@@ -121,7 +206,7 @@ export function Reveal({ posts, clues, conclusions, children }: RevealProps) {
               <li
                 key={item.clueIndex}
                 className="reveal-slam evidence-pin relative bg-paper-deep p-4 shadow-[6px_6px_0_oklch(0%_0_0/0.5)]"
-                style={{ animationDelay: `${FIRST_DELAY + i * STEP}s`, rotate: tilt(i) }}
+                style={{ animationDelay: paced(FIRST_DELAY + i * STEP), rotate: tilt(i) }}
               >
                 {item.used && (
                   <span className="absolute -top-3 right-3 z-10 rotate-6 bg-seeker px-2 py-0.5 text-xs font-bold text-paper">
@@ -129,9 +214,9 @@ export function Reveal({ posts, clues, conclusions, children }: RevealProps) {
                   </span>
                 )}
                 {item.image ? (
-                  <PhotoEvidence item={item} label={label} />
+                  <PhotoEvidence item={item} label={label} peelAt={peels.get(item.clueIndex)} />
                 ) : (
-                  <TextEvidence item={item} label={label} />
+                  <TextEvidence item={item} label={label} peelAt={peels.get(item.clueIndex)} />
                 )}
               </li>
             );

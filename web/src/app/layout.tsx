@@ -8,6 +8,7 @@ import "./globals.css";
 
 import { SiteFooter } from "@/components/legal/SiteFooter";
 import { SessionProvider } from "@/components/session/SessionProvider";
+import { StageMode } from "@/components/stage/StageMode";
 import { messages } from "@/lib/messages";
 
 export const metadata: Metadata = {
@@ -22,6 +23,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="ja" className="h-full overflow-x-clip antialiased">
       <body className="min-h-full overflow-x-clip">
+        <StageMode />
         <SessionProvider>{children}</SessionProvider>
         <SiteFooter />
       </body>

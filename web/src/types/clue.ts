@@ -28,6 +28,7 @@ export const PHOTO_OR_TEXT_CLUE_TYPES = [
   "handle_text",
   "place_text",
   "local_item",
+  "vehicle_model",
 ] as const;
 
 /** 本文からだけ出る type */

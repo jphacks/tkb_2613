@@ -1,0 +1,93 @@
+/* 仮除外・削除で推定が崩れたとき（EscapeStamps）：崩れた推定に「不明」の判子が順に押されて灰色になり、
+   数が 1 つずつ減り、最後に「もう、見つからない」が弾む。止まった状態（動きを減らす設定の人に見せる状態）は
+   最後の状態にし、動きは backwards で始める。遅れ・長さ・steps の数は style で渡す */
+
+/* 判子が押されるまでは、消す前の推定として地の色で見せ、押された瞬間に灰色になる */
+.escape-row {
+  animation: escape-row 0.15s linear backwards;
+}
+
+@keyframes escape-row {
+  from {
+    color: var(--ink);
+    border-color: var(--seeker);
+  }
+}
+
+.escape-stamp {
+  position: absolute;
+  top: 50%;
+  right: 1rem;
+  translate: 0 -50%;
+  rotate: -12deg;
+  border: 3px double var(--seeker);
+  padding: 0.1em 0.5em;
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  line-height: 1.2;
+  color: var(--seeker);
+  opacity: 0.9;
+  animation: escape-stamp 0.5s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+}
+
+/* 上から大きく落ちてきて、押し付けられる */
+@keyframes escape-stamp {
+  0% {
+    opacity: 0;
+    transform: scale(2.4);
+  }
+  40% {
+    opacity: 0.9;
+    transform: scale(0.94);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* 数：減ったあとの数までを縦に並べ、判子に合わせて steps() で 1 つずつ送る */
+.escape-count {
+  display: inline-block;
+  height: 1em;
+  overflow: hidden;
+  vertical-align: bottom;
+}
+
+.escape-count-strip {
+  display: flex;
+  flex-direction: column;
+  animation-name: escape-count;
+  animation-fill-mode: backwards;
+}
+
+.escape-count-strip > span {
+  height: 1em;
+}
+
+@keyframes escape-count {
+  from {
+    transform: translateY(0);
+  }
+}
+
+.escape-message {
+  animation: escape-message 0.6s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+}
+
+/* 弾む：小さく現れて少し行き過ぎ、戻って止まる */
+@keyframes escape-message {
+  0% {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+  55% {
+    opacity: 1;
+    transform: scale(1.12);
+  }
+  80% {
+    transform: scale(0.97);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
