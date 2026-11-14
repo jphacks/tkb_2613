@@ -189,6 +189,8 @@ def _local_candidate_coordinates(
         return None
     if not (20 <= latitude <= 46 and 122 <= longitude <= 154):
         return None
+    if not gazetteer.is_japan_mesh_coordinate(latitude, longitude):
+        return None
     return latitude, longitude
 
 

@@ -105,6 +105,7 @@ def test_commons_reference_lookup_requires_enabled_live_cap_and_compatible_index
 
     mismatch_dir = tmp_path / "mismatch"
     mismatch_dir.mkdir()
+    (mismatch_dir / "muni_mesh.parquet").touch()
     place_index = mismatch_dir / "places.sqlite3"
     with sqlite3.connect(place_index) as db:
         db.execute("PRAGMA user_version = 999")
@@ -112,6 +113,7 @@ def test_commons_reference_lookup_requires_enabled_live_cap_and_compatible_index
 
     compatible_dir = tmp_path / "compatible"
     compatible_dir.mkdir()
+    (compatible_dir / "muni_mesh.parquet").touch()
     with sqlite3.connect(compatible_dir / "places.sqlite3") as db:
         db.execute(f"PRAGMA user_version = {PLACE_INDEX_SCHEMA_VERSION}")
     assert is_available(compatible_dir) is True
@@ -160,6 +162,8 @@ def test_commons_feature_uses_same_national_places_index_resolution(tmp_path: Pa
     root_index = processed / "places.sqlite3"
     national_index = national / "places.sqlite3"
     write_index(root_index, PLACE_INDEX_SCHEMA_VERSION)
+    assert is_available(national) is False
+    (national / "muni_mesh.parquet").touch()
     assert is_available(national) is True
 
     write_index(national_index, PLACE_INDEX_SCHEMA_VERSION - 1)

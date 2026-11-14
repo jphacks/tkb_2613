@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+from jismesh.utils import to_meshcode
 from PIL import Image, ImageDraw
 
 from tkb_api.commons_reference import (
@@ -65,7 +66,12 @@ def _picture(variant: int = 0, quality: int = 94) -> bytes:
     return output.getvalue()
 
 
-def _index(path: Path, place_id: str = "places:poi-1") -> None:
+def _index(
+    path: Path,
+    place_id: str = "places:poi-1",
+    latitude: float = 35.123456,
+    longitude: float = 139.123456,
+) -> None:
     source = {
         "source_id": "overture:poi-1",
         "provider": "Overture Maps",
@@ -77,8 +83,8 @@ def _index(path: Path, place_id: str = "places:poi-1") -> None:
         "place_id": place_id,
         "label": "中央文化館",
         "aliases": ["中央文化館"],
-        "latitude": 35.123456,
-        "longitude": 139.123456,
+        "latitude": latitude,
+        "longitude": longitude,
         "country": "JP",
         "basic_category": "cultural",
         "sources": [source],
@@ -123,6 +129,19 @@ def _post() -> Post:
             ],
         }
     )
+
+
+def _gazetteer(
+    index: Path,
+    *,
+    latitude: float = 35.123456,
+    longitude: float = 139.123456,
+    jp_meshes: set[str] | None = None,
+) -> Gazetteer:
+    meshes = jp_meshes
+    if meshes is None:
+        meshes = {str(int(to_meshcode(latitude, longitude, 3)))}
+    return Gazetteer(places_path=index, jp_meshes=meshes)
 
 
 def _candidate() -> PhotoPlaceResult:
@@ -223,7 +242,7 @@ def test_commons_match_adds_reference_evidence_only_for_near_duplicate_and_keeps
             [_candidate()],
             [_clue()],
             [_post()],
-            Gazetteer(places_path=index),
+            _gazetteer(index),
             get_source_image,
             transport=httpx.MockTransport(respond),
         )
@@ -288,7 +307,7 @@ def test_no_match_or_unlicensed_file_never_adds_reference_evidence(tmp_path: Pat
                 [_candidate()],
                 [_clue()],
                 [_post()],
-                Gazetteer(places_path=index),
+                _gazetteer(index),
                 source_image,
                 transport=httpx.MockTransport(respond),
             )
@@ -312,6 +331,7 @@ def test_no_consent_side_or_ineligible_candidates_do_not_fetch_or_query(
         raise AssertionError("source image should not be fetched")
 
     requests: list[httpx.Request] = []
+
     def respond(request: httpx.Request) -> httpx.Response:
         requests.append(request)
         return httpx.Response(500)
@@ -322,7 +342,7 @@ def test_no_consent_side_or_ineligible_candidates_do_not_fetch_or_query(
             [_candidate()],
             [_clue(region=None)],
             [_post()],
-            Gazetteer(places_path=index),
+            _gazetteer(index),
             no_source_image,
             transport=transport,
         )
@@ -351,7 +371,7 @@ def test_request_limits_and_private_source_failure_are_bounded(tmp_path: Path) -
             [_candidate()],
             [_clue()],
             [_post()],
-            Gazetteer(places_path=index),
+            _gazetteer(index),
             source_image,
             transport=httpx.MockTransport(responder),
         )
@@ -370,7 +390,7 @@ def test_unavailable_status_is_limited_to_locally_eligible_photo_candidates(tmp_
         granularity=PhotoPlaceGranularity.UNKNOWN,
     )
     marked = mark_reference_lookup_unavailable(
-        [_candidate(), unknown], [_clue()], Gazetteer(places_path=index)
+        [_candidate(), unknown], [_clue()], _gazetteer(index)
     )
     assert marked[0].lookup_status is PhotoPlaceLookupStatus.UNAVAILABLE
     assert "reference_lookup_unavailable" in marked[0].reason_codes
@@ -394,6 +414,36 @@ def test_private_or_unlabeled_local_poi_is_not_eligible_for_commons(
             row["taxonomy"] = taxonomy
             row["label"] = label
             db.execute("UPDATE poi_place SET record_json = ?", (json.dumps(row),))
-        assert _local_candidate_coordinates(
-            _candidate().candidates[0], Gazetteer(places_path=index)
-        ) is None
+        assert _local_candidate_coordinates(_candidate().candidates[0], _gazetteer(index)) is None
+
+
+def test_commons_coordinates_must_belong_to_japanese_mesh_coverage(tmp_path: Path) -> None:
+    tokyo_mesh = str(int(to_meshcode(35.123456, 139.123456, 3)))
+    for label, latitude, longitude in (
+        ("bbox_border", 34.0, 126.0),
+        ("korea", 37.0, 127.0),
+    ):
+        index = tmp_path / f"{label}.sqlite3"
+        _index(index, latitude=latitude, longitude=longitude)
+        gazetteer = _gazetteer(index, jp_meshes={tokyo_mesh})
+        assert _local_candidate_coordinates(_candidate().candidates[0], gazetteer) is None
+
+    island = (26.2124, 127.6809)
+    island_index = tmp_path / "okinawa.sqlite3"
+    _index(island_index, latitude=island[0], longitude=island[1])
+    island_code = str(int(to_meshcode(*island, 3)))
+    assert (
+        _local_candidate_coordinates(
+            _candidate().candidates[0], _gazetteer(island_index, jp_meshes={island_code})
+        )
+        == island
+    )
+
+    missing_mesh_index = tmp_path / "missing-mesh.sqlite3"
+    _index(missing_mesh_index)
+    assert (
+        _local_candidate_coordinates(
+            _candidate().candidates[0], _gazetteer(missing_mesh_index, jp_meshes=set())
+        )
+        is None
+    )

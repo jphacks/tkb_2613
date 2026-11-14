@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 import pyarrow.parquet as pq
+from jismesh.utils import to_meshcode
 
 from tkb_common.corporate_name import normalize_corporate_name
 from tkb_common.place_names import PLACE_INDEX_SCHEMA_VERSION, place_name_keys
@@ -138,6 +139,9 @@ class Gazetteer:
     stations: list[dict[str, Any]] = field(default_factory=list)
     postal: list[dict[str, str]] = field(default_factory=list)
     muni_meshes: dict[str, set[str]] = field(default_factory=dict)
+    # The 1km mesh coverage of the configured national municipality table.
+    # None means derive once from muni_meshes; an explicit empty set fails closed.
+    jp_meshes: set[str] | None = None
     knowledge: Knowledge = field(default_factory=Knowledge)
     # 学校ごとに {"name", "kind"（大学・高等学校など）, "city", ...}。表がなければ空
     schools: list[dict[str, str]] = field(default_factory=list)
@@ -159,6 +163,22 @@ class Gazetteer:
     corporations_path: Path | None = None
     # 任意POIのSQLite名称索引。データ全件はメモリへ読み込まず、名称一致時だけ行を引く。
     places_path: Path | None = None
+
+    def __post_init__(self) -> None:
+        if self.jp_meshes is None:
+            object.__setattr__(
+                self,
+                "jp_meshes",
+                (
+                    {
+                        str(mesh).strip().removesuffix("*")
+                        for meshes in self.muni_meshes.values()
+                        for mesh in meshes
+                    }
+                    if self.muni_meshes
+                    else set()
+                ),
+            )
 
     @classmethod
     def load(cls, data_dir: Path = DATA_DIR, knowledge: Knowledge | None = None) -> "Gazetteer":
@@ -210,6 +230,19 @@ class Gazetteer:
             json.loads(record_json)
             for _, record_json in sorted(records.items())[: MAX_PLACE_NAME_MATCHES + 1]
         ]
+
+    def is_japan_mesh_coordinate(self, latitude: float, longitude: float) -> bool:
+        """Check coordinate membership in the loaded Japanese 1km mesh coverage."""
+        meshes = self.jp_meshes
+        if not meshes or not (math.isfinite(latitude) and math.isfinite(longitude)):
+            return False
+        if not (20 <= latitude <= 46 and 122 <= longitude <= 154):
+            return False
+        try:
+            mesh = str(int(to_meshcode(latitude, longitude, 3)))
+        except (OverflowError, TypeError, ValueError):
+            return False
+        return mesh in meshes
 
     def place_coordinates(self, place_id: str) -> tuple[float, float] | None:
         """Return validated (latitude, longitude) for a licensed local POI ID."""

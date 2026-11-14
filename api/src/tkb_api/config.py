@@ -21,7 +21,9 @@ def _has_complete_gazetteer(directory: Path) -> bool:
 
 
 def _has_compatible_place_index(directory: Path) -> bool:
-    """Check only that the local POI index exists and uses the supported schema."""
+    """Require local POI and mesh indexes before advertising Commons lookup."""
+    if not (directory / "muni_mesh.parquet").is_file():
+        return False
     path = resolve_places_index_path(directory)
     if path is None:
         return False
