@@ -1,14 +1,16 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 
 import { ConclusionBoard } from "@/components/conclusion-board/ConclusionBoard";
 import { EscapeStamps, brokenInferences, countAttributes, lostAttributes } from "@/components/escape-stamps/EscapeStamps";
 import { PostCard } from "@/components/post-list/PostCard";
 import { Reveal } from "@/components/reveal/Reveal";
+import { ThreadsDiagnosing } from "@/components/threads/ThreadsDiagnosing";
 import { THREADS_TEXT, ThreadsError, type ThreadsErrorKey, type ThreadsLang } from "@/lib/threads-i18n";
 import { checkThreadsPublicText } from "@/lib/threads-public-check";
+import { useThreadsDiagnosis } from "@/lib/useThreadsDiagnosis";
 import { useThreadsLang } from "@/lib/useThreadsLang";
 import { isDiagnosisSnapshot, isThreadsSimulation, type Conclusion, type DiagnosisSnapshot, type RiskyPost, type ThreadsSimulation } from "@/types/diagnose";
 import { isPost, type Post } from "@/types/post";
@@ -40,8 +42,6 @@ type ThreadsConfig = {
   image_diagnosis_enabled?: boolean;
 };
 type ThreadsSession = { username: string; mock: boolean; busy?: boolean };
-const DIAGNOSIS_POLL_MS = 3_000;
-const DIAGNOSIS_FOLLOW_LIMIT_MS = 2_100_000;
 
 const LANGUAGES: readonly { readonly code: ThreadsLang; readonly label: string }[] = [
   { code: "ja", label: "日本語" },
@@ -189,36 +189,12 @@ export default function ThreadsPage() {
   const [fetchedPosts, setFetchedPosts] = useState<readonly Post[] | null>(null);
   const [publicCheckDone, setPublicCheckDone] = useState(false);
   const [busy, setBusy] = useState(false);
-  // api が診断を実行中（再読み込み後や、別のタブ・重複要求で 409 になったとき）。完了まで session を見守る
-  const [diagnosing, setDiagnosing] = useState(false);
-  const mounted = useRef(true);
   const [error, setError] = useState<ThreadsErrorKey | null>(null);
+  const { diagnosing, start: startDiagnosis, resume: resumeDiagnosis } = useThreadsDiagnosis(call, requireDiagnosis, {
+    onResult: (result) => { setOriginal(result); setView(result); },
+    onError: setError,
+  });
   const t = THREADS_TEXT[lang];
-
-  /** 実行中の診断が終わるまで session を見て、終わったら結果を取り出す（診断は中断しない） */
-  async function followDiagnosis() {
-    setDiagnosing(true);
-    try {
-      const deadline = Date.now() + DIAGNOSIS_FOLLOW_LIMIT_MS;
-      for (;;) {
-        await new Promise((resolve) => setTimeout(resolve, DIAGNOSIS_POLL_MS));
-        if (!mounted.current) return;
-        const latest = await call("session");
-        if (!isSession(latest)) throw new ThreadsError("sessionUnreadable");
-        if (latest.busy !== true) break;
-        if (Date.now() > deadline) throw new ThreadsError("timeout");
-      }
-      let result: ThreadsDiagnosis;
-      try { result = requireDiagnosis(await call("diagnosis")); }
-      catch (cause) {
-        // 結果がない（診断が失敗して終わった）ときは、失敗として知らせて再実行できるようにする
-        throw cause instanceof ThreadsError && cause.key === "failed" ? new ThreadsError("diagnosisEnded") : cause;
-      }
-      if (mounted.current) { setOriginal(result); setView(result); }
-    } finally {
-      if (mounted.current) setDiagnosing(false);
-    }
-  }
 
   useEffect(() => {
     document.documentElement.lang = t.htmlLang;
@@ -227,7 +203,6 @@ export default function ThreadsPage() {
 
   useEffect(() => {
     let active = true;
-    mounted.current = true;
     void (async () => {
       const authError = new URLSearchParams(window.location.search).get("auth_error");
       if (authError) {
@@ -247,20 +222,21 @@ export default function ThreadsPage() {
         if (!active || !isSession(connected)) return;
         setSession(connected);
         if (connected.busy === true) {
-          // 診断の最中に再読み込みした。続きの結果を待つ
-          setBusy(true);
-          void followDiagnosis().catch((cause) => { if (active) setError(errorKeyOf(cause, "failed")); })
-            .finally(() => { if (active) setBusy(false); });
+          // 診断の最中に再読み込みした。progress を見て続きの結果を待つ
+          void resumeDiagnosis();
           return;
         }
         try {
           const restored = requireDiagnosis(await call("diagnosis"));
           if (active) { setOriginal(restored); setView(restored); }
-        } catch { /* 診断前なら結果はない。 */ }
+        } catch {
+          // 結果がなければ、再読み込みの前に始めた診断が続いていないか確かめる
+          if (active) void resumeDiagnosis();
+        }
       } catch { /* 未ログイン時の 401 は通常状態。 */ }
     })();
-    return () => { active = false; mounted.current = false; };
-  }, []);
+    return () => { active = false; };
+  }, [resumeDiagnosis]);
 
   async function perform(action: () => Promise<void>) {
     setBusy(true);
@@ -268,13 +244,13 @@ export default function ThreadsPage() {
     try {
       try { await action(); }
       catch (cause) {
-        // すでに診断中なら、汎用エラーにせず、その診断の完了を待って結果を出す
-        if (cause instanceof ThreadsError && cause.key === "diagnosing") await followDiagnosis();
-        else throw cause;
+        // すでに診断中なら、汎用エラーにせず、その診断の進み具合を出して完了を待つ
+        if (!(cause instanceof ThreadsError) || cause.key !== "diagnosing") throw cause;
+        if (!(await resumeDiagnosis())) throw cause;
       }
     }
     catch (cause) { setError(errorKeyOf(cause, "failed")); }
-    finally { if (mounted.current) setBusy(false); }
+    finally { setBusy(false); }
   }
 
   function toggle(postId: string) {
@@ -355,12 +331,12 @@ export default function ThreadsPage() {
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-sm bg-paper-deep p-4">
           <p className="[overflow-wrap:anywhere]"><span className="mr-2 inline-block bg-ink px-2 py-0.5 font-bold text-paper">Threads</span>
             {session.mock ? session.username : `@${session.username}`}</p>
-          <button type="button" disabled={busy} className="text-sm underline" onClick={() => void perform(async () => {
+          <button type="button" disabled={busy || diagnosing !== null} className="text-sm underline disabled:opacity-50" onClick={() => void perform(async () => {
             await call("session", "DELETE");
             setSession(null); setOriginal(null); setView(null); setSelected([]); setPreview(null); setFetchedPosts(null); setPublicCheckDone(false);
           })}>{t.logout}</button>
         </div>
-        {!original && <button type="button" disabled={busy}
+        {!original && !diagnosing && <button type="button" disabled={busy}
           className="rounded-sm border border-ink px-5 py-3 font-bold disabled:opacity-50"
           onClick={() => void perform(async () => {
             const data = await call("posts");
@@ -373,9 +349,20 @@ export default function ThreadsPage() {
             setPublicCheckDone(false);
           })}>{t.reviewPosts}</button>}
         {busy && !diagnosing && <p role="status" className="text-sm text-ink/70">{t.loading}</p>}
+        {diagnosing && <ThreadsDiagnosing t={t} posts={fetchedPosts ?? []} progress={diagnosing.progress}
+          startedAt={diagnosing.startedAt} status={diagnosing.resumed ? t.diagnosingNotice : t.diagnosing} />}
         {!original && fetchedPosts && <section aria-label={t.postsAria} className="space-y-4">
           <p className="text-sm text-ink/70">{config?.image_diagnosis_enabled
             ? t.postsFetchedWithImages(fetchedPosts.length) : t.postsFetched(fetchedPosts.length)}</p>
+          {/* 診断の開始は、長い投稿一覧より前に置く（スマホでも最初の画面に入る） */}
+          {!diagnosing && <section aria-labelledby="threads-ai-heading"
+            className="space-y-3 rounded-sm border border-ink/25 bg-paper-deep p-4 shadow-[4px_4px_0_oklch(5%_0.03_265)] sm:p-5">
+            <h2 id="threads-ai-heading" className="font-bold">{t.aiSummary}</h2>
+            <p className="text-sm text-ink/70">{config?.image_diagnosis_enabled ? t.aiNoteWithImages : t.aiNote}</p>
+            <button type="button" disabled={busy}
+              className="w-full rounded-sm bg-seeker px-6 py-3 font-bold text-paper disabled:opacity-50 sm:w-auto"
+              onClick={() => { setError(null); void startDiagnosis(); }}>{t.aiButton}</button>
+          </section>}
           <ol className="space-y-5">{fetchedPosts.map((post) => <li key={post.post_id}>
             {post.images.length > 0 && <p className="mb-2 text-xs font-bold text-seeker">{t.imageDiagnosis}</p>}
             <PostCard post={post} locale={lang} />
@@ -406,19 +393,8 @@ export default function ThreadsPage() {
             </div>}
           </section>
         </section>}
-        {!original && fetchedPosts && <details className="rounded-sm border border-ink/20 p-4">
-          <summary className="cursor-pointer font-bold">{t.aiSummary}</summary>
-          <p className="mt-3 text-sm text-ink/70">{config?.image_diagnosis_enabled ? t.aiNoteWithImages : t.aiNote}</p>
-          <button type="button" disabled={busy}
-            className="mt-3 rounded-sm bg-seeker px-6 py-3 font-bold text-paper disabled:opacity-50"
-            onClick={() => void perform(async () => {
-              const result = requireDiagnosis(await call("diagnose", "POST"));
-              setOriginal(result); setView(result);
-            })}>{busy ? t.aiBusy : t.aiButton}</button>
-        </details>}
       </section>}
 
-      {diagnosing && <p role="status" className="mt-6 border-l-4 border-ink/40 bg-paper-deep p-3">{t.diagnosingNotice}</p>}
       {error && <p role="alert" className="mt-6 border-l-4 border-seeker p-3">{t.errors[error]}</p>}
 
       {original && current && <div className="mt-12 space-y-10">

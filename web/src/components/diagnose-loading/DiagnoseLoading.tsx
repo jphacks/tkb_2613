@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import type { PostClues } from "@/components/post-list/PostCard";
 import { SeekerEyes } from "@/components/seeker-eyes/SeekerEyes";
@@ -66,6 +66,13 @@ interface DiagnoseLoadingProps {
   found: Readonly<Record<string, PostClues>>;
   /** いまの進み具合（DiagnosePanel の状態の文言） */
   status: string;
+  /**
+   * 調べた割合のバーの数。省略すると posts と found から数える（Bluesky の SSE）。
+   * null のときはバーを出さない（サーバーから実際の件数が届いていないときに、見込みの割合を出さないため）
+   */
+  progress?: { readonly done: number; readonly total: number } | null;
+  /** 状態の文言の下に足す表示（Threads の段階と経過時間） */
+  children?: ReactNode;
 }
 
 /**
@@ -74,7 +81,7 @@ interface DiagnoseLoadingProps {
  *
  * 終わったあとも role="status" の要素は同じものを使い続ける（差し替えると読み上げられないことがあるため）。
  */
-export function DiagnoseLoading({ active, posts, found, status }: DiagnoseLoadingProps) {
+export function DiagnoseLoading({ active, posts, found, status, progress, children }: DiagnoseLoadingProps) {
   const { index, line } = useRotatingLine(t.lines, active);
 
   return (
@@ -92,10 +99,11 @@ export function DiagnoseLoading({ active, posts, found, status }: DiagnoseLoadin
         {status}
       </p>
 
+      {active && children}
+
       {active && (
         <LoadingProgress
-          posts={posts.length}
-          searched={Object.keys(found).length}
+          bar={progress === undefined ? { done: Object.keys(found).length, total: posts.length } : progress}
           line={line}
           lineKey={index}
           feed={feedLines(posts, found).slice(-FEED_SIZE).reverse()}
@@ -106,8 +114,8 @@ export function DiagnoseLoading({ active, posts, found, status }: DiagnoseLoadin
 }
 
 interface LoadingProgressProps {
-  posts: number;
-  searched: number;
+  /** null のときはバーを出さない */
+  bar: { readonly done: number; readonly total: number } | null;
   line: string;
   lineKey: number;
   /** 新しい順 */
@@ -115,23 +123,25 @@ interface LoadingProgressProps {
 }
 
 /** 調べた割合のバー、切り替わる一言、実況 */
-function LoadingProgress({ posts, searched, line, lineKey, feed }: LoadingProgressProps) {
-  const ratio = posts > 0 ? searched / posts : 0;
+function LoadingProgress({ bar, line, lineKey, feed }: LoadingProgressProps) {
+  const ratio = bar && bar.total > 0 ? bar.done / bar.total : 0;
   return (
     <>
-      <div
-        role="progressbar"
-        aria-label={t.progressLabel}
-        aria-valuemin={0}
-        aria-valuemax={posts}
-        aria-valuenow={searched}
-        className="mt-5 h-2 overflow-hidden rounded-full bg-ink/10"
-      >
+      {bar && (
         <div
-          className="h-full origin-left bg-seeker transition-transform duration-500 ease-out"
-          style={{ transform: `scaleX(${ratio})` }}
-        />
-      </div>
+          role="progressbar"
+          aria-label={t.progressLabel}
+          aria-valuemin={0}
+          aria-valuemax={bar.total}
+          aria-valuenow={bar.done}
+          className="mt-5 h-2 overflow-hidden rounded-full bg-ink/10"
+        >
+          <div
+            className="h-full origin-left bg-seeker transition-transform duration-500 ease-out"
+            style={{ transform: `scaleX(${ratio})` }}
+          />
+        </div>
+      )}
 
       {/* 同じ一言がくり返されるので読み上げない。進み具合は status が伝える */}
       <p aria-hidden key={lineKey} className="loading-line mt-5 min-h-6 text-ink/60">

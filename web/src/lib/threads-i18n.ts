@@ -19,6 +19,10 @@ export type ThreadsErrorKey =
   | "postsUnreadable" | "authorizeUnverified" | "simulationUnreadable"
   | "authDenied" | "authState" | "authFailed";
 
+/** サーバーが返す診断の段階（GET /api/threads/progress の stage）。実際に行った順に並べる */
+export const THREADS_DIAGNOSE_STAGES = ["checking_model", "fetching", "reading", "inferring"] as const;
+export type ThreadsDiagnoseStage = (typeof THREADS_DIAGNOSE_STAGES)[number];
+
 export class ThreadsError extends Error {
   constructor(readonly key: ThreadsErrorKey) {
     super(key);
@@ -71,7 +75,13 @@ export interface ThreadsText {
   readonly aiNote: string;
   readonly aiNoteWithImages: string;
   readonly aiButton: string;
-  readonly aiBusy: string;
+  readonly diagnosing: string;
+  readonly stagesLabel: string;
+  readonly stageLabels: Readonly<Record<ThreadsDiagnoseStage, string>>;
+  readonly stageDone: string;
+  readonly stageCurrent: string;
+  readonly postsRead: (read: number, total: number) => string;
+  readonly elapsedLive: (clock: string) => string;
   readonly diagnosingNotice: string;
   readonly resultFull: string;
   readonly resultRe: string;
@@ -143,7 +153,18 @@ const ja: ThreadsText = {
   aiNote: "この機能はMeta審査の操作には不要です。チーム管理の本文モデルが停止中は利用できません。上のセルフチェックとは別機能です。",
   aiNoteWithImages: "画像付き投稿は本文・投稿時刻・画像1枚目をチーム管理のモデルで診断します。モデル停止中は利用できません。上のセルフチェックとは別機能です。",
   aiButton: "AI診断を試す",
-  aiBusy: "AI診断中…",
+  diagnosing: "AI診断中です。このページを再読み込みしても、診断は続きます。",
+  stagesLabel: "診断の段階",
+  stageLabels: {
+    checking_model: "AIモデルに接続",
+    fetching: "投稿を取得",
+    reading: "本文・画像を解析",
+    inferring: "推理結果を生成",
+  },
+  stageDone: "完了",
+  stageCurrent: "実行中",
+  postsRead: (read, total) => `${read} / ${total} 件`,
+  elapsedLive: (clock) => `経過 ${clock}`,
   diagnosingNotice: "診断を実行中です。ページを再読み込みしても処理は続きます。終わると結果を自動で表示します（数分かかることがあります）。",
   resultFull: "診断結果",
   resultRe: "仮除外後の再診断",
@@ -235,7 +256,18 @@ const en: ThreadsText = {
   aiNote: "This feature is not needed to review the app. It is unavailable while the team-managed text model is stopped. It is separate from the self-check above.",
   aiNoteWithImages: "Image posts are diagnosed using the text, timestamp, and first image on the team-managed model. It is unavailable while the model is stopped and is separate from the self-check above.",
   aiButton: "Try the AI diagnosis",
-  aiBusy: "AI diagnosis in progress…",
+  diagnosing: "The AI diagnosis is running. It continues even if you reload this page.",
+  stagesLabel: "Diagnosis steps",
+  stageLabels: {
+    checking_model: "Connect to the AI model",
+    fetching: "Fetch posts",
+    reading: "Analyze text and images",
+    inferring: "Build the inference results",
+  },
+  stageDone: "done",
+  stageCurrent: "in progress",
+  postsRead: (read, total) => `${read} / ${total} posts`,
+  elapsedLive: (clock) => `Elapsed ${clock}`,
   diagnosingNotice: "A diagnosis is running. It keeps running if you reload this page, and the result appears automatically when it finishes (this can take a few minutes).",
   resultFull: "Diagnosis result",
   resultRe: "Re-diagnosis after provisional exclusion",

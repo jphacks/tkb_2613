@@ -166,4 +166,22 @@ X の状態変更 API は同一オリジンの `Origin` ヘッダーを要求す
 
 `/api/threads/diagnose` と `/api/threads/diagnosis` は、共通パイプラインの24属性候補セットを Threads 画面向けの従来の `ProfileItem[]` に変換して返す。表示対象の候補だけを平坦化し、候補のない属性は省略する。`/api/threads/rediagnose` は仮除外後の根拠経路を再評価し、返却する `clues` に合わせて根拠番号を振り直す。Threads の結果は専用セッションのメモリに置き、投稿の実削除は行わない。
 
+`POST /api/threads/diagnose` は同じセッションで診断中なら `409`（`{"detail":"診断中です"}`）を返し、診断済みなら保存した結果をそのまま返す。投稿の取得（`GET /api/threads/posts`）の処理中も `409` になる。
+
+`GET /api/threads/session` は `{"username":string,"mock":boolean,"busy":boolean}` を返す。`busy` は診断または投稿の取得が実行中のとき true。
+
+`GET /api/threads/progress`（要セッション）は診断の進み具合を返す。画面は診断中・`409` のあと・再読み込みのあとにこれを約1.5秒ごとに聞き、`done` になったら `GET /api/threads/diagnosis` で結果を読む。
+
+```json
+{"state": "running", "stage": "reading", "elapsed_ms": 42000, "posts_total": 30, "posts_read": 12,
+ "read_post_ids": ["threads:..."], "stages": ["checking_model", "fetching", "reading", "inferring"], "error": null}
+```
+
+- `state`：`idle`（診断していない。投稿の取得だけの処理中も含む）/ `running` / `done`（結果あり）/ `failed`（直前の診断が失敗し、結果なし）
+- `stage`：`running` のときだけ。`checking_model`（モデルの応答確認）→ `fetching`（Threads API から本人投稿を取得）→ `reading`（本文・画像の手がかりの取り出し）→ `inferring`（推理・プロフィール推定・plan）
+- `stages`：そのセッションで実際に行う段階の順。実アカウントは4段階、GPU デモは `fetching` なし、固定の手がかりのモックは `reading`・`inferring` だけ
+- `posts_total`・`posts_read`・`read_post_ids`：`reading` から入る。`posts_read` は手がかりの取り出しが終わった（失敗も含む）投稿の数で、見込みの割合は返さない。画面は `posts_total` が届くまで進捗バーを出さない
+- `elapsed_ms`：診断を始めてからの経過時間（`running` のときだけ）。画面の経過時間はこれに合わせる
+- `error`：`failed` のときだけ。`model_unavailable`（`503`。GPU・モデル停止や全投稿の読み取り失敗）/ `failed`（それ以外）。本文や例外の中身は入れない
+
 `GET /api/threads/posts` は従来どおり `{"posts":[Post,...],"mock":boolean}` を返す。`THREADS_IMAGE_DIAGNOSIS=0`（既定）では Threads API に `media_url` を要求せず、全投稿の `images` は空配列のまま。`THREADS_IMAGE_DIAGNOSIS=1` では `media_type=IMAGE` の投稿だけ `media_url` を要求し、許可済みMeta CDNの画像1枚目を `images[0]` に加える。動画とカルーセルは画像なしとして扱う。診断は本文・投稿時刻に加えてこの1枚を既存のチーム管理VLMへ渡す。画像取得または検証に失敗した投稿は画像を使わず、本文の診断を継続する。画像URL・画像バイト列・本文はログへ記録せず、画像はメモリ上だけで処理する。`GET /api/threads/config` の追加フィールド `image_diagnosis_enabled` で画面表示を切り替える。
