@@ -1127,6 +1127,7 @@ def infer_owner_claims_with_web(
     diagnosis_date: date | None = None,
     diagnosis_at: datetime | None = None,
     include_heuristic_rules: bool = False,
+    photo_place_results: Sequence[PhotoPlaceResult] = (),
 ) -> list[ProfileItem]:
     """Combine direct and Web-backed paths; reject conflicting employer names."""
     claims = infer_owner_claims(
@@ -1138,6 +1139,7 @@ def infer_owner_claims_with_web(
         diagnosis_date=diagnosis_date,
         diagnosis_at=diagnosis_at,
         include_heuristic_rules=include_heuristic_rules,
+        photo_place_results=photo_place_results,
     )
     registry_claim = (
         infer_registry_employer_claim(posts, owner_profile_text, gazetteer)
@@ -1193,6 +1195,7 @@ def infer_owner_candidate_sets_with_web(
     diagnosis_date: date | None = None,
     diagnosis_at: datetime | None = None,
     include_heuristic_rules: bool = True,
+    photo_place_results: Sequence[PhotoPlaceResult] = (),
 ) -> list[ProfileCandidateSet]:
     """Public multi-candidate entry point; returns one set for each supported catalog item."""
     claims = infer_owner_claims_with_web(
@@ -1205,6 +1208,7 @@ def infer_owner_candidate_sets_with_web(
         diagnosis_date=diagnosis_date,
         diagnosis_at=diagnosis_at,
         include_heuristic_rules=include_heuristic_rules,
+        photo_place_results=photo_place_results,
     )
     return evaluate_profile_candidates(claims, posts, clues=clues)
 

@@ -509,6 +509,16 @@ def test_photo_place_residence_needs_home_context_and_independent_local_post() -
         if item.attribute is ProfileAttribute.RESIDENTIAL_AREA
     )
     assert claim.value == "\u6587\u4eac\u533a"
+    candidate_sets = infer_owner_candidate_sets_with_web(
+        [photo, area_post],
+        [photo_clue, area_clue],
+        [],
+        photo_place_results=[result],
+    )
+    residence_set = next(
+        item for item in candidate_sets if item.attribute is ProfileAttribute.RESIDENTIAL_AREA
+    )
+    assert [candidate.value for candidate in residence_set.candidates] == ["\u6587\u4eac\u533a"]
     assert claim.status is ProfileStatus.WEAK
     assert claim.confidence <= 0.65
     path = claim.evidence_paths[0]
