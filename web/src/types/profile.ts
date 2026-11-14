@@ -52,6 +52,7 @@ export const PROFILE_ATTRIBUTE_CATALOG = {
   home_building: { label: "自宅の建物候補", category: "home_and_location", personalLevel: null, guessability: null },
   home_room: { label: "自宅の部屋・階・位置", category: "home_and_location", personalLevel: null, guessability: null },
   home_nearest_station: { label: "自宅の最寄り駅", category: "home_and_location", personalLevel: null, guessability: null },
+  home_walk_area: { label: "自宅から駅までの徒歩圏", category: "home_and_location", personalLevel: null, guessability: null },
   regular_station: { label: "投稿時点の通勤利用駅候補", category: "home_and_location", personalLevel: null, guessability: null },
   regular_line: { label: "日常的に利用する路線", category: "home_and_location", personalLevel: null, guessability: null },
   residential_area: {

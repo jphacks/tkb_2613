@@ -376,7 +376,9 @@ async def run() -> int:
             failed += data["error"] is not None
         elif event == "conclusions":
             clue_count = len(data["clues"])
-            conclusion_count = len(data["conclusions"])
+            # The main API publishes catalog-driven ProfileCandidateSets, not the
+            # internal Conclusion intermediates.
+            conclusion_count = len(data["profile_claims"])
         # post / plan の内容は表示しない。plan はメモリ内の仮除外計算だけ。
     print(
         f"Threads 本人 ID を確認。投稿 {len(posts)} 件、手がかり {clue_count} 件、"

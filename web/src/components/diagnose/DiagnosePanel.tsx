@@ -300,8 +300,7 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
       </h2>
       {!busy && result && (
         <Reveal posts={livePosts} clues={result.clues} conclusions={[]} profileClaims={visibleProfileClaims} excludedPostIds={excluded}>
-          {/* 身元カードのすぐあとに、1都3県から家の区画までの絞り込みを出す */}
-          <NarrowingStages narrowing={visibleNarrowing(result.narrowing, excluded)} />
+          <NarrowingStages narrowing={visibleNarrowing(simulation ? simulation.narrowing : result.narrowing, excluded)} />
           {risky && <PlanSummary risky={risky.filter((post) => !excluded.has(post.post_id))} targetId={RISKY_HEADING_ID} />}
         </Reveal>
       )}

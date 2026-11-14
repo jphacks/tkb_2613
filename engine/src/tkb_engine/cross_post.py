@@ -9,6 +9,7 @@ from itertools import combinations
 
 from tkb_common.place_names import place_name_keys
 from tkb_common.schemas import (
+    PROFILE_DIAGNOSED_ATTRIBUTES,
     ClaimAssessment,
     Clue,
     ClueSource,
@@ -362,15 +363,13 @@ def evaluate_profile_candidates(
     conflict_reasons: Mapping[ProfileAttribute, str] | None = None,
     clues: Sequence[Clue] = (),
 ) -> list[ProfileCandidateSet]:
-    """Return all 29 diagnosed attributes as bounded, grounded candidate sets.
+    """Return all diagnosed catalog attributes as bounded, grounded candidate sets.
 
     A singleton is explicitly a candidate, not a resolved truth. A weak leader keeps up
     to three evidence-sufficient candidates regardless of score gap. A found leader keeps
     same-grade contenders within 0.15 score points. Scores are provisional rule scores.
     """
-    attributes = [
-        attribute for attribute in ProfileAttribute if attribute is not ProfileAttribute.HOME_ROOM
-    ]
+    attributes = list(PROFILE_DIAGNOSED_ATTRIBUTES)
     grouped: dict[ProfileAttribute, dict[str, ProfileItem]] = {
         attribute: {} for attribute in attributes
     }
@@ -638,6 +637,7 @@ PROFILE_ATTRIBUTE_WEIGHTS: dict[ProfileAttribute, int] = {
     ProfileAttribute.BIRTHDAY: 100,
     ProfileAttribute.RESIDENTIAL_AREA: 100,
     ProfileAttribute.HOME_NEAREST_STATION: 100,
+    ProfileAttribute.HOME_WALK_AREA: 100,
     ProfileAttribute.ACTUAL_HOME_ABSENCE: 100,
     ProfileAttribute.ANNOUNCED_LONG_ABSENCE: 100,
     ProfileAttribute.REALTIME_LOCATION: 100,
@@ -666,7 +666,7 @@ PROFILE_ATTRIBUTE_WEIGHTS: dict[ProfileAttribute, int] = {
 
 @dataclass(frozen=True, slots=True)
 class ProfileCandidateSimulation:
-    """Result of recalculating 29-attribute candidate sets after deleting posts."""
+    """Result of recalculating catalog-driven candidate sets after deleting posts."""
 
     delete: list[str]
     broken: list[str]
@@ -824,13 +824,12 @@ def simulate_profile_candidate_sets(
     requested = list(dict.fromkeys(delete_post_ids))
     delete_set = set(requested) - excluded
     remaining_posts = [post for post in posts if post.post_id not in excluded]
-    remaining_clues = [clue for clue in clues if clue.post_id not in excluded]
     before = (
         recalculate_profile_candidate_sets(
             candidate_sets,
             excluded,
             remaining_posts,
-            clues=remaining_clues,
+            clues=clues,
             diagnosis_at=diagnosis_at,
         )
         if excluded
@@ -839,12 +838,11 @@ def simulate_profile_candidate_sets(
     if not delete_set:
         return ProfileCandidateSimulation(delete=requested, broken=[], after=before)
     after_posts = [post for post in remaining_posts if post.post_id not in delete_set]
-    after_clues = [clue for clue in remaining_clues if clue.post_id not in delete_set]
     after = recalculate_profile_candidate_sets(
         before,
         delete_set,
         after_posts,
-        clues=after_clues,
+        clues=clues,
         diagnosis_at=diagnosis_at,
     )
     return ProfileCandidateSimulation(
@@ -1183,9 +1181,15 @@ def infer_rule_and_link_claims(
     posts: Sequence[Post],
     clues: Sequence[Clue],
     gazetteer: Gazetteer | None = None,
+    *,
+    rule_conclusions: Sequence[Conclusion] | None = None,
 ) -> list[ProfileItem]:
     """Convert RulesR (R1..R12), RulesX (X2..X5) and BP1/BP2 conclusions into candidates."""
-    conclusions = infer(list(clues), list(posts), gazetteer or Gazetteer())
+    conclusions = (
+        list(rule_conclusions)
+        if rule_conclusions is not None
+        else infer(list(clues), list(posts), gazetteer or Gazetteer())
+    )
     grouped_paths: dict[tuple[ProfileAttribute, str], list[ProfileEvidencePath]] = {}
     for conclusion in conclusions:
         mapped = _RULE_CONCLUSION_MAPPING.get((conclusion.rule, conclusion.attribute))
@@ -1234,6 +1238,7 @@ def infer_owner_claims_with_web(
     diagnosis_at: datetime | None = None,
     include_heuristic_rules: bool = False,
     photo_place_results: Sequence[PhotoPlaceResult] = (),
+    rule_conclusions: Sequence[Conclusion] | None = None,
 ) -> list[ProfileItem]:
     """Combine direct and Web-backed paths; reject conflicting employer names."""
     claims = infer_owner_claims(
@@ -1246,6 +1251,7 @@ def infer_owner_claims_with_web(
         diagnosis_at=diagnosis_at,
         include_heuristic_rules=include_heuristic_rules,
         photo_place_results=photo_place_results,
+        rule_conclusions=rule_conclusions,
     )
     registry_claim = (
         infer_registry_employer_claim(posts, owner_profile_text, gazetteer)
@@ -1302,6 +1308,7 @@ def infer_owner_candidate_sets_with_web(
     diagnosis_at: datetime | None = None,
     include_heuristic_rules: bool = True,
     photo_place_results: Sequence[PhotoPlaceResult] = (),
+    rule_conclusions: Sequence[Conclusion] | None = None,
 ) -> list[ProfileCandidateSet]:
     """Public multi-candidate entry point; returns one set for each supported catalog item."""
     claims = infer_owner_claims_with_web(
@@ -1315,8 +1322,94 @@ def infer_owner_candidate_sets_with_web(
         diagnosis_at=diagnosis_at,
         include_heuristic_rules=include_heuristic_rules,
         photo_place_results=photo_place_results,
+        rule_conclusions=rule_conclusions,
     )
+    claims.extend(infer_home_walk_area_claims(claims, posts, clues, gazetteer))
     return evaluate_profile_candidates(claims, posts, clues=clues)
+
+
+def infer_home_walk_area_claims(
+    claims: Sequence[ProfileItem],
+    posts: Sequence[Post],
+    clues: Sequence[Clue],
+    gazetteer: Gazetteer | None,
+) -> list[ProfileItem]:
+    """Derive a walk-radius candidate from an existing home-station candidate and post text."""
+    if gazetteer is None:
+        return []
+    from tkb_engine.walk_area import _walk_minutes, walk_area
+
+    station_set = next(
+        (
+            candidate_set
+            for candidate_set in evaluate_profile_candidates(claims, posts, clues=clues)
+            if candidate_set.attribute is ProfileAttribute.HOME_NEAREST_STATION
+        ),
+        None,
+    )
+    if station_set is None or not station_set.candidates:
+        return []
+
+    derived: list[ProfileItem] = []
+    station_candidates = station_set.candidates
+    for station_candidate in station_candidates:
+        station_name = station_candidate.value.removesuffix("駅")
+        station_paths = station_candidate.evidence_paths
+        for post in posts:
+            minutes = _walk_minutes(post.text, station_name)
+            if minutes is None:
+                continue
+            # A generic "駅まで徒歩N分" post cannot choose among several station candidates.
+            if len(station_candidates) > 1 and f"{station_name}駅" not in post.text:
+                continue
+            walk_results = [
+                result
+                for station_path in station_paths
+                if (
+                    result := walk_area(
+                        clues,
+                        [post],
+                        station_candidate.value,
+                        [
+                            reference.clue_index
+                            for reference in station_path.evidence
+                            if reference.clue_index is not None
+                        ],
+                        gazetteer,
+                    )
+                )
+                is not None
+            ]
+            if not walk_results:
+                continue
+            walk_evidence = ProfileEvidence(
+                post_id=post.post_id,
+                required=True,
+                source=EvidenceSource.POST_TEXT,
+                excerpt=post.text[:500],
+            )
+            paths = [
+                ProfileEvidencePath(
+                    evidence=[*station_path.evidence, walk_evidence],
+                    confidence=min(station_path.confidence, station_candidate.confidence),
+                    provenance=EvidencePathProvenance.COMBINED_INFERENCE,
+                )
+                for station_path in station_candidate.evidence_paths
+            ]
+            if not paths:
+                continue
+            derived.append(
+                ProfileItem(
+                    attribute=ProfileAttribute.HOME_WALK_AREA,
+                    value=walk_results[0].value,
+                    confidence=station_candidate.confidence,
+                    status=station_candidate.status,
+                    evidence=[reference for path in paths for reference in path.evidence],
+                    evidence_paths=paths,
+                    assessment=station_candidate.assessment,
+                )
+            )
+    return derived
 
 
 _COMMUTE_DESTINATION_RE = re.compile(
@@ -1333,6 +1426,7 @@ def infer_owner_profile_relations(
     *,
     clues: Sequence[Clue] = (),
     gazetteer: Gazetteer | None = None,
+    rule_conclusions: Sequence[Conclusion] | None = None,
 ) -> list[ProfileRelation]:
     """Create scoreless links from explicit owner wording, independent paths, and RulesX X1."""
     by_attribute = {claim.attribute: claim for claim in profile_claims}
@@ -1472,14 +1566,18 @@ def infer_owner_profile_relations(
                         )
                     )
     if clues:
-        rule_conclusions = infer(list(clues), list(posts), gazetteer or Gazetteer())
+        conclusions = (
+            list(rule_conclusions)
+            if rule_conclusions is not None
+            else infer(list(clues), list(posts), gazetteer or Gazetteer())
+        )
         school_set = by_attribute.get(ProfileAttribute.SCHOOL)
         if school_set is not None and school_set.candidates:
             candidate_by_norm = {
                 unicodedata.normalize("NFKC", candidate.value).strip(): candidate
                 for candidate in school_set.candidates
             }
-            for conclusion in rule_conclusions:
+            for conclusion in conclusions:
                 if conclusion.rule != "X1" or conclusion.attribute != "home_school_commute":
                     continue
                 x1_match = re.fullmatch(
@@ -1576,6 +1674,7 @@ def infer_owner_claims(
     diagnosis_at: datetime | None = None,
     include_heuristic_rules: bool = False,
     photo_place_results: Sequence[PhotoPlaceResult] = (),
+    rule_conclusions: Sequence[Conclusion] | None = None,
 ) -> list[ProfileItem]:
     """Infer only limited claims with explicit owner/context evidence.
 
@@ -1727,7 +1826,9 @@ def infer_owner_claims(
         claims.extend(infer_child_school_claims(posts, clues, gazetteer))
         claims = add_school_district_residence(claims, gazetteer)
     if include_heuristic_rules:
-        claims.extend(infer_rule_and_link_claims(posts, clues, gazetteer))
+        claims.extend(
+            infer_rule_and_link_claims(posts, clues, gazetteer, rule_conclusions=rule_conclusions)
+        )
     return claims
 
 
@@ -1785,8 +1886,8 @@ def _photo_home_area_facts(
             or candidate.photo_relation is not PhotoPlaceRelation.VISIBLE_IN_FRAME
         ):
             continue
-        # Brave結果は検証済みの事実ではない。ちょうど1件のBrave由来候補（ローカル候補と
-        # 混ざらない）で、市区町村が分かる場合に限り、弱い根拠として扱う。
+        # Brave results are unverified. Treat one as weak evidence only when exactly one
+        # Brave-derived candidate remains and its municipality is available.
         if result.lookup_status is PhotoPlaceLookupStatus.WEB_SEARCHED and (
             len(result.candidates) != 1
             or not candidate.place_id.startswith("brave-place:")

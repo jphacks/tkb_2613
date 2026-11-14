@@ -1,16 +1,34 @@
 """W1 徒歩の距離と、f1 絞り込みの演出のデータ。投稿はすべて架空。"""
 
 import math
+import unicodedata
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import jismesh.utils as ju
 import pytest
 
-from tkb_common.schemas import Clue, ClueSource, ClueType, Post
-from tkb_engine import Gazetteer, infer
+from tkb_common.schemas import (
+    Clue,
+    ClueSource,
+    ClueType,
+    Post,
+    ProfileAttribute,
+    ProfileCandidate,
+    ProfileCandidateSet,
+    ProfileCandidateSetStatus,
+    ProfileEvidence,
+    ProfileEvidencePath,
+    ProfileItem,
+    ProfileStatus,
+)
+from tkb_engine import Gazetteer
+from tkb_engine.cross_post import (
+    evaluate_profile_candidates,
+    infer_home_walk_area_claims,
+    recalculate_profile_candidate_sets,
+)
 from tkb_engine.narrowing import narrowing
-from tkb_engine.planner import simulate
 from tkb_engine.walk_area import (
     INTEGRATION_MARGIN,
     _walk_minutes,
@@ -63,6 +81,95 @@ def _envelope(post_id: str) -> Clue:
         confidence=0.98,
         source=ClueSource.OCR,
     )
+
+
+def _candidate_sets(
+    clues: list[Clue], station_values: tuple[str, ...] = ("根津駅",)
+) -> list[ProfileCandidateSet]:
+    evidence = [
+        ProfileEvidence(post_id=clue.post_id, clue_index=i, required=True)
+        for i, clue in enumerate(clues)
+        if clue.type is ClueType.PLACE_TEXT
+    ][:2]
+    station_candidates = [
+        ProfileCandidate(
+            rank=i + 1,
+            value=value,
+            confidence=0.58,
+            status=ProfileStatus.WEAK,
+            evidence=evidence,
+            evidence_paths=[ProfileEvidencePath(evidence=evidence, confidence=0.58)],
+        )
+        for i, value in enumerate(
+            sorted(station_values, key=lambda v: unicodedata.normalize("NFKC", v).lower().strip())
+        )
+    ]
+    station_set = ProfileCandidateSet(
+        attribute=ProfileAttribute.HOME_NEAREST_STATION,
+        status=(
+            ProfileCandidateSetStatus.CANDIDATE
+            if len(station_values) == 1
+            else ProfileCandidateSetStatus.AMBIGUOUS
+        ),
+        candidates=station_candidates,
+        candidate_pool=station_candidates,
+    )
+    sets = [station_set]
+    posts = [*STATION_POSTS]
+    if any(clue.post_id == "w" for clue in clues):
+        posts.append(WALK_POST)
+        station_items = [
+            ProfileItem(
+                attribute=ProfileAttribute.HOME_NEAREST_STATION,
+                value=candidate.value,
+                confidence=candidate.confidence,
+                status=candidate.status,
+                evidence=candidate.evidence,
+                evidence_paths=candidate.evidence_paths,
+            )
+            for candidate in station_candidates
+        ]
+        walk_claims = infer_home_walk_area_claims(station_items, posts, clues, _gaz())
+        sets.extend(
+            item
+            for item in evaluate_profile_candidates(
+                [*station_items, *walk_claims], posts, clues=clues
+            )
+            if item.attribute is ProfileAttribute.HOME_WALK_AREA
+        )
+    address_index = next(
+        (i for i, clue in enumerate(clues) if clue.type in {ClueType.CODE, ClueType.ADDRESS_TEXT}),
+        None,
+    )
+    if address_index is not None:
+        clue = clues[address_index]
+        block_evidence = [
+            ProfileEvidence(post_id=clue.post_id, clue_index=address_index, required=True),
+            ProfileEvidence(
+                post_id=clue.post_id,
+                clue_index=None,
+                required=True,
+                source="post_text",
+                excerpt="address evidence",
+            ),
+        ]
+        block_candidate = ProfileCandidate(
+            rank=1,
+            value="Bunkyo Yayo 2-99",
+            confidence=0.62,
+            status=ProfileStatus.WEAK,
+            evidence=block_evidence,
+            evidence_paths=[ProfileEvidencePath(evidence=block_evidence, confidence=0.62)],
+        )
+        sets.append(
+            ProfileCandidateSet(
+                attribute=ProfileAttribute.RESIDENTIAL_AREA,
+                status=ProfileCandidateSetStatus.CANDIDATE,
+                candidates=[block_candidate],
+                candidate_pool=[block_candidate],
+            )
+        )
+    return sets
 
 
 STATION_POSTS = [
@@ -183,34 +290,89 @@ def test_walk_minutes(text: str, minutes: int | None) -> None:
 # ---- W1 ----
 
 
-def test_w1_draws_a_circle_around_the_r1_station() -> None:
+def test_walk_range_uses_existing_station_candidate_and_its_evidence() -> None:
     clues = [*STATION_CLUES, WALK_CLUE]
+    claims = _candidate_sets(clues)
+    walk_set = next(item for item in claims if item.attribute is ProfileAttribute.HOME_WALK_AREA)
+    assert walk_set.status is ProfileCandidateSetStatus.CANDIDATE
+    walk_candidate = walk_set.candidates[0]
+    assert "約" in walk_candidate.value and "世帯" in walk_candidate.value
+    evidence_posts = {
+        evidence.post_id for path in walk_candidate.evidence_paths for evidence in path.evidence
+    }
+    assert evidence_posts == {"s1", "s2", "w"}
+    result = narrowing(clues, [*STATION_POSTS, WALK_POST], claims, _gaz())
 
-    result = [c for c in infer(clues, [*STATION_POSTS, WALK_POST], _gaz()) if c.rule == "W1"]
-
-    assert len(result) == 1
-    w1 = result[0]
-    assert w1.attribute == "home_walk_area"
-    assert w1.value.startswith("根津駅から半径320m（徒歩4分）、約")
-    assert w1.clue_indices == [0, 1, 2]
-    assert "第9条第9号" in w1.note and "国勢調査" in w1.note
+    assert result is not None
+    assert result["walk"]["station"] == "根津駅"
+    assert result["walk"]["radius_m"] == 320
+    assert result["walk"]["post_ids"] == ["s1", "s2", "w"]
 
 
-def test_w1_breaks_without_the_walk_post_or_the_station() -> None:
+def test_walk_range_disappears_when_either_candidate_or_walk_post_is_removed() -> None:
     clues = [*STATION_CLUES, WALK_CLUE]
     posts = [*STATION_POSTS, WALK_POST]
+    claims = _candidate_sets(clues)
+    assert narrowing(clues, posts, claims, _gaz()) is not None
+    assert narrowing(clues, [*STATION_POSTS], claims, _gaz()) is None
+    after_walk_removed = recalculate_profile_candidate_sets(
+        claims, {"w"}, STATION_POSTS, clues=clues
+    )
+    assert (
+        next(
+            item for item in after_walk_removed if item.attribute is ProfileAttribute.HOME_WALK_AREA
+        ).candidates
+        == []
+    )
+    after_station_removed = recalculate_profile_candidate_sets(
+        claims, {"s1", "s2"}, [WALK_POST], clues=clues
+    )
+    assert narrowing(clues, [WALK_POST], after_station_removed, _gaz()) is None
 
-    result = simulate(clues, posts, _gaz(), ["w"])
 
-    assert any(c.rule == "W1" for c in result.before)
-    assert not any(c.rule == "W1" for c in result.after)
-    # 駅がわからなければ（R1 がなければ）出さない
-    assert not any(c.rule == "W1" for c in infer([WALK_CLUE], [WALK_POST], _gaz()))
+def test_simulation_keeps_global_clue_indexes_after_deleting_the_first_post() -> None:
+    prefix_post = _post("prefix", "昨日は誕生日だった。")
+    prefix_clue = _text("prefix", ClueType.AGE_TEXT, "誕生日")
+    clues = [prefix_clue, *STATION_CLUES, WALK_CLUE]
+    posts = [prefix_post, *STATION_POSTS, WALK_POST]
+    claims = _candidate_sets(clues)
+
+    after = recalculate_profile_candidate_sets(claims, {"prefix"}, posts[1:], clues=clues)
+    original_value = (
+        next(item for item in claims if item.attribute is ProfileAttribute.HOME_WALK_AREA)
+        .candidates[0]
+        .value
+    )
+    recalculated_value = (
+        next(item for item in after if item.attribute is ProfileAttribute.HOME_WALK_AREA)
+        .candidates[0]
+        .value
+    )
+    assert recalculated_value == original_value
+    result = narrowing(clues, posts[1:], after, _gaz())
+
+    assert result is not None
+    assert result["walk"]["post_ids"] == ["s1", "s2", "w"]
 
 
-def test_w1_needs_the_census_table() -> None:
+def test_simulation_hides_walk_stage_when_walk_post_is_deleted() -> None:
     clues = [*STATION_CLUES, WALK_CLUE]
-    assert not any(c.rule == "W1" for c in infer(clues, [*STATION_POSTS, WALK_POST], _gaz({})))
+    claims = _candidate_sets(clues)
+    after = recalculate_profile_candidate_sets(claims, {"w"}, STATION_POSTS, clues=clues)
+    result = narrowing(clues, STATION_POSTS, after, _gaz())
+
+    assert result is None
+
+
+def test_walk_range_needs_the_census_table() -> None:
+    clues = [*STATION_CLUES, WALK_CLUE]
+    assert narrowing(clues, [*STATION_POSTS, WALK_POST], _candidate_sets(clues), _gaz({})) is None
+
+
+def test_generic_walk_text_does_not_choose_between_station_candidates() -> None:
+    clues = [*STATION_CLUES, WALK_CLUE]
+    claims = _candidate_sets(clues, ("根津駅", "千駄木駅"))
+    assert narrowing(clues, [*STATION_POSTS, WALK_POST], claims, _gaz()) is None
 
 
 # ---- f1 ----
@@ -221,7 +383,7 @@ def test_narrowing_lists_region_walk_and_block_with_their_posts() -> None:
     clues = [*STATION_CLUES, WALK_CLUE, _envelope("env")]
     gaz = _gaz()
 
-    data = narrowing(clues, posts, infer(clues, posts, gaz), gaz)
+    data = narrowing(clues, posts, _candidate_sets(clues), gaz)
 
     assert data is not None
     assert data["region"]["label"] == "1都3県"
@@ -231,13 +393,10 @@ def test_narrowing_lists_region_walk_and_block_with_their_posts() -> None:
     assert [m["code"] for m in walk["meshes"]] == [NEZU_MESH]
     assert walk["households"] <= 2000
     assert walk["post_ids"] == ["s1", "s2", "w"]
-    assert data["block"] == {"value": "文京区弥生 2-99 付近", "post_ids": ["env"]}
+    assert data["block"] == {"value": "Bunkyo Yayo 2-99", "post_ids": ["env"]}
     assert len(data["sources"]) == 2
 
 
 def test_narrowing_is_none_without_walk_or_block() -> None:
     gaz = _gaz()
-    assert (
-        narrowing(STATION_CLUES, STATION_POSTS, infer(STATION_CLUES, STATION_POSTS, gaz), gaz)
-        is None
-    )
+    assert narrowing(STATION_CLUES, STATION_POSTS, _candidate_sets(STATION_CLUES), gaz) is None

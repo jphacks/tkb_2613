@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { toDiagnoseEvent } from "./diagnose";
 import { isNarrowing } from "./narrowing";
+import { PROFILE_DIAGNOSED_ATTRIBUTES } from "./profile";
 
 const VALID = {
   region: { label: "1都3県", households: 17_410_647, bounds: [34.9, 138.9, 36.9, 140.9] },
@@ -39,7 +40,17 @@ describe("isNarrowing", () => {
 
 describe("conclusions event", () => {
   it("keeps valid narrowing and drops a broken one without failing the diagnosis", () => {
-    const base = { clues: [], conclusions: [] };
+    const base = {
+      clues: [],
+      profile_claims: PROFILE_DIAGNOSED_ATTRIBUTES.map((attribute) => ({
+        attribute,
+        status: "unknown",
+        candidates: [],
+        candidate_pool: [],
+        reason: "no_grounded_rule",
+        conflicting_evidence: [],
+      })),
+    };
     const good = toDiagnoseEvent("conclusions", JSON.stringify({ ...base, narrowing: VALID }));
     expect(good?.event === "conclusions" && good.narrowing).toEqual(VALID);
     const broken = toDiagnoseEvent("conclusions", JSON.stringify({ ...base, narrowing: { region: 1 } }));

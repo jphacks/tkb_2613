@@ -21,7 +21,6 @@ from dataclasses import dataclass
 
 from tkb_common.schemas import Clue, ClueSource, Post
 from tkb_engine.gazetteer import Gazetteer
-from tkb_engine.rules import Conclusion
 
 METERS_PER_MINUTE = 80
 MAX_MINUTES = 20
@@ -163,14 +162,14 @@ def floor_two_digits(value: float) -> int:
 def walk_area(
     clues: Sequence[Clue],
     posts: Sequence[Post],
-    conclusions: Sequence[Conclusion],
+    station_value: str,
+    station_clue_indices: Sequence[int],
     gaz: Gazetteer,
 ) -> WalkArea | None:
-    """R1 の駅と、別の投稿（または同じ投稿）の「駅まで徒歩N分」から、範囲と世帯数。"""
-    station = next((c for c in conclusions if c.rule == "R1" and c.attribute == "station"), None)
-    if station is None or not gaz.households:
+    """A supported station candidate and a walk post yield the home_walk_area value."""
+    if not station_value or not gaz.households:
         return None
-    name = station.value.removesuffix("駅")
+    name = station_value.removesuffix("駅")
     center = gaz.station_point(name)
     if center is None:
         return None
@@ -195,7 +194,7 @@ def walk_area(
             center=center,
             meshes=tuple(meshes),
             households=floor_two_digits(total),
-            clue_indices=tuple(sorted({*station.clue_indices, *evidence})),
+            clue_indices=tuple(sorted({*station_clue_indices, *evidence})),
         )
     return None
 
@@ -212,20 +211,3 @@ def _walk_minutes(text: str, station: str) -> int | None:
             if 1 <= minutes <= MAX_MINUTES:
                 return minutes
     return None
-
-
-def rule_w1(
-    clues: Sequence[Clue],
-    posts: Sequence[Post],
-    conclusions: Sequence[Conclusion],
-    gaz: Gazetteer,
-) -> list[Conclusion]:
-    """W1 徒歩の距離（home_walk_area）。"""
-    area = walk_area(clues, posts, conclusions, gaz)
-    if area is None:
-        return []
-    note = (
-        f"{WALK_SOURCE}で半径を出し、{CENSUS_SOURCE}を円と重なる面積の割合で按分した"
-        f"（{len(area.meshes)}メッシュ）。計算の誤差の分を引き、有効数字2桁で切り捨て"
-    )
-    return [Conclusion("W1", "home_walk_area", area.value, list(area.clue_indices), note)]

@@ -1,22 +1,15 @@
 /**
- * 診断（POST /api/diagnose）で SSE として届くイベント。TypeScript 側の正。
- * api/src/tkb_api/routes/diagnose.py と同時に変更すること。
+ * TypeScript representation of the Bluesky /api/diagnose SSE contract.
+ * Keep synchronized with api/src/tkb_api/routes/diagnose.py.
  *
- *   event: post         data: {"post": 投稿}                             投稿を 1 件取得するたびに
- *   event: clues        data: {"post_id", "clues": [手がかり], "error"}  手がかりの取り出しが終わった順
- *   event: conclusions  data: {"clues": [全手がかり], "conclusions": [推理],
- *                             "profile_claim_suggestions": [最大3件の投稿ID]} 最後に 1 回
- *   event: plan         data: {"delete", "broken", "after", "posts"}      危ない投稿。最後に 1 回
- *   event: done         data: {"posts_seen": 件数}                       最後に 1 回
- *
- * 推理の clue_indices は、同じ conclusions イベントの clues の並びでの番号。
- * plan の after（消したあとの結論）の clue_indices も、conclusions イベントの clues での番号。
+ * The legacy `conclusions` event name remains for transport compatibility;
+ * its data contains profile_claims and never exposes internal Conclusion values.
  */
 
-import { isNarrowing, type Narrowing } from "./narrowing";
 import { type Clue, isClue } from "./clue";
 import { isPost, type Post } from "./post";
-import { isExternalProfileResult, isProfileCandidateSetList, isProfileRelationList, isWebFact, type ExternalLookupStatus, type ExternalProfileResult, type ProfileCandidateSet, type ProfileRelation, type WebFact } from "./profile";
+import { isNarrowing, type Narrowing } from "./narrowing";
+import { isExternalProfileResult, isProfileCandidateSet, isProfileCandidateSetList, isProfileRelationList, isWebFact, type ExternalLookupStatus, type ExternalProfileResult, type ProfileCandidateSet, type ProfileRelation, type WebFact } from "./profile";
 
 /** 推理ルールが出した結論 1 つ（engine の Conclusion） */
 export interface Conclusion {
@@ -53,13 +46,20 @@ export interface Simulation {
   /** 消すと候補が崩れる項目（ProfileAttribute または旧 Conclusion の attribute） */
   readonly broken: readonly string[];
   /** 消したあとに残る結果 */
-  readonly after: readonly ProfileCandidateSet[] | readonly Conclusion[];
+  readonly after: readonly ProfileCandidateSet[];
+  /** Optional display-only narrowing projected from surviving profile candidates. */
+  readonly narrowing?: Narrowing | null;
 }
 
 export function isProfileSimulationAfter(
   after: Simulation["after"],
 ): after is readonly ProfileCandidateSet[] {
   return isProfileCandidateSetList(after);
+}
+
+/** Threads-only legacy simulation shape; never accepted by Bluesky/demo APIs. */
+export interface ThreadsSimulation extends Omit<Simulation, "after"> {
+  readonly after: readonly ProfileCandidateSet[] | readonly Conclusion[];
 }
 
 /**
@@ -124,17 +124,12 @@ export interface PhotoPlaceResult {
 export interface DiagnosisSnapshot {
   readonly posts: readonly Post[];
   readonly clues: readonly Clue[];
-  /**
-   * 診断のあとに Bluesky から消した投稿の ID（GET /api/diagnosis だけが返す）。posts と clues は診断時のまま
-   * （番号を変えない）で、conclusions と plan はここの投稿を除いて計算してある
-   */
+  /** Deleted post IDs are present on the owner restore snapshot only. */
   readonly deleted?: readonly string[];
-  readonly conclusions: readonly Conclusion[];
-  /** f1 絞り込みの演出のデータ。推定の段がなければ null（古い応答では省略） */
-  readonly narrowing?: Narrowing | null;
   readonly photo_place_results?: readonly PhotoPlaceResult[];
   readonly plan: Simulation & { readonly posts: readonly RiskyPost[] };
-  readonly profile_claims?: readonly ProfileCandidateSet[];
+  readonly profile_claims: readonly ProfileCandidateSet[];
+  readonly narrowing?: Narrowing | null;
   readonly profile_relations?: readonly ProfileRelation[];
   readonly profile_claim_suggestions?: readonly string[];
   readonly web_facts?: readonly WebFact[];
@@ -143,6 +138,46 @@ export interface DiagnosisSnapshot {
   readonly external_profile_results?: readonly ExternalProfileResult[];
   readonly owner_profile_text?: string;
   readonly self_report_clues?: readonly Clue[];
+}
+
+/** Existing links created before candidate sets were stored remain readable until expiry. */
+export interface LegacySharedSnapshot {
+  readonly posts: readonly Post[];
+  readonly clues: readonly Clue[];
+  /** Older candidate snapshots may omit attributes added to the current catalog. */
+  readonly profile_claims?: readonly ProfileCandidateSet[];
+  /** Conclusion-only links created before candidate sets were stored. */
+  readonly conclusions?: readonly Conclusion[];
+  readonly profile_relations?: readonly ProfileRelation[];
+  readonly plan: {
+    readonly delete: readonly string[];
+    readonly broken: readonly string[];
+    readonly after: readonly (ProfileCandidateSet | Conclusion)[];
+    readonly posts: readonly RiskyPost[];
+  };
+}
+
+export type SharedResultSnapshot = DiagnosisSnapshot | LegacySharedSnapshot;
+
+export function isLegacySharedSnapshot(value: unknown): value is LegacySharedSnapshot {
+  if (!isRecord(value) || !Array.isArray(value.posts) || !value.posts.every(isPost) || !isClueList(value.clues)) return false;
+  const clueCount = value.clues.length;
+  if (!isRecord(value.plan) || !Array.isArray(value.plan.posts) || !value.plan.posts.every(isRiskyPost)) return false;
+  if (Object.hasOwn(value, "profile_claims")) {
+    const claims = value.profile_claims;
+    if (!Array.isArray(claims) || claims.length === 0 || !claims.every(isProfileCandidateSet)) return false;
+    const attributes = claims.map((claim) => claim.attribute);
+    if (new Set(attributes).size !== attributes.length || attributes.includes("home_room")) return false;
+    if (!isStringList(value.plan.delete) || !isStringList(value.plan.broken) || !Array.isArray(value.plan.after) ||
+      !value.plan.after.every((item) => isProfileCandidateSet(item) || isConclusion(item, clueCount))) return false;
+    if (value.conclusions !== undefined && (!Array.isArray(value.conclusions) ||
+      !value.conclusions.every((item) => isConclusion(item, clueCount)))) return false;
+    if (value.profile_relations !== undefined && !isProfileRelationList(value.profile_relations)) return false;
+    return true;
+  }
+  return Array.isArray(value.conclusions) && value.conclusions.every((item) => isConclusion(item, clueCount)) &&
+    isStringList(value.plan.delete) && isStringList(value.plan.broken) && Array.isArray(value.plan.after) &&
+    value.plan.after.every((item) => isConclusion(item, clueCount));
 }
 
 export type DiagnoseEvent =
@@ -157,11 +192,9 @@ export type DiagnoseEvent =
   | {
       readonly event: "conclusions";
       readonly clues: readonly Clue[];
-      readonly conclusions: readonly Conclusion[];
-      /** f1 絞り込みの演出のデータ。形が違うときは落とす（演出だけなので診断は止めない） */
       readonly narrowing?: Narrowing | null;
       readonly photo_place_results?: readonly PhotoPlaceResult[];
-      readonly profile_claims?: readonly ProfileCandidateSet[];
+      readonly profile_claims: readonly ProfileCandidateSet[];
       readonly profile_claims_error?: boolean;
       readonly profile_relations?: readonly ProfileRelation[];
       /** Up to three diagnosis-order-stable post IDs selected by exact claim-path removal. */
@@ -297,8 +330,16 @@ export function isSimulation(
   if (!isRecord(value) || !isStringList(value.delete) || !isStringList(value.broken) || !Array.isArray(value.after)) {
     return false;
   }
+  // Narrowing is a display-only sidecar; a malformed optional sidecar must not
+  // make an otherwise valid simulation result unreadable.
   const after: readonly unknown[] = value.after;
-  return isProfileCandidateSetList(after) || after.every((c) => isConclusion(c, clueCount));
+  return isProfileCandidateSetList(after);
+}
+
+export function isThreadsSimulation(value: unknown, clueCount = Number.POSITIVE_INFINITY): value is ThreadsSimulation {
+  if (!isRecord(value) || !isStringList(value.delete) || !isStringList(value.broken) || !Array.isArray(value.after)) return false;
+  const after: readonly unknown[] = value.after;
+  return isProfileCandidateSetList(after) || after.every((item) => isConclusion(item, clueCount));
 }
 
 /** 実際に消した結果の形を確かめる。clueCount は isSimulation と同じ */
@@ -336,17 +377,17 @@ export function isDiagnosisSnapshot(value: unknown): value is DiagnosisSnapshot 
     const postIds = new Set(value.posts.map((post) => post.post_id));
     if (!isStringList(value.deleted) || !value.deleted.every((id) => postIds.has(id))) return false;
   }
-  if (!Array.isArray(value.conclusions) || !value.conclusions.every((c) => isConclusion(c, clueCount))) return false;
+  if (Object.hasOwn(value, "conclusions")) return false;
+  if (!isProfileCandidateSetList(value.profile_claims)) return false;
   const plan = value.plan;
   if (!isSimulation(plan, clueCount) || !isRecord(plan) || !Array.isArray(plan.posts) || !plan.posts.every(isRiskyPost)) return false;
   let conclusionsEvent: DiagnoseEvent | null;
   try {
     conclusionsEvent = toDiagnoseEvent("conclusions", JSON.stringify({
       clues: value.clues,
-      conclusions: value.conclusions,
-      ...(Object.hasOwn(value, "narrowing") ? { narrowing: value.narrowing } : {}),
       ...(Object.hasOwn(value, "photo_place_results") ? { photo_place_results: value.photo_place_results } : {}),
-      ...(Object.hasOwn(value, "profile_claims") ? { profile_claims: value.profile_claims } : {}),
+      ...(Object.hasOwn(value, "narrowing") ? { narrowing: value.narrowing } : {}),
+      profile_claims: value.profile_claims,
       ...(Object.hasOwn(value, "profile_relations") ? { profile_relations: value.profile_relations } : {}),
       ...(Object.hasOwn(value, "profile_claim_suggestions") ? { profile_claim_suggestions: value.profile_claim_suggestions } : {}),
       ...(Object.hasOwn(value, "web_facts") ? { web_facts: value.web_facts } : {}),
@@ -390,9 +431,8 @@ export function toDiagnoseEvent(
       error: value.error,
     };
   }
-  if (event === "conclusions" && isRecord(value) && isClueList(value.clues)) {
+  if (event === "conclusions" && isRecord(value) && !Object.hasOwn(value, "conclusions") && isClueList(value.clues)) {
     const clueCount = value.clues.length;
-    const { conclusions } = value;
     const profileClaims = value.profile_claims ?? [];
     const profileRelations = value.profile_relations ?? [];
     const hasProfileRelations = Object.hasOwn(value, "profile_relations");
@@ -407,6 +447,8 @@ export function toDiagnoseEvent(
     const externalProfileResults = value.external_profile_results ?? [];
     const hasPhotoPlaceResults = Object.hasOwn(value, "photo_place_results");
     const photoPlaceResults = value.photo_place_results ?? [];
+    const hasNarrowing = Object.hasOwn(value, "narrowing");
+    const narrowed = value.narrowing === null ? null : isNarrowing(value.narrowing) ? value.narrowing : null;
     const webFactIds = Array.isArray(webFacts) && webFacts.every(isWebFact)
       ? new Set(webFacts.map((fact) => fact.id))
       : new Set<string>();
@@ -434,7 +476,7 @@ export function toDiagnoseEvent(
         )),
       )));
     if (
-      Array.isArray(conclusions) && conclusions.every((c) => isConclusion(c, clueCount)) &&
+      hasProfileClaims &&
       (!hasPhotoPlaceResults || isPhotoPlaceResultList(photoPlaceResults, value.clues)) &&
       typeof profileText === "string" &&
       (!hasProfileRelations || isProfileRelationList(profileRelations)) &&
@@ -449,10 +491,9 @@ export function toDiagnoseEvent(
       return {
         event,
         clues: value.clues,
-        conclusions: conclusions as Conclusion[],
-        ...(Object.hasOwn(value, "narrowing") ? { narrowing: isNarrowing(value.narrowing) ? value.narrowing : null } : {}),
         ...(hasPhotoPlaceResults ? { photo_place_results: photoPlaceResults as readonly PhotoPlaceResult[] } : {}),
-        ...(hasProfileClaims ? { profile_claims: safeProfileClaims } : {}),
+        ...(hasNarrowing ? { narrowing: narrowed } : {}),
+        profile_claims: safeProfileClaims,
         ...(profileClaimsError ? { profile_claims_error: true } : {}),
         ...(hasProfileRelations ? { profile_relations: profileRelations as readonly ProfileRelation[] } : {}),
         ...(Object.hasOwn(value, "profile_claim_suggestions") ? { profile_claim_suggestions: profileClaimsError ? [] : profileClaimSuggestions } : {}),

@@ -15,6 +15,7 @@ import {
   simulate,
 } from "./api";
 import { messages } from "@/lib/messages";
+import { PROFILE_DIAGNOSED_ATTRIBUTES } from "@/types/profile";
 
 const RESPONSE = {
   clues: [
@@ -350,13 +351,15 @@ describe("diagnose", () => {
   });
 });
 
+function unknownCandidateSets() {
+  return PROFILE_DIAGNOSED_ATTRIBUTES.map((attribute) => ({
+    attribute, status: "unknown", candidates: [], candidate_pool: [], reason: "no_grounded_rule", conflicting_evidence: [],
+  }));
+}
+
 describe("simulate", () => {
   const POST_ID = "at://did:plc:abc/app.bsky.feed.post/3k9";
-  const RESULT = {
-    delete: [POST_ID],
-    broken: ["station"],
-    after: [{ rule: "R3", attribute: "routine", value: "毎週火曜", clue_indices: [2], note: "" }],
-  };
+  const RESULT = { delete: [POST_ID], broken: ["regular_station"], after: unknownCandidateSets() };
 
   function json(body: unknown, status = 200): Response {
     return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -373,9 +376,9 @@ describe("simulate", () => {
     expect(JSON.parse(init?.body as string)).toEqual({ delete: [POST_ID] });
   });
 
-  it("rejects evidence numbers beyond the diagnosed clues", async () => {
-    mockFetch(json(RESULT));
-    await expect(simulate([POST_ID], 2)).rejects.toMatchObject({ kind: "invalid_response" });
+  it("rejects results that do not cover every diagnosed attribute", async () => {
+    mockFetch(json({ ...RESULT, after: RESULT.after.slice(1) }));
+    await expect(simulate([POST_ID], 3)).rejects.toMatchObject({ kind: "invalid_response" });
   });
 
   it("asks to diagnose first when the api has no diagnosis", async () => {
@@ -392,7 +395,7 @@ describe("simulate", () => {
 describe("deletePosts", () => {
   const POST_ID = "at://did:plc:abc/app.bsky.feed.post/3k9";
   const KEPT_ID = "at://did:plc:abc/app.bsky.feed.post/3k2";
-  const RESULT = { delete: [POST_ID], failed: [KEPT_ID], broken: ["station"], after: [] };
+  const RESULT = { delete: [POST_ID], failed: [KEPT_ID], broken: ["regular_station"], after: unknownCandidateSets() };
 
   function json(body: unknown, status = 200): Response {
     return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });

@@ -109,7 +109,7 @@ def rule_bp1(clues: Sequence[Clue], posts: Sequence[Post]) -> list[Conclusion]:
     i, bp, _ = found[0]
     pnr = PNR_NOTE if any(leg.has_pnr for f in found for leg in f[1].legs) else ""
     name = f"{bp.family_name} {bp.given_name}".strip()
-    note = _join("搭乗券のバーコードの氏名（ローマ字）", pnr)
+    note = _join("搭乗券の旅客氏名（投稿者本人とは未確認）", pnr)
     conclusions = [Conclusion("BP1", "full_name", name, [i], note)]
     # 留守の予定は、予定として読める搭乗券のうち最初のもの（終わった旅行の搭乗券は飛ばす）
     planned = next(

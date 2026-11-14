@@ -21,6 +21,7 @@ from tkb_api.pipeline import (
 from tkb_api.routes.diagnose import read_diagnosis
 from tkb_common.place_names import PLACE_INDEX_SCHEMA_VERSION
 from tkb_common.schemas import (
+    PROFILE_DIAGNOSED_ATTRIBUTES,
     Clue,
     ClueSource,
     ClueType,
@@ -149,7 +150,7 @@ async def _stream(items: list[PostExtraction]) -> AsyncIterator[PostExtraction]:
 
 
 @pytest.mark.anyio
-async def test_events_keep_failed_posts_and_index_conclusions_into_all_clues() -> None:
+async def test_events_keep_failed_posts_and_return_candidate_sets_only() -> None:
     post = _post(0, text="毎週火曜はジム")
     clue = Clue(
         post_id=post.post_id,
@@ -177,7 +178,8 @@ async def test_events_keep_failed_posts_and_index_conclusions_into_all_clues() -
     assert events[1][1]["error"] == "写真を取得できませんでした"
     result = events[3][1]
     assert result["clues"] == [clue.model_dump(mode="json")]
-    assert len(result["profile_claims"]) == 29
+    assert "conclusions" not in result
+    assert len(result["profile_claims"]) == len(PROFILE_DIAGNOSED_ATTRIBUTES)
     assert result["profile_relations"] == []
     claims_by_attr = {claim["attribute"]: claim for claim in result["profile_claims"]}
     assert claims_by_attr["routine"]["status"] == "candidate"
@@ -190,17 +192,12 @@ async def test_events_keep_failed_posts_and_index_conclusions_into_all_clues() -
     assert "home_room" not in claims_by_attr
     assert result["profile_claim_suggestions"] == [post.post_id]
     assert saved_result["clues"] == [clue]
-    assert len(saved_result["profile_claims"]) == 29
+    assert len(saved_result["profile_claims"]) == len(PROFILE_DIAGNOSED_ATTRIBUTES)
     assert saved_result["profile_relations"] == []
     assert all(
         (claim.status == "candidate" if claim.attribute == "routine" else claim.status == "unknown")
         for claim in saved_result["profile_claims"]
     )
-    routine = next(c for c in result["conclusions"] if c["attribute"] == "routine")
-    assert routine["clue_indices"] == [0]
-    assert set(routine) == {"rule", "attribute", "value", "clue_indices", "note", "confidence"}
-    # 根拠は確からしさ 0.9 の手がかり1件だけなので、合成しても 0.9
-    assert routine["confidence"] == 0.9
 
 
 @pytest.mark.anyio

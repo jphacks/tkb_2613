@@ -217,6 +217,7 @@ class ProfileAttribute(StrEnum):
     HOME_BUILDING = "home_building"
     HOME_ROOM = "home_room"
     HOME_NEAREST_STATION = "home_nearest_station"
+    HOME_WALK_AREA = "home_walk_area"
     REGULAR_STATION = "regular_station"
     REGULAR_LINE = "regular_line"
     RESIDENTIAL_AREA = "residential_area"
@@ -298,6 +299,9 @@ PROFILE_ATTRIBUTE_CATALOG: dict[ProfileAttribute, ProfileAttributeMetadata] = {
     ProfileAttribute.HOME_NEAREST_STATION: ProfileAttributeMetadata(
         "自宅の最寄り駅", ProfileCategory.HOME_AND_LOCATION
     ),
+    ProfileAttribute.HOME_WALK_AREA: ProfileAttributeMetadata(
+        "自宅から駅までの徒歩圏", ProfileCategory.HOME_AND_LOCATION
+    ),
     ProfileAttribute.REGULAR_STATION: ProfileAttributeMetadata(
         "投稿時点の通勤利用駅候補", ProfileCategory.HOME_AND_LOCATION
     ),
@@ -360,6 +364,11 @@ PROFILE_ATTRIBUTE_CATALOG: dict[ProfileAttribute, ProfileAttributeMetadata] = {
         "子どもの通園・通学先", ProfileCategory.ACTIVITY_AND_FAMILY
     ),
 }
+
+# Catalog-driven public result attributes. HOME_ROOM remains intentionally excluded.
+PROFILE_DIAGNOSED_ATTRIBUTES: tuple[ProfileAttribute, ...] = tuple(
+    attribute for attribute in ProfileAttribute if attribute is not ProfileAttribute.HOME_ROOM
+)
 
 
 class ProfileStatus(StrEnum):

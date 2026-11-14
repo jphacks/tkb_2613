@@ -43,8 +43,8 @@ age・birthday・occupation・active_time・routine は16項目にない。
 R2・R3、R7 の時間割、R9 の誕生日は投稿の時刻を使うので、投稿の日付が TIME_MIN_DAYS 日以上に
 散らばっているときだけ使う（同じ日にまとめて投稿したアカウントでは時刻が生活を表さない）。
 
-X2〜X5（生まれた年・留守の予定・行きつけの店・勤務先）は links.py。W1（徒歩の距離から家の範囲と
-世帯数）は walk_area.py。別々の投稿をつなぐルール。
+X2〜X5（生まれた年・留守の予定・行きつけの店・勤務先）は links.py。徒歩圏は、既存の
+`home_nearest_station` 候補と本人の徒歩投稿から ProfileCandidateSet に導く。
 
 ルールを足すときは rule_rN(clues, posts, ...) -> list[Conclusion] を書き、infer に並べる。
 しきい値は下の「しきい値」にまとめる。値は eval/fixtures/demo_observations.json で決めた仮の値で、
@@ -827,10 +827,6 @@ def infer(clues: Sequence[Clue], posts: Sequence[Post], gaz: Gazetteer) -> list[
         *rule_r10(clues),
         *rule_r11(clues, r1, gaz),
     ]
-    # W1 は R1 の駅を使う。walk_area.py はこのファイルを import するので、ここで読む
-    from tkb_engine.walk_area import rule_w1
-
-    base.extend(rule_w1(clues, posts, r1, gaz))
     linked = link(clues, posts, [*base, *rule_x1(clues, posts, base)], gaz)
     return [replace(c, confidence=combined_confidence(clues, c.clue_indices)) for c in linked]
 

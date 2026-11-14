@@ -63,6 +63,7 @@ def test_bp1_reads_the_name_and_the_flight_day_without_the_pnr(value: str) -> No
     posts = [_post("bp", "2026-10-25 12:33", "来週は広島に帰る！名前はちゃんと隠しました。")]
 
     result = rule_bp1([_code("bp", value)], posts)
+    assert "投稿者本人とは未確認" in result[0].note
 
     assert [(c.attribute, c.value, c.clue_indices) for c in result] == [
         ("full_name", "KAKURE HARUKI", [0]),

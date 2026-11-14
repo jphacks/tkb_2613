@@ -61,7 +61,7 @@ export default function DemoPage() {
         {result && (
           <>
             <Reveal posts={result.posts} clues={result.clues} conclusions={[]} profileClaims={visibleProfileClaims} excludedPostIds={excluded}>
-              <NarrowingStages narrowing={visibleNarrowing(result.narrowing, excluded)} />
+              <NarrowingStages narrowing={visibleNarrowing(simulation ? simulation.narrowing : result.narrowing, excluded)} />
             </Reveal>
             <ConclusionBoard
               clues={result.clues}

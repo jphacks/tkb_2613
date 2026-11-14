@@ -1,18 +1,6 @@
-"""ログインなしの体験デモ。架空アカウントの投稿と手がかりで、診断と「消したらどうなる」を見せる。
+"""Fixed fictional demo account with the same catalog-driven candidate-set result as Bluesky.
 
-使うのは eval/fixtures/demo_observations.json（DEMO_FIXTURE_PATH）の架空アカウントだけ。
-モデル・Bluesky・セッションには接続せず、Cookie も読まない（MOCK_MODE=0 でも同じ）。
-削除の API はない。
-
-  GET  /api/demo/diagnosis  → {"demo": true, "posts", "clues", "conclusions", "narrowing",
-                              "profile_claims", "profile_relations",
-                              "profile_claim_suggestions", "plan"}
-  POST /api/demo/simulate   {"delete": [投稿ID]} → {"delete", "broken", "after"}
-
-GET /api/demo/diagnosis の応答は、表（DEMO_FIXTURE_PATH）と地名の表（Gazetteer）が同じなら
-毎回同じなので、一度だけ計算して JSON のバイト列のまま使い回す。起動時（lifespan）に
-warm_diagnosis_cache で計算しておき、要求ごとには推理も計画も計算しない。
-バイト列は変更できないので、要求の間で中身が書き換わることはない。
+No model, Bluesky, session, or account-identifying data is used.
 """
 
 import json
@@ -27,8 +15,6 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 
 from tkb_api.config import Settings, get_settings
 from tkb_api.pipeline import (
-    conclusions_json,
-    narrowing_json,
     plan_claims_json,
     simulate_claims_json,
 )
@@ -40,6 +26,8 @@ from tkb_engine.cross_post import (
     infer_owner_profile_relations,
 )
 from tkb_engine.gazetteer import Gazetteer
+from tkb_engine.narrowing import narrowing
+from tkb_engine.rules import infer
 
 router = APIRouter(prefix="/api/demo")
 
@@ -82,20 +70,31 @@ _cached: _CachedDiagnosis | None = None
 def _render_diagnosis(
     posts: tuple[Post, ...], clues: tuple[Clue, ...], gazetteer: Gazetteer
 ) -> tuple[tuple[ProfileCandidateSet, ...], bytes]:
+    rule_conclusions = infer(list(clues), list(posts), gazetteer)
     profile_claims = tuple(
-        infer_owner_candidate_sets_with_web(list(posts), list(clues), [], gazetteer=gazetteer)
+        infer_owner_candidate_sets_with_web(
+            list(posts),
+            list(clues),
+            [],
+            gazetteer=gazetteer,
+            rule_conclusions=rule_conclusions,
+        )
     )
     profile_relations = infer_owner_profile_relations(
-        list(posts), profile_claims, clues=list(clues), gazetteer=gazetteer
+        list(posts),
+        profile_claims,
+        clues=list(clues),
+        gazetteer=gazetteer,
+        rule_conclusions=rule_conclusions,
     )
+    narrowed = narrowing(list(clues), list(posts), profile_claims, gazetteer)
     plan = plan_claims_json(profile_claims, clues, posts)
     doc = {
         "demo": True,
         "posts": [post.model_dump(mode="json") for post in posts],
         "clues": [clue.model_dump(mode="json") for clue in clues],
-        "conclusions": conclusions_json(clues, posts, gazetteer),
-        "narrowing": narrowing_json(clues, posts, gazetteer),
         "profile_claims": [item.model_dump(mode="json") for item in profile_claims],
+        "narrowing": narrowed,
         "profile_relations": [item.model_dump(mode="json") for item in profile_relations],
         "profile_claim_suggestions": list(plan["delete"]),
         "plan": plan,
@@ -168,4 +167,4 @@ def simulate(
             status.HTTP_422_UNPROCESSABLE_CONTENT, "デモの投稿の中から選んでください"
         )
     profile_claims = _diagnosis_entry(settings.demo_fixture_path, data, gazetteer).profile_claims
-    return simulate_claims_json(profile_claims, clues, posts, body.delete)
+    return simulate_claims_json(profile_claims, clues, posts, body.delete, gazetteer=gazetteer)

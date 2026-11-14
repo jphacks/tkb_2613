@@ -173,7 +173,7 @@ def _kept_indices(clues: Sequence[Clue], gone: Iterable[str]) -> list[int]:
 
 
 def _remaining(
-    clues: Sequence[Clue], posts: Sequence[Post], excluded: Sequence[str]
+    clues: Sequence[Clue], posts: Sequence[Post], excluded: Iterable[str]
 ) -> tuple[list[Clue], list[Post]]:
     gone = set(excluded)
     return [c for c in clues if c.post_id not in gone], [p for p in posts if p.post_id not in gone]
@@ -183,47 +183,10 @@ def _renumbered(conclusions: Sequence[Conclusion], kept: Sequence[int]) -> list[
     return [{**asdict(c), "clue_indices": [kept[i] for i in c.clue_indices]} for c in conclusions]
 
 
-def narrowing_json(
-    clues: Sequence[Clue],
-    posts: Sequence[Post],
-    gazetteer: Gazetteer,
-    excluded: Sequence[str] = (),
-) -> dict[str, Any] | None:
-    """f1 絞り込みの演出のデータ（tkb_engine.narrowing）。消した投稿（excluded）を除く。"""
-    remaining_clues, remaining_posts = _remaining(clues, posts, excluded)
-    return narrowing(
-        remaining_clues,
-        remaining_posts,
-        infer(remaining_clues, remaining_posts, gazetteer),
-        gazetteer,
-    )
-
-
-def conclusions_json(
-    clues: Sequence[Clue],
-    posts: Sequence[Post],
-    gazetteer: Gazetteer,
-    excluded: Sequence[str] = (),
-) -> list[dict[str, Any]]:
-    """excluded（もう消した投稿）を除いて推理する。
-
-    clue_indices は clues（診断の全手がかり）での番号。
-    """
-    remaining_clues, remaining_posts = _remaining(clues, posts, excluded)
-    return _renumbered(
-        infer(remaining_clues, remaining_posts, gazetteer), _kept_indices(clues, excluded)
-    )
-
-
 def simulation_json(
     sim: Simulation, clues: Sequence[Clue], excluded: Sequence[str] = ()
 ) -> dict[str, Any]:
-    """消したらどうなるかを、画面に渡す形にする。
-
-    after の clue_indices は、消したあとの手がかりの番号から、clues（診断の全手がかり）での
-    番号に直す。画面は conclusions イベントの clues をそのまま使える。
-    excluded は、sim を作る前にもう除いてあった投稿（すでに消した投稿）。
-    """
+    """Serialize the legacy Conclusion response for the Threads compatibility route."""
     return {
         "delete": sim.delete,
         "broken": sim.broken,
@@ -274,8 +237,9 @@ def simulate_claims_json(
     excluded: Sequence[str] = (),
     *,
     diagnosis_at: datetime | None = None,
+    gazetteer: Gazetteer | None = None,
 ) -> dict[str, Any]:
-    """excluded を除いた状態から、delete を消したときの 29 項目候補集合の変化を返す。"""
+    """excluded を除いた状態から、delete を消したときの候補集合の変化を返す。"""
     sim = simulate_profile_candidate_sets(
         candidate_sets,
         posts,
@@ -284,11 +248,16 @@ def simulate_claims_json(
         excluded_post_ids=excluded,
         diagnosis_at=diagnosis_at,
     )
-    return {
+    result = {
         "delete": sim.delete,
         "broken": sim.broken,
         "after": [item.model_dump(mode="json") for item in sim.after],
     }
+    if gazetteer is not None:
+        gone = set(excluded) | set(delete)
+        _, remaining_posts = _remaining(clues, posts, gone)
+        result["narrowing"] = narrowing(clues, remaining_posts, sim.after, gazetteer)
+    return result
 
 
 def plan_claims_json(
@@ -300,15 +269,15 @@ def plan_claims_json(
     diagnosis_at: datetime | None = None,
     proposed_delete: Sequence[str] | None = None,
 ) -> dict[str, Any]:
-    """29 項目の候補集合を基準に、最小削除提案と投稿ごとの影響項目を返す。"""
-    remaining_clues, remaining_posts = _remaining(clues, posts, excluded)
+    """候補カタログを基準に、最小削除提案と投稿ごとの影響項目を返す。"""
+    _, remaining_posts = _remaining(clues, posts, excluded)
     excluded_set = set(excluded)
     before = (
         recalculate_profile_candidate_sets(
             candidate_sets,
             excluded_set,
             remaining_posts,
-            clues=remaining_clues,
+            clues=clues,
             diagnosis_at=diagnosis_at,
         )
         if excluded_set
@@ -323,7 +292,7 @@ def plan_claims_json(
         before,
         remaining_posts,
         delete_ids,
-        clues=remaining_clues,
+        clues=clues,
         diagnosis_at=diagnosis_at,
     )
     per_post = [
@@ -333,7 +302,7 @@ def plan_claims_json(
                 before,
                 remaining_posts,
                 [post_id],
-                clues=remaining_clues,
+                clues=clues,
                 diagnosis_at=diagnosis_at,
             ).broken,
         }
@@ -462,19 +431,24 @@ async def diagnose_events(
         diagnosis_date=diagnosis_date,
         diagnosis_at=diagnosis_at,
         photo_place_results=photo_place_results,
+        rule_conclusions=conclusions,
     )
     profile_claim_suggestions = plan_profile_candidate_deletion(profile_claims, posts)
     profile_relations = infer_owner_profile_relations(
-        list(posts), profile_claims, clues=all_clues, gazetteer=gazetteer
+        list(posts),
+        profile_claims,
+        clues=all_clues,
+        gazetteer=gazetteer,
+        rule_conclusions=conclusions,
     )
+    narrowing_result = narrowing(all_clues, list(posts), profile_claims, gazetteer)
     yield (
         "conclusions",
         {
             "clues": [c.model_dump(mode="json") for c in all_clues],
-            "conclusions": [asdict(c) for c in conclusions],
-            "narrowing": narrowing(all_clues, list(posts), conclusions, gazetteer),
             "photo_place_results": [item.model_dump(mode="json") for item in photo_place_results],
             "profile_claims": [item.model_dump(mode="json") for item in profile_claims],
+            "narrowing": narrowing_result,
             "profile_relations": [item.model_dump(mode="json") for item in profile_relations],
             "profile_claim_suggestions": profile_claim_suggestions,
             "web_facts": [fact.model_dump(mode="json") for fact in web_facts],

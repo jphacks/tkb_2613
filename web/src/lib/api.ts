@@ -10,7 +10,9 @@ import {
   isDeletion,
   isDemoDiagnosis,
   isDiagnosisSnapshot,
+  isLegacySharedSnapshot,
   isSimulation,
+  type SharedResultSnapshot,
   type Simulation,
   toDiagnoseEvent,
 } from "@/types/diagnose";
@@ -319,7 +321,7 @@ export async function revokeResultLink(
 export async function getSharedResult(
   token: string,
   { baseUrl = DEFAULT_BASE_URL, signal }: RequestOptions = {},
-): Promise<DiagnosisSnapshot> {
+): Promise<SharedResultSnapshot> {
   let res: Response;
   try {
     res = await fetch(`${baseUrl}/api/shared-result`, {
@@ -333,7 +335,9 @@ export async function getSharedResult(
   }
   if (!res.ok) throw await failure(res);
   const data: unknown = await res.json().catch(() => undefined);
-  if (!isDiagnosisSnapshot(data)) throw new ApiError("invalid_response", messages.errors.invalidResponse);
+  if (!isDiagnosisSnapshot(data) && !isLegacySharedSnapshot(data)) {
+    throw new ApiError("invalid_response", messages.errors.invalidResponse);
+  }
   return data;
 }
 

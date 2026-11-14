@@ -46,7 +46,7 @@ def test_candidate_evaluation_rejects_empty_or_incomplete_sets_before_scoring() 
                 {"status": "confirmed", "complete": True, "claims": []},
             )
         except ValueError as error:
-            assert "29" in str(error) or "unique" in str(error)
+            assert "missing" in str(error) or "unique" in str(error)
         else:
             raise AssertionError("an incomplete candidate set must be rejected")
 
@@ -79,8 +79,8 @@ def test_complete_truth_scores_top1_coverage_false_candidates_and_unknowns() -> 
     assert metrics["displayed_candidate_coverage"] == 1.0
     assert metrics["wrong_candidate_rate"] == 0.5
     assert metrics["wrong_candidates"] == [{"attribute": "regular_station", "value": "千駄木駅"}]
-    assert result["candidate_status_rates"]["unknown_count"] == 28
-    assert result["candidate_status_rates"]["set_count"] == 29
+    assert result["candidate_status_rates"]["unknown_count"] == len(_ALL_ATTRIBUTES) - 1
+    assert result["candidate_status_rates"]["set_count"] == len(_ALL_ATTRIBUTES)
     assert result["evidence_reference_integrity"]["valid_rate"] == 1.0
 
 
@@ -161,8 +161,8 @@ def test_provenance_scoped_status_rates_mark_filtered_candidate_unknown() -> Non
     result = module.evaluate_candidate_sets(rows, {}, provenance_scope="direct_disclosure")
 
     assert result["candidate_status_rates"]["scope"] == "unfiltered_profile_claim_status"
-    assert result["candidate_status_rates"]["unknown_count"] == 28
-    assert result["provenance_scoped_status_rates"]["unknown_count"] == 29
+    assert result["candidate_status_rates"]["unknown_count"] == len(_ALL_ATTRIBUTES) - 1
+    assert result["provenance_scoped_status_rates"]["unknown_count"] == len(_ALL_ATTRIBUTES)
     assert result["provenance_scoped_status_rates"]["unknown_rate"] == 1.0
     assert result["provenance_scoped_status_rates"]["candidate_count"] == 0
 
@@ -184,7 +184,7 @@ def test_accuracy_is_withheld_for_incomplete_truth_but_status_rates_remain() -> 
     )
     assert result["assessed"] is False
     assert result["accuracy_metrics"]["top1_accuracy"] is None
-    assert result["candidate_status_rates"]["set_count"] == 29
+    assert result["candidate_status_rates"]["set_count"] == len(_ALL_ATTRIBUTES)
 
 
 def test_unknown_set_for_truth_attribute_counts_as_top1_miss_and_uncovered() -> None:

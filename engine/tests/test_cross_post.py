@@ -1,6 +1,7 @@
 from datetime import UTC, date, datetime, timedelta
 
 from tkb_common.schemas import (
+    PROFILE_DIAGNOSED_ATTRIBUTES,
     Clue,
     ClueSource,
     ClueType,
@@ -1692,6 +1693,7 @@ def test_explicit_self_report_rules_emit_candidates_with_matching_typed_observat
         not in {
             ProfileAttribute.FACIAL_APPEARANCE,
             ProfileAttribute.HOME_ROOM,
+            ProfileAttribute.HOME_WALK_AREA,
             ProfileAttribute.RESIDENTIAL_AREA,
             ProfileAttribute.REGULAR_STATION,
             ProfileAttribute.SCHOOL,
@@ -1891,7 +1893,7 @@ def test_candidate_sets_cover_24_items_and_keep_equal_grounded_values_ambiguous(
         ],
     )
     sets = evaluate_profile_candidates(claims, [a, b, c])
-    assert len(sets) == 29
+    assert len(sets) == len(PROFILE_DIAGNOSED_ATTRIBUTES)
     assert all(item.attribute is not ProfileAttribute.HOME_ROOM for item in sets)
     residence = next(item for item in sets if item.attribute is ProfileAttribute.RESIDENTIAL_AREA)
     assert residence.status is ProfileCandidateSetStatus.AMBIGUOUS
@@ -2127,7 +2129,7 @@ def test_mixed_direct_and_combined_paths_stay_one_candidate_and_deletion_reclass
 
 def test_missing_claims_remain_unknown_and_do_not_enter_candidate_pool() -> None:
     sets = evaluate_profile_candidates([], [])
-    assert len(sets) == 29
+    assert len(sets) == len(PROFILE_DIAGNOSED_ATTRIBUTES)
     assert all(item.status is ProfileCandidateSetStatus.UNKNOWN for item in sets)
     assert all(not item.candidates and not item.candidate_pool for item in sets)
 
@@ -2389,7 +2391,7 @@ def test_rules_and_links_integrate_into_candidate_sets_and_collapse_on_deletion(
     assert all(len(path.evidence) >= 2 for claim in claims for path in claim.evidence_paths)
 
     sets = infer_owner_candidate_sets_with_web(posts, clues, [], gazetteer=gaz)
-    assert len(sets) == 29
+    assert len(sets) == len(PROFILE_DIAGNOSED_ATTRIBUTES)
     by_attr = {candidate_set.attribute: candidate_set for candidate_set in sets}
 
     assert by_attr[ProfileAttribute.RESIDENTIAL_AREA].candidates[0].value == "小日向"

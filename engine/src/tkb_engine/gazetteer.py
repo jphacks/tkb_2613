@@ -158,8 +158,7 @@ class Gazetteer:
     # 推定の結果には使わず、候補の説明に参考として添えるだけ
     ridership: dict[str, int] = field(default_factory=dict)
     ridership_year: int = 0
-    # 令和2年国勢調査の 500m メッシュごとの世帯総数（メッシュ番号9桁 → 世帯数）。表がなければ空。
-    # W1（徒歩の距離）と f1（絞り込みの演出）で使う
+    # Census household totals by 500m mesh, used for home_walk_area values and map display.
     households: dict[str, int] = field(default_factory=dict)
     # 法人番号の公表データの SQLite（data-prep の corporations.sqlite）。行はメモリに載せず、
     # 引くたびに読み取り専用で開く。なければ None
@@ -239,12 +238,7 @@ class Gazetteer:
         ]
 
     def places_named_in_area(self, value: str, area_label: str) -> list[dict[str, Any]]:
-        """Look up licensed POIs by alias and exact municipality label.
-
-        Unlike `places_named`, the area filter is applied in SQL before the limit, so a name
-        shared by many municipalities still finds the records of one municipality. At most
-        MAX_PLACE_NAME_MATCHES + 1 rows are returned.
-        """
+        """Look up licensed POIs by alias and exact municipality label."""
         if self.places_path is None or not area_label.strip():
             return []
         name_keys = place_name_keys(value)

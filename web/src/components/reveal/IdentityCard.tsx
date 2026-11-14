@@ -102,6 +102,7 @@ interface IdentityCardProps {
   name: string | null;
   nameProvenance: readonly string[];
   nameAmbiguous: boolean;
+  nameNeedsOwnerCheck: boolean;
   /** 写真の枠に出す顔。なければ人影 */
   face: FacePhoto | null;
   conclusions: readonly InferredSummary[];
@@ -114,7 +115,7 @@ interface IdentityCardProps {
  * 身元が割れた瞬間のカード。写真の枠（顔か人影）、写っていた名前、推定できたこと、見つかった手がかりの数を並べる。
  * 数字は「本人である確率」ではなく、実際に見つかった手がかりの数にする（確率は出せないので出さない）。
  */
-export function IdentityCard({ name, nameProvenance, nameAmbiguous, face, conclusions, highlights, clueCount }: IdentityCardProps) {
+export function IdentityCard({ name, nameProvenance, nameAmbiguous, nameNeedsOwnerCheck, face, conclusions, highlights, clueCount }: IdentityCardProps) {
   return (
     <article
       aria-label={t.label}
@@ -126,6 +127,7 @@ export function IdentityCard({ name, nameProvenance, nameAmbiguous, face, conclu
         <div>
           <p className="text-xs tracking-[0.3em] text-ink/60">{t.nameLabel}</p>
           <p className="identity-name mt-1 text-5xl font-bold break-words sm:text-6xl">{name ?? (nameAmbiguous ? t.nameMultiple : t.nameUnknown)}</p>
+          {nameNeedsOwnerCheck && <p role="note" className="mt-2 text-sm font-medium text-seeker">搭乗券の旅客名です。投稿者本人とは確認できません。</p>}
           {nameProvenance.length > 0 && <ul aria-label="名前候補の根拠経路" className="mt-2 flex flex-wrap gap-2 text-xs text-ink/70">
             {nameProvenance.map((label) => <li key={label} className="rounded border border-ink/25 px-2 py-0.5">{label}</li>)}
           </ul>}

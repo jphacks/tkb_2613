@@ -111,13 +111,13 @@ function TextEvidence({ item, label, peelAt = 0 }: { item: RevealItem; label: st
 interface RevealProps {
   posts: readonly Post[];
   clues: readonly Clue[];
-  conclusions: readonly Conclusion[];
+  conclusions?: readonly Conclusion[];
   profileClaims?: readonly ProfileCandidateSet[];
   excludedPostIds?: ReadonlySet<string>;
   children?: ReactNode;
 }
 
-function profileName(profileClaims: readonly ProfileCandidateSet[]): { candidate: ProfileCandidate | null; provenance: string[]; ambiguous: boolean } {
+function profileName(profileClaims: readonly ProfileCandidateSet[], clues: readonly Clue[]): { candidate: ProfileCandidate | null; provenance: string[]; ambiguous: boolean; needsOwnerCheck: boolean } {
   const fullNameSet = profileClaims.find((set) => set.attribute === "full_name");
   const fullNameCandidates = fullNameSet?.candidates ?? [];
   // An explicit full-name candidate takes priority over a shorter name, but an
@@ -127,7 +127,7 @@ function profileName(profileClaims: readonly ProfileCandidateSet[]): { candidate
     : profileClaims.filter((set) => set.attribute === "given_name" || set.attribute === "nickname")
       .flatMap((set) => set.candidates);
   if (candidates.length !== 1) {
-    return { candidate: null, provenance: [], ambiguous: candidates.length > 1 };
+    return { candidate: null, provenance: [], ambiguous: candidates.length > 1, needsOwnerCheck: false };
   }
   const candidate = candidates[0];
   const provenance = [...new Set(candidate.evidence_paths.map((path) => {
@@ -139,7 +139,12 @@ function profileName(profileClaims: readonly ProfileCandidateSet[]): { candidate
     }
     return "根拠経路未分類";
   }))];
-  return { candidate, provenance, ambiguous: false };
+  const needsOwnerCheck = candidate.evidence_paths.some((path) => path.evidence.some((evidence) => {
+    if (evidence.clue_index === null) return false;
+    const clue = clues[evidence.clue_index];
+    return clue?.type === "code" && /^(?:PDF417|AZTEC|QRCODE|DATAMATRIX): M[1-4]/i.test(clue.value);
+  }));
+  return { candidate, provenance, ambiguous: false, needsOwnerCheck };
 }
 
 /**
@@ -147,9 +152,9 @@ function profileName(profileClaims: readonly ProfileCandidateSet[]): { candidate
  * 推定できたことを大きく出し、続けて証拠を 1 枚ずつ机に投げ出すように並べる。
  * 動きを減らす設定の人には、動きなしで並べて見せる（globals.css）。
  */
-export function Reveal({ posts, clues, conclusions, profileClaims = [], excludedPostIds = new Set(), children }: RevealProps) {
+export function Reveal({ posts, clues, conclusions = [], profileClaims = [], excludedPostIds = new Set(), children }: RevealProps) {
   const items = pickSpotlight(posts, clues, conclusions, excludedPostIds, profileClaims);
-  const identity = profileName(profileClaims);
+  const identity = profileName(profileClaims, clues);
   const profileInferences = conclusions.length > 0
     ? []
     : profileClaims
@@ -181,6 +186,7 @@ export function Reveal({ posts, clues, conclusions, profileClaims = [], excluded
         name={identity.candidate?.value ?? null}
         nameProvenance={identity.provenance}
         nameAmbiguous={identity.ambiguous}
+        nameNeedsOwnerCheck={identity.needsOwnerCheck}
         face={pickFace(posts, clues)}
         conclusions={otherConclusions}
         highlights={items

@@ -571,7 +571,26 @@ def _infer_events(
     async def collect() -> list[Event]:
         return [event async for event in diagnose_events(posts, _replayed(extractions), gazetteer)]
 
-    return asyncio.run(collect())
+    events = asyncio.run(collect())
+    # Threads retains its legacy Conclusion response. The Bluesky pipeline no
+    # longer publishes that intermediate, so compute it only at this boundary.
+    return [
+        (
+            name,
+            {
+                **data,
+                "conclusions": [
+                    asdict(item)
+                    for item in infer(
+                        [Clue.model_validate(clue) for clue in data["clues"]], posts, gazetteer
+                    )
+                ],
+            },
+        )
+        if name == "conclusions"
+        else (name, data)
+        for name, data in events
+    ]
 
 
 def _text_extractor(settings: Settings) -> Extractor:
