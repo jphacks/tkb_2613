@@ -164,7 +164,7 @@ journalctl -u tkb-app -n 50 --no-pager
 
 tar に入れる表（11個。1つでも欠けたら上げない）：`stations`・`postal`・`area_codes`・`muni_mesh`・`households_500m`（e-Stat のメッシュ統計から）・`schools`・`shelters`・`bus_stops`・`school_districts`・`ridership` の `.parquet` と、法人番号の `corporations.sqlite`。固めると約 75MB、展開すると約 220MB。
 
-任意で、写真場所のPOI索引 `places.sqlite3`（国土数値情報 P05 の役場・公的集会施設など。作り方は [data-prep/SOURCES.md](../../data-prep/SOURCES.md)）も入れる。`data/processed/places.sqlite3` があればそれを、なければ `data/processed/national/places.sqlite3` を使い、どちらの場合も tar では直下に置く。本番の api は11個がそろった `data/processed` を選び、POI索引もその直下だけを見るため、`national/` の下のままでは使われない。索引がなければ写真場所の候補はいつも「不明」になる（他の推理には影響しない）。P05 全国版で約 100MB 増える。索引の schema version（`PRAGMA user_version`）が api と合わないものは api が読まないので、api を更新したら索引も作り直して届け直す。
+任意で、写真場所のPOI索引 `places.sqlite3`（国土数値情報 P05 の役場・公的集会施設など。作り方は [data-prep/SOURCES.md](../../data-prep/SOURCES.md)）も入れる。`data/processed/places.sqlite3` があればそれを、なければ `data/processed/national/places.sqlite3` を使い、どちらの場合も tar では直下に置く。本番の api は11個がそろった `data/processed` を選び、POI索引もその直下だけを見るため、`national/` の下のままでは使われない。索引がなければ写真場所の候補はいつも「不明」になる（他の推理には影響しない）。P05 全国版で約 100MB 増える。Overture Maps Places の関東1都6県分（約103万件）を足した索引は約 2GB（P05 のみは約 100MB）で、tar に入れると約 2GB が S3 経由で EC2 に届き、展開後も約 2GB のディスクを使うので、EC2 のディスクの空きと署名付き URL の有効秒数（既定 900 秒、最大 3600 秒）を先に確かめる。置き場所は同じく `data/processed/places.sqlite3` で、作り方は [data-prep/SOURCES.md](../../data-prep/SOURCES.md) の「Overture Places 関東1都6県の索引」（`data/processed/kanto/places.sqlite3` を `data/processed/` 直下へコピーする）。索引の schema version（`PRAGMA user_version`）が api と合わないものは api が読まないので、api を更新したら索引も作り直して届け直す。
 
 ### 1. 手元で表を作る
 

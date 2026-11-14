@@ -12,9 +12,8 @@ import { useSession } from "@/components/session/SessionProvider";
 import { ResultShare } from "@/components/diagnose/ResultShare";
 import { ApiError, diagnose, getDiagnosis, getFeatures } from "@/lib/api";
 import { messages } from "@/lib/messages";
-import { validNameConclusions } from "@/lib/reveal";
 import type { Clue } from "@/types/clue";
-import { legacySimulationConclusions, type Conclusion, type PhotoPlaceResult, type RiskyPost, type Simulation } from "@/types/diagnose";
+import { isProfileSimulationAfter, type PhotoPlaceResult, type RiskyPost, type Simulation } from "@/types/diagnose";
 import type { Post } from "@/types/post";
 import { profileClaimsAfterDeletion, type ExternalLookupStatus, type ExternalProfileResult, type ProfileCandidateSet, type ProfileRelation, type WebFact } from "@/types/profile";
 
@@ -40,8 +39,8 @@ type Phase =
 interface Result {
   clues: readonly Clue[];
   photoPlaceResults?: readonly PhotoPlaceResult[];
-  conclusions: readonly Conclusion[];
   profileClaims?: readonly ProfileCandidateSet[];
+  profileClaimsError?: boolean;
   profileRelations?: readonly ProfileRelation[];
   profileClaimSuggestions?: readonly string[];
   webFacts?: readonly WebFact[];
@@ -128,8 +127,8 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
         setResult({
           clues: snapshot.clues,
           photoPlaceResults: snapshot.photo_place_results ?? [],
-          conclusions: validNameConclusions(snapshot.conclusions),
           profileClaims: snapshot.profile_claims ?? [],
+          profileClaimsError: false,
           profileRelations: snapshot.profile_relations ?? [],
           profileClaimSuggestions: snapshot.profile_claim_suggestions ?? [],
           webFacts: snapshot.web_facts ?? [],
@@ -195,8 +194,8 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
             setResult({
               clues: event.clues,
               photoPlaceResults: event.photo_place_results ?? [],
-              conclusions: validNameConclusions(event.conclusions),
               profileClaims: event.profile_claims ?? [],
+              profileClaimsError: event.profile_claims_error ?? false,
               profileRelations: event.profile_relations ?? [],
               profileClaimSuggestions: event.profile_claim_suggestions ?? [],
               webFacts: event.web_facts ?? [],
@@ -227,9 +226,11 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
   const livePosts = deleted.size === 0 ? posts : posts.filter((post) => !deleted.has(post.post_id));
   const simulatedGone = simulation?.delete ?? [];
   const excluded = simulation ? new Set([...deleted, ...simulatedGone]) : deleted;
-  const visibleProfileClaims = profileClaimsAfterDeletion(result?.profileClaims ?? [], excluded);
+  const beforeProfileClaims = profileClaimsAfterDeletion(result?.profileClaims ?? [], deleted);
+  const visibleProfileClaims = simulation && isProfileSimulationAfter(simulation.after)
+    ? profileClaimsAfterDeletion(simulation.after, deleted)
+    : profileClaimsAfterDeletion(result?.profileClaims ?? [], excluded);
   const visibleProfileClaimSuggestions = (result?.profileClaimSuggestions ?? []).filter((id) => !excluded.has(id));
-  const visibleConclusions = simulation ? validNameConclusions(legacySimulationConclusions(simulation.after)) : result?.conclusions ?? [];
 
   // 結果が出たら再診断ボタンを下へ移し、身元カード→写真→捜査ボードを続けて見せる。
   const postList = (
@@ -293,7 +294,7 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
         {t.heading}
       </h2>
       {!busy && result && (
-        <Reveal posts={livePosts} clues={result.clues} conclusions={visibleConclusions} profileClaims={visibleProfileClaims} excludedPostIds={excluded}>
+        <Reveal posts={livePosts} clues={result.clues} conclusions={[]} profileClaims={visibleProfileClaims} excludedPostIds={excluded}>
           {risky && <PlanSummary risky={risky.filter((post) => !excluded.has(post.post_id))} targetId={RISKY_HEADING_ID} />}
         </Reveal>
       )}
@@ -303,9 +304,10 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
         <ConclusionBoard
           clues={result.clues}
           photoPlaceResults={result.photoPlaceResults?.filter((item) => !excluded.has(item.post_id))}
-          conclusions={simulation ? validNameConclusions(legacySimulationConclusions(simulation.after)) : result.conclusions}
+          conclusions={[]}
           unknown={simulation?.broken}
           profileClaims={visibleProfileClaims}
+          profileClaimsError={result.profileClaimsError}
           profileRelations={result.profileRelations}
           deletedPostIds={simulation?.delete ?? []}
           profileClaimSuggestions={visibleProfileClaimSuggestions}
@@ -319,7 +321,7 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
       )}
 
       {!busy && result && risky && (
-        <RiskyPosts posts={livePosts} risky={risky.filter((post) => !deleted.has(post.post_id))} clues={result.clues} clueCount={result.clues.length} profileClaims={visibleProfileClaims} conclusions={result.conclusions} onSimulated={setSimulation} onDeleted={(deletion) => setDeleted((prev) => new Set([...prev, ...deletion.delete.filter((id) => !deletion.failed.includes(id))]))} onSessionExpired={expire} />
+        <RiskyPosts posts={livePosts} risky={risky.filter((post) => !deleted.has(post.post_id))} clues={result.clues} clueCount={result.clues.length} profileClaims={beforeProfileClaims} onSimulated={setSimulation} onDeleted={(deletion) => setDeleted((prev) => new Set([...prev, ...deletion.delete.filter((id) => !deletion.failed.includes(id))]))} onSessionExpired={expire} />
       )}
       {!busy && result && <ResultShare />}
       {!busy && result && controls(true)}

@@ -2476,6 +2476,100 @@ def test_rules_x1_emits_commute_destination_is_school_relation() -> None:
     assert len(relation.evidence_paths[0].evidence) >= 2
 
 
+def brave_area_result(p: Post, clue_index: int, *, area: str | None = "文京区") -> PhotoPlaceResult:
+    candidate = PhotoPlaceCandidate(
+        place_id="brave-place:abc",
+        label="青葉市場",
+        place_type=PhotoPlaceType.FACILITY,
+        photo_relation=PhotoPlaceRelation.VISIBLE_IN_FRAME,
+        area_label=area,
+        evidence=[PhotoPlaceEvidence(kind="clue", clue_index=clue_index)],
+        source_ids=["brave-place-search:abc"],
+        sources=[
+            PhotoPlaceSource(
+                source_id="brave-place-search:abc",
+                provider="Brave Search Place Search",
+                dataset="unverified external place result",
+                license_id="brave-search-api-terms",
+                source_url="https://example.org/place",
+            )
+        ],
+    )
+    return PhotoPlaceResult(
+        post_id=p.post_id,
+        image_index=0,
+        status=PhotoPlaceStatus.CANDIDATE,
+        granularity=PhotoPlaceGranularity.FACILITY,
+        lookup_status=PhotoPlaceLookupStatus.WEB_SEARCHED,
+        candidates=[candidate],
+    )
+
+
+def _brave_fixture(
+    photo_text: str = "自宅の近くの 青葉市場",
+    area_text: str | None = "文京区が近所で毎日通る",
+) -> tuple[list[Post], list[Clue], Post, Post | None]:
+    photo = post("brave-photo", photo_text)
+    photo_clue = Clue(
+        post_id=photo.post_id,
+        image_index=0,
+        type=ClueType.LANDMARK,
+        value="青葉 市場",
+        region=None,
+        confidence=0.9,
+        source=ClueSource.VLM,
+    )
+    posts = [photo]
+    clues = [photo_clue]
+    area_post = None
+    if area_text is not None:
+        area_post = post("brave-area", area_text)
+        posts.append(area_post)
+        clues.append(typed_clue(area_post, "文京区", ClueType.PLACE_TEXT))
+    return posts, clues, photo, area_post
+
+
+def _residence(
+    posts: list[Post], clues: list[Clue], results: list[PhotoPlaceResult]
+) -> list[ProfileItem]:
+    return [
+        item
+        for item in infer_owner_claims(posts, clues, photo_place_results=results)
+        if item.attribute is ProfileAttribute.RESIDENTIAL_AREA
+    ]
+
+
+def test_single_brave_result_with_locality_gives_weak_residential_area() -> None:
+    posts, clues, photo, area_post = _brave_fixture()
+    assert area_post is not None
+    [claim] = _residence(posts, clues, [brave_area_result(photo, 0)])
+    assert claim.value == "文京区"
+    assert claim.status is ProfileStatus.WEAK
+    assert claim.confidence <= 0.65
+    assert recalculate_after_deletion(claim, {photo.post_id}) is None
+    assert recalculate_after_deletion(claim, {area_post.post_id}) is None
+
+
+def test_brave_residential_area_rejects_weak_inputs() -> None:
+    posts, clues, photo, _ = _brave_fixture()
+    result = brave_area_result(photo, 0)
+    extra = result.candidates[0].model_copy(update={"place_id": "brave-place:def"})
+    local = photo_area_result(photo, 0).candidates[0]
+    for bad in (
+        result.model_copy(update={"candidates": [result.candidates[0], extra]}),
+        result.model_copy(update={"candidates": [result.candidates[0], local]}),
+        brave_area_result(photo, 0, area=None),
+        brave_area_result(photo, 0, area="東京都"),
+    ):
+        assert _residence(posts, clues, [bad]) == []
+    # 別の投稿の根拠がない
+    no_area_posts, no_area_clues, no_area_photo, _ = _brave_fixture(area_text=None)
+    assert _residence(no_area_posts, no_area_clues, [brave_area_result(no_area_photo, 0)]) == []
+    # 写真の投稿の本文に自宅近くがない
+    plain_posts, plain_clues, plain_photo, _ = _brave_fixture(photo_text="青葉市場に行った")
+    assert _residence(plain_posts, plain_clues, [brave_area_result(plain_photo, 0)]) == []
+
+
 def test_profile_attribute_weights_cover_all_attributes() -> None:
     assert set(PROFILE_ATTRIBUTE_WEIGHTS) == set(ProfileAttribute)
 

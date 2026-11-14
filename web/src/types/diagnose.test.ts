@@ -131,9 +131,22 @@ describe("toDiagnoseEvent", () => {
     expect(toDiagnoseEvent("conclusions", JSON.stringify({
       clues: [CLUE], conclusions: [], profile_claims, profile_claim_suggestions: [],
     }))).toMatchObject({ event: "conclusions", profile_claims });
-    expect(() => toDiagnoseEvent("conclusions", JSON.stringify({
+    expect(toDiagnoseEvent("conclusions", JSON.stringify({
       clues: [CLUE], conclusions: [], profile_claims: profile_claims.slice(1), profile_claim_suggestions: [],
-    }))).toThrow(InvalidDiagnoseEventError);
+    }))).toMatchObject({
+      event: "conclusions",
+      clues: [CLUE],
+      profile_claims: [],
+      profile_claims_error: true,
+    });
+    expect(isDiagnosisSnapshot({
+      posts: [POST],
+      deleted: [],
+      clues: [CLUE],
+      conclusions: [],
+      profile_claims: profile_claims.slice(1),
+      plan: { delete: [], broken: [], after: [], posts: [] },
+    })).toBe(false);
   });
 
   it("reads scoreless profile relations with complete evidence paths", () => {
