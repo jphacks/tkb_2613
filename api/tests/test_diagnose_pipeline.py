@@ -21,6 +21,7 @@ from tkb_api.pipeline import (
 from tkb_api.routes.diagnose import read_diagnosis
 from tkb_common.place_names import PLACE_INDEX_SCHEMA_VERSION
 from tkb_common.schemas import (
+    PROFILE_DIAGNOSED_ATTRIBUTES,
     Clue,
     ClueSource,
     ClueType,
@@ -178,7 +179,7 @@ async def test_events_keep_failed_posts_and_return_candidate_sets_only() -> None
     result = events[3][1]
     assert result["clues"] == [clue.model_dump(mode="json")]
     assert "conclusions" not in result
-    assert len(result["profile_claims"]) == 29
+    assert len(result["profile_claims"]) == len(PROFILE_DIAGNOSED_ATTRIBUTES)
     assert result["profile_relations"] == []
     claims_by_attr = {claim["attribute"]: claim for claim in result["profile_claims"]}
     assert claims_by_attr["routine"]["status"] == "candidate"
@@ -191,7 +192,7 @@ async def test_events_keep_failed_posts_and_return_candidate_sets_only() -> None
     assert "home_room" not in claims_by_attr
     assert result["profile_claim_suggestions"] == [post.post_id]
     assert saved_result["clues"] == [clue]
-    assert len(saved_result["profile_claims"]) == 29
+    assert len(saved_result["profile_claims"]) == len(PROFILE_DIAGNOSED_ATTRIBUTES)
     assert saved_result["profile_relations"] == []
     assert all(
         (claim.status == "candidate" if claim.attribute == "routine" else claim.status == "unknown")

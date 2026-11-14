@@ -39,6 +39,12 @@ const ALL_BROKEN: Simulation = {
   after: [],
 };
 
+function onlyCandidateSet(candidate: ProfileCandidateSet): ProfileCandidateSet[] {
+  return PROFILE_DIAGNOSED_ATTRIBUTES.map((attribute) => attribute === candidate.attribute
+    ? candidate
+    : { attribute, status: "unknown", candidates: [], candidate_pool: [], reason: "no_grounded_rule", conflicting_evidence: [] });
+}
+
 function renderRisky(onSimulated = vi.fn()) {
   render(<RiskyPosts posts={[GYM, ADDRESS]} risky={RISKY} clueCount={20} onSimulated={onSimulated} />);
   return onSimulated;
@@ -73,7 +79,7 @@ describe("RiskyPosts", () => {
     expect(item).toHaveTextContent(t.directClues(messages.clues.typeLabels.face));
   });
 
-  it("shows provenance-backed 29-attribute breakage labels including full_name", async () => {
+  it("shows provenance-backed catalog-driven breakage labels including full_name", async () => {
     const name: Clue = {
       post_id: ADDRESS.post_id, image_index: null, type: "name_text", value: "内藤大貴",
       region: null, confidence: 0.9, source: "text",
@@ -117,7 +123,7 @@ describe("RiskyPosts", () => {
       attribute: "full_name", status: "candidate", candidates: [candidate], candidate_pool: [candidate],
       reason: null, conflicting_evidence: [],
     };
-    vi.mocked(simulate).mockResolvedValue({ delete: [ADDRESS.post_id], broken: ["full_name"], after: [] });
+    vi.mocked(simulate).mockResolvedValue({ delete: [ADDRESS.post_id], broken: ["full_name"], after: onlyCandidateSet(claim) });
     render(<RiskyPosts posts={[ADDRESS]} risky={[{ post_id: ADDRESS.post_id, broken: ["full_name"] }]} clues={[name]} clueCount={1} profileClaims={[claim]} onSimulated={vi.fn()} />);
 
     const item = screen.getByRole("listitem");
@@ -147,15 +153,15 @@ describe("RiskyPosts", () => {
     vi.mocked(simulate).mockResolvedValue({
       delete: [GYM.post_id],
       broken: ["routine"],
-      after: [{ rule: "R1", attribute: "station", value: "根津駅", clue_indices: [0], note: "" }],
+      after: [],
     });
     renderRisky();
 
     fireEvent.click(screen.getAllByRole("checkbox")[0]);
     fireEvent.click(screen.getByRole("button", { name: t.simulate }));
 
-    expect(await screen.findByText(t.result(1, 1))).toBeInTheDocument();
-    expect(screen.queryByText(t.safe)).not.toBeInTheDocument();
+    expect(await screen.findByText(t.safe)).toBeInTheDocument();
+    expect(screen.getByText(t.safe)).toBeInTheDocument();
     expect(vi.mocked(simulate).mock.calls[0][0]).toEqual([GYM.post_id]);
   });
 
@@ -222,7 +228,7 @@ describe("RiskyPosts", () => {
     await vi.waitFor(() => expect(onSessionExpired).toHaveBeenCalledTimes(1));
   });
 
-  it("shows how many 29-attribute items could be inferred before and after the simulated deletion", async () => {
+  it("shows how many catalog-driven items could be inferred before and after the simulated deletion", async () => {
     const assessment = {
       minimal_scope: "bluesky" as const, offline_subtype: null, psychological_resistance: null, persona_context: null,
       inference_ease: null, inference_ease_basis: null, harm_severity: null, harm_scenario: null,
@@ -418,7 +424,7 @@ describe("RiskyPosts", () => {
       delete: [GYM.post_id],
       failed: [ADDRESS.post_id],
       broken: ["routine"],
-      after: [{ rule: "R1", attribute: "station", value: "根津駅", clue_indices: [0], note: "" }],
+      after: [],
     });
     renderRisky();
     fireEvent.click(screen.getByRole("button", { name: t.simulate }));
@@ -437,7 +443,7 @@ describe("RiskyPosts", () => {
       delete: [GYM.post_id],
       failed: [ADDRESS.post_id],
       broken: ["routine"],
-      after: [{ rule: "R1", attribute: "station", value: "根津駅", clue_indices: [0], note: "" }],
+      after: [],
       bluesky_busy: true,
     });
     renderRisky();
@@ -473,7 +479,7 @@ describe("RiskyPosts", () => {
 });
 
 
-it("does not report escape while a 29-attribute residential_area claim survives", async () => {
+it("does not report escape while a catalog-driven residential_area claim survives", async () => {
   const assessment = {
     minimal_scope: "bluesky" as const, offline_subtype: null, psychological_resistance: null, persona_context: null,
     inference_ease: null, inference_ease_basis: null, harm_severity: null, harm_scenario: null,

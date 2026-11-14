@@ -139,7 +139,7 @@ def test_candidate_set_evaluation_is_separate_and_labeled_by_annotation_track() 
     assert report["evaluation_track"] == "manual_annotation_rule_evaluation"
     candidate_eval = report["candidate_set_truth_evaluation"]
     assert candidate_eval["accuracy_metrics"]["wrong_candidate_rate"] == 0.0
-    assert candidate_eval["candidate_status_rates"]["unknown_count"] == 29
+    assert candidate_eval["candidate_status_rates"]["unknown_count"] == len(candidate_sets)
 
 
 def test_candidate_report_rejects_incomplete_attribute_sets() -> None:
@@ -162,7 +162,7 @@ def test_candidate_report_rejects_incomplete_attribute_sets() -> None:
                 candidate_sets=incomplete,
             )
         except ValueError as error:
-            assert "exactly 29 unique attributes" in str(error)
+            assert "unique diagnosed attributes" in str(error)
         else:
             raise AssertionError("an empty or incomplete candidate set array must be rejected")
 

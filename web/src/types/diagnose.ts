@@ -9,7 +9,7 @@
 import { type Clue, isClue } from "./clue";
 import { isPost, type Post } from "./post";
 import { isNarrowing, type Narrowing } from "./narrowing";
-import { isExternalProfileResult, isProfileCandidateSetList, isProfileRelationList, isWebFact, type ExternalLookupStatus, type ExternalProfileResult, type ProfileCandidateSet, type ProfileRelation, type WebFact } from "./profile";
+import { isExternalProfileResult, isProfileCandidateSet, isProfileCandidateSetList, isProfileRelationList, isWebFact, type ExternalLookupStatus, type ExternalProfileResult, type ProfileCandidateSet, type ProfileRelation, type WebFact } from "./profile";
 
 /** 推理ルールが出した結論 1 つ（engine の Conclusion） */
 export interface Conclusion {
@@ -46,7 +46,7 @@ export interface Simulation {
   /** 消すと候補が崩れる項目（ProfileAttribute または旧 Conclusion の attribute） */
   readonly broken: readonly string[];
   /** 消したあとに残る結果 */
-  readonly after: readonly ProfileCandidateSet[] | readonly Conclusion[];
+  readonly after: readonly ProfileCandidateSet[];
   /** Optional display-only narrowing projected from surviving profile candidates. */
   readonly narrowing?: Narrowing | null;
 }
@@ -55,6 +55,11 @@ export function isProfileSimulationAfter(
   after: Simulation["after"],
 ): after is readonly ProfileCandidateSet[] {
   return isProfileCandidateSetList(after);
+}
+
+/** Threads-only legacy simulation shape; never accepted by Bluesky/demo APIs. */
+export interface ThreadsSimulation extends Omit<Simulation, "after"> {
+  readonly after: readonly ProfileCandidateSet[] | readonly Conclusion[];
 }
 
 /**
@@ -139,19 +144,40 @@ export interface DiagnosisSnapshot {
 export interface LegacySharedSnapshot {
   readonly posts: readonly Post[];
   readonly clues: readonly Clue[];
-  readonly conclusions: readonly Conclusion[];
-  readonly plan: Simulation & { readonly posts: readonly RiskyPost[] };
+  /** Older candidate snapshots may omit attributes added to the current catalog. */
+  readonly profile_claims?: readonly ProfileCandidateSet[];
+  /** Conclusion-only links created before candidate sets were stored. */
+  readonly conclusions?: readonly Conclusion[];
+  readonly profile_relations?: readonly ProfileRelation[];
+  readonly plan: {
+    readonly delete: readonly string[];
+    readonly broken: readonly string[];
+    readonly after: readonly (ProfileCandidateSet | Conclusion)[];
+    readonly posts: readonly RiskyPost[];
+  };
 }
 
 export type SharedResultSnapshot = DiagnosisSnapshot | LegacySharedSnapshot;
 
 export function isLegacySharedSnapshot(value: unknown): value is LegacySharedSnapshot {
-  if (!isRecord(value) || Object.hasOwn(value, "profile_claims") ||
-    !Array.isArray(value.posts) || !value.posts.every(isPost) || !isClueList(value.clues)) return false;
+  if (!isRecord(value) || !Array.isArray(value.posts) || !value.posts.every(isPost) || !isClueList(value.clues)) return false;
   const clueCount = value.clues.length;
+  if (!isRecord(value.plan) || !Array.isArray(value.plan.posts) || !value.plan.posts.every(isRiskyPost)) return false;
+  if (Object.hasOwn(value, "profile_claims")) {
+    const claims = value.profile_claims;
+    if (!Array.isArray(claims) || claims.length === 0 || !claims.every(isProfileCandidateSet)) return false;
+    const attributes = claims.map((claim) => claim.attribute);
+    if (new Set(attributes).size !== attributes.length || attributes.includes("home_room")) return false;
+    if (!isStringList(value.plan.delete) || !isStringList(value.plan.broken) || !Array.isArray(value.plan.after) ||
+      !value.plan.after.every((item) => isProfileCandidateSet(item) || isConclusion(item, clueCount))) return false;
+    if (value.conclusions !== undefined && (!Array.isArray(value.conclusions) ||
+      !value.conclusions.every((item) => isConclusion(item, clueCount)))) return false;
+    if (value.profile_relations !== undefined && !isProfileRelationList(value.profile_relations)) return false;
+    return true;
+  }
   return Array.isArray(value.conclusions) && value.conclusions.every((item) => isConclusion(item, clueCount)) &&
-    isRecord(value.plan) && isSimulation(value.plan, clueCount) && Array.isArray(value.plan.posts) &&
-    value.plan.posts.every(isRiskyPost);
+    isStringList(value.plan.delete) && isStringList(value.plan.broken) && Array.isArray(value.plan.after) &&
+    value.plan.after.every((item) => isConclusion(item, clueCount));
 }
 
 export type DiagnoseEvent =
@@ -307,7 +333,13 @@ export function isSimulation(
   // Narrowing is a display-only sidecar; a malformed optional sidecar must not
   // make an otherwise valid simulation result unreadable.
   const after: readonly unknown[] = value.after;
-  return isProfileCandidateSetList(after) || after.every((c) => isConclusion(c, clueCount));
+  return isProfileCandidateSetList(after);
+}
+
+export function isThreadsSimulation(value: unknown, clueCount = Number.POSITIVE_INFINITY): value is ThreadsSimulation {
+  if (!isRecord(value) || !isStringList(value.delete) || !isStringList(value.broken) || !Array.isArray(value.after)) return false;
+  const after: readonly unknown[] = value.after;
+  return isProfileCandidateSetList(after) || after.every((item) => isConclusion(item, clueCount));
 }
 
 /** 実際に消した結果の形を確かめる。clueCount は isSimulation と同じ */
@@ -345,8 +377,7 @@ export function isDiagnosisSnapshot(value: unknown): value is DiagnosisSnapshot 
     const postIds = new Set(value.posts.map((post) => post.post_id));
     if (!isStringList(value.deleted) || !value.deleted.every((id) => postIds.has(id))) return false;
   }
-  if (Object.hasOwn(value, "conclusions") &&
-    (!Array.isArray(value.conclusions) || !value.conclusions.every((c) => isConclusion(c, clueCount)))) return false;
+  if (Object.hasOwn(value, "conclusions")) return false;
   if (!isProfileCandidateSetList(value.profile_claims)) return false;
   const plan = value.plan;
   if (!isSimulation(plan, clueCount) || !isRecord(plan) || !Array.isArray(plan.posts) || !plan.posts.every(isRiskyPost)) return false;
@@ -400,7 +431,7 @@ export function toDiagnoseEvent(
       error: value.error,
     };
   }
-  if (event === "conclusions" && isRecord(value) && isClueList(value.clues)) {
+  if (event === "conclusions" && isRecord(value) && !Object.hasOwn(value, "conclusions") && isClueList(value.clues)) {
     const clueCount = value.clues.length;
     const profileClaims = value.profile_claims ?? [];
     const profileRelations = value.profile_relations ?? [];

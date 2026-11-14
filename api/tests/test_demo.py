@@ -14,6 +14,7 @@ from tkb_api.config import Settings, get_settings
 from tkb_api.main import create_app
 from tkb_api.routes import demo
 from tkb_api.routes.diagnose import get_gazetteer
+from tkb_common.schemas import PROFILE_DIAGNOSED_ATTRIBUTES
 from tkb_engine.gazetteer import Gazetteer
 
 FIXTURE = Path(__file__).resolve().parents[2] / "eval" / "fixtures" / "demo_observations.json"
@@ -56,11 +57,11 @@ def test_demo_diagnosis_needs_no_login_and_returns_the_fictional_account(
     assert len(body["clues"]) == len(DOC["clues"])
     assert "conclusions" not in body
     assert "narrowing" in body
-    assert len(body["profile_claims"]) == 29
+    assert len(body["profile_claims"]) == len(PROFILE_DIAGNOSED_ATTRIBUTES)
     assert isinstance(body["profile_relations"], list)
     assert body["profile_claim_suggestions"] == body["plan"]["delete"]
     assert set(body["plan"]) == {"delete", "broken", "after", "posts"}
-    assert len(body["plan"]["after"]) == 29
+    assert len(body["plan"]["after"]) == len(PROFILE_DIAGNOSED_ATTRIBUTES)
     assert "set-cookie" not in res.headers
 
 
@@ -71,7 +72,7 @@ def test_demo_simulate_drops_the_selected_posts(client: TestClient) -> None:
     body = res.json()
     assert body["delete"] == [GYM_POST]
     assert "routine" in body["broken"]
-    assert len(body["after"]) == 29
+    assert len(body["after"]) == len(PROFILE_DIAGNOSED_ATTRIBUTES)
     assert "narrowing" in body
     for claim_set in body["after"]:
         for candidate in claim_set["candidate_pool"]:

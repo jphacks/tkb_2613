@@ -296,7 +296,7 @@ describe("Reveal", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it("shows non-name 29-attribute profile claims and marks their clue_index evidence as used", () => {
+  it("shows non-name catalog-driven profile claims and marks their clue_index evidence as used", () => {
     const assessment = {
       minimal_scope: "bluesky" as const, offline_subtype: null, psychological_resistance: null, persona_context: null,
       inference_ease: null, inference_ease_basis: null, harm_severity: null, harm_scenario: null,

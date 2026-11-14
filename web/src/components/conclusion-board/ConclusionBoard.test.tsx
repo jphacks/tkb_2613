@@ -185,7 +185,7 @@ describe("ConclusionBoard", () => {
     expect(screen.getByText(/これは別の日の投稿だと書いてある/)).toBeInTheDocument();
   });
 
-  it("renders all 4 category headings and 29 attributes in unified mode, keeping direct and combined provenance", () => {
+  it("renders all catalog attributes in unified mode, keeping direct and combined provenance", () => {
     const firstPost = { post_id: CLUE.post_id, clue_index: 0, required: true, source: "post_text" as const, excerpt: "私の勤務先は青空社です" };
     const secondPost = { ...firstPost, clue_index: null, post_id: "at://did:plc:test/app.bsky.feed.post/second", excerpt: "青空社の正式社名は株式会社青空" };
     const assessment = {
@@ -229,7 +229,7 @@ describe("ConclusionBoard", () => {
 
     expect(screen.getByText(messages.board.found)).toBeInTheDocument();
     expect(screen.getByText(messages.board.unknownNote)).toBeInTheDocument();
-    expect(screen.getAllByText(messages.board.unknown)).toHaveLength(29);
+    expect(screen.getAllByText(messages.board.unknown)).toHaveLength(PROFILE_DIAGNOSED_ATTRIBUTES.length);
   });
 
   it("shows profileClaimsError banner when profile_claims could not be read", () => {

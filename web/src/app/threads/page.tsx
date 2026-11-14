@@ -10,11 +10,10 @@ import { Reveal } from "@/components/reveal/Reveal";
 import { THREADS_TEXT, ThreadsError, type ThreadsErrorKey, type ThreadsLang } from "@/lib/threads-i18n";
 import { checkThreadsPublicText } from "@/lib/threads-public-check";
 import { useThreadsLang } from "@/lib/useThreadsLang";
-import { isDiagnosisSnapshot, isSimulation, type Conclusion, type DiagnosisSnapshot, type Simulation } from "@/types/diagnose";
+import { isDiagnosisSnapshot, isThreadsSimulation, type Conclusion, type DiagnosisSnapshot, type RiskyPost, type ThreadsSimulation } from "@/types/diagnose";
 import { isPost, type Post } from "@/types/post";
 import {
   PROFILE_DIAGNOSED_ATTRIBUTES,
-  isProfileCandidateSetList,
   isProfileItem,
   profileClaimsAfterDeletion,
   type ClaimAssessment,
@@ -24,9 +23,10 @@ import {
 } from "@/types/profile";
 
 type PostError = { readonly post_id: string; readonly error: string };
-type ThreadsDiagnosis = DiagnosisSnapshot & {
+type ThreadsDiagnosis = Omit<DiagnosisSnapshot, "plan"> & {
   /** Thread compatibility still returns its own legacy inference list. */
   readonly conclusions: readonly Conclusion[];
+  readonly plan: ThreadsSimulation & { readonly posts: readonly RiskyPost[] };
   readonly elapsed_ms?: number;
   readonly mock?: boolean;
   /** 読み取りに失敗して診断から外した投稿（api の post_errors）。再診断の応答にはない */
@@ -151,13 +151,19 @@ function requireDiagnosis(value: unknown): ThreadsDiagnosis {
   if (!isRecord(value) || !isPostErrors(value.post_errors) || !isLegacyConclusions(value.conclusions)) {
     throw new ThreadsError("diagnosisUnreadable");
   }
-  if (isDiagnosisSnapshot(value) && (value.profile_claims === undefined ||
-    isProfileCandidateSetList(value.profile_claims))) return value as unknown as ThreadsDiagnosis;
+  const { conclusions, ...withoutLegacyConclusion } = value;
   const profileClaims = threadsCandidateSets(value.profile_claims, Array.isArray(value.posts)
     ? value.posts.filter(isPost) : []);
-  const adapted = profileClaims === null ? value : { ...value, profile_claims: profileClaims };
-  if (!isDiagnosisSnapshot(adapted)) throw new ThreadsError("diagnosisUnreadable");
-  return adapted as unknown as ThreadsDiagnosis;
+  const adapted = profileClaims === null ? withoutLegacyConclusion : { ...withoutLegacyConclusion, profile_claims: profileClaims };
+  if (!isRecord(adapted.plan) || !isThreadsSimulation(adapted.plan, Array.isArray(adapted.clues) ? adapted.clues.length : 0)) {
+    throw new ThreadsError("diagnosisUnreadable");
+  }
+  const { after: _legacyAfter, ...planWithoutLegacyAfter } = adapted.plan;
+  if (!Array.isArray(adapted.profile_claims) ||
+    !isDiagnosisSnapshot({ ...adapted, plan: { ...planWithoutLegacyAfter, after: adapted.profile_claims } })) {
+    throw new ThreadsError("diagnosisUnreadable");
+  }
+  return { ...adapted, conclusions } as unknown as ThreadsDiagnosis;
 }
 
 export default function ThreadsPage() {
@@ -168,7 +174,7 @@ export default function ThreadsPage() {
   const [original, setOriginal] = useState<ThreadsDiagnosis | null>(null);
   const [view, setView] = useState<ThreadsDiagnosis | null>(null);
   const [selected, setSelected] = useState<readonly string[]>([]);
-  const [preview, setPreview] = useState<Simulation | null>(null);
+  const [preview, setPreview] = useState<ThreadsSimulation | null>(null);
   const [fetchedPosts, setFetchedPosts] = useState<readonly Post[] | null>(null);
   const [publicCheckDone, setPublicCheckDone] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -401,7 +407,7 @@ export default function ThreadsPage() {
             <button type="button" disabled={!selected.length || busy} className="rounded-sm border border-ink px-4 py-2 disabled:opacity-50"
               onClick={() => void perform(async () => {
                 const result = await call("simulate", "POST", { delete: selected });
-                if (!isSimulation(result, original.clues.length)) throw new ThreadsError("simulationUnreadable");
+                if (!isThreadsSimulation(result, original.clues.length)) throw new ThreadsError("simulationUnreadable");
                 setPreview(result);
               })}>{t.simulate}</button>
             <button type="button" disabled={!selected.length || busy} className="rounded-sm bg-seeker px-4 py-2 font-bold text-paper disabled:opacity-50"

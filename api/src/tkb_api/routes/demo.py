@@ -1,4 +1,4 @@
-"""Fixed fictional demo account with the same 29 candidate-set result as Bluesky.
+"""Fixed fictional demo account with the same catalog-driven candidate-set result as Bluesky.
 
 No model, Bluesky, session, or account-identifying data is used.
 """

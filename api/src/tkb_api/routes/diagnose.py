@@ -1,7 +1,7 @@
 """Bluesky diagnosis, streamed one post at a time as Server-Sent Events.
 
 The legacy ``conclusions`` event name is retained for transport compatibility;
-its public payload contains the 29 ProfileCandidateSet values. Internal rule
+its public payload contains the catalog-driven ProfileCandidateSet values. Internal rule
 Conclusion intermediates are not part of this Bluesky API response.
 """
 
@@ -247,13 +247,26 @@ def get_external_profile_searcher(
     return search
 
 
+@lru_cache(maxsize=4)
+def _cached_gazetteer(data_dir: Path) -> Gazetteer:
+    return load_gazetteer(data_dir)
+
+
+def get_gazetteer(settings: Annotated[Settings, Depends(get_settings)]) -> Gazetteer:
+    return _cached_gazetteer(settings.gazetteer_dir)
+
+
+
 def get_photo_place_searcher(
     settings: Annotated[Settings, Depends(get_settings)],
+    gazetteer: Annotated[Gazetteer, Depends(get_gazetteer)],
 ) -> PhotoPlaceSearcher:
     async def search(
         results: Sequence[PhotoPlaceResult], clues: Sequence[Clue]
     ) -> list[PhotoPlaceResult]:
-        return await search_photo_places(results, clues, settings.brave_search_api_key)
+        return await search_photo_places(
+            results, clues, settings.brave_search_api_key, gazetteer=gazetteer
+        )
 
     return search
 
@@ -289,15 +302,6 @@ def _load_demo_external_lookup(settings: Settings) -> tuple[str, list[ExternalPr
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE, "モック用の公開Web候補を読み込めませんでした"
         ) from None
-
-
-@lru_cache(maxsize=4)
-def _cached_gazetteer(data_dir: Path) -> Gazetteer:
-    return load_gazetteer(data_dir)
-
-
-def get_gazetteer(settings: Annotated[Settings, Depends(get_settings)]) -> Gazetteer:
-    return _cached_gazetteer(settings.gazetteer_dir)
 
 
 ExtractorFactory = Callable[[], Extractor]
@@ -379,7 +383,7 @@ def read_diagnosis(
         diagnosis.profile_claims,
         deleted_ids,
         remaining_posts,
-        clues=remaining_clues,
+        clues=clues,
         diagnosis_at=diagnosis.diagnosis_at,
     )
     profile_relations = profile_relations_after_deletion(

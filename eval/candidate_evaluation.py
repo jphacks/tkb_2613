@@ -16,9 +16,9 @@ from tkb_common.schemas import ProfileAttribute
 PROFILE_CANDIDATE_ATTRIBUTES = {
     attribute.value for attribute in ProfileAttribute if attribute is not ProfileAttribute.HOME_ROOM
 }
-if len(PROFILE_CANDIDATE_ATTRIBUTES) != 29:
+if len(PROFILE_CANDIDATE_ATTRIBUTES) != len(ProfileAttribute) - 1:
     raise RuntimeError(
-        "ProfileAttribute schema must expose 29 diagnosed attributes excluding home_room"
+        "ProfileAttribute schema must diagnose every attribute except home_room"
     )
 
 
@@ -115,7 +115,7 @@ def _validate_candidate_set_attributes(
         missing = PROFILE_CANDIDATE_ATTRIBUTES - set(rows_by_attribute)
         extra = set(rows_by_attribute) - PROFILE_CANDIDATE_ATTRIBUTES
         raise ValueError(
-            "candidate sets must contain exactly the 29 supported attributes "
+            "candidate sets must contain exactly the diagnosed catalog attributes "
             f"(missing: {sorted(missing)}, extra: {sorted(extra)})"
         )
     return rows_by_attribute
@@ -161,7 +161,7 @@ def evaluate_candidate_sets(
     expected: dict[str, set[str]] = defaultdict(set)
     for claim in claims:
         if claim["attribute"] not in PROFILE_CANDIDATE_ATTRIBUTES:
-            raise ValueError("truth contains an attribute outside the 29 diagnosed attributes")
+            raise ValueError("truth contains an attribute outside the diagnosed catalog attributes")
         expected[claim["attribute"]].add(_canonical_value(claim["value"]))
 
     top1_correct = top1_total = covered = truth_value_count = 0

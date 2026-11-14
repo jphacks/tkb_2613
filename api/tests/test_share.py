@@ -11,7 +11,9 @@ from fastapi.testclient import TestClient
 from tkb_api.config import Settings, get_settings
 from tkb_api.main import create_app
 from tkb_api.routes.diagnose import get_gazetteer
+from tkb_api.routes.share import _candidate_snapshot
 from tkb_api.shares import ShareStore
+from tkb_common.schemas import PROFILE_DIAGNOSED_ATTRIBUTES
 from tkb_engine.gazetteer import Gazetteer
 
 # ブラウザは POST・DELETE に Origin を付ける（元に戻せない操作は Origin を確かめる）
@@ -57,11 +59,44 @@ def test_result_link_requires_the_owners_finished_diagnosis_and_is_read_only(
         assert shared.headers["cache-control"] == "no-store, no-transform"
         assert shared.json()["posts"]
         assert "conclusions" not in shared.json()
-        assert len(shared.json()["profile_claims"]) == 29
+        assert len(shared.json()["profile_claims"]) == len(PROFILE_DIAGNOSED_ATTRIBUTES)
         assert shared.json()["plan"]["posts"]
         assert viewer.post("/api/delete", json={"delete": []}).status_code == 401
         assert viewer.post("/api/simulate", json={"delete": []}).status_code == 401
         assert viewer.post("/api/shared-result", json={"token": "y" * 43}).status_code == 404
+
+
+def test_old_candidate_share_drops_redundant_conclusions_without_recomputing() -> None:
+    legacy_conclusion = {
+        "rule": "W1",
+        "attribute": "home_walk_area",
+        "value": "根津駅から徒歩4分",
+        "clue_indices": [1],
+        "note": "legacy saved value",
+    }
+    payload = {
+        "posts": [],
+        "clues": [],
+        "profile_claims": [
+            {
+                "attribute": "home_nearest_station",
+                "status": "unknown",
+                "candidates": [],
+                "candidate_pool": [],
+                "conflicting_evidence": [],
+                "reason": "no_grounded_rule",
+                "reason": "no_grounded_rule",
+            }
+        ],
+        "conclusions": [legacy_conclusion],
+        "plan": {"delete": [], "broken": [], "before": [legacy_conclusion], "after": [legacy_conclusion], "posts": []},
+    }
+
+    result = _candidate_snapshot(payload)
+
+    assert "conclusions" not in result
+    assert result["profile_claims"] == payload["profile_claims"]
+    assert result["plan"] == payload["plan"]
 
 
 def test_legacy_shared_links_are_returned_unchanged_until_expiry(tmp_path: Path) -> None:

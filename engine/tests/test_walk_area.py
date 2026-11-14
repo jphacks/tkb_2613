@@ -19,10 +19,15 @@ from tkb_common.schemas import (
     ProfileCandidateSetStatus,
     ProfileEvidence,
     ProfileEvidencePath,
+    ProfileItem,
     ProfileStatus,
 )
 from tkb_engine import Gazetteer
-from tkb_engine.cross_post import recalculate_profile_candidate_sets
+from tkb_engine.cross_post import (
+    evaluate_profile_candidates,
+    infer_home_walk_area_claims,
+    recalculate_profile_candidate_sets,
+)
 from tkb_engine.narrowing import narrowing
 from tkb_engine.walk_area import (
     INTEGRATION_MARGIN,
@@ -108,6 +113,28 @@ def _candidate_sets(clues: list[Clue], station_values: tuple[str, ...] = ("根�
         candidate_pool=station_candidates,
     )
     sets = [station_set]
+    posts = [*STATION_POSTS]
+    if any(clue.post_id == "w" for clue in clues):
+        posts.append(WALK_POST)
+        station_items = [
+            ProfileItem(
+                attribute=ProfileAttribute.HOME_NEAREST_STATION,
+                value=candidate.value,
+                confidence=candidate.confidence,
+                status=candidate.status,
+                evidence=candidate.evidence,
+                evidence_paths=candidate.evidence_paths,
+            )
+            for candidate in station_candidates
+        ]
+        walk_claims = infer_home_walk_area_claims(station_items, posts, clues, _gaz())
+        sets.extend(
+            item
+            for item in evaluate_profile_candidates(
+                [*station_items, *walk_claims], posts, clues=clues
+            )
+            if item.attribute is ProfileAttribute.HOME_WALK_AREA
+        )
     address_index = next(
         (i for i, clue in enumerate(clues) if clue.type in {ClueType.CODE, ClueType.ADDRESS_TEXT}),
         None,
@@ -261,7 +288,18 @@ def test_walk_minutes(text: str, minutes: int | None) -> None:
 
 def test_walk_range_uses_existing_station_candidate_and_its_evidence() -> None:
     clues = [*STATION_CLUES, WALK_CLUE]
-    result = narrowing(clues, [*STATION_POSTS, WALK_POST], _candidate_sets(clues), _gaz())
+    claims = _candidate_sets(clues)
+    walk_set = next(item for item in claims if item.attribute is ProfileAttribute.HOME_WALK_AREA)
+    assert walk_set.status is ProfileCandidateSetStatus.CANDIDATE
+    walk_candidate = walk_set.candidates[0]
+    assert "約" in walk_candidate.value and "世帯" in walk_candidate.value
+    evidence_posts = {
+        evidence.post_id
+        for path in walk_candidate.evidence_paths
+        for evidence in path.evidence
+    }
+    assert evidence_posts == {"s1", "s2", "w"}
+    result = narrowing(clues, [*STATION_POSTS, WALK_POST], claims, _gaz())
 
     assert result is not None
     assert result["walk"]["station"] == "根津駅"
@@ -275,6 +313,12 @@ def test_walk_range_disappears_when_either_candidate_or_walk_post_is_removed() -
     claims = _candidate_sets(clues)
     assert narrowing(clues, posts, claims, _gaz()) is not None
     assert narrowing(clues, [*STATION_POSTS], claims, _gaz()) is None
+    after_walk_removed = recalculate_profile_candidate_sets(
+        claims, {"w"}, STATION_POSTS, clues=clues
+    )
+    assert next(
+        item for item in after_walk_removed if item.attribute is ProfileAttribute.HOME_WALK_AREA
+    ).candidates == []
     after_station_removed = recalculate_profile_candidate_sets(
         claims, {"s1", "s2"}, [WALK_POST], clues=clues
     )
@@ -291,6 +335,13 @@ def test_simulation_keeps_global_clue_indexes_after_deleting_the_first_post() ->
     after = recalculate_profile_candidate_sets(
         claims, {"prefix"}, posts[1:], clues=clues
     )
+    original_value = next(
+        item for item in claims if item.attribute is ProfileAttribute.HOME_WALK_AREA
+    ).candidates[0].value
+    recalculated_value = next(
+        item for item in after if item.attribute is ProfileAttribute.HOME_WALK_AREA
+    ).candidates[0].value
+    assert recalculated_value == original_value
     result = narrowing(clues, posts[1:], after, _gaz())
 
     assert result is not None

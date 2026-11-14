@@ -166,7 +166,7 @@ def walk_area(
     station_clue_indices: Sequence[int],
     gaz: Gazetteer,
 ) -> WalkArea | None:
-    """A supported 29-profile station candidate and a walk post yield a display area."""
+    """A supported station candidate and a walk post yield the home_walk_area value."""
     if not station_value or not gaz.households:
         return None
     name = station_value.removesuffix("駅")

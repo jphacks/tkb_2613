@@ -7,9 +7,9 @@ import { ApiError, deletePosts, simulate } from "@/lib/api";
 import { attributeLabel, messages } from "@/lib/messages";
 import { isLikelyNameText } from "@/lib/reveal";
 import type { Clue } from "@/types/clue";
-import { isProfileSimulationAfter, type Deletion, type RiskyPost, type Simulation } from "@/types/diagnose";
+import { type Deletion, type RiskyPost, type Simulation } from "@/types/diagnose";
 import type { Post } from "@/types/post";
-import { profileCandidateAfterDeletion, type ProfileCandidateSet } from "@/types/profile";
+import type { ProfileCandidateSet } from "@/types/profile";
 
 import { DeleteConfirm } from "./DeleteConfirm";
 
@@ -27,7 +27,7 @@ interface RiskyPostsProps {
   clues?: readonly Clue[];
   /** 診断の手がかりの数（simulate の結果の根拠の番号を確かめる） */
   clueCount: number;
-  /** 29項目の候補セット（シミュレート後の件数比較と逃げ切り判定に使う） */
+  /** カタログ属性の候補セット（シミュレート後の件数比較と逃げ切り判定に使う） */
   profileClaims?: readonly ProfileCandidateSet[];
   onSessionExpired?: () => void;
   /** 消したらどうなるか・実際に消した結果。元に戻したり選び直したりしたら null */
@@ -162,14 +162,9 @@ export function RiskyPosts({ posts, risky, clues = [], clueCount, profileClaims 
     ? deletion.delete.filter((id) => !deletion.failed.includes(id))
     : result?.delete ?? []);
   const directCluesLeft = clues.some((c) => !gone.has(c.post_id) && directClueLabel(c) !== null);
-  const afterProfileClaims = shown === null
-    ? []
-    : isProfileSimulationAfter(shown.after)
-      ? shown.after
-      : profileClaims.map((claimSet) => profileCandidateAfterDeletion(claimSet, gone));
+  const afterProfileClaims = shown?.after ?? [];
   const hasSurvivingProfileCandidate = supportedCount(afterProfileClaims) > 0;
-  const hasLegacySurvivor = shown !== null && !isProfileSimulationAfter(shown.after) && shown.after.length > 0;
-  const escaped = shown !== null && !directCluesLeft && !hasSurvivingProfileCandidate && !hasLegacySurvivor;
+  const escaped = shown !== null && (deletion?.failed.length ?? 0) === 0 && !directCluesLeft && !hasSurvivingProfileCandidate;
   const counts = shown !== null && profileClaims.length > 0
     ? { before: supportedCount(profileClaims), after: supportedCount(afterProfileClaims) }
     : null;

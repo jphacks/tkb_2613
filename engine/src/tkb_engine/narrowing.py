@@ -1,4 +1,4 @@
-"""Optional visual narrowing projected from the public 29 profile candidates."""
+"""Optional visual narrowing projected from the public profile candidate sets."""
 
 from collections.abc import Sequence
 from functools import cache
@@ -26,15 +26,16 @@ def narrowing(
     profile_claims: Sequence[ProfileCandidateSet],
     gaz: Gazetteer,
 ) -> dict[str, Any] | None:
-    """Build a display-only narrowing path from existing candidate sets.
+    """Project a map from the formal walk-area candidate and existing evidence.
 
     This never creates a profile value: the station and address must already be
-    present in the 29-item result. Evidence IDs are retained for exclusion UI.
+    present in the catalog-driven result. Evidence IDs are retained for exclusion UI.
     """
     if not gaz.households:
         return None
     by_attribute = {claim.attribute: claim for claim in profile_claims}
     station_set = by_attribute.get(ProfileAttribute.HOME_NEAREST_STATION)
+    walk_set = by_attribute.get(ProfileAttribute.HOME_WALK_AREA)
     walk = None
     if station_set is not None and station_set.status in {
         ProfileCandidateSetStatus.CANDIDATE,
@@ -54,23 +55,42 @@ def narrowing(
                 clues, posts, candidate.value, station_indices, gaz
             )
             if walk_area_result is not None:
-                root_post_ids = [item.post_id for item in candidate.evidence if item.post_id]
-                walk = {
-                    "station": walk_area_result.station,
-                    "minutes": walk_area_result.minutes,
-                    "radius_m": walk_area_result.radius_m,
-                    "center": list(walk_area_result.center),
-                    "households": walk_area_result.households,
-                    "meshes": [
-                        {"code": m.code, "households": m.households, "share": round(m.share, 6)}
-                        for m in walk_area_result.meshes
-                        if round(m.share, 6) > 0
-                    ],
-                    "post_ids": list(dict.fromkeys([
-                        *root_post_ids,
-                        *_post_ids(clues, walk_area_result.clue_indices),
-                    ])),
-                }
+                walk_candidate = next(
+                    (
+                        item
+                        for item in (walk_set.candidates if walk_set is not None else [])
+                        if item.value == walk_area_result.value
+                    ),
+                    None,
+                )
+                if walk_candidate is not None:
+                    evidence = [
+                        reference
+                        for path in walk_candidate.evidence_paths
+                        for reference in path.evidence
+                    ]
+                    post_ids = list(
+                        dict.fromkeys(
+                            reference.post_id for reference in evidence if reference.post_id
+                        )
+                    )
+                    walk = {
+                        "station": walk_area_result.station,
+                        "minutes": walk_area_result.minutes,
+                        "radius_m": walk_area_result.radius_m,
+                        "center": list(walk_area_result.center),
+                        "households": walk_area_result.households,
+                        "meshes": [
+                            {
+                                "code": m.code,
+                                "households": m.households,
+                                "share": round(m.share, 6),
+                            }
+                            for m in walk_area_result.meshes
+                            if round(m.share, 6) > 0
+                        ],
+                        "post_ids": post_ids,
+                    }
 
     block_set = by_attribute.get(ProfileAttribute.RESIDENTIAL_AREA)
     block = _residential_block(block_set, clues)

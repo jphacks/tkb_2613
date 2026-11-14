@@ -10,7 +10,7 @@ from tkb_api.bluesky import Diagnosis, LoginResult, SessionStore
 from tkb_api.config import Settings, get_settings
 from tkb_api.main import create_app
 from tkb_api.routes.diagnose import get_gazetteer
-from tkb_common.schemas import Clue, Post
+from tkb_common.schemas import PROFILE_DIAGNOSED_ATTRIBUTES, Clue, Post
 from tkb_engine.gazetteer import Gazetteer
 
 # ブラウザは POST・DELETE に Origin を付ける（元に戻せない操作は Origin を確かめる）
@@ -75,7 +75,7 @@ def test_diagnose_streams_the_plan_before_done(client: TestClient) -> None:
     assert {"given_name", "age", "birthday", "home_nearest_station", "residential_area"} <= set(
         proposal["broken"]
     )
-    assert len(proposal["after"]) == 29
+    assert len(proposal["after"]) == len(PROFILE_DIAGNOSED_ATTRIBUTES)
     supported_after = {c["attribute"] for c in proposal["after"] if c["candidates"]}
     assert not supported_after & {
         "given_name",
@@ -110,7 +110,7 @@ def test_simulate_breaks_the_station_when_the_address_post_is_deleted(client: Te
     body = res.json()
     assert body["delete"] == [ADDRESS_POST]
     assert "home_nearest_station" in body["broken"]
-    assert len(body["after"]) == 29
+    assert len(body["after"]) == len(PROFILE_DIAGNOSED_ATTRIBUTES)
     assert "narrowing" in body
     # 残った候補の根拠経路は、消した投稿の手がかりを指さない
     for claim_set in body["after"]:

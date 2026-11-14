@@ -24,7 +24,14 @@ from tkb_api.routes.diagnose import (
 )
 from tkb_api.routes.session import get_login
 from tkb_common.place_names import PLACE_INDEX_SCHEMA_VERSION
-from tkb_common.schemas import Clue, ClueSource, ClueType, ExternalLookupStatus, Post
+from tkb_common.schemas import (
+    PROFILE_DIAGNOSED_ATTRIBUTES,
+    Clue,
+    ClueSource,
+    ClueType,
+    ExternalLookupStatus,
+    Post,
+)
 from tkb_detect.errors import ForbiddenEndpointError
 from tkb_detect.extract import Extractor
 from tkb_detect.vlm_client import VlmClient, VlmConfig
@@ -212,7 +219,7 @@ def test_mock_diagnose_streams_posts_clues_conclusions_plan_then_done(client: Te
     # The legacy event name is retained, but its public payload contains candidate sets only.
     _, result = events[-3]
     assert "conclusions" not in result
-    assert len(result["profile_claims"]) == 29
+    assert len(result["profile_claims"]) == len(PROFILE_DIAGNOSED_ATTRIBUTES)
     assert {claim["attribute"] for claim in result["profile_claims"]} >= {
         "regular_station",
         "routine",

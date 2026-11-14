@@ -176,7 +176,7 @@ def build_report(
             or set(candidate_attributes) != PROFILE_CANDIDATE_ATTRIBUTES
         ):
             raise ValueError(
-                "candidate sets must contain exactly 29 unique attributes excluding home_room"
+                "candidate sets must contain unique diagnosed attributes excluding home_room"
             )
         parsed_candidate_sets = CANDIDATE_SETS.validate_python(candidate_sets)
         candidate_sets = [row.model_dump(mode="json") for row in parsed_candidate_sets]

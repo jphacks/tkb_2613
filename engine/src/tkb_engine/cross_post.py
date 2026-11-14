@@ -9,6 +9,7 @@ from itertools import combinations
 
 from tkb_common.place_names import place_name_keys
 from tkb_common.schemas import (
+    PROFILE_DIAGNOSED_ATTRIBUTES,
     ClaimAssessment,
     Clue,
     ClueSource,
@@ -362,15 +363,13 @@ def evaluate_profile_candidates(
     conflict_reasons: Mapping[ProfileAttribute, str] | None = None,
     clues: Sequence[Clue] = (),
 ) -> list[ProfileCandidateSet]:
-    """Return all 29 diagnosed attributes as bounded, grounded candidate sets.
+    """Return all diagnosed catalog attributes as bounded, grounded candidate sets.
 
     A singleton is explicitly a candidate, not a resolved truth. A weak leader keeps up
     to three evidence-sufficient candidates regardless of score gap. A found leader keeps
     same-grade contenders within 0.15 score points. Scores are provisional rule scores.
     """
-    attributes = [
-        attribute for attribute in ProfileAttribute if attribute is not ProfileAttribute.HOME_ROOM
-    ]
+    attributes = list(PROFILE_DIAGNOSED_ATTRIBUTES)
     grouped: dict[ProfileAttribute, dict[str, ProfileItem]] = {
         attribute: {} for attribute in attributes
     }
@@ -638,6 +637,7 @@ PROFILE_ATTRIBUTE_WEIGHTS: dict[ProfileAttribute, int] = {
     ProfileAttribute.BIRTHDAY: 100,
     ProfileAttribute.RESIDENTIAL_AREA: 100,
     ProfileAttribute.HOME_NEAREST_STATION: 100,
+    ProfileAttribute.HOME_WALK_AREA: 100,
     ProfileAttribute.ACTUAL_HOME_ABSENCE: 100,
     ProfileAttribute.ANNOUNCED_LONG_ABSENCE: 100,
     ProfileAttribute.REALTIME_LOCATION: 100,
@@ -666,7 +666,7 @@ PROFILE_ATTRIBUTE_WEIGHTS: dict[ProfileAttribute, int] = {
 
 @dataclass(frozen=True, slots=True)
 class ProfileCandidateSimulation:
-    """Result of recalculating 29-attribute candidate sets after deleting posts."""
+    """Result of recalculating catalog-driven candidate sets after deleting posts."""
 
     delete: list[str]
     broken: list[str]
@@ -824,13 +824,12 @@ def simulate_profile_candidate_sets(
     requested = list(dict.fromkeys(delete_post_ids))
     delete_set = set(requested) - excluded
     remaining_posts = [post for post in posts if post.post_id not in excluded]
-    remaining_clues = [clue for clue in clues if clue.post_id not in excluded]
     before = (
         recalculate_profile_candidate_sets(
             candidate_sets,
             excluded,
             remaining_posts,
-            clues=remaining_clues,
+            clues=clues,
             diagnosis_at=diagnosis_at,
         )
         if excluded
@@ -839,12 +838,11 @@ def simulate_profile_candidate_sets(
     if not delete_set:
         return ProfileCandidateSimulation(delete=requested, broken=[], after=before)
     after_posts = [post for post in remaining_posts if post.post_id not in delete_set]
-    after_clues = [clue for clue in remaining_clues if clue.post_id not in delete_set]
     after = recalculate_profile_candidate_sets(
         before,
         delete_set,
         after_posts,
-        clues=after_clues,
+        clues=clues,
         diagnosis_at=diagnosis_at,
     )
     return ProfileCandidateSimulation(
@@ -1324,7 +1322,91 @@ def infer_owner_candidate_sets_with_web(
         photo_place_results=photo_place_results,
         rule_conclusions=rule_conclusions,
     )
+    claims.extend(infer_home_walk_area_claims(claims, posts, clues, gazetteer))
     return evaluate_profile_candidates(claims, posts, clues=clues)
+
+
+def infer_home_walk_area_claims(
+    claims: Sequence[ProfileItem],
+    posts: Sequence[Post],
+    clues: Sequence[Clue],
+    gazetteer: Gazetteer | None,
+) -> list[ProfileItem]:
+    """Derive a walk-radius candidate from an existing home-station candidate and post text."""
+    if gazetteer is None:
+        return []
+    from tkb_engine.walk_area import _walk_minutes, walk_area
+
+    station_set = next(
+        (
+            candidate_set
+            for candidate_set in evaluate_profile_candidates(claims, posts, clues=clues)
+            if candidate_set.attribute is ProfileAttribute.HOME_NEAREST_STATION
+        ),
+        None,
+    )
+    if station_set is None or not station_set.candidates:
+        return []
+
+    derived: list[ProfileItem] = []
+    station_candidates = station_set.candidates
+    for station_candidate in station_candidates:
+        station_name = station_candidate.value.removesuffix("駅")
+        station_paths = station_candidate.evidence_paths
+        for post in posts:
+            minutes = _walk_minutes(post.text, station_name)
+            if minutes is None:
+                continue
+            # A generic "駅まで徒歩N分" post cannot choose among several station candidates.
+            if len(station_candidates) > 1 and f"{station_name}駅" not in post.text:
+                continue
+            walk_results = [
+                result
+                for station_path in station_paths
+                if (
+                    result := walk_area(
+                        clues,
+                        [post],
+                        station_candidate.value,
+                        [
+                            reference.clue_index
+                            for reference in station_path.evidence
+                            if reference.clue_index is not None
+                        ],
+                        gazetteer,
+                    )
+                ) is not None
+            ]
+            if not walk_results:
+                continue
+            walk_evidence = ProfileEvidence(
+                post_id=post.post_id,
+                required=True,
+                source=EvidenceSource.POST_TEXT,
+                excerpt=post.text[:500],
+            )
+            paths = [
+                ProfileEvidencePath(
+                    evidence=[*station_path.evidence, walk_evidence],
+                    confidence=min(station_path.confidence, station_candidate.confidence),
+                    provenance=EvidencePathProvenance.COMBINED_INFERENCE,
+                )
+                for station_path in station_candidate.evidence_paths
+            ]
+            if not paths:
+                continue
+            derived.append(
+                ProfileItem(
+                    attribute=ProfileAttribute.HOME_WALK_AREA,
+                    value=walk_results[0].value,
+                    confidence=station_candidate.confidence,
+                    status=station_candidate.status,
+                    evidence=[reference for path in paths for reference in path.evidence],
+                    evidence_paths=paths,
+                    assessment=station_candidate.assessment,
+                )
+            )
+    return derived
 
 
 _COMMUTE_DESTINATION_RE = re.compile(
@@ -1788,6 +1870,7 @@ def _photo_home_area_facts(
                 PhotoPlaceLookupStatus.LOCAL_ONLY,
                 PhotoPlaceLookupStatus.REFERENCE_CHECKED,
                 PhotoPlaceLookupStatus.UNAVAILABLE,
+                PhotoPlaceLookupStatus.WEB_SEARCHED,
             }
             or _forbidden_context(photo_post.text)
             or _has_quoted_or_fiction_context(photo_post.text)
@@ -1798,6 +1881,14 @@ def _photo_home_area_facts(
         if (
             candidate.place_type not in {PhotoPlaceType.FACILITY, PhotoPlaceType.LANDMARK}
             or candidate.photo_relation is not PhotoPlaceRelation.VISIBLE_IN_FRAME
+        ):
+            continue
+        # Brave results are unverified. Treat one as weak evidence only when exactly one
+        # Brave-derived candidate remains and its municipality is available.
+        if result.lookup_status is PhotoPlaceLookupStatus.WEB_SEARCHED and (
+            len(result.candidates) != 1
+            or not candidate.place_id.startswith("brave-place:")
+            or any(source.provider != "Brave Search Place Search" for source in candidate.sources)
         ):
             continue
         home_match = _photo_home_place_match(photo_post.text, candidate.label)

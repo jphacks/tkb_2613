@@ -9,7 +9,6 @@ import { ApiError, getSharedResult } from "@/lib/api";
 import { messages } from "@/lib/messages";
 import { validNameConclusions } from "@/lib/reveal";
 import type { SharedResultSnapshot } from "@/types/diagnose";
-import { isProfileCandidateSetList } from "@/types/profile";
 
 export default function SharedResultPage() {
   const [result, setResult] = useState<SharedResultSnapshot | null>(null);
@@ -38,9 +37,9 @@ export default function SharedResultPage() {
     return () => controller.abort();
   }, []);
 
-  const profileClaims = result && "profile_claims" in result && isProfileCandidateSetList(result.profile_claims)
-    ? result.profile_claims : [];
-  const conclusions = result && "conclusions" in result ? validNameConclusions(result.conclusions) : [];
+  const profileClaims = result && "profile_claims" in result ? result.profile_claims ?? [] : [];
+  const conclusions = result && !("profile_claims" in result) && "conclusions" in result
+    ? validNameConclusions(result.conclusions ?? []) : [];
   const profileRelations = result && "profile_relations" in result ? result.profile_relations ?? [] : [];
 
   return (

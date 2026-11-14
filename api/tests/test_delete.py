@@ -16,6 +16,7 @@ from tkb_api.routes.delete import get_delete_posts
 from tkb_api.routes.diagnose import get_gazetteer
 from tkb_api.routes.session import SESSION_COOKIE, get_login
 from tkb_common.schemas import (
+    PROFILE_DIAGNOSED_ATTRIBUTES,
     Clue,
     Post,
     ProfileAttribute,
@@ -219,7 +220,7 @@ def test_restored_profile_claims_drop_the_ones_whose_evidence_was_deleted(
         ),
     )
     before = client.get("/api/diagnosis").json()
-    assert len(before["profile_claims"]) == 29
+    assert len(before["profile_claims"]) == len(PROFILE_DIAGNOSED_ATTRIBUTES)
     assert sum(bool(claim["candidate_pool"]) for claim in before["profile_claims"]) == 2
 
     client.post("/api/delete", json={"delete": [GYM_POST]})

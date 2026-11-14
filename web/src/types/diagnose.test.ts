@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { InvalidDiagnoseEventError, isDiagnosisSnapshot, isLegacySharedSnapshot, toDiagnoseEvent } from "./diagnose";
+import { InvalidDiagnoseEventError, isDiagnosisSnapshot, isLegacySharedSnapshot, isSimulation, isThreadsSimulation, toDiagnoseEvent } from "./diagnose";
 import { PROFILE_DIAGNOSED_ATTRIBUTES } from "./profile";
 
 const POST = {
@@ -44,6 +44,15 @@ describe("isDiagnosisSnapshot", () => {
     expect(isDiagnosisSnapshot({ ...snapshot, deleted: [] })).toBe(true);
     expect(isDiagnosisSnapshot({ ...snapshot, deleted: ["at://did:plc:other/app.bsky.feed.post/missing"] })).toBe(false);
     expect(isDiagnosisSnapshot({ ...snapshot, deleted: [1] })).toBe(false);
+    expect(isDiagnosisSnapshot({ ...snapshot, conclusions: [] })).toBe(false);
+  });
+});
+
+describe("simulation API boundaries", () => {
+  it("accepts legacy conclusions only on the Threads compatibility validator", () => {
+    const legacy = { delete: [], broken: ["routine"], after: [CONCLUSION] };
+    expect(isSimulation(legacy)).toBe(false);
+    expect(isThreadsSimulation(legacy)).toBe(true);
   });
 });
 
@@ -88,6 +97,8 @@ describe("toDiagnoseEvent", () => {
       event: "conclusions",
       ...data,
     });
+    expect(() => toDiagnoseEvent("conclusions", JSON.stringify({ ...data, conclusions: [CONCLUSION] })))
+      .toThrow(InvalidDiagnoseEventError);
   });
 
   it("validates per-image place candidates, clue references, and source licenses", () => {
@@ -137,7 +148,7 @@ describe("toDiagnoseEvent", () => {
     }
   });
 
-  it("reads all 29 candidate sets, including attributes that remain unknown", () => {
+  it("reads all candidate sets, including attributes that remain unknown", () => {
     const profile_claims = PROFILE_DIAGNOSED_ATTRIBUTES.map((attribute) => ({
       attribute,
       status: "unknown",
@@ -197,7 +208,7 @@ describe("toDiagnoseEvent", () => {
     );
   });
 
-  it("reads a plan event with 29 profile candidate sets", () => {
+  it("reads a plan event with profile candidate sets", () => {
     const profileClaims = PROFILE_DIAGNOSED_ATTRIBUTES.map((attribute) => ({
       attribute,
       status: "unknown",
@@ -218,17 +229,14 @@ describe("toDiagnoseEvent", () => {
     });
   });
 
-  it("reads a legacy plan event", () => {
+  it("rejects a legacy Conclusion plan on the Bluesky event contract", () => {
     const data = {
       delete: [POST.post_id],
       broken: ["routine"],
-      after: [],
+      after: [CONCLUSION],
       posts: [{ post_id: POST.post_id, broken: ["routine"] }],
     };
-    expect(toDiagnoseEvent("plan", JSON.stringify(data))).toEqual({
-      event: "plan",
-      ...data,
-    });
+    expect(() => toDiagnoseEvent("plan", JSON.stringify(data))).toThrow(InvalidDiagnoseEventError);
   });
 
   it("rejects a plan event without the per-post breakdown", () => {

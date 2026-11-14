@@ -16,7 +16,8 @@ describe("profile metadata catalog", () => {
       school: "通学先（大学・キャンパス・学校）", occupation: "職種・属性", frequent_shop: "行きつけの店（ジム・美容院・カフェ）",
       vehicle_model: "自家用車の車種", partial_plate: "ナンバーの一部", active_time: "主な活動時間帯", routine: "定期行動・習慣",
       partner_status: "配偶者・交際相手の有無",
-      partner_attributes: "配偶者・交際相手の属性", child_age: "子どもの年齢", child_school: "子どもの通園・通学先",
+      partner_attributes: "配偶者・交際相手の属性", home_walk_area: PROFILE_ATTRIBUTE_CATALOG.home_walk_area.label,
+      child_age: "子どもの年齢", child_school: "子どもの通園・通学先",
     };
     expect(Object.keys(PROFILE_ATTRIBUTE_CATALOG).sort()).toEqual(Object.keys(expected).sort());
     expect(Object.fromEntries(Object.entries(PROFILE_ATTRIBUTE_CATALOG).map(([id, item]) => [id, item.label]))).toEqual(expected);
@@ -262,11 +263,11 @@ describe("profile candidate sets", () => {
     expect(isProfileCandidateSet(set("school", [candidate("架空大学", 0.65, "weak", "2026-11-12T10:00:00+09:00")]))).toBe(false);
   });
 
-  it("requires a complete 29-attribute diagnosis set, excluding home_room", () => {
+  it("requires a complete catalog-driven diagnosis set, excluding home_room", () => {
     const sets: ProfileCandidateSet[] = PROFILE_DIAGNOSED_ATTRIBUTES.map((attribute) => ({
       attribute, status: "unknown", candidates: [], candidate_pool: [], reason: "no_grounded_rule", conflicting_evidence: [],
     }));
-    expect(sets).toHaveLength(29);
+    expect(sets).toHaveLength(PROFILE_DIAGNOSED_ATTRIBUTES.length);
     expect(isProfileCandidateSetList(sets)).toBe(true);
     expect(isProfileCandidateSetList([...sets, { attribute: "home_room", status: "unknown", candidates: [], candidate_pool: [], reason: "excluded", conflicting_evidence: [] }])).toBe(false);
   });

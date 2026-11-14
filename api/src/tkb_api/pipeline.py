@@ -186,12 +186,7 @@ def _renumbered(conclusions: Sequence[Conclusion], kept: Sequence[int]) -> list[
 def simulation_json(
     sim: Simulation, clues: Sequence[Clue], excluded: Sequence[str] = ()
 ) -> dict[str, Any]:
-    """消したらどうなるかを、画面に渡す形にする。
-
-    after の clue_indices は、消したあとの手がかりの番号から、clues（診断の全手がかり）での
-    番号に直す。画面は conclusions イベントの clues をそのまま使える。
-    excluded は、sim を作る前にもう除いてあった投稿（すでに消した投稿）。
-    """
+    """Serialize the legacy Conclusion response for the Threads compatibility route."""
     return {
         "delete": sim.delete,
         "broken": sim.broken,
@@ -244,7 +239,7 @@ def simulate_claims_json(
     diagnosis_at: datetime | None = None,
     gazetteer: Gazetteer | None = None,
 ) -> dict[str, Any]:
-    """excluded を除いた状態から、delete を消したときの 29 項目候補集合の変化を返す。"""
+    """excluded を除いた状態から、delete を消したときの候補集合の変化を返す。"""
     sim = simulate_profile_candidate_sets(
         candidate_sets,
         posts,
@@ -276,15 +271,15 @@ def plan_claims_json(
     diagnosis_at: datetime | None = None,
     proposed_delete: Sequence[str] | None = None,
 ) -> dict[str, Any]:
-    """29 項目の候補集合を基準に、最小削除提案と投稿ごとの影響項目を返す。"""
-    remaining_clues, remaining_posts = _remaining(clues, posts, excluded)
+    """候補カタログを基準に、最小削除提案と投稿ごとの影響項目を返す。"""
+    _, remaining_posts = _remaining(clues, posts, excluded)
     excluded_set = set(excluded)
     before = (
         recalculate_profile_candidate_sets(
             candidate_sets,
             excluded_set,
             remaining_posts,
-            clues=remaining_clues,
+            clues=clues,
             diagnosis_at=diagnosis_at,
         )
         if excluded_set
@@ -299,7 +294,7 @@ def plan_claims_json(
         before,
         remaining_posts,
         delete_ids,
-        clues=remaining_clues,
+        clues=clues,
         diagnosis_at=diagnosis_at,
     )
     per_post = [
@@ -309,7 +304,7 @@ def plan_claims_json(
                 before,
                 remaining_posts,
                 [post_id],
-                clues=remaining_clues,
+                clues=clues,
                 diagnosis_at=diagnosis_at,
             ).broken,
         }
