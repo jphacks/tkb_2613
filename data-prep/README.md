@@ -44,6 +44,19 @@ e-Stat はコマンドで取得できないので、ブラウザで落として�
 
 月末ごとに新しい版が出る。入れ替えるときは古い zip を消してから置き、`make data` をやり直す。
 
+### 2b. 住まいの推定（点数の地図）の生データを置く（任意、ブラウザで）
+
+置かなければ、住まいの推定の表（`scoring_*.parquet`）だけ作らずに進む（api は住まいの推定を出さない）。
+
+| 置き場所 | データ | 取り方 |
+|---|---|---|
+| `raw/estat_age/` | 令和2年国勢調査 地域メッシュ統計 4次メッシュ（500m）「男女，年齢（5歳階級）別人口」（統計表 T001192、世界測地系） | e-Stat の統計GIS → データダウンロード → 国勢調査 → 2020年 → 地域メッシュ統計 → 4次メッシュ。上と同じ8つの第1次地域区画の `tblT001192H5238.zip` など（展開しない） |
+| `raw/census_boundary/` | 令和2年国勢調査 小地域（町丁・字等）境界データ、世界測地系緯度経度・Shapefile | e-Stat の統計GIS → 境界データダウンロード → 小地域 → 国勢調査 → 2020年 → 小地域（町丁・字等別）→ 世界測地系緯度経度・Shapefile → 東京・埼玉・千葉・神奈川。`A002005212020DDSWC13-JGD2011.zip` など4つ |
+| `raw/osm/kanto-latest.osm.pbf` | OpenStreetMap 関東の抜粋（Geofabrik） | https://download.geofabrik.de/asia/japan/kanto.html |
+
+道路網からグラフを作る中間ファイル `raw/osm/walk-graph.npz`（約 530MB）ができる。pbf を入れ替えると作り直す。
+作るのに、手元の機械でグラフに約1分（最大メモリ約 4GB）、表全体で約12分（最大メモリ約 2.3GB）かかる。
+
 ### 3. 取得と変換
 
 ```bash
@@ -97,6 +110,19 @@ area_codes             276 行（うち一部だけが対象 47）
 | `school_districts.parquet` | kind, school_code, name, muni_code, city, meshes, terms, note | 1都3県の公立の小学校区・中学校区（国土数値情報 A27・A32、令和3年度版）。kind は小学校・中学校。meshes は学区の多角形にかかる 1km メッシュ（リスト）。terms は自治体ごとの利用条件（オープンデータ公開・商用利用不可・条件公開）、note は特記条件の原文。「再配布・再利用不可」の自治体は入れない。政令市は行政区域（N03）の境界で区を引く。2026-11-12 の実行で 5,136 行（242 区市町村） |
 | `corporations.sqlite` | corporations(corporate_number, name, normalized_name, furigana, pref_code)、meta(key, value) | 1都3県に本店がある法人（国税庁「法人番号公表サイト」の全件データ。最新履歴で、閉鎖と検索対象除外を除く）。normalized_name に索引。meta の as_of がデータの時点。本店所在地は入れない。約 192 万行、約 230MB。api はメモリに載せず、引くたびに読み取り専用で開く |
 | `schools.parquet` | school_code, kind, name, address, postal_code, muni_code, city | 1都3県の大学・短期大学・高等専門学校・高等学校・中等教育学校（文部科学省「学校コード」、廃止を除く）。大学は本部の所在地だけ |
+
+住まいの推定（点数の地図）の表。`uv run python -m tkb_data_prep.scoring_tables` で作る（`make data` の最後に実行）。番号（mesh・town・school・station・place・cell）は、同じ回に作った表の行の番号（0 から）。
+
+| ファイル | 列 | 内容 |
+|---|---|---|
+| `scoring_age_500m.parquet` | mesh_500m, total, age_00, age_05, …, age_95 | 500m メッシュごとの年齢5歳階級別人口（age_95 は95歳以上）。秘匿されたメッシュ（HTKSYORI=2）の内訳は、合算先（=1）の内訳を総数の比で割り戻したもの（小数）。階級の合計は公表値のまま。人口のあるメッシュだけ（37,190 行） |
+| `scoring_towns.parquet` | key_code, muni_code, city, name, population, lat, lon | 町丁目（国勢調査の小地域 KEY_CODE ごと。飛び地はまとめる）。lat, lon は区域の中にある代表の点。22,616 行 |
+| `scoring_cells.parquet` | cell, lat, lon, mesh, town, school, station, station_m | 100m マス（10 桁のコード）。人口のある 500m メッシュの中の 25 個ずつ（929,750 行）。mesh は scoring_age_500m、town は scoring_towns、school は scoring_schools の行の番号（区域の外は -1）。station・station_m は道のりで一番近い駅（scoring_stations の番号）とその道のり（2,400m を超えれば -1・NaN） |
+| `scoring_stations.parquet` / `scoring_station_walk.parquet` | name, line_name, operator, lat, lon / place, cell, distance | 駅（stations.parquet と同じ並び）と、道のり 800m 以内のマス（186,207 行） |
+| `scoring_bus_stops.parquet` / `scoring_bus_walk.parquet` | name, operator, lat, lon / place, cell, distance | バス停（bus_stops.parquet と同じ並び）と、道のり 300m 以内のマス（610,975 行） |
+| `scoring_schools.parquet` | school_code, name, muni_code, city | 小学校区（A27）の学校。school_districts.parquet にある学校（利用条件で取り込めたもの）だけ |
+
+道のりは、マスの中心に一番近い道の点から、駅・バス停の位置に一番近い道の点までの、歩ける道に沿った最短の長さ（`tkb_data_prep.walk`）。道の点は 40m ごとに足してあるので、一番近い道の点を選ぶ誤差は 20m まで。一番近い道の点が 200m より遠いマス・駅・バス停は表に入れない。歩ける道は OSM の highway のうち、高速道路（motorway）・工事中・計画中・foot=no・access=no（foot の許可なし）を除いたもの。
 
 ### 知っておくこと
 

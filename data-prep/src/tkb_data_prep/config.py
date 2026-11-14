@@ -73,6 +73,26 @@ class Paths:
         return self.raw_dir / "estat"
 
     @property
+    def estat_age_dir(self) -> Path:
+        """国勢調査 地域メッシュ統計 年齢5歳階級別人口（T001192、500m）の zip。"""
+        return self.raw_dir / "estat_age"
+
+    @property
+    def census_boundary_dir(self) -> Path:
+        """国勢調査 小地域境界（町丁・字等、2020、JGD2011 経緯度 Shapefile）の zip。"""
+        return self.raw_dir / "census_boundary"
+
+    @property
+    def osm_pbf(self) -> Path:
+        """OpenStreetMap の関東の抜粋（Geofabrik）。"""
+        return self.raw_dir / "osm" / "kanto-latest.osm.pbf"
+
+    @property
+    def road_graph_cache(self) -> Path:
+        """osm_pbf から作った歩ける道のグラフ（作り直しを省くための中間ファイル）。"""
+        return self.raw_dir / "osm" / "walk-graph.npz"
+
+    @property
     def mext_dir(self) -> Path:
         return self.raw_dir / "mext"
 

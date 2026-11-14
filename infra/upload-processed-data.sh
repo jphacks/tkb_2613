@@ -25,6 +25,13 @@ REQUIRED=(
   schools.parquet shelters.parquet bus_stops.parquet school_districts.parquet ridership.parquet
   corporations.sqlite
 )
+# 住まいの推定（点数の地図）の表。make data で生データ（年齢別人口・小地域境界・OpenStreetMap）が
+# あったときだけできる。なければ上げず、api は住まいの推定を出さない。一部だけなら上げない
+SCORING=(
+  scoring_age_500m.parquet scoring_towns.parquet scoring_cells.parquet scoring_stations.parquet
+  scoring_station_walk.parquet scoring_bus_stops.parquet scoring_bus_walk.parquet
+  scoring_schools.parquet
+)
 
 if [[ ! "$EXPIRES" =~ ^[0-9]+$ ]] || ((EXPIRES < 60 || EXPIRES > 3600)); then
   echo "有効期限は 60〜3600 秒にしてください（指定：$EXPIRES）" >&2
@@ -47,6 +54,18 @@ elif [ -s "$SRC/national/places.sqlite3" ]; then
   PLACES_DIR="$SRC/national"
 fi
 
+scoring_found=()
+scoring_missing=()
+for f in "${SCORING[@]}"; do
+  if [ -s "$SRC/$f" ]; then scoring_found+=("$f"); else scoring_missing+=("$f"); fi
+done
+if ((${#scoring_found[@]} && ${#scoring_missing[@]})); then
+  echo "$SRC の住まいの推定の表が一部だけあります（ない表：${scoring_missing[*]}）" >&2
+  echo "make data をやり直すか、scoring_*.parquet を全部消してください" >&2
+  exit 1
+fi
+FILES=("${REQUIRED[@]}" "${scoring_found[@]}")
+
 block="$(aws s3api get-public-access-block --bucket "$BUCKET" \
   --query '[PublicAccessBlockConfiguration.BlockPublicAcls,PublicAccessBlockConfiguration.IgnorePublicAcls,PublicAccessBlockConfiguration.BlockPublicPolicy,PublicAccessBlockConfiguration.RestrictPublicBuckets]' \
   --output text)"
@@ -59,14 +78,14 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 NAME="processed-$STAMP.tar.gz"
-(cd "$SRC" && sha256sum "${REQUIRED[@]}" >"$WORK/MANIFEST.sha256")
+(cd "$SRC" && sha256sum "${FILES[@]}" >"$WORK/MANIFEST.sha256")
 PLACES_ARGS=()
 if [ -n "$PLACES_DIR" ]; then
   (cd "$PLACES_DIR" && sha256sum places.sqlite3 >>"$WORK/MANIFEST.sha256")
   PLACES_ARGS=(-C "$PLACES_DIR" places.sqlite3)
 fi
 tar -czf "$WORK/$NAME" --owner=0 --group=0 --numeric-owner \
-  -C "$SRC" "${REQUIRED[@]}" "${PLACES_ARGS[@]}" -C "$WORK" MANIFEST.sha256
+  -C "$SRC" "${FILES[@]}" "${PLACES_ARGS[@]}" -C "$WORK" MANIFEST.sha256
 SHA="$(sha256sum "$WORK/$NAME" | cut -d' ' -f1)"
 
 KEY="$PREFIX/$NAME"
@@ -74,7 +93,7 @@ aws s3 cp --only-show-errors --sse AES256 "$WORK/$NAME" "s3://$BUCKET/$KEY"
 URL="$(aws s3 presign "s3://$BUCKET/$KEY" --expires-in "$EXPIRES")"
 
 cat <<MSG
-上げました：s3://$BUCKET/$KEY（$(du -h "$WORK/$NAME" | cut -f1)）
+上げました：s3://$BUCKET/$KEY（$(du -h "$WORK/$NAME" | cut -f1)、住まいの推定の表 ${#scoring_found[@]} 個）
 写真場所のPOI索引：$(if [ -n "$PLACES_DIR" ]; then echo "入れました（$PLACES_DIR/places.sqlite3）"; else echo "なし（写真場所の候補は不明になります）"; fi)
 tar の sha256：$SHA
 

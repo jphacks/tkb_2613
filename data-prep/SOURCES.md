@@ -18,6 +18,9 @@ data-prep で使う公開データ。データ本体はリポジトリに含め�
 | 指定緊急避難場所・指定避難所データ（都道府県別 CSV、11000〜14000 の `_1`・`_2`） | 国土地理院 | https://hinanmap.gsi.go.jp/hinanjocp/defaultFtpData/csv/13000_2.csv など（案内は https://www.gsi.go.jp/bousaichiri/hinanbasho.html ） | [国土地理院コンテンツ利用規約](https://www.gsi.go.jp/kikakuchousei/kikakuchousei40182.html)（公共データ利用規約 第1.0版。CC BY 4.0 と互換）と、ダウンロードサイトの「ご利用上の注意」（最新でない場合や未掲載の場合があること、第三者に提供するときはこの注意が伝わるようにすること） | 2026-11-12 |
 | 法人番号公表サイト 基本3情報 全件データ（CSV 形式・Shift-JIS、埼玉・千葉・東京・神奈川） | 国税庁 | https://www.houjin-bangou.nta.go.jp/download/zenken/ （ブラウザで取得して `raw/houjin/` に置く） | [法人番号公表サイトの利用規約](https://www.houjin-bangou.nta.go.jp/riyokiyaku/index.html)（公共データ利用規約 第1.0版に準拠。CC BY 4.0 と互換） | 2026-11-12（2026-10-30 版） |
 | ごみと資源の収集日（syusyubi.csv） | 文京区 | https://www.city.bunkyo.lg.jp/documents/6059/syusyubi.csv （案内は https://www.city.bunkyo.lg.jp/b004/p006286.html ） | 文京区オープンデータ（[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/deed.ja)）。データの時点の記載はない（ファイルの更新は 2026-03-23） | 2026-11-12 |
+| 令和2年国勢調査 地域メッシュ統計 4次メッシュ（500m）「男女，年齢（5歳階級）別人口」（統計表 T001192、JGD2011） | 総務省統計局（政府統計の総合窓口 e-Stat） | https://www.e-stat.go.jp/gis （統計GIS のデータダウンロード。`tblT001192H{5238,5239,5240,5338,5339,5340,5438,5439}.zip` をブラウザで取得して `raw/estat_age/` に置く） | [e-Stat の利用規約](https://www.e-stat.go.jp/terms-of-use)（政府標準利用規約 第2.0版に準拠、CC BY 4.0 と互換） | 2026-11-15 |
+| 令和2年国勢調査 小地域（町丁・字等）境界データ（世界測地系緯度経度・Shapefile、JGD2011、11〜14） | 総務省統計局（政府統計の総合窓口 e-Stat） | https://www.e-stat.go.jp/gis （境界データダウンロード。`A002005212020DDSWC{11..14}-JGD2011.zip` を `raw/census_boundary/` に置く） | [e-Stat の利用規約](https://www.e-stat.go.jp/terms-of-use)（政府標準利用規約 第2.0版に準拠、CC BY 4.0 と互換） | 2026-11-15 |
+| OpenStreetMap 関東の抜粋（`kanto-latest.osm.pbf`） | OpenStreetMap の貢献者（抜粋の作成は Geofabrik GmbH） | https://download.geofabrik.de/asia/japan/kanto.html （`raw/osm/` に置く） | [Open Database License（ODbL）1.0](https://opendatacommons.org/licenses/odbl/1-0/)。出典の表示（© OpenStreetMap contributors）が必要。道路距離の表は ODbL の派生データベースにあたるので、表を公開・配布するときは ODbL で提供する。表を使った画面（生成物）には出典を表示し、表の作り方（`tkb_data_prep.roads`・`walk`・`scoring_tables`、MIT で公開）を示す | 2026-11-14（ファイルの日付） |
 | 市外局番の一覧（令和8年3月1日現在、Word 版） | 総務省 | https://www.soumu.go.jp/main_content/001072458.doc | [総務省ホームページの利用条件](https://www.soumu.go.jp/menu_kyotsuu/policy/tyosaku.html)（公共データ利用規約 第1.0版に準拠） | 2026-10-23 |
 | 任意ローカルPOI名称索引（`places.sqlite3`。自動取得しない） | 利用者がローカルで準備するGeoJSONL。候補データ: Overture Maps Places | https://docs.overturemaps.org/guides/places/ | 2026-11時点のスキーマは `id,names,basic_category,taxonomy,addresses,sources`。sourceごとにライセンスが異なり、`sources[].license` が欠落する場合もある。`sources[].license` または確認済みのdataset別SPDX mappingを保持し、ライセンス不明の行は検索別名を作らない。[Attribution](https://docs.overturemaps.org/attribution/) と各provider条件を取得前に確認 | スキーマ確認 2026-11-14 |
 
@@ -36,6 +39,8 @@ data-prep で使う公開データ。データ本体はリポジトリに含め�
 - 「国土数値情報（小学校区データ）」「国土数値情報（中学校区データ）」（国土交通省）（上の URL）を加工して作成。令和3年度のデータで、境界には推定による線や重なりがあり、公式な資料ではない
 - 出典：国税庁法人番号公表サイト（国税庁）（https://www.houjin-bangou.nta.go.jp/download/zenken/）を加工して作成
 - 「指定緊急避難場所データ」「指定避難所データ」（国土地理院）（https://www.gsi.go.jp/bousaichiri/hinanbasho.html）をもとに作成。最新でない場合や未掲載の場合があります（最新の状況は各市町村にご確認ください）
+- 出典：政府統計の総合窓口（e-Stat）（https://www.e-stat.go.jp/）、総務省統計局「令和2年国勢調査 地域メッシュ統計（男女，年齢（5歳階級）別人口）」「令和2年国勢調査 小地域（町丁・字等）境界データ」を加工して作成
+- © OpenStreetMap contributors（https://www.openstreetmap.org/copyright）。道路網から歩いて行ける道のりを計算して作成（ODbL 1.0）
 
 画面で避難所の表を根拠に出すときは、上の注記（最新でない場合や未掲載の場合があること）を必ず添える（`engine/src/tkb_engine/open_data.py` の `SHELTER_CITATION`）。避難の情報としては見せない。
 
@@ -110,3 +115,5 @@ uv run --project data-prep python -m tkb_data_prep.merge_places   --input data/p
 
 `manual/knowledge.json` は推理ルールが引く手作りの知識表（自治体の指定ゴミ袋、ゴミの収集地区、大学の時間割）。公開データの加工ではなく、行ごとの `source` に出典か「要確認」「架空（デモ用）」を書く。デモ用の架空の行を実データとして画面や発表に出さない。
 文京区の収集地区（`collection_areas` の `city` が文京区の行）だけは手で書かず、上の文京区のオープンデータから `uv run python -m tkb_data_prep.bunkyo_collection` で作る（`fetch.sh` が CSV を `raw/bunkyo/` に取得する）。この変換は文京区の行だけを入れ替え、八王子市などほかの行は変えない。
+
+住まいの推定（点数の地図）の画面には、e-Stat と OpenStreetMap の出典（上の書き方）を必ず出す（`web` の住まいの推定の画面の脚注）。
