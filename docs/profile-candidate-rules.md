@@ -44,6 +44,6 @@
 
 ## 実装範囲
 
-既存の横断ルールは `residential_area`, `regular_station`, `regular_line`（直接開示と限定的な駅間組合せ推定）, `employer_name`, `school`, `child_age` に加え、RulesR（R1〜R12）・RulesX（X1〜X5）の結合経路を29項目へ統合済み。直接の本人申告と一致する型付き観測は、明示語と値が同一投稿内で一致する場合だけ追加候補にする。`realtime_location` と `actual_home_absence` は鮮度を満たす場合だけ候補にする。`facial_appearance` は本人の自己言及と同一投稿の顔検出がある場合も、自己申告文の存在のみを示す候補とし、本人判定・特徴推定をしない。`home_room` はこの29項目の出力対象外。
+既存の横断ルールは `residential_area`, `regular_station`, `regular_line`（直接開示と限定的な駅間組合せ推定）, `employer_name`, `school`, `child_age` に加え、RulesR（R1〜R12）・RulesX（X1〜X5）・搭乗券の BP1/BP2 の結合経路を29項目へ統合済み（BP1 は `full_name` と `announced_long_absence`、BP2 は `announced_long_absence`）。直接の本人申告と一致する型付き観測は、明示語と値が同一投稿内で一致する場合だけ追加候補にする。`realtime_location` と `actual_home_absence` は鮮度を満たす場合だけ候補にする。`facial_appearance` は本人の自己言及と同一投稿の顔検出がある場合も、自己申告文の存在のみを示す候補とし、本人判定・特徴推定をしない。`home_room` はこの29項目の出力対象外。
 
 規則の confidence は暫定スコアで、校正済み確率ではない。弱い最上位にはスコア差を使わず、証拠条件を満たす弱い候補を最大3件表示する。強い最上位には同じ evidence grade のうち最上位との差0.15以内を最大3件表示する。値が1つの場合も確定事実とは表現しない。
