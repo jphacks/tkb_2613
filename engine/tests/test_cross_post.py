@@ -2734,6 +2734,99 @@ def test_indirect_area_anchor_rejects_weak_inputs() -> None:
     assert _indirect_residence(posts, clues, [result_for(photo, 0)], None) == []
 
 
+def _ambiguous_result(
+    photo: Post, areas: tuple[str, ...] = ("文京区", "新宿区")
+) -> PhotoPlaceResult:
+    base = brave_area_result(photo, 0)
+    candidates = [
+        base.candidates[0].model_copy(update={"place_id": f"brave-place:amb{i}", "area_label": a})
+        for i, a in enumerate(areas)
+    ]
+    return base.model_copy(update={"status": PhotoPlaceStatus.AMBIGUOUS, "candidates": candidates})
+
+
+def test_ambiguous_brave_candidates_narrowed_by_station_postal_or_direct_area() -> None:
+    gaz = _indirect_gazetteer()
+    cases = [
+        _indirect_fixture("今朝も根津駅で電車を待つ"),
+        _indirect_fixture("届いた", kind=ClueType.POSTAL_CODE, value="113-00xx"),
+        _indirect_fixture("文京区が近所で毎日通る", value="文京区"),
+    ]
+    for posts, clues, photo, support in cases:
+        [claim] = _indirect_residence(posts, clues, [_ambiguous_result(photo)], gaz)
+        _assert_weak_and_fragile(claim, photo, support)
+
+
+def test_ambiguous_brave_candidates_stay_unnarrowed_without_unique_municipality() -> None:
+    gaz = _indirect_gazetteer()
+    # support municipality matches no candidate
+    posts, clues, photo, _ = _indirect_fixture("今朝も新宿駅で電車を待つ", value="新宿")
+    other = _ambiguous_result(photo, ("文京区", "台東区"))
+    assert _indirect_residence(posts, clues, [other], gaz) == []
+    # both candidates in the same municipality
+    posts, clues, photo, _ = _indirect_fixture("今朝も根津駅で電車を待つ")
+    same = _ambiguous_result(photo, ("文京区", "文京区"))
+    assert _indirect_residence(posts, clues, [same], gaz) == []
+    # a local (non-Brave) candidate or another provider disqualifies the result
+    posts, clues, photo, _ = _indirect_fixture("今朝も根津駅で電車を待つ")
+    result = _ambiguous_result(photo)
+    local = photo_area_result(photo, 0).candidates[0]
+    mixed = result.model_copy(update={"candidates": [result.candidates[0], local]})
+    assert _indirect_residence(posts, clues, [mixed], gaz) == []
+    foreign_source = result.candidates[1].sources[0].model_copy(update={"provider": "Other"})
+    foreign = result.candidates[1].model_copy(update={"sources": [foreign_source]})
+    other_provider = result.model_copy(update={"candidates": [result.candidates[0], foreign]})
+    assert _indirect_residence(posts, clues, [other_provider], gaz) == []
+    # no "near my home" expression in the photo post
+    posts, clues, photo, _ = _brave_fixture(photo_text="青葉市場に行った", area_text=None)
+    support = post("amb-support", "今朝も根津駅で電車を待つ")
+    posts.append(support)
+    clues.append(typed_clue(support, "根津", ClueType.PLACE_TEXT))
+    assert _indirect_residence(posts, clues, [_ambiguous_result(photo)], gaz) == []
+    # travel context in the supporting post
+    posts, clues, photo, _ = _indirect_fixture("旅行で根津駅に来た")
+    assert _indirect_residence(posts, clues, [_ambiguous_result(photo)], gaz) == []
+    # no gazetteer: station anchor does not apply
+    posts, clues, photo, _ = _indirect_fixture("今朝も根津駅で電車を待つ")
+    assert _indirect_residence(posts, clues, [_ambiguous_result(photo)], None) == []
+
+
+def test_ambiguous_brave_candidates_are_not_narrowed_by_another_photo_place() -> None:
+    posts, clues, photo, _ = _brave_fixture(area_text=None)
+    other = post("amb-other-photo", "散歩")
+    posts.append(other)
+    clues.append(
+        Clue(
+            post_id=other.post_id,
+            image_index=0,
+            type=ClueType.LANDMARK,
+            value="青葉 市場",
+            region=None,
+            confidence=0.9,
+            source=ClueSource.VLM,
+        )
+    )
+    second = brave_area_result(other, 1)
+    second.candidates[0] = second.candidates[0].model_copy(update={"place_id": "brave-place:xyz"})
+    assert _indirect_residence(posts, clues, [_ambiguous_result(photo), second], None) == []
+
+
+def test_ambiguous_brave_conflicting_narrowing_lists_both_municipalities() -> None:
+    # Pins existing behaviour: infer_cross_post_candidates does not suppress competing
+    # values, so each supporting post yields its own weak residential_area item.
+    posts, clues, photo, _ = _brave_fixture(area_text=None)
+    for key, text, value in (
+        ("amb-a", "今朝も根津駅で電車を待つ", "根津"),
+        ("amb-b", "今朝も新宿駅で電車を待つ", "新宿"),
+    ):
+        support = post(key, text)
+        posts.append(support)
+        clues.append(typed_clue(support, value, ClueType.PLACE_TEXT))
+    claims = _indirect_residence(posts, clues, [_ambiguous_result(photo)], _indirect_gazetteer())
+    assert {c.value for c in claims} == {"文京区", "新宿区"}
+    assert all(c.status is ProfileStatus.WEAK and c.confidence <= 0.65 for c in claims)
+
+
 def test_profile_attribute_weights_cover_all_attributes() -> None:
     assert set(PROFILE_ATTRIBUTE_WEIGHTS) == set(ProfileAttribute)
 
