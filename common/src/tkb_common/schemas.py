@@ -77,10 +77,22 @@ class Post(BaseModel):
         for image in self.images:
             if image.url.startswith(BSKY_CDN_PREFIX):
                 continue
-            host = urlparse(image.url).hostname or ""
-            if not self.post_id.startswith("threads:") or not any(
-                host == suffix or host.endswith(f".{suffix}")
-                for suffix in THREADS_MEDIA_HOST_SUFFIXES
+            parsed = urlparse(image.url)
+            host = parsed.hostname or ""
+            try:
+                safe_port = parsed.port in {None, 443}
+            except ValueError:
+                safe_port = False
+            if (
+                not self.post_id.startswith("threads:")
+                or parsed.username is not None
+                or parsed.password is not None
+                or parsed.fragment
+                or not safe_port
+                or not any(
+                    host == suffix or host.endswith(f".{suffix}")
+                    for suffix in THREADS_MEDIA_HOST_SUFFIXES
+                )
             ):
                 raise ValueError("画像の URL は許可済み CDN ではありません")
         return self

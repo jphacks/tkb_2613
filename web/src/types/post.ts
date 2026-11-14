@@ -76,7 +76,8 @@ export function isPost(value: unknown): value is Post {
     if (!postId.startsWith("threads:")) return false;
     try {
       const parsed = new URL(image.url);
-      return parsed.protocol === "https:" && THREADS_MEDIA_HOST_SUFFIXES.some(
+      return parsed.protocol === "https:" && !parsed.username && !parsed.password &&
+        (!parsed.port || parsed.port === "443") && !parsed.hash && THREADS_MEDIA_HOST_SUFFIXES.some(
         (suffix) => parsed.hostname === suffix || parsed.hostname.endsWith(`.${suffix}`),
       );
     } catch {

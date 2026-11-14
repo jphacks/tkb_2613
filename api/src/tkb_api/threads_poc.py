@@ -5,12 +5,19 @@
 """
 
 import asyncio
+import io
+import ipaddress
+import logging
 import os
+import socket
+import ssl
 import sys
+import warnings
 from typing import Any
-from urllib.parse import urlparse
 
+import httpcore
 import httpx
+from PIL import Image, UnidentifiedImageError
 from pydantic import ValidationError
 
 from tkb_api.config import get_settings
@@ -22,10 +29,146 @@ from tkb_detect.extract import build_extractor
 THREADS_API = "https://graph.threads.com/v1.0"
 MAX_POSTS = 30
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
+MAX_IMAGE_PIXELS = 25_000_000
+ALLOWED_IMAGE_FORMATS = frozenset({"JPEG", "PNG", "WEBP"})
 
 
 class ThreadsPocError(Exception):
     """応答本文やトークンを含まない、利用者向けのエラー。"""
+
+
+def _is_threads_media_host(host: str) -> bool:
+    return any(
+        host == suffix or host.endswith(f".{suffix}") for suffix in THREADS_MEDIA_HOST_SUFFIXES
+    )
+
+
+def _checked_threads_image_url(value: str) -> str | None:
+    """443番のMeta CDNだけを許可し、認証情報を埋め込んだURLは拒否する。"""
+    try:
+        parsed = httpx.URL(value)
+    except (TypeError, ValueError):
+        return None
+    host = parsed.host
+    if (
+        parsed.scheme != "https"
+        or not host
+        or not _is_threads_media_host(host)
+        or parsed.port not in {None, 443}
+        or parsed.userinfo
+        or parsed.fragment
+    ):
+        return None
+    return str(parsed)
+
+
+def _resolved_public_ips(host: str, port: int) -> tuple[str, ...]:
+    """DNS応答を1回だけ取得し、非公開アドレスが1件でもあれば全体を拒否する。"""
+    if port != 443 or not _is_threads_media_host(host):
+        raise OSError("Threads media destination rejected")
+    infos = socket.getaddrinfo(
+        host, port, family=socket.AF_UNSPEC, type=socket.SOCK_STREAM, proto=socket.IPPROTO_TCP
+    )
+    addresses = tuple(dict.fromkeys(str(info[4][0]) for info in infos))
+    if not addresses or any(not ipaddress.ip_address(address).is_global for address in addresses):
+        raise OSError("Threads media destination rejected")
+    return addresses
+
+
+class _PinnedPublicNetworkBackend(httpcore.AsyncNetworkBackend):
+    """検査済みDNS応答へ接続を固定し、接続時の再解決を避ける。"""
+
+    def __init__(self) -> None:
+        self._backend = httpcore.AnyIOBackend()
+
+    async def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: float | None = None,
+        local_address: str | None = None,
+        socket_options: Any = None,
+    ) -> httpcore.AsyncNetworkStream:
+        try:
+            addresses = await asyncio.to_thread(_resolved_public_ips, host, port)
+        except (OSError, ValueError):
+            raise httpcore.ConnectError("Threads media destination rejected") from None
+        last_error: Exception | None = None
+        for address in addresses:
+            try:
+                return await self._backend.connect_tcp(
+                    address,
+                    port,
+                    timeout=timeout,
+                    local_address=local_address,
+                    socket_options=socket_options,
+                )
+            except httpcore.NetworkError as exc:
+                last_error = exc
+        raise httpcore.ConnectError("Threads media connection failed") from last_error
+
+    async def connect_unix_socket(
+        self, path: str, timeout: float | None = None, socket_options: Any = None
+    ) -> httpcore.AsyncNetworkStream:
+        del path, timeout, socket_options
+        raise httpcore.ConnectError("Threads media destination rejected")
+
+    async def sleep(self, seconds: float) -> None:
+        await asyncio.sleep(seconds)
+
+
+def _threads_media_transport() -> httpx.AsyncHTTPTransport:
+    """プロキシを使わず、TLSのSNIは許可済みCDNホストのまま接続する。"""
+    transport = httpx.AsyncHTTPTransport(trust_env=False)
+    transport._pool = httpcore.AsyncConnectionPool(
+        ssl_context=ssl.create_default_context(),
+        max_connections=4,
+        max_keepalive_connections=0,
+        network_backend=_PinnedPublicNetworkBackend(),
+    )
+    return transport
+
+
+def _validate_image_bytes(data: bytes) -> None:
+    """モデル処理前に画像実体・破損・画素数を検査する。"""
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            with Image.open(io.BytesIO(data)) as image:
+                if (
+                    image.format not in ALLOWED_IMAGE_FORMATS
+                    or image.width < 1
+                    or image.height < 1
+                    or image.width * image.height > MAX_IMAGE_PIXELS
+                ):
+                    raise ThreadsPocError("Threads の画像形式を確認できませんでした")
+                image.verify()
+    except ThreadsPocError:
+        raise
+    except (UnidentifiedImageError, Image.DecompressionBombError, OSError, ValueError, Warning):
+        raise ThreadsPocError("Threads の画像形式を確認できませんでした") from None
+
+
+class _ThreadsMediaLogFilter(logging.Filter):
+    """httpxの任意ログから署名付きMeta CDN URLを除く。"""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        args = record.args
+        if (
+            record.msg == 'HTTP Request: %s %s "%s %d %s"'
+            and isinstance(args, tuple)
+            and len(args) == 5
+            and _checked_threads_image_url(str(args[1])) is not None
+        ):
+            clean = list(args)
+            clean[1] = "https://threads-media.invalid/[redacted]"
+            record.args = tuple(clean)
+        return True
+
+
+_httpx_logger = logging.getLogger("httpx")
+if not any(isinstance(item, _ThreadsMediaLogFilter) for item in _httpx_logger.filters):
+    _httpx_logger.addFilter(_ThreadsMediaLogFilter())
 
 
 def _object(value: Any) -> dict[str, Any]:
@@ -53,13 +196,7 @@ def _threads_image_url(item: dict[str, Any], include_image: bool) -> str | None:
     value = item.get("media_url")
     if not isinstance(value, str):
         return None
-    parsed = urlparse(value)
-    host = parsed.hostname or ""
-    if parsed.scheme != "https" or not any(
-        host == suffix or host.endswith(f".{suffix}") for suffix in THREADS_MEDIA_HOST_SUFFIXES
-    ):
-        return None
-    return value
+    return _checked_threads_image_url(value)
 
 
 def to_post(item: dict[str, Any], *, include_image: bool = False) -> Post | None:
@@ -153,7 +290,11 @@ async def fetch_threads_images(post: Post) -> list[bytes]:
         raise ThreadsPocError("Threads の画像は1枚だけ診断できます")
     result: list[bytes] = []
     async with httpx.AsyncClient(
-        timeout=20, follow_redirects=False, trust_env=False, headers={"Accept": "image/*"}
+        timeout=httpx.Timeout(20.0, connect=10.0),
+        follow_redirects=False,
+        trust_env=False,
+        transport=_threads_media_transport(),
+        headers={"Accept": "image/jpeg,image/png,image/webp"},
     ) as client:
         for image in post.images:
             url = _threads_image_url(
@@ -163,10 +304,22 @@ async def fetch_threads_images(post: Post) -> list[bytes]:
                 raise ThreadsPocError("Threads の画像取得先を確認できませんでした")
             try:
                 async with client.stream("GET", url) as response:
+                    if response.is_redirect:
+                        raise ThreadsPocError("Threads の画像取得先を確認できませんでした")
                     response.raise_for_status()
                     media_type = response.headers.get("content-type", "").split(";", 1)[0]
-                    if not media_type.startswith("image/"):
+                    if media_type not in {"image/jpeg", "image/png", "image/webp"}:
                         raise ThreadsPocError("Threads の画像形式を確認できませんでした")
+                    content_length = response.headers.get("content-length")
+                    if content_length is not None:
+                        try:
+                            declared_size = int(content_length)
+                        except ValueError:
+                            raise ThreadsPocError(
+                                "Threads の画像形式を確認できませんでした"
+                            ) from None
+                        if declared_size < 0 or declared_size > MAX_IMAGE_BYTES:
+                            raise ThreadsPocError("Threads の画像が大きすぎます")
                     chunks: list[bytes] = []
                     size = 0
                     async for chunk in response.aiter_bytes():
@@ -174,7 +327,11 @@ async def fetch_threads_images(post: Post) -> list[bytes]:
                         if size > MAX_IMAGE_BYTES:
                             raise ThreadsPocError("Threads の画像が大きすぎます")
                         chunks.append(chunk)
-                    result.append(b"".join(chunks))
+                    data = b"".join(chunks)
+                    # ここではコンテナ検証だけを行う。20MB・2500万画素で上限済みで、
+                    # 完全なデコードと縮小はextractor側で別スレッドに出す。
+                    _validate_image_bytes(data)
+                    result.append(data)
             except httpx.HTTPError:
                 # URLや応答本文は例外・ログへ出さない。
                 raise ThreadsPocError("Threads の画像を取得できませんでした") from None
@@ -205,7 +362,12 @@ async def run() -> int:
     gazetteer = load_gazetteer(settings.gazetteer_dir)
     clue_count = conclusion_count = failed = 0
     extractions = (
-        extract_posts(extractor, posts, fetch_threads_images)
+        extract_posts(
+            extractor,
+            posts,
+            fetch_threads_images,
+            image_fetch_fallback_to_text=True,
+        )
         if settings.threads_image_diagnosis
         else real_extractions(extractor, posts)
     )

@@ -11,6 +11,8 @@ from tkb_api.main import create_app
 from tkb_api.routes import threads
 from tkb_api.threads_poc import to_post
 from tkb_common.schemas import Clue, ClueSource, ClueType, Post
+from tkb_detect.batch import extract_posts
+from tkb_detect.extract import Extractor
 
 ORIGIN = "https://testserver"
 HEADERS = {"Origin": ORIGIN}
@@ -22,7 +24,7 @@ VLM = {
 }
 
 
-class FakeExtractor:
+class FakeExtractor(Extractor):
     """build_extractor の代わり。応答確認と投稿ごとの読み取りを記録する。"""
 
     image_enabled = True
@@ -188,7 +190,7 @@ async def test_image_flag_passes_first_image_to_existing_vllm(
     )
     posts = await threads._own_posts(session, _settings(threads_image_diagnosis=True))
     extracted = [
-        item async for item in threads.extract_posts(extractor, posts, fetch_images, concurrency=1)
+        item async for item in extract_posts(extractor, posts, fetch_images, concurrency=1)
     ]
 
     assert requested_images == [True]

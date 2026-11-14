@@ -633,7 +633,12 @@ async def diagnose(request: Request) -> dict[str, Any]:
             extractor = await _reachable_text_extractor(settings)
             posts = await _own_posts(current, settings)
             extractions = (
-                extract_posts(extractor, posts, fetch_threads_images)
+                extract_posts(
+                    extractor,
+                    posts,
+                    fetch_threads_images,
+                    image_fetch_fallback_to_text=True,
+                )
                 if settings.threads_image_diagnosis
                 else real_extractions(extractor, posts)
             )
