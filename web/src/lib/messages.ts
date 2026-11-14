@@ -1,4 +1,5 @@
 import type { ClueType } from "@/types/clue";
+import { PROFILE_ATTRIBUTE_CATALOG } from "@/types/profile";
 
 /**
  * 画面に出す文言は、すべてここに置く。文言を変えるときはここだけを直す。
@@ -185,6 +186,7 @@ export const messages = {
     found: "みーつけた",
     /** 推定に使われた手がかりを留めた列 */
     evidence: "証拠",
+    profileClaimsError: "プロフィール候補を読めませんでした",
     conclusionsLabel: "推定できたこと",
     inferred: "推定",
     /** 確からしさが弱い推定にだけ付ける印（数字は出さない。web/src/types/diagnose.ts の STRONG_CONFIDENCE 未満） */
@@ -349,3 +351,9 @@ export const messages = {
     shareDisabled: "閲覧リンクの機能は、いまは使えません",
   },
 } as const;
+
+/** 29項目の表示名を優先し、旧ルール用の項目名へフォールバックする */
+export function attributeLabel(attribute: string): string {
+  const entry = (PROFILE_ATTRIBUTE_CATALOG as Readonly<Record<string, { readonly label: string }>>)[attribute];
+  return entry?.label ?? messages.board.attributeLabels[attribute] ?? attribute;
+}

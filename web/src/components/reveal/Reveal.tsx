@@ -148,14 +148,23 @@ function profileName(profileClaims: readonly ProfileCandidateSet[]): { candidate
  * 動きを減らす設定の人には、動きなしで並べて見せる（globals.css）。
  */
 export function Reveal({ posts, clues, conclusions, profileClaims = [], excludedPostIds = new Set(), children }: RevealProps) {
-  const items = pickSpotlight(posts, clues, conclusions, excludedPostIds);
+  const items = pickSpotlight(posts, clues, conclusions, excludedPostIds, profileClaims);
   const identity = profileName(profileClaims);
-  if (items.length === 0 && conclusions.length === 0 && !identity.candidate && !identity.ambiguous) return children ?? null;
+  const profileInferences = conclusions.length > 0
+    ? []
+    : profileClaims
+      .filter((set) => set.candidates.length > 0 && set.attribute !== "full_name" && set.attribute !== "given_name" && set.attribute !== "nickname")
+      .map((set) => ({ attribute: set.attribute, value: set.candidates.map((candidate) => candidate.value).join(" / ") }));
+  if (items.length === 0 && conclusions.length === 0 && profileInferences.length === 0 && !identity.candidate && !identity.ambiguous) {
+    return children ?? null;
+  }
   const visibleClues = clues.filter((clue) => !excludedPostIds.has(clue.post_id));
   const postCount = new Set(visibleClues.map((c) => c.post_id)).size;
-  const otherConclusions = validNameConclusions(conclusions).filter(
-    (conclusion) => conclusion.attribute !== "full_name" && conclusion.attribute !== "given_name_or_nickname",
-  );
+  const otherConclusions = conclusions.length > 0
+    ? validNameConclusions(conclusions).filter(
+      (conclusion) => conclusion.attribute !== "full_name" && conclusion.attribute !== "given_name_or_nickname",
+    )
+    : profileInferences;
   const peels = peelDelays(items);
 
   return (

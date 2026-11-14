@@ -1,11 +1,10 @@
 "use client";
 
-import { messages } from "@/lib/messages";
+import { attributeLabel, messages } from "@/lib/messages";
 import { paced, staggerDelay } from "@/lib/motion";
 import { postImageSrc } from "@/lib/post-image";
 import { cropStyle, type FacePhoto } from "@/lib/reveal";
 import { useLoadedSize } from "@/lib/useLoadedSize";
-import type { Conclusion } from "@/types/diagnose";
 
 import { DecodeText } from "./DecodeText";
 
@@ -94,13 +93,18 @@ export interface Highlight {
   value: string;
 }
 
+interface InferredSummary {
+  readonly attribute: string;
+  readonly value: string;
+}
+
 interface IdentityCardProps {
   name: string | null;
   nameProvenance: readonly string[];
   nameAmbiguous: boolean;
   /** 写真の枠に出す顔。なければ人影 */
   face: FacePhoto | null;
-  conclusions: readonly Conclusion[];
+  conclusions: readonly InferredSummary[];
   /** 名前のほかに並べる強い手がかり。危ない種類の順 */
   highlights: readonly Highlight[];
   clueCount: number;
@@ -151,7 +155,7 @@ export function IdentityCard({ name, nameProvenance, nameAmbiguous, face, conclu
             {conclusions.map((c, i) => (
               <li key={i} className="reveal-stamp" style={{ animationDelay: paced(0.5 + i * 0.2) }}>
                 <span className="mr-2 text-xs tracking-widest text-ink/60">
-                  {messages.board.attributeLabels[c.attribute] ?? c.attribute}
+                  {attributeLabel(c.attribute)}
                 </span>
                 <span className="mr-2 rounded-sm bg-ink/10 px-1.5 py-0.5 text-xs">{t.inferred}</span>
                 <span className="text-lg font-bold text-seeker sm:text-xl">

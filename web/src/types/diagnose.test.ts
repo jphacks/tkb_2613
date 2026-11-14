@@ -131,9 +131,22 @@ describe("toDiagnoseEvent", () => {
     expect(toDiagnoseEvent("conclusions", JSON.stringify({
       clues: [CLUE], conclusions: [], profile_claims, profile_claim_suggestions: [],
     }))).toMatchObject({ event: "conclusions", profile_claims });
-    expect(() => toDiagnoseEvent("conclusions", JSON.stringify({
+    expect(toDiagnoseEvent("conclusions", JSON.stringify({
       clues: [CLUE], conclusions: [], profile_claims: profile_claims.slice(1), profile_claim_suggestions: [],
-    }))).toThrow(InvalidDiagnoseEventError);
+    }))).toMatchObject({
+      event: "conclusions",
+      clues: [CLUE],
+      profile_claims: [],
+      profile_claims_error: true,
+    });
+    expect(isDiagnosisSnapshot({
+      posts: [POST],
+      deleted: [],
+      clues: [CLUE],
+      conclusions: [],
+      profile_claims: profile_claims.slice(1),
+      plan: { delete: [], broken: [], after: [], posts: [] },
+    })).toBe(false);
   });
 
   it("reads scoreless profile relations with complete evidence paths", () => {
@@ -167,7 +180,28 @@ describe("toDiagnoseEvent", () => {
     );
   });
 
-  it("reads a plan event", () => {
+  it("reads a plan event with 29 profile candidate sets", () => {
+    const profileClaims = PROFILE_DIAGNOSED_ATTRIBUTES.map((attribute) => ({
+      attribute,
+      status: "unknown",
+      candidates: [],
+      candidate_pool: [],
+      reason: "no_grounded_rule",
+      conflicting_evidence: [],
+    }));
+    const data = {
+      delete: [POST.post_id],
+      broken: ["routine"],
+      after: profileClaims,
+      posts: [{ post_id: POST.post_id, broken: ["routine"] }],
+    };
+    expect(toDiagnoseEvent("plan", JSON.stringify(data))).toEqual({
+      event: "plan",
+      ...data,
+    });
+  });
+
+  it("reads a legacy plan event", () => {
     const data = {
       delete: [POST.post_id],
       broken: ["routine"],

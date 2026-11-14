@@ -13,10 +13,12 @@ from tkb_data_prep.import_places import (
     DEFAULT_MESH_INDEX,
     DEFAULT_OUTPUT,
     MeshIndexError,
+    _load_mesh_membership,
     _validate_source_urls,
     import_geojsonl,
     import_geoparquet,
     main,
+    parse_prefecture_codes,
 )
 from tkb_data_prep.mesh import code_1km
 
@@ -536,3 +538,90 @@ def test_cli_default_and_help_use_api_gazetteer_directory(
     assert "data/processed/national/muni_mesh.parquet" in help_text
     assert "--mesh-index" in help_text
     assert "engine/data/processed" not in help_text
+
+
+def _prefecture_mesh_index(tmp_path: Path, rows: dict[str, tuple[float, float]]) -> Path:
+    path = tmp_path / "muni_mesh.parquet"
+    pq.write_table(
+        pa.table(
+            {
+                "muni_code": list(rows),
+                "mesh_1km": [code_1km(lat, lon) for lon, lat in rows.values()],
+            }
+        ),
+        path,
+    )
+    return path
+
+
+def test_prefecture_codes_keep_only_meshes_of_selected_prefectures(tmp_path: Path) -> None:
+    points = {
+        "13104": (139.70, 35.69),
+        "14101": (139.62, 35.45),
+        "19201": (138.57, 35.66),
+        "20201": (138.19, 36.65),
+    }
+    mesh_index = _prefecture_mesh_index(tmp_path, points)
+    source = tmp_path / "places.geojsonl"
+    source.write_text(
+        "\n".join(
+            json.dumps(_feature(f"p{muni}", country="JP", license_name="CC0 1.0", coordinates=pt))
+            for muni, pt in points.items()
+        ),
+        encoding="utf-8",
+    )
+    output = tmp_path / "kanto.sqlite3"
+
+    count = import_geojsonl(
+        source,
+        output,
+        mesh_index_path=mesh_index,
+        provider="Provider",
+        dataset="places",
+        prefecture_codes=parse_prefecture_codes("08,09,10,11,12,13,14"),
+    )
+
+    assert count == 2
+    with sqlite3.connect(output) as db:
+        ids = {row[0] for row in db.execute("SELECT place_id FROM poi_place")}
+    assert ids == {"places:p13104", "places:p14101"}
+
+
+def test_prefecture_filter_needs_muni_code_column_and_valid_codes(tmp_path: Path) -> None:
+    with pytest.raises(ValueError):
+        parse_prefecture_codes("13,abc")
+    with pytest.raises(ValueError):
+        parse_prefecture_codes("")
+    with pytest.raises(MeshIndexError, match="muni_code"):
+        _load_mesh_membership(_mesh_index(tmp_path), frozenset({"13"}))
+
+
+def test_geoparquet_without_partition_columns_needs_explicit_flag(tmp_path: Path) -> None:
+    mesh_index = _mesh_index(tmp_path)
+    point = Point(139.0, 35.0)
+    table = pa.table(
+        {
+            "id": ["a", "b"],
+            "geometry": [point.wkb, point.wkb],
+            "names": [{"primary": "公園"}, {"primary": "自宅"}],
+            "addresses": [[{"country": "JP", "locality": "府中市"}]] * 2,
+            "sources": [[{"dataset": "meta", "license": "CDLA-Permissive-2.0"}]] * 2,
+            "basic_category": ["park", "residential"],
+        }
+    )
+    path = tmp_path / "cli.parquet"
+    pq.write_table(table, path)
+
+    with pytest.raises(ValueError, match="theme"):
+        import_geoparquet(
+            path, tmp_path / "x.sqlite3", mesh_index_path=mesh_index, provider="O", dataset="o"
+        )
+    count = import_geoparquet(
+        path,
+        tmp_path / "y.sqlite3",
+        mesh_index_path=mesh_index,
+        provider="O",
+        dataset="o",
+        assume_place_rows=True,
+    )
+    assert count == 1

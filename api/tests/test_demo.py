@@ -55,23 +55,27 @@ def test_demo_diagnosis_needs_no_login_and_returns_the_fictional_account(
     assert [p["post_id"] for p in body["posts"]] == POST_IDS
     assert len(body["clues"]) == len(DOC["clues"])
     assert body["conclusions"]
+    assert len(body["profile_claims"]) == 29
+    assert isinstance(body["profile_relations"], list)
+    assert body["profile_claim_suggestions"] == body["plan"]["delete"]
     assert set(body["plan"]) == {"delete", "broken", "after", "posts"}
+    assert len(body["plan"]["after"]) == 29
     for conclusion in body["conclusions"]:
         assert all(0 <= i < len(body["clues"]) for i in conclusion["clue_indices"])
     assert "set-cookie" not in res.headers
 
 
 def test_demo_simulate_drops_the_selected_posts(client: TestClient) -> None:
-    clues = client.get("/api/demo/diagnosis").json()["clues"]
-
     res = client.post("/api/demo/simulate", json={"delete": [GYM_POST]})
 
     assert res.status_code == 200
     body = res.json()
     assert body["delete"] == [GYM_POST]
     assert "routine" in body["broken"]
-    for conclusion in body["after"]:
-        assert all(clues[i]["post_id"] != GYM_POST for i in conclusion["clue_indices"])
+    assert len(body["after"]) == 29
+    for claim_set in body["after"]:
+        for candidate in claim_set["candidate_pool"]:
+            assert all(ref["post_id"] != GYM_POST for ref in candidate["evidence"])
 
 
 def test_demo_simulate_matches_the_plan(client: TestClient) -> None:
@@ -119,7 +123,7 @@ class _Counter:
     def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
         self.calls = {"conclusions": 0, "plan": 0}
         conclusions = pipeline.conclusions_json
-        plan = pipeline.plan_json
+        plan = pipeline.plan_claims_json
 
         def counted_conclusions(*args: Any, **kwargs: Any) -> Any:
             self.calls["conclusions"] += 1
@@ -130,7 +134,7 @@ class _Counter:
             return plan(*args, **kwargs)
 
         monkeypatch.setattr(demo, "conclusions_json", counted_conclusions)
-        monkeypatch.setattr(demo, "plan_json", counted_plan)
+        monkeypatch.setattr(demo, "plan_claims_json", counted_plan)
         monkeypatch.setattr(demo, "_cached", None)
 
 

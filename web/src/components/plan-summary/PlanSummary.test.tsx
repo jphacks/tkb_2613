@@ -1,18 +1,17 @@
 import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import { messages } from "@/lib/messages";
+import { attributeLabel, messages } from "@/lib/messages";
 import type { RiskyPost } from "@/types/diagnose";
 
 import { PlanSummary } from "./PlanSummary";
 
 const t = messages.plan;
-const label = (a: string) => messages.board.attributeLabels[a] ?? a;
 
 const RISKY: RiskyPost[] = [
-  { post_id: "at://did:plc:abc/app.bsky.feed.post/3k1", broken: ["age", "given_name_or_nickname"] },
+  { post_id: "at://did:plc:abc/app.bsky.feed.post/3k1", broken: ["employer_name", "given_name"] },
   { post_id: "at://did:plc:abc/app.bsky.feed.post/3k2", broken: [] },
-  { post_id: "at://did:plc:abc/app.bsky.feed.post/3k3", broken: ["routine", "age"] },
+  { post_id: "at://did:plc:abc/app.bsky.feed.post/3k3", broken: ["regular_station", "employer_name"] },
 ];
 
 describe("PlanSummary", () => {
@@ -21,7 +20,7 @@ describe("PlanSummary", () => {
 
     const summary = screen.getByRole("region", { name: t.label });
     expect(summary).toHaveTextContent(
-      t.breaks(3, [label("age"), label("given_name_or_nickname"), label("routine")].join("・")),
+      t.breaks(3, [attributeLabel("employer_name"), attributeLabel("given_name"), attributeLabel("regular_station")].join("・")),
     );
   });
 

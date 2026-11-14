@@ -104,11 +104,10 @@ Python は `common/` の Pydantic モデル（`tkb_common.schemas`）、TypeScri
 
 ## 推定と最小削除の考え方（engine）
 
-- プロフィール推定：手がかりの一覧（文字だけ）を言語モデルに渡し、項目ごとの候補と根拠（手がかりの番号）を出させる。項目の確からしさは、根拠の手がかりの confidence を 1 − ∏(1 − c_i) で合成する。`required` の根拠が1つでも消えたら、その項目は不明にする
-- 駅名は `data-prep` の stations 表で実在を確認する。最寄り駅（R1）の候補が複数残ったときは、国土数値情報の駅別乗降客数を説明に参考として添えるだけで、どの駅にするかには使わない。生活時間帯は今回の16項目に含めない
-- 現在の実装は、言語モデルを使わない推理ルール R1〜R12（`engine/src/tkb_engine/rules.py`）および X1〜X5（`engine/src/tkb_engine/links.py`）、ならびに `engine/src/tkb_engine/cross_post.py` の候補セット推定（`home_room` を除く29項目、うち `age`・`birthday`・`occupation`・`active_time`・`routine` を含む）と `profile_relations` の統合。指定ゴミ袋・収集地区・大学の時間割は手で作る知識表 `data-prep/manual/knowledge.json`、学校の名前と所在地は `make data` で作る schools 表（文部科学省の学校コード）を引く。知識表は行ごとに出典を書き、未確認のところはそう書く。文京区の収集地区の行は、文京区のオープンデータ「ごみと資源の収集日」から `python -m tkb_data_prep.bunkyo_collection` で作る。R5（収集地区）は、朝の「燃えるゴミ出し忘れた」のような投稿の曜日も読み、指定ゴミ袋がない区では住所・郵便番号の手がかりで区を決める。写真のバーコードは言語モデルではなく `detect/src/tkb_detect/barcode.py`（zxing-cpp と日本郵便のカスタマバーコード）で読む
-- 最小削除：投稿を1件抜いたときの各項目の確からしさを、モデルを呼ばずに計算し直す。16項目に対する重みは実装時に決める。重要な項目を最も多く崩す投稿から貪欲法で選ぶ。最大3件まで
-- 再診断：抜き出し済みの手がかりから、削除した投稿の分を除いてすぐに計算する
+- プロフィール推定：`engine/src/tkb_engine/cross_post.py` の `evaluate_profile_candidates` が、`home_room` を除く29項目すべてを `ProfileCandidateSet` として出力し、`profile_relations` とともに返す（言語モデルを使わない推理ルール R1〜R12 `engine/src/tkb_engine/rules.py`、X1〜X5 `engine/src/tkb_engine/links.py` の結果も含め、`age`・`birthday`・`occupation`・`active_time`・`routine` を含む29項目へ一本化）。指定ゴミ袋・収集地区・大学の時間割は知識表 `data-prep/manual/knowledge.json`、学校の名前と所在地は `make data` で作る schools 表（文部科学省の学校コード）を引く。知識表は行ごとに出典を書き、未確認のところはそう書く。文京区の収集地区の行は、文京区のオープンデータ「ごみと資源の収集日」から `python -m tkb_data_prep.bunkyo_collection` で作る。R5（収集地区）は、朝の「燃えるゴミ出し忘れた」のような投稿の曜日も読み、指定ゴミ袋がない区では住所・郵便番号の手がかりで区を決める。写真のバーコードは言語モデルではなく `detect/src/tkb_detect/barcode.py`（zxing-cpp と日本郵便のカスタマバーコード）で読む
+- 駅名は `data-prep` の stations 表で実在を確認する。最寄り駅（R1）の候補が複数残ったときは、国土数値情報の駅別乗降客数を説明に参考として添えるだけで、どの駅にするかには使わない
+- 最小削除：`plan_profile_candidate_deletion`（`engine/src/tkb_engine/cross_post.py`）が、投稿を外したときに候補がすべて崩れる29項目の重み（`PROFILE_ATTRIBUTE_WEIGHTS`: 120 / 100 / 85 / 65 / 45 / 25）の合計、ついで残存候補数の減少が最も大きい投稿を貪欲法で最大3件選ぶ。Bluesky の SSE `plan`、`/api/simulate`、`/api/delete`、`/api/demo/*` はいずれも29項目の `ProfileCandidateSet[]` で `after` と `broken` を返す（`/threads` は既存互換ルートを維持）
+- 再診断：削除・仮除外した投稿を除いた手がかりと根拠経路から、モデルを再実行せず `recalculate_profile_candidate_sets`（画面側は `profileClaimsAfterDeletion`）で即座に再計算する
 
 ## モデルの呼び出し
 
