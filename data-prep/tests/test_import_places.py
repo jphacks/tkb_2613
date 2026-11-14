@@ -3,10 +3,18 @@ import sqlite3
 import sys
 from pathlib import Path
 
+import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
+from shapely.geometry import Point
 
 from tkb_common.place_names import PLACE_INDEX_SCHEMA_VERSION, place_name_keys
-from tkb_data_prep.import_places import DEFAULT_OUTPUT, import_geojsonl, main
+from tkb_data_prep.import_places import (
+    DEFAULT_OUTPUT,
+    import_geojsonl,
+    import_geoparquet,
+    main,
+)
 
 
 def _feature(place_id: str, *, country: str | None, license_name: str | None) -> dict[str, object]:
@@ -105,6 +113,109 @@ def test_import_refuses_overwrite(tmp_path) -> None:
     output.touch()
     with pytest.raises(FileExistsError):
         import_geojsonl(source, output, provider="Provider", dataset="places")
+
+
+def test_geoparquet_batches_filter_country_private_address_and_unknown_license(tmp_path) -> None:
+    source = tmp_path / "places.parquet"
+    rows = []
+    for place_id, theme, kind, country, category, license_name in [
+        ("jp-ok", "places", "place", "JP", "cultural", "CC0-1.0"),
+        ("jp-unlicensed", "places", "place", "JP", "cultural", None),
+        ("us", "places", "place", "US", "cultural", "CC0-1.0"),
+        ("address", "addresses", "address", "JP", "cultural", "CC0-1.0"),
+        ("private", "places", "place", "JP", "private_residence", "CC0-1.0"),
+        ("apartment", "places", "place", "JP", "apartment", "CC0-1.0"),
+    ]:
+        feature = _feature(place_id, country=country, license_name=license_name)
+        properties = feature["properties"]
+        assert isinstance(properties, dict)
+        properties["basic_category"] = category
+        if place_id == "jp-ok":
+            properties["addresses"] = [
+                {
+                    "country": "JP",
+                    "locality": "横手市",
+                    "freeform": "個人住所相当の番地情報",
+                }
+            ]
+        rows.append(
+            {
+                "id": place_id,
+                "theme": theme,
+                "type": kind,
+                "geometry": Point(139.0, 35.0).wkb,
+                **properties,
+            }
+        )
+    pq.write_table(pa.Table.from_pylist(rows), source)
+    output = tmp_path / "places.sqlite3"
+
+    assert import_geoparquet(
+        source, output, provider="Overture Maps", dataset="places", batch_size=2
+    ) == 2
+    with sqlite3.connect(output) as db:
+        ids = {row[0] for row in db.execute("SELECT place_id FROM poi_place")}
+        aliases = {
+            row[0]
+            for row in db.execute("SELECT place_id FROM poi_alias")
+        }
+        stored = json.loads(
+            db.execute(
+                "SELECT record_json FROM poi_place WHERE place_id = ?", ("places:jp-ok",)
+            ).fetchone()[0]
+        )
+    assert ids == {"places:jp-ok", "places:jp-unlicensed"}
+    assert aliases == {"places:jp-ok"}
+    assert stored["area_label"] == "横手市"
+    assert "個人住所相当の番地情報" not in json.dumps(stored, ensure_ascii=False)
+
+
+def test_area_label_uses_only_unambiguous_japan_locality(tmp_path) -> None:
+    source = tmp_path / "places.geojsonl"
+    feature = _feature("area", country="JP", license_name="CC0-1.0")
+    properties = feature["properties"]
+    assert isinstance(properties, dict)
+    properties["addresses"] = [
+        {"country": "JP", "locality": "世田谷区", "freeform": "1-2-3"},
+        {"country": "US", "locality": "Other City"},
+    ]
+    source.write_text(json.dumps(feature), encoding="utf-8")
+    output = tmp_path / "area.sqlite3"
+    import_geojsonl(source, output, provider="P", dataset="places")
+    with sqlite3.connect(output) as db:
+        stored = json.loads(db.execute("SELECT record_json FROM poi_place").fetchone()[0])
+    assert stored["area_label"] == "世田谷区"
+    assert "freeform" not in stored
+
+
+def test_geoparquet_requires_partition_columns_and_refuses_overwrite(tmp_path) -> None:
+    malformed = tmp_path / "missing-partitions.parquet"
+    pq.write_table(pa.table({"id": ["x"]}), malformed)
+    with pytest.raises(ValueError, match="theme, type"):
+        import_geoparquet(malformed, tmp_path / "out.sqlite3", provider="P", dataset="D")
+
+    valid = tmp_path / "valid.parquet"
+    pq.write_table(
+        pa.Table.from_pylist(
+            [
+                {
+                    "id": "x",
+                    "theme": "places",
+                    "type": "place",
+                    "geometry": Point(139, 35).wkb,
+                    "names": {"primary": "施設"},
+                    "addresses": [{"country": "JP"}],
+                    "sources": [],
+                }
+            ]
+        ),
+        valid,
+    )
+    output = tmp_path / "exists.sqlite3"
+    output.write_bytes(b"keep")
+    with pytest.raises(FileExistsError):
+        import_geoparquet(valid, output, provider="P", dataset="D")
+    assert output.read_bytes() == b"keep"
 
 
 def test_cli_default_and_help_use_api_gazetteer_directory(monkeypatch, capsys) -> None:

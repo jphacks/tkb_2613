@@ -41,12 +41,22 @@ data-prep で使う公開データ。データ本体はリポジトリに含め�
 
 ## 任意POI索引の取込
 
-全国POIのダウンロードは実行せず、データ本体もコミットしない。Overture Placesは全国規模のGeoParquetで、地域別の抽出は[公式getting-dataガイド](https://docs.overturemaps.org/getting-data/)に従う。検索用に全件をPythonメモリへ展開せず、ローカルで1行1featureのGeoJSONLへストリーム変換し、必要なら地域チャンクを連結してから実行する。
+全国POIのダウンロードやクラウド件数照会は実行しない。データ本体もコミットしない。Overture Placesは全国規模のGeoParquetで、取得/地域別抽出は[公式getting-dataガイド](https://docs.overturemaps.org/getting-data/)に従い、実行前に対象release・取得量・空き容量を確認する。次のアダプタは、利用者が別途準備したローカルGeoParquetをPyArrowのbatch iteratorで処理し、GeoJSONL中間ファイルを作らず既存SQLite索引へ書く。ファイルには `theme` と `type` の列を残し、値がそれぞれ `places` / `place` の行だけを対象にする。したがって住所テーマの点は取り込まれない。ジオメトリはWKB Pointに限定し、`addresses[].country=JP` を必須とする。[公式Place schema](https://docs.overturemaps.org/schema/reference/places/place/)の `addresses[].locality` から、日本語の市区町村接尾辞で明示された一意の値だけを粗い `area_label` として保存する（Address schema上の `locality` は市町村または近隣地区を含み得るため、該当形式でない・複数値が競合する場合はnull）。`freeform`・番地・郵便番号等は保存しない。明示的な私有住居カテゴリ（`home`, `house`, `private_house`, `private_residence`, `residence`, `residential_building`, `residential`, `apartment`, `apartments`, `dwelling`）も除外する。
 
 ```powershell
 uv run --project data-prep python -m tkb_data_prep.import_places `
   --input C:\data\places-japan.geojsonl `
   --output data\processed\places.sqlite3 `
+  --provider "Overture Maps" --dataset "places" --version "取得したrelease ID" `
+  --source-license-map C:\data\verified-source-licenses.json
+```
+
+既に公式配布から適切な範囲を抽出したGeoParquetを使う場合は、同じimporterに `--input-format geoparquet` を指定する。全量取得/展開を意味するコマンドではなく、入力ファイルの作成・download手順は別途見積もる。
+
+```powershell
+uv run --project data-prep python -m tkb_data_prep.import_places `
+  --input C:\data\places-japan.parquet --input-format geoparquet `
+  --output data\processed\national\places.sqlite3 `
   --provider "Overture Maps" --dataset "places" --version "取得したrelease ID" `
   --source-license-map C:\data\verified-source-licenses.json
 ```
