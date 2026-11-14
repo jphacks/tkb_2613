@@ -164,3 +164,5 @@ X の状態変更 API は同一オリジンの `Origin` ヘッダーを要求す
 ## Threads 専用の読み取り診断
 
 `/api/threads/diagnose` と `/api/threads/diagnosis` は、共通パイプラインの24属性候補セットを Threads 画面向けの従来の `ProfileItem[]` に変換して返す。表示対象の候補だけを平坦化し、候補のない属性は省略する。`/api/threads/rediagnose` は仮除外後の根拠経路を再評価し、返却する `clues` に合わせて根拠番号を振り直す。Threads の結果は専用セッションのメモリに置き、投稿の実削除は行わない。
+
+`GET /api/threads/posts` は従来どおり `{"posts":[Post,...],"mock":boolean}` を返す。`THREADS_IMAGE_DIAGNOSIS=0`（既定）では Threads API に `media_url` を要求せず、全投稿の `images` は空配列のまま。`THREADS_IMAGE_DIAGNOSIS=1` では `media_type=IMAGE` の投稿だけ `media_url` を要求し、許可済みMeta CDNの画像1枚目を `images[0]` に加える。動画とカルーセルは画像なしとして扱う。診断は本文・投稿時刻に加えてこの1枚を既存のチーム管理VLMへ渡す。画像取得または検証に失敗した投稿は画像を使わず、本文の診断を継続する。画像URL・画像バイト列・本文はログへ記録せず、画像はメモリ上だけで処理する。`GET /api/threads/config` の追加フィールド `image_diagnosis_enabled` で画面表示を切り替える。

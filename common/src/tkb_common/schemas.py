@@ -8,6 +8,7 @@ import unicodedata
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Annotated, Self
+from urllib.parse import urlparse
 
 from pydantic import (
     AwareDatetime,
@@ -23,8 +24,10 @@ NonNegativeInt = Annotated[int, Field(ge=0)]
 PositiveInt = Annotated[int, Field(gt=0)]
 Region = tuple[NonNegativeInt, NonNegativeInt, NonNegativeInt, NonNegativeInt]
 
-# 画像を取りに行ってよいのは Bluesky の CDN だけ
+# Bluesky投稿で画像を取りに行ってよいCDN
 BSKY_CDN_PREFIX = "https://cdn.bsky.app/"
+# Threads API の media_url が返す Meta 管理 CDN。実際の取得時にも api 側で再検証する。
+THREADS_MEDIA_HOST_SUFFIXES = ("cdninstagram.com", "fbcdn.net")
 # Bluesky の投稿に付けられる写真は4枚まで
 MAX_IMAGES_PER_POST = 4
 
@@ -42,9 +45,9 @@ class PostImage(BaseModel):
 
     @field_validator("url")
     @classmethod
-    def _check_cdn(cls, value: str) -> str:
-        if not value.startswith(BSKY_CDN_PREFIX):
-            raise ValueError(f"画像の URL は {BSKY_CDN_PREFIX} で始まること")
+    def _check_https(cls, value: str) -> str:
+        if urlparse(value).scheme != "https":
+            raise ValueError("画像の URL は https で始まること")
         return value
 
     @field_validator("mock_asset")
@@ -71,6 +74,27 @@ class Post(BaseModel):
     def _check_image_order(self) -> Self:
         if [image.index for image in self.images] != list(range(len(self.images))):
             raise ValueError("images の index は 0 から順に並べること")
+        for image in self.images:
+            if image.url.startswith(BSKY_CDN_PREFIX):
+                continue
+            parsed = urlparse(image.url)
+            host = parsed.hostname or ""
+            try:
+                safe_port = parsed.port in {None, 443}
+            except ValueError:
+                safe_port = False
+            if (
+                not self.post_id.startswith("threads:")
+                or parsed.username is not None
+                or parsed.password is not None
+                or parsed.fragment
+                or not safe_port
+                or not any(
+                    host == suffix or host.endswith(f".{suffix}")
+                    for suffix in THREADS_MEDIA_HOST_SUFFIXES
+                )
+            ):
+                raise ValueError("画像の URL は許可済み CDN ではありません")
         return self
 
 

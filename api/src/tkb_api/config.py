@@ -124,8 +124,10 @@ class Settings(BaseSettings):
     threads_mock_mode: bool = True
     threads_gpu_demo_enabled: bool = False
     threads_max_posts: int = Field(default=30, ge=1, le=30)
+    # 単一画像の取得・表示・VLM診断。既存の本文だけの経路を守るため既定は無効。
+    threads_image_diagnosis: bool = False
     # Threads の本文を読むモデル。既定は Bluesky と同じ vLLM（VLM_*・MODEL_ALLOWED_HOST_SUFFIXES）。
-    # ollama にすると OLLAMA_BASE_URL・OLLAMA_MODEL で読む。写真は読まない
+    # ollama にすると OLLAMA_BASE_URL・OLLAMA_MODELで本文を読む。画像は有効時だけVLMで読む。
     threads_text_backend: Literal["vlm", "ollama"] = "vlm"
     x_client_id: str = ""
     x_client_secret: SecretStr = SecretStr("")

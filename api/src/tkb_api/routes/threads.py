@@ -31,7 +31,14 @@ from tkb_api.pipeline import (
 )
 from tkb_api.routes.diagnose import _cached_gazetteer
 from tkb_api.schemas import SimulateRequest
-from tkb_api.threads_poc import THREADS_API, ThreadsPocError, _get, fetch_own_posts, to_post
+from tkb_api.threads_poc import (
+    THREADS_API,
+    ThreadsPocError,
+    _get,
+    fetch_own_posts,
+    fetch_threads_images,
+    to_post,
+)
 from tkb_common.schemas import (
     Clue,
     ClueSource,
@@ -41,7 +48,7 @@ from tkb_common.schemas import (
     ProfileEvidence,
     ProfileItem,
 )
-from tkb_detect.batch import PostExtraction
+from tkb_detect.batch import PostExtraction, extract_posts
 from tkb_detect.errors import DetectError
 from tkb_detect.extract import Extractor, build_extractor
 from tkb_engine.cross_post import claims_after_deletion
@@ -226,6 +233,7 @@ async def config(request: Request) -> dict[str, bool | int]:
         "gpu_demo_enabled": settings.threads_mock_mode and settings.threads_gpu_demo_enabled,
         "live_enabled": _live_ready(settings),
         "max_posts": settings.threads_max_posts,
+        "image_diagnosis_enabled": settings.threads_image_diagnosis,
     }
 
 
@@ -447,7 +455,12 @@ async def _own_posts(current: ThreadsSession, settings: Settings) -> list[Post]:
         posts, _ = _mock_data()
     else:
         try:
-            owner_id, posts = await fetch_own_posts(current.token, settings.threads_max_posts)
+            if settings.threads_image_diagnosis:
+                owner_id, posts = await fetch_own_posts(
+                    current.token, settings.threads_max_posts, include_images=True
+                )
+            else:
+                owner_id, posts = await fetch_own_posts(current.token, settings.threads_max_posts)
             if owner_id != current.owner_id:
                 raise ThreadsPocError("本人 ID が一致しません")
         except ThreadsPocError as exc:
@@ -562,7 +575,7 @@ def _infer_events(
 
 
 def _text_extractor(settings: Settings) -> Extractor:
-    """Threads の本文を読む部品。写真は読まない（OCR を使わず、投稿にも写真を入れない）。
+    """Threads の本文と、有効時だけ写真を読む部品（OCRは使わない）。
 
     既定は Bluesky と同じ vLLM（VLM_*）で、送り先は MODEL_ALLOWED_HOST_SUFFIXES の許可リストで
     確かめる。THREADS_TEXT_BACKEND=ollama のときだけ Ollama で読む。
@@ -619,7 +632,16 @@ async def diagnose(request: Request) -> dict[str, Any]:
             _require_live(settings)
             extractor = await _reachable_text_extractor(settings)
             posts = await _own_posts(current, settings)
-            extractions = real_extractions(extractor, posts)
+            extractions = (
+                extract_posts(
+                    extractor,
+                    posts,
+                    fetch_threads_images,
+                    image_fetch_fallback_to_text=True,
+                )
+                if settings.threads_image_diagnosis
+                else real_extractions(extractor, posts)
+            )
         gazetteer = _cached_gazetteer(settings.gazetteer_dir)
         started = time.monotonic()
         extracted = [extraction async for extraction in extractions]

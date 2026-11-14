@@ -30,7 +30,13 @@ type ThreadsDiagnosis = DiagnosisSnapshot & {
   /** 読み取りに失敗して診断から外した投稿（api の post_errors）。再診断の応答にはない */
   readonly post_errors?: readonly PostError[];
 };
-type ThreadsConfig = { mock_enabled: boolean; gpu_demo_enabled: boolean; live_enabled: boolean; max_posts: number };
+type ThreadsConfig = {
+  mock_enabled: boolean;
+  gpu_demo_enabled: boolean;
+  live_enabled: boolean;
+  max_posts: number;
+  image_diagnosis_enabled?: boolean;
+};
 type ThreadsSession = { username: string; mock: boolean };
 
 const LANGUAGES: readonly { readonly code: ThreadsLang; readonly label: string }[] = [
@@ -45,7 +51,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function isConfig(value: unknown): value is ThreadsConfig {
   return isRecord(value) && typeof value.mock_enabled === "boolean" &&
     typeof value.gpu_demo_enabled === "boolean" &&
-    typeof value.live_enabled === "boolean" && typeof value.max_posts === "number";
+    typeof value.live_enabled === "boolean" && typeof value.max_posts === "number" &&
+    (value.image_diagnosis_enabled === undefined || typeof value.image_diagnosis_enabled === "boolean");
 }
 
 function isSession(value: unknown): value is ThreadsSession {
@@ -249,9 +256,9 @@ export default function ThreadsPage() {
         <section className="mt-10 max-w-2xl space-y-5" aria-label={t.startAria}>
           <label className="flex gap-3 rounded-sm border border-ink/30 bg-paper-deep p-4">
             <input type="checkbox" className="mt-1 shrink-0" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
-            <span>{t.consent}</span>
+            <span>{config?.image_diagnosis_enabled ? t.consentWithImage : t.consent}</span>
           </label>
-          <p className="text-sm text-ink/70">{t.noMedia}</p>
+          <p className="text-sm text-ink/70">{config?.image_diagnosis_enabled ? t.withMedia : t.noMedia}</p>
           <div className="flex flex-wrap gap-3">
             {config?.mock_enabled && <button type="button" disabled={!consent || busy}
               className="rounded-sm bg-seeker px-5 py-3 font-bold text-paper disabled:opacity-50"
@@ -296,7 +303,8 @@ export default function ThreadsPage() {
           onClick={() => void perform(async () => {
             const data = await call("posts");
             if (!isRecord(data) || data.mock !== session.mock || !Array.isArray(data.posts) ||
-                !data.posts.every((post) => isPost(post) && post.post_id.startsWith("threads:") && post.images.length === 0)) {
+                !data.posts.every((post) => isPost(post) && post.post_id.startsWith("threads:") &&
+                  post.images.length <= (config?.image_diagnosis_enabled ? 1 : 0))) {
               throw new ThreadsError("postsUnreadable");
             }
             setFetchedPosts(data.posts);
@@ -304,15 +312,19 @@ export default function ThreadsPage() {
           })}>{t.reviewPosts}</button>}
         {busy && <p role="status" className="text-sm text-ink/70">{t.loading}</p>}
         {!original && fetchedPosts && <section aria-label={t.postsAria} className="space-y-4">
-          <p className="text-sm text-ink/70">{t.postsFetched(fetchedPosts.length)}</p>
+          <p className="text-sm text-ink/70">{config?.image_diagnosis_enabled
+            ? t.postsFetchedWithImages(fetchedPosts.length) : t.postsFetched(fetchedPosts.length)}</p>
           <ol className="space-y-5">{fetchedPosts.map((post) => <li key={post.post_id}>
+            {post.images.length > 0 && <p className="mb-2 text-xs font-bold text-seeker">{t.imageDiagnosis}</p>}
             <PostCard post={post} locale={lang} />
             <details className="mt-2 text-sm text-ink/70">
               <summary className="cursor-pointer underline underline-offset-4">{t.detailsSummary}</summary>
               <dl className="mt-2 grid gap-1 [overflow-wrap:anywhere]">
                 <div><dt className="inline font-bold">{t.postId}</dt><dd className="inline">{post.post_id}</dd></div>
                 <div><dt className="inline font-bold">{t.postTime}</dt><dd className="inline">{post.created_at}</dd></div>
-                <div><dt className="inline font-bold">{t.media}</dt><dd className="inline">{t.mediaValue}</dd></div>
+                <div><dt className="inline font-bold">{t.media}</dt><dd className="inline">
+                  {post.images.length > 0 ? t.mediaValueImage : t.mediaValue}
+                </dd></div>
               </dl>
             </details>
           </li>)}</ol>
@@ -334,7 +346,7 @@ export default function ThreadsPage() {
         </section>}
         {!original && fetchedPosts && <details className="rounded-sm border border-ink/20 p-4">
           <summary className="cursor-pointer font-bold">{t.aiSummary}</summary>
-          <p className="mt-3 text-sm text-ink/70">{t.aiNote}</p>
+          <p className="mt-3 text-sm text-ink/70">{config?.image_diagnosis_enabled ? t.aiNoteWithImages : t.aiNote}</p>
           <button type="button" disabled={busy}
             className="mt-3 rounded-sm bg-seeker px-6 py-3 font-bold text-paper disabled:opacity-50"
             onClick={() => void perform(async () => {
@@ -386,6 +398,7 @@ export default function ThreadsPage() {
               <input type="checkbox" checked={selected.includes(post.post_id)} onChange={() => toggle(post.post_id)} />
               {t.exclude}
             </label>
+            {post.images.length > 0 && <p className="mb-2 text-xs font-bold text-seeker">{t.imageDiagnosis}</p>}
             <PostCard post={post} locale={lang} found={{ clues: original.clues.filter((clue) => clue.post_id === post.post_id), error: null }} />
           </li>)}</ol>
           <div className="flex flex-wrap gap-3">
