@@ -57,6 +57,7 @@ from tkb_engine.planner import simulate as simulate_deletion
 from tkb_engine.rules import infer
 
 router = APIRouter(prefix="/api/threads", tags=["threads"])
+logger = logging.getLogger(__name__)
 SESSION_COOKIE = "threads_tkb_session"
 START_COOKIE = "threads_oauth_start"
 START_TTL_S = 300
@@ -204,6 +205,11 @@ def _live_ready(settings: Settings) -> bool:
 def _require_live(settings: Settings) -> None:
     if not _live_ready(settings):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Threads の実投稿診断は現在利用できません")
+
+
+def _kind(current: ThreadsSession) -> str:
+    """ログ用。実アカウント（live）か、モック・デモ（mock）か。識別子は出さない。"""
+    return "mock" if current.token is None else "live"
 
 
 def _session(request: Request) -> ThreadsSession:
@@ -435,7 +441,8 @@ async def data_deletion(request: Request) -> dict[str, str]:
 @router.get("/session")
 async def session(request: Request) -> dict[str, str | bool]:
     current = _session(request)
-    return {"username": current.username, "mock": current.token is None}
+    # busy: 診断（または投稿取得）が実行中。再読み込みした画面が処理中だと分かるように返す
+    return {"username": current.username, "mock": current.token is None, "busy": current.busy}
 
 
 @router.get("/diagnosis")
@@ -633,10 +640,13 @@ async def diagnose(request: Request) -> dict[str, Any]:
     current = _session(request)
     if current.snapshot is not None:
         return current.snapshot
+    kind = _kind(current)
     with _store(request).lock:
         if current.busy:
+            logger.info("Threads診断：実行中のため重複要求を断る kind=%s", kind)
             raise HTTPException(status.HTTP_409_CONFLICT, "診断中です")
         current.busy = True
+    logger.info("Threads診断：開始 kind=%s image=%s", kind, settings.threads_image_diagnosis)
     try:
         if current.token is None:
             if not settings.threads_mock_mode:
@@ -695,7 +705,22 @@ async def diagnose(request: Request) -> dict[str, Any]:
             "elapsed_ms": round((time.monotonic() - started) * 1000),
             "mock": current.token is None,
         }
+        logger.info(
+            "Threads診断：完了 kind=%s 投稿=%d 手がかり=%d 読めなかった投稿=%d 秒=%.1f",
+            kind,
+            len(posts),
+            len(current.clues),
+            len(post_errors),
+            time.monotonic() - started,
+        )
         return current.snapshot
+    except HTTPException as exc:
+        logger.info("Threads診断：失敗 kind=%s status=%d", kind, exc.status_code)
+        raise
+    except Exception as exc:
+        # 例外の中身（本文・URL・トークンが混ざりうる）は出さず、型名だけ
+        logger.warning("Threads診断：失敗 kind=%s error=%s", kind, type(exc).__name__)
+        raise
     finally:
         with _store(request).lock:
             current.busy = False
