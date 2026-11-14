@@ -1661,7 +1661,12 @@ def _photo_home_area_facts(
             photo_post is None
             or result.status is not PhotoPlaceStatus.CANDIDATE
             or result.granularity is not PhotoPlaceGranularity.FACILITY
-            or result.lookup_status is not PhotoPlaceLookupStatus.LOCAL_ONLY
+            or result.lookup_status
+            not in {
+                PhotoPlaceLookupStatus.LOCAL_ONLY,
+                PhotoPlaceLookupStatus.REFERENCE_CHECKED,
+                PhotoPlaceLookupStatus.UNAVAILABLE,
+            }
             or _forbidden_context(photo_post.text)
             or _has_quoted_or_fiction_context(photo_post.text)
             or _PHOTO_AREA_EXCLUDED_RE.search(photo_post.text)

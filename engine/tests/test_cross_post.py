@@ -519,6 +519,26 @@ def test_photo_place_residence_needs_home_context_and_independent_local_post() -
         item for item in candidate_sets if item.attribute is ProfileAttribute.RESIDENTIAL_AREA
     )
     assert [candidate.value for candidate in residence_set.candidates] == ["\u6587\u4eac\u533a"]
+    for lookup_status in (
+        PhotoPlaceLookupStatus.REFERENCE_CHECKED,
+        PhotoPlaceLookupStatus.UNAVAILABLE,
+    ):
+        checked = result.model_copy(update={"lookup_status": lookup_status})
+        assert any(
+            item.attribute is ProfileAttribute.RESIDENTIAL_AREA
+            for item in infer_owner_claims(
+                [photo, area_post], [photo_clue, area_clue], photo_place_results=[checked]
+            )
+        )
+    web_searched = result.model_copy(
+        update={"lookup_status": PhotoPlaceLookupStatus.WEB_SEARCHED}
+    )
+    assert all(
+        item.attribute is not ProfileAttribute.RESIDENTIAL_AREA
+        for item in infer_owner_claims(
+            [photo, area_post], [photo_clue, area_clue], photo_place_results=[web_searched]
+        )
+    )
     assert claim.status is ProfileStatus.WEAK
     assert claim.confidence <= 0.65
     path = claim.evidence_paths[0]
