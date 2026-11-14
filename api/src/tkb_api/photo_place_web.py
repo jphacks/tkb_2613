@@ -189,13 +189,13 @@ def _external_candidates(
         seen.add(place_id)
         locality = address.get("addressLocality")
         region = address.get("addressRegion")
+        # 居住地域の弱い根拠に使えるのは、市区町村で終わる値だけ（それ以外は None）。
         coarse_area = (
-            " ".join(
-                str(part).strip()
-                for part in (region, locality)
-                if isinstance(part, str) and part.strip()
-            )[:200]
-            or None
+            locality.strip()
+            if isinstance(locality, str)
+            and len(locality.strip()) >= 2
+            and locality.strip().endswith(("市", "区", "町", "村"))
+            else None
         )
         source_id = f"brave-place-search:{identity}"
         candidate = PhotoPlaceCandidate(
@@ -212,7 +212,7 @@ def _external_candidates(
                     source_id=source_id,
                     provider="Brave Search Place Search",
                     dataset="unverified external place result",
-                    license_id=None,
+                    license_id="brave-search-api-terms",
                     record_id=None,
                     version=None,
                     attribution="Brave Search result; not independently verified",
