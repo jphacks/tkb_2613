@@ -279,8 +279,10 @@ def _area_record_candidates(
     if len(locality) < 2 or not locality.endswith(("市", "区", "町", "村")):
         return []
     clue_index = next(
-        (e.clue_index for e in external.candidate.evidence if e.clue_index is not None), 0
+        (e.clue_index for e in external.candidate.evidence if e.clue_index is not None), None
     )
+    if clue_index is None:
+        return []
     candidates = []
     for row in gazetteer.places_named_in_area(external.candidate.label, locality):
         candidate = place_candidate_from_record(row, clue_index)
