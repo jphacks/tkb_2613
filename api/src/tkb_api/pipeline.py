@@ -360,6 +360,7 @@ async def diagnose_events(
         gazetteer=gazetteer,
         diagnosis_date=diagnosis_date,
         diagnosis_at=diagnosis_at,
+        photo_place_results=photo_place_results,
     )
     profile_claim_suggestions = plan_profile_candidate_deletion(profile_claims, posts)
     profile_relations = infer_owner_profile_relations(

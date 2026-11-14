@@ -1,8 +1,8 @@
 # 写真から場所を推定する汎用設計（提案）
 
-状態: 第一〜第三実装スライス済み。対象は日本全国の投稿写真に写る場所候補であり、写真だけから居住地や現在地を決めない。任意のGeoJSONLデータをストリーミングでSQLite名称索引に取り込み、実行時に照合する経路と、診断単位の写真場所専用同意を必要とするBrave Place Search補完を実装済み。現在は実POIデータを同梱・配置していないため、索引がない環境では外部同意/許可対象Clueがなければ `unknown` を返す。Commonsの位置付き公開写真を使う参照画像照合は、個別の権利確認と診断単位同意を経た極めて近い複製検出までを実装した。別角度/視点照合と撮影地点推定は未実装。
+状態: 第一〜第四実装スライス済み。撮影場所候補の生成、同意付きCommons参照画像の近似複製照合、PhotoPlaceResultを条件付きで使う保守的な投稿横断`residential_area`経路まで実装済み。写真候補だけから居住地や現在地を決めない。別角度/視点照合と撮影地点推定は未実装。
 
-初回スライスでは、投稿画像ごとの `PhotoPlaceResult` を共通Pydantic型とTypeScript型で追加し、`conclusions` SSEと診断snapshotに含めた。駅名はGazetteer掲載名への完全一致に加え、同じ画像上で重なる高確度OCRとVLMの駅名観測を要求する。既存郵便Gazetteerは完全な郵便番号/住所の文字候補にだけ使い、文字が写真に写ること自体からカメラ位置を推定しない。任意POIは出典・ライセンスが確認されたローカルSQLite索引だけから候補化し、GeoJSONLはストリーミング取込する。権利不明行は検索aliasに登録しない。同名候補は最大50件まで表示し、超過時も `ambiguous` と明示する。複数候補は `ambiguous`、根拠不足や未配置索引は `unknown`。写真場所とプロフィール推論は別経路で、PhotoPlaceResult単独から居住地/現在地候補を生成しない。
+初回スライスでは投稿画像ごとの `PhotoPlaceResult` を共通型と `conclusions` SSE/診断snapshotに追加した。駅候補は重なる高確度OCR/VLM、施設候補は許諾済みローカルSQLite POI索引を使う。写真場所結果はプロフィール属性と別型のままだが、本人が写真投稿で「自宅近くの<X>」と明示し、許諾済み一意POIの粗い行政地域が分かり、別投稿にも同地域の近隣・日常・帰宅・通勤等の独立文脈と `PLACE_TEXT` 根拠がある場合だけ、居住地域の弱い候補を作る。結果単独では候補を作らない。
 
 ## 1. 目的と境界
 
@@ -59,10 +59,10 @@
 }
 ```
 
-- `PhotoPlaceResult` は `post_id`, `image_index`, `status`, `granularity`, `candidates`, `reason_codes`, `lookup_status` を持つ。`status` は `candidate | ambiguous | unknown | unavailable`、`lookup_status` は `local_only | web_searched | unavailable`。`reason_codes` はその状態と矛盾しない理由だけを含める。不明なら候補を空配列にする。
+- `PhotoPlaceResult` は `post_id`, `image_index`, `status`, `granularity`, `candidates`, `reason_codes`, `lookup_status` を持つ。`status` は `candidate | ambiguous | unknown | unavailable`、`lookup_status` は `local_only | web_searched | reference_checked | unavailable`。`reason_codes` はその状態と矛盾しない理由だけを含める。不明なら候補を空配列にする。
 - 候補要素は安定した出典ID、表示ラベル、地物種別（`station | landmark | facility | address | area | unknown`）、地理粒度、`photo_relation`、証拠参照、出典IDを持つ。`photo_relation` は候補ごとの `visible_in_frame | camera_nearby | camera_at` のいずれかで、画像ごとの結果全体には置かない。地標が写っているだけなら `visible_in_frame` とし、距離のある地標から `camera_at` を導かない。 `camera_nearby` / `camera_at` は視点照合や近距離看板等で撮影地点を拘束できた場合に限る。座標を返す必要がある場合は粗く丸めた座標を別途定義し、民家/個人施設の正確な座標は出さない。`score` は未校正なら `null`。座標や参照画像メタデータは内部計算用と画面表示用を分ける。
 - `PhotoPlaceEvidence` は観測clue indexまたは参照画像IDを指す。`PhotoPlaceSource` は出典・ライセンスと任意の `source_url` を持つ。Brave結果は一時IDを持続IDとして使わず、source URLを公開HTTPS検査したうえで表示する。
-- `PhotoPlaceResult` は `ProfileAttribute` ではない。`RESIDENTIAL_AREA`、`REALTIME_LOCATION`、`WebFact` と統合しない。関係推論が成立した際も、居住地claimは `evidence_paths` から元の `PhotoPlaceResult` と投稿本文の関係clueに遡れるようにする。
+- `PhotoPlaceResult` は `ProfileAttribute` ではなく、直接 `RESIDENTIAL_AREA` / `REALTIME_LOCATION` / `WebFact` へ変換しない。保守的な居住地域経路では、元画像の `Clue` evidence（post/clue indexから画像を特定）、同じ投稿の候補名に係る明示的な家周辺文脈、別投稿の独立した同地域根拠をAND経路に含める。全根拠を必須にするため、どちらの投稿を除外しても経路が落ちる。専用のPhotoPlaceResult ProfileEvidence型は追加せず、Clueと投稿文の既存参照から候補を再構成できる。
 
 ## 5. API / SSE 契約との同期
 
@@ -154,7 +154,7 @@ Mapillaryの地理付き街路画像 | 候補を絞った地域の視点画像�
 - **任意SQLite POI**: `data-prep/src/tkb_data_prep/import_places.py` はローカルGeoJSONLまたはPyArrowのバッチ読込に対応したGeoParquetを既存SQLite索引へ取り込む。GeoParquetでは `theme=places` と `type=place` の両partition列を必須にし、WKB Point、`addresses[].country=JP`、私有住居カテゴリdenylistを適用する。Overture [Place schema](https://docs.overturemaps.org/schema/reference/places/place/) と [Address schema](https://docs.overturemaps.org/schema/reference/places/types/address/) の `addresses[].locality` から、市区町村接尾辞で明示され一意な値だけを粗い `area_label` として保存する。公式定義上localityは近隣地区の場合もあるため、市区町村と判定できない値や競合値はnull。住所freeform・番地・郵便番号は保存しない。既存CLIと互換のためGeoJSONLが既定で、GeoParquetは `--input-format geoparquet` を指定する。API/Gazetteer既定ディレクトリは `data/processed/places.sqlite3`。既存DBは上書きしない。`name_key` のindexでlookupする。索引がなければPOIはunknown。名称キーは `tkb_common.place_names.place_name_keys` をimport/search双方で共有し、NFKC、空白・中黒の差、かな文字種の差だけを正規化する。漢字の読みや意味は推測しない。SQLite `user_version` でキー仕様を示し、非対応versionは検索せずunknown理由を返すため、仕様更新後は索引を再生成する。公開POIデータのみ保存対象で、投稿画像・本文・診断結果は引き続き保存しない。DBレコードは `place_id, names/aliases, coordinates, area_label, basic_category/taxonomy, sources` を保持する。
 - インポートは `addresses[].country=JP` を既定条件にする。住所国が欠落するデータは入力が日本範囲へ切り出し済みの場合だけ明示フラグで許可する（GeoParquetもcountry欠落行は除外）。`theme/type` が Places/place 以外のParquet行、Point以外、明示的な私有住居カテゴリは除外する。source licenseは各source行から保ち、null値は出典情報とともにDBに残すが検索aliasは作らない。`source-license-map` は人が確認したdataset別 SPDX mapping のみ受け付ける。POI名一致は未確認候補で、所在地の検証済み事実ではない。GeoParquetアダプタは小さなfixtureでpartition・国・私有カテゴリ・ライセンス・上書き条件を検証する。実データの取得量と地域カバレッジは取得前に別途確認する。
 - 同名候補は最大50件を表示し、上限超過時は `too_many_matches` を付け、画面に候補の省略と曖昧さを示す。未校正scoreは保存型にあっても画面へ表示しない。
-- **独立性**: `photo_place_results` は29属性の `profile_claims` / `profile_relations` の入力ではない。仮除外/実削除された投稿の写真候補は画面から除く。候補が現れても撮影地点・居住地・現在地を示さない。
+- **独立性と関係推論**: `photo_place_results` 自体はprofile claimではない。唯一の現行接続は `residential_area` への保守的な別推論で、ローカルlicensed POIの一意候補、同じ投稿本文の「自宅/家/うちの近くの候補名」、候補と画像Clue名の正規化一致、粗い `area_label`、別投稿の同地域 `PLACE_TEXT` と近隣/日常等の明示文脈をすべて要求する。`WEB_SEARCHED`候補、単なる地域名言及、引用/旅行/訪問/否定、曖昧候補は使わず、confidenceは最大0.65でstatusはweak。根拠経路に写真側・独立投稿側の両方を含め、除外・削除時は既存candidate-pool再評価で経路を落とす。表示する写真候補は削除投稿から除く。撮影地点/現在地推定は行わない。
 - **Brave Place Search（実装済み）**: `api/src/tkb_api/photo_place_web.py` のtransport注入可能クライアント。診断ごとの `photo_place_web_lookup_consent` のみで起動し、既存ハンドル検索同意とは独立。最大3クエリ、画像OCR/VLM `shop/landmark/station_sign` の名称のみを送る。結果title完全一致と `postal_address.country=JP` を要求し、`source_url` は公開HTTPS検査後に表示。Brave短期ID/snippet/thumbnailは保持しない。mock・キーなしは通信しない。有料APIの実呼び出しは行っていない。
-- **未実装**: 別角度を含む参照画像/視点照合、`camera_nearby` / `camera_at`の成立ルール、写真場所と「家の近く」等の独立投稿文脈を結ぶprofile inference、外部候補の公式/公的な独立検証。POI本体は取得していない。
+- **未実装**: 別角度を含む参照画像/視点照合、`camera_nearby` / `camera_at`の成立ルール、Braveなど外部候補の公式/公的な独立検証。POI本体は取得していない。
 - データ供給源の参照条件と任意取込手順は [`data-prep/SOURCES.md`](../data-prep/SOURCES.md)。API/SSE形は [`docs/api-sse-contract.md`](api-sse-contract.md)。テスト結果は実行環境での確認後に作業報告へ記録する。

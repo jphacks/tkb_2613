@@ -405,7 +405,9 @@ def read_diagnosis(
         "posts": [post.model_dump(mode="json") for post in posts],
         "clues": [clue.model_dump(mode="json") for clue in clues],
         "photo_place_results": [
-            item.model_dump(mode="json") for item in diagnosis.photo_place_results
+            item.model_dump(mode="json")
+            for item in diagnosis.photo_place_results
+            if item.post_id not in deleted_ids
         ],
         "deleted": list(deleted),
         "conclusions": conclusions_json(clues, posts, gazetteer, deleted),
