@@ -282,6 +282,43 @@ mv processed processed.bad && mv processed.prev processed && systemctl restart t
 
 3. 一度、Actions から実行して Summary が「成功」になることを確かめる
 
+### うまくいかなかったとき
+
+Summary の結果ごとに、することが決まっている。「前のコミット」と SSM コマンド ID は Summary にある。
+
+| 結果 | 本番の状態 | すること |
+|---|---|---|
+| ⛔ 始める前に中止 / EC2 に送る前に中止 | 変わっていない | 理由（最新の main でない、CI が未完了、EC2 に手元の変更がある など）を直して、もう一度 Run workflow |
+| ⏸ 別のデプロイが実行中 | 変わっていない | 前のデプロイが終わってから実行する |
+| ↩️ 前のコミットに戻した | 前のコミットで動いている（確認済み） | 失敗の理由（EC2 の出力の `prod_smoke.py` の NG 行など）を PR で直してから、もう一度実行 |
+| 🚨 ロールバックも失敗 | 止まっているか、不完全 | すぐにインフラ担当へ。下の「手で戻す」 |
+| Actions を途中で止めた・待ちきれなかった | EC2 ではデプロイとロールバックが最後まで進む | 15分ほど待って画面を確かめ、もう一度実行する（実行中なら「別のデプロイが実行中」で止まるだけ）。インフラ担当は `aws ssm get-command-invocation --region us-east-1 --instance-id i-0e4f78053c9564025 --command-id <ID>` で結果を見られる |
+| SSM の状態が Undeliverable・Failed で、EC2 の出力がない | 変わっていない（SSM のエージェントに届いていない） | インフラ担当が `aws ssm describe-instance-information` で EC2 がオンラインか確かめる |
+
+**手で戻す（インフラ担当）**：SSM でアプリの EC2 に入り、前のコミットで起動し直す。
+
+```bash
+sudo -i
+cd /opt/tkb_2613
+git log -1 --oneline; docker ps -a; journalctl -u tkb-app -n 100 --no-pager   # 何が起きたか
+git checkout <前のコミットの SHA>
+install -m 700 infra/tkb-app-start.sh /usr/local/bin/tkb-app-start
+systemctl restart tkb-app
+python3 infra/prod_smoke.py "$(sed -n 's/^PUBLIC_URL=//p' .env)"
+```
+
+ビルドそのものができない（ディスク不足、Docker Hub や PyPI に届かない など）ときは、デプロイの前に残したイメージを、ビルドせずに使う。秘密の渡し方は起動スクリプトのままにする。
+
+```bash
+docker tag tkb_2613-api:rollback-<前のSHAの7桁> tkb_2613-api:latest
+docker tag tkb_2613-web:rollback-<前のSHAの7桁> tkb_2613-web:latest
+sed 's/ up --build -d/ up --no-build -d/' /usr/local/bin/tkb-app-start > /run/tkb-app-start-nobuild
+bash /run/tkb-app-start-nobuild; rm -f /run/tkb-app-start-nobuild
+df -h /; docker system df   # ディスク不足なら docker builder prune で空ける
+```
+
+それでも戻らず、利用者に壊れた画面を見せたくないときは、「全遮断・停止」の 1（WAF で全員を遮断）を使う。
+
 ## 全遮断・停止（docs/aws-migration.md の 7章）
 
 ### OAuth の公開前試験と採用判定（11/12 21:00 JST）
