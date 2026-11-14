@@ -43,15 +43,27 @@ export function confidenceLevel(conclusion: Conclusion): "strong" | "weak" | nul
 
 /**
  * 投稿を消したらどうなるか（実際には消さない）。plan イベントと POST /api/simulate の応答に共通。
- * api/src/tkb_api/pipeline.py の simulation_json と同時に変更すること。
+ * api/src/tkb_api/pipeline.py の simulate_claims_json と同時に変更すること。
+ * Threads 互換ルートでは after に旧 Conclusion[] が返る場合がある。
  */
 export interface Simulation {
   /** 消す投稿の ID */
   readonly delete: readonly string[];
-  /** 消すと「不明」になる項目（Conclusion の attribute） */
+  /** 消すと候補が崩れる項目（ProfileAttribute または旧 Conclusion の attribute） */
   readonly broken: readonly string[];
-  /** 消したあとに残る結論 */
-  readonly after: readonly Conclusion[];
+  /** 消したあとに残る結果 */
+  readonly after: readonly ProfileCandidateSet[] | readonly Conclusion[];
+}
+
+export function isProfileSimulationAfter(
+  after: Simulation["after"],
+): after is readonly ProfileCandidateSet[] {
+  return isProfileCandidateSetList(after);
+}
+
+/** PR2 で UI を 29 項目へ一本化するまでの旧 Conclusion[] 互換取り出し。 */
+export function legacySimulationConclusions(after: Simulation["after"]): readonly Conclusion[] {
+  return isProfileSimulationAfter(after) ? [] : after;
 }
 
 /**
@@ -281,13 +293,11 @@ export function isSimulation(
   value: unknown,
   clueCount = Number.POSITIVE_INFINITY,
 ): value is Simulation {
-  return (
-    isRecord(value) &&
-    isStringList(value.delete) &&
-    isStringList(value.broken) &&
-    Array.isArray(value.after) &&
-    value.after.every((c) => isConclusion(c, clueCount))
-  );
+  if (!isRecord(value) || !isStringList(value.delete) || !isStringList(value.broken) || !Array.isArray(value.after)) {
+    return false;
+  }
+  const after: readonly unknown[] = value.after;
+  return isProfileCandidateSetList(after) || after.every((c) => isConclusion(c, clueCount));
 }
 
 /** 実際に消した結果の形を確かめる。clueCount は isSimulation と同じ */

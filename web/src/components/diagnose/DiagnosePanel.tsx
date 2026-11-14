@@ -14,7 +14,7 @@ import { ApiError, diagnose, getDiagnosis, getFeatures } from "@/lib/api";
 import { messages } from "@/lib/messages";
 import { validNameConclusions } from "@/lib/reveal";
 import type { Clue } from "@/types/clue";
-import type { Conclusion, PhotoPlaceResult, RiskyPost, Simulation } from "@/types/diagnose";
+import { legacySimulationConclusions, type Conclusion, type PhotoPlaceResult, type RiskyPost, type Simulation } from "@/types/diagnose";
 import type { Post } from "@/types/post";
 import { profileClaimsAfterDeletion, type ExternalLookupStatus, type ExternalProfileResult, type ProfileCandidateSet, type ProfileRelation, type WebFact } from "@/types/profile";
 
@@ -229,7 +229,7 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
   const excluded = simulation ? new Set([...deleted, ...simulatedGone]) : deleted;
   const visibleProfileClaims = profileClaimsAfterDeletion(result?.profileClaims ?? [], excluded);
   const visibleProfileClaimSuggestions = (result?.profileClaimSuggestions ?? []).filter((id) => !excluded.has(id));
-  const visibleConclusions = simulation ? validNameConclusions(simulation.after) : result?.conclusions ?? [];
+  const visibleConclusions = simulation ? validNameConclusions(legacySimulationConclusions(simulation.after)) : result?.conclusions ?? [];
 
   // 結果が出たら再診断ボタンを下へ移し、身元カード→写真→捜査ボードを続けて見せる。
   const postList = (
@@ -303,7 +303,7 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
         <ConclusionBoard
           clues={result.clues}
           photoPlaceResults={result.photoPlaceResults?.filter((item) => !excluded.has(item.post_id))}
-          conclusions={simulation ? validNameConclusions(simulation.after) : result.conclusions}
+          conclusions={simulation ? validNameConclusions(legacySimulationConclusions(simulation.after)) : result.conclusions}
           unknown={simulation?.broken}
           profileClaims={visibleProfileClaims}
           profileRelations={result.profileRelations}
