@@ -1,0 +1,175 @@
+# 本番デプロイ：Actions の「Run workflow」から、最新の main をアプリの EC2 に出す。
+#
+# - 書き込み権限のあるメンバーなら誰でも実行できる。対象は実行した時点の最新の main だけ
+# - AWS へは OIDC で入り、ロール tkb_2613-github-deploy（infra/terraform/deploy.tf）を使う。
+#   できるのは SSM ドキュメント tkb_2613-deploy をアプリの EC2 に送ることだけ（GPU には触れない）
+# - EC2 では infra/deploy.sh が checkout → 起動し直し → api・web・prod_smoke.py の確認を行い、
+#   失敗したら前のコミットに戻す
+# - 同時に実行しない。途中で Actions を止めても、EC2 側のデプロイ（とロールバック）は最後まで進む
+name: 本番デプロイ
+
+on:
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: デプロイする理由（任意。実行の記録に残る）
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  actions: read # 同じコミットの CI の結果を確かめる
+  id-token: write # AWS の OIDC
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-1
+  APP_INSTANCE_ID: i-0e4f78053c9564025
+  SSM_DOCUMENT: tkb_2613-deploy
+  # EC2 側の上限（ドキュメントの timeoutSeconds）より少し長く待つ
+  WAIT_SECONDS: 1980
+
+jobs:
+  deploy:
+    name: main を本番へ
+    # main 以外のブランチを選んで実行しても動かさない（AWS 側の信頼ポリシーでも main だけに絞っている）
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: 最新の main で、CI が通っているか確かめる
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          echo "STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
+          latest="$(gh api "repos/$REPO/commits/main" --jq .sha)"
+          if [ "$latest" != "$SHA" ]; then
+            echo "::error::最新の main ではありません（実行したのは ${SHA:0:7}、main は ${latest:0:7}）。もう一度 Run workflow してください"
+            exit 1
+          fi
+          conclusion="$(gh api "repos/$REPO/actions/workflows/ci.yml/runs?head_sha=$SHA&event=push&per_page=1" \
+            --jq '.workflow_runs[0].conclusion // "missing"')"
+          if [ "$conclusion" != "success" ]; then
+            echo "::error::このコミットの CI が成功していません（${conclusion}）。CI が終わってから実行してください"
+            exit 1
+          fi
+          echo "デプロイするコミット：$SHA（CI 成功）"
+
+      - name: AWS に OIDC で入る
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          role-session-name: deploy-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+          mask-aws-account-id: true
+
+      - name: アプリの EC2 でデプロイする（SSM Run Command）
+        id: ssm
+        env:
+          SHA: ${{ github.sha }}
+          ACTOR: ${{ github.actor }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          command_id="$(aws ssm send-command \
+            --instance-ids "$APP_INSTANCE_ID" \
+            --document-name "$SSM_DOCUMENT" \
+            --parameters "CommitSha=$SHA" \
+            --comment "actions run $RUN_ID by $ACTOR" \
+            --query Command.CommandId --output text)"
+          echo "command_id=$command_id" >> "$GITHUB_OUTPUT"
+          echo "SSM コマンド：$command_id"
+
+          deadline=$(( $(date +%s) + WAIT_SECONDS ))
+          status=Pending
+          while :; do
+            status="$(aws ssm get-command-invocation --command-id "$command_id" --instance-id "$APP_INSTANCE_ID" \
+              --query Status --output text 2>/dev/null || echo Pending)"
+            case "$status" in
+              Pending|InProgress|Delayed) ;;
+              *) break ;;
+            esac
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "::error::EC2 の応答を待ちきれませんでした（最後の状態：$status）"
+              break
+            fi
+            sleep 10
+          done
+
+          aws ssm get-command-invocation --command-id "$command_id" --instance-id "$APP_INSTANCE_ID" \
+            --query StandardOutputContent --output text > deploy.log || true
+          aws ssm get-command-invocation --command-id "$command_id" --instance-id "$APP_INSTANCE_ID" \
+            --query StandardErrorContent --output text > deploy.err || true
+          echo "::group::EC2 の出力"
+          cat deploy.log
+          echo "::endgroup::"
+          if [ -s deploy.err ] && [ "$(cat deploy.err)" != "None" ]; then
+            echo "::group::EC2 のエラー出力"
+            cat deploy.err
+            echo "::endgroup::"
+          fi
+
+          line="$(grep '^DEPLOY_RESULT=' deploy.log | tail -n 1 || true)"
+          result="$(sed -n 's/^DEPLOY_RESULT=\([a-z_]*\).*/\1/p' <<<"$line")"
+          previous="$(sed -n 's/.* PREVIOUS=\([0-9a-f]*\).*/\1/p' <<<"$line")"
+          current="$(sed -n 's/.* CURRENT=\([0-9a-f]*\).*/\1/p' <<<"$line")"
+          {
+            echo "status=$status"
+            echo "result=${result:-unknown}"
+            echo "previous=$previous"
+            echo "current=$current"
+          } >> "$GITHUB_OUTPUT"
+
+          case "${result:-unknown}" in
+            success) echo "本番は ${SHA:0:7} で動いています" ;;
+            rolled_back) echo "::error::確認に失敗したので、前のコミット ${previous:0:7} に戻しました"; exit 1 ;;
+            rollback_failed) echo "::error::ロールバックも失敗しました。すぐにインフラ担当へ連絡してください"; exit 1 ;;
+            locked) echo "::error::EC2 で別のデプロイが実行中でした。何も変えていません"; exit 1 ;;
+            aborted) echo "::error::始める前の確認で止めました。何も変えていません（上の EC2 の出力を見てください）"; exit 1 ;;
+            *) echo "::error::結果を読み取れませんでした（SSM の状態：$status）"; exit 1 ;;
+          esac
+
+      - name: 実行の記録
+        if: always()
+        env:
+          SHA: ${{ github.sha }}
+          ACTOR: ${{ github.actor }}
+          REASON: ${{ inputs.reason }}
+          RESULT: ${{ steps.ssm.outputs.result || 'not_started' }}
+          PREVIOUS: ${{ steps.ssm.outputs.previous }}
+          CURRENT: ${{ steps.ssm.outputs.current }}
+          COMMAND_ID: ${{ steps.ssm.outputs.command_id }}
+          SERVER: ${{ github.server_url }}
+          REPO: ${{ github.repository }}
+        run: |
+          started="${STARTED_AT:-$(date +%s)}"
+          elapsed=$(( $(date +%s) - started ))
+          case "$RESULT" in
+            success) label="✅ 成功" ;;
+            rolled_back) label="↩️ 失敗したので前のコミットに戻した" ;;
+            rollback_failed) label="🚨 ロールバックも失敗" ;;
+            locked) label="⏸ 別のデプロイが実行中（変更なし）" ;;
+            aborted) label="⛔ 始める前に中止（変更なし）" ;;
+            not_started) label="⛔ EC2 に送る前に中止（変更なし）" ;;
+            *) label="❓ 不明（$RESULT）" ;;
+          esac
+          commit_link() { [ -n "$1" ] && echo "[\`${1:0:7}\`]($SERVER/$REPO/commit/$1)" || echo "-"; }
+          {
+            echo "## 本番デプロイ：$label"
+            echo
+            echo "| 項目 | 値 |"
+            echo "|---|---|"
+            echo "| 実行者 | $ACTOR |"
+            echo "| デプロイしたコミット | $(commit_link "$SHA") |"
+            echo "| 前のコミット | $(commit_link "$PREVIOUS") |"
+            echo "| いま本番で動いているコミット | $(commit_link "$CURRENT") |"
+            echo "| 所要時間 | $((elapsed / 60)) 分 $((elapsed % 60)) 秒 |"
+            echo "| SSM コマンド ID | \`${COMMAND_ID:--}\` |"
+            if [ -n "$REASON" ]; then
+              echo "| 理由 | $(printf '%s' "$REASON" | tr -d '|\r\n' | cut -c1-200) |"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
