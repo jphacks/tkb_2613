@@ -3,7 +3,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError, getSharedResult } from "@/lib/api";
 import { messages } from "@/lib/messages";
-import type { DiagnosisSnapshot } from "@/types/diagnose";
+import type { DiagnosisSnapshot, LegacySharedSnapshot } from "@/types/diagnose";
+import { PROFILE_DIAGNOSED_ATTRIBUTES } from "@/types/profile";
 
 import SharedResultPage from "./page";
 
@@ -27,8 +28,13 @@ describe("SharedResultPage", () => {
         created_at: "2026-10-20T08:31:00+09:00", images: [],
       }],
       clues: [],
-      conclusions: [],
-      plan: { delete: [], broken: [], after: [], posts: [] },
+      profile_claims: PROFILE_DIAGNOSED_ATTRIBUTES.map((attribute) => ({
+        attribute, status: "unknown", candidates: [], candidate_pool: [], reason: null, conflicting_evidence: [],
+      })),
+      profile_relations: [],
+      plan: { delete: [], broken: [], after: PROFILE_DIAGNOSED_ATTRIBUTES.map((attribute) => ({
+        attribute, status: "unknown", candidates: [], candidate_pool: [], reason: null, conflicting_evidence: [],
+      })), posts: [] },
     };
     vi.mocked(getSharedResult).mockResolvedValue(saved);
 
@@ -37,6 +43,24 @@ describe("SharedResultPage", () => {
     expect(await screen.findByText("デモの投稿")).toBeInTheDocument();
     expect(getSharedResult).toHaveBeenCalledWith(token, expect.any(Object));
     expect(screen.queryByRole("button", { name: "Bluesky から消す" })).not.toBeInTheDocument();
+  });
+
+  it("renders an old saved conclusion snapshot without recomputing it", async () => {
+    window.location.hash = "b".repeat(43);
+    const legacy: LegacySharedSnapshot = {
+      posts: [],
+      clues: [],
+      conclusions: [{ rule: "R3", attribute: "routine", value: "火曜の夜勤", clue_indices: [], note: "保存済み" }],
+      plan: {
+        delete: [], broken: ["routine"],
+        after: [{ rule: "R3", attribute: "routine", value: "火曜の夜勤", clue_indices: [], note: "保存済み" }],
+        posts: [],
+      },
+    };
+    vi.mocked(getSharedResult).mockResolvedValue(legacy);
+    render(<SharedResultPage />);
+    expect((await screen.findAllByText("火曜の夜勤")).length).toBeGreaterThan(0);
+    expect(getSharedResult).toHaveBeenCalledWith("b".repeat(43), expect.any(Object));
   });
 
   it("says result links are turned off instead of calling the link invalid", async () => {

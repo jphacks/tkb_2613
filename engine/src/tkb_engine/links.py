@@ -11,6 +11,8 @@ rules.py の R1〜R12 の結論と手がかりを受け取り、1件ずつでは
   そのどれかに R1 の最寄り駅も出てくれば「◯◯駅の近く」を添える
 - X5 勤務先・バイト先：会社・店の名前と、同じ投稿の「シフト」「バイト」などの言葉（workplace）
 
+搭乗券のバーコードを使う BP1・BP2 は boarding.py。link でここに並べる。
+
 ルールを足すときは rule_xN を書き、link に並べる。しきい値は下にまとめる。
 """
 
@@ -19,6 +21,7 @@ from collections.abc import Sequence
 from datetime import datetime, timedelta
 
 from tkb_common.schemas import Clue, ClueType, Post
+from tkb_engine.boarding import PAST_WORDS, Plan, rule_bp1, rule_bp2
 from tkb_engine.gazetteer import Gazetteer
 from tkb_engine.rules import SCHOOL_WORDS, Conclusion, _local, _most_frequent
 
@@ -28,9 +31,8 @@ X4_MIN_POSTS = 2
 # ----------------------------
 
 AGE = re.compile(r"(\d{1,3})\s*歳")
-# X3：旅行・帰省などの予定の言葉と、もう終わった話の言葉
+# X3：旅行・帰省などの予定の言葉（もう終わった話の言葉 PAST_WORDS は boarding.py）
 TRIP_WORDS = ("旅行", "帰省", "実家に帰", "出張", "遠征", "旅に出", "留守")
-PAST_WORDS = ("行ってきた", "帰ってきた", "ただいま", "帰宅した", "楽しかった")
 # X3：予定の手がかりを探す type（本文の手がかり）
 TRIP_TYPES = {ClueType.ROUTINE_TEXT, ClueType.PLACE_TEXT, ClueType.RELATION_TEXT}
 # X4：店名の手がかり（写真の看板は shop、本文の店名は place_text）
@@ -92,29 +94,37 @@ def rule_x3(
     )
     if home is None:
         return []
-    home_posts = {clues[i].post_id for i in home.clue_indices}
+    plan = text_trip_plan(clues, posts, {clues[i].post_id for i in home.clue_indices})
+    if plan is None:
+        return []
+    return [
+        Conclusion(
+            "X3",
+            "long_term_home_absence",
+            f"{home.value}付近の家が{plan.when}留守になる可能性（{plan.source}）",
+            sorted({*home.clue_indices, *plan.clue_indices}),
+            "生活圏の投稿と、旅行・帰省の予定の投稿を結合。日付は投稿の日から数えた",
+        )
+    ]
+
+
+def text_trip_plan(
+    clues: Sequence[Clue], posts: Sequence[Post], skip_posts: set[str]
+) -> Plan | None:
+    """本文の旅行・帰省・出張の予定（skip_posts の投稿は除く）。終わった旅行の話は使わない。"""
     by_id = {p.post_id: p for p in posts}
     for i, clue in enumerate(clues):
         post = by_id.get(clue.post_id)
-        if clue.type not in TRIP_TYPES or post is None or post.post_id in home_posts:
+        if clue.type not in TRIP_TYPES or post is None or post.post_id in skip_posts:
             continue
         text = f"{clue.value} {post.text}"
         word = next((w for w in TRIP_WORDS if w in text), None)
         if word is None or any(w in text for w in PAST_WORDS):
             continue
-        when = _trip_start(text, _local(post))
         days = _trip_days(text)
         length = f"{days}日ほど" if days else ""
-        return [
-            Conclusion(
-                "X3",
-                "long_term_home_absence",
-                f"{home.value}付近の家が{when}{length}留守になる可能性（{word}）",
-                sorted({*home.clue_indices, i}),
-                "生活圏の投稿と、旅行・帰省の予定の投稿を結合。日付は投稿の日から数えた",
-            )
-        ]
-    return []
+        return Plan(_trip_start(text, _local(post)) + length, (i,), word, False)
+    return None
 
 
 def rule_x4(
@@ -226,16 +236,36 @@ def link(
     conclusions: Sequence[Conclusion],
     gaz: Gazetteer,
 ) -> list[Conclusion]:
-    """R1〜R12 の結論に X2〜X5 を足した一覧。X2 が出たら R12 の誕生日と置き換える。"""
+    """R1〜R12 の結論に X2〜X5 と BP1・BP2 を足した一覧。
+
+    X2 が出たら R12 の誕生日と、BP2 が出たら X3 と BP1 の留守の予定と置き換える。
+    """
     x2 = rule_x2(clues, posts, conclusions)
     base = [c for c in conclusions if not (x2 and c.attribute == "birthday")]
+    x3 = rule_x3(clues, posts, base)
+    bp1 = rule_bp1(clues, posts)
+    bp2 = rule_bp2(clues, posts, [*base, *bp1], _bp2_text_plan(clues, posts, base))
+    if bp2:
+        x3 = []
+        bp1 = [c for c in bp1 if c.attribute != "long_term_home_absence"]
     return [
         *base,
         *x2,
-        *rule_x3(clues, posts, base),
+        *x3,
         *rule_x4(clues, posts, base, gaz),
         *rule_x5(clues, posts, gaz),
+        *bp1,
+        *bp2,
     ]
+
+
+def _bp2_text_plan(
+    clues: Sequence[Clue], posts: Sequence[Post], conclusions: Sequence[Conclusion]
+) -> Plan | None:
+    """BP2 に渡す本文の予定。R6 の番地の投稿とは別の投稿から探す。"""
+    block = next((c for c in conclusions if c.attribute == "home_block"), None)
+    skip = {clues[i].post_id for i in block.clue_indices} if block else set()
+    return text_trip_plan(clues, posts, skip)
 
 
 def _trip_start(text: str, posted: datetime) -> str:

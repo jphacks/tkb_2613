@@ -85,6 +85,41 @@ describe("Threads review flow without a model", () => {
     await waitFor(() => expect(screen.queryByText("@reviewer")).not.toBeInTheDocument());
     expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining("/diagnose"), expect.anything());
   });
+
+  it("previews the first image and labels image diagnosis when the flag is enabled", async () => {
+    const imageUrl = "https://scontent.cdninstagram.com/photo.jpg?token=redacted";
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path.endsWith("/config")) return json({
+        mock_enabled: false,
+        gpu_demo_enabled: false,
+        live_enabled: true,
+        max_posts: 30,
+        image_diagnosis_enabled: true,
+      });
+      if (path.endsWith("/session")) return json({ username: "reviewer", mock: false });
+      if (path.endsWith("/diagnosis")) return json({ detail: "none" }, 404);
+      if (path.endsWith("/posts")) return json({
+        mock: false,
+        posts: [{
+          post_id: "threads:image-1",
+          text: "画像付き投稿",
+          created_at: "2026-11-12T12:00:00+09:00",
+          images: [{ index: 0, url: imageUrl, alt: "", width: 1, height: 1 }],
+        }],
+      });
+      throw new Error(`unexpected fetch: ${path}`);
+    }));
+
+    const { container } = render(<ThreadsPage />);
+    expect(await screen.findByText("@reviewer")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "本人投稿を確認" }));
+
+    expect(await screen.findByText("画像つき診断")).toBeInTheDocument();
+    expect(container.querySelector(`img[src="${imageUrl}"]`)).toBeInTheDocument();
+    fireEvent.click(screen.getByText("取得情報の詳細"));
+    expect(screen.getByText(/画像1枚目をプレビュー/)).toBeInTheDocument();
+  });
 });
 
 describe("Japanese is the default display language", () => {
@@ -258,7 +293,7 @@ describe("profile claims on the Threads diagnosis", () => {
   }
 
   function profileSection(): HTMLElement {
-    return screen.getByRole("heading", { name: "投稿を横断したプロフィール推定" }).closest("section") as HTMLElement;
+    return screen.getByRole("heading", { name: "プロフィール候補" }).closest("section") as HTMLElement;
   }
 
   function excludeSchoolPost() {
@@ -272,7 +307,7 @@ describe("profile claims on the Threads diagnosis", () => {
     stubDiagnosedApi();
     render(<ThreadsPage />);
 
-    expect(await screen.findByRole("heading", { name: "投稿を横断したプロフィール推定" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "プロフィール候補" })).toBeInTheDocument();
     expect(within(profileSection()).getByText("林町小学校")).toBeInTheDocument();
     expect(within(profileSection()).getByText("文京区")).toBeInTheDocument();
   });
@@ -280,27 +315,105 @@ describe("profile claims on the Threads diagnosis", () => {
   it("drops the claims built on a post while that post is tentatively excluded", async () => {
     stubDiagnosedApi();
     render(<ThreadsPage />);
-    await screen.findByRole("heading", { name: "投稿を横断したプロフィール推定" });
+    await screen.findByRole("heading", { name: "プロフィール候補" });
 
     excludeSchoolPost();
     fireEvent.click(screen.getByRole("button", { name: "仮除外を試す" }));
 
-    await waitFor(() => expect(screen.queryByRole("heading", { name: "投稿を横断したプロフィール推定" })).not.toBeInTheDocument());
-    expect(screen.queryByText("文京区")).not.toBeInTheDocument();
+    await waitFor(() => expect(within(profileSection()).getByText("根拠経路のある候補はありません。")).toBeInTheDocument());
+    expect(within(profileSection()).queryByText("文京区")).not.toBeInTheDocument();
   });
 
   it("uses the claims returned by the rediagnosis and restores them for all posts", async () => {
     stubDiagnosedApi();
     render(<ThreadsPage />);
-    await screen.findByRole("heading", { name: "投稿を横断したプロフィール推定" });
+    await screen.findByRole("heading", { name: "プロフィール候補" });
 
     excludeSchoolPost();
     fireEvent.click(screen.getByRole("button", { name: "選択した投稿を除いて再診断" }));
-    await waitFor(() => expect(screen.queryByRole("heading", { name: "投稿を横断したプロフィール推定" })).not.toBeInTheDocument());
+    await waitFor(() => expect(within(profileSection()).getByText("根拠経路のある候補はありません。")).toBeInTheDocument());
 
     fireEvent.click(screen.getByRole("button", { name: "全投稿の結果に戻す" }));
-    expect(await screen.findByRole("heading", { name: "投稿を横断したプロフィール推定" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "プロフィール候補" })).toBeInTheDocument();
     expect(within(profileSection()).getByText("林町小学校")).toBeInTheDocument();
+  });
+
+  it("slams the Bluesky reveal on top of the full diagnosis and drops it for the rediagnosis", async () => {
+    stubDiagnosedApi();
+    render(<ThreadsPage />);
+
+    const reveal = (await screen.findByRole("heading", { name: "ぜんぶ、みえてる" })).closest("section") as HTMLElement;
+    // 身元カードに推定、証拠のカードに本文の手がかりが出る
+    expect(within(reveal).getByRole("article", { name: "プロフィールと手がかり" })).toBeInTheDocument();
+    expect(within(reveal).getByText("毎週火曜（毎週火曜はジム）")).toBeInTheDocument();
+    // 身元カードの推定の値は、地名の漢字が回ってから解読される（Bluesky と同じ）。読み上げには値そのものを渡す
+    const card = within(reveal).getByRole("article", { name: "プロフィールと手がかり" });
+    expect(within(card).getByText("毎週火曜（毎週火曜はジム）")).toHaveClass("sr-only");
+    expect(card.querySelectorAll(".decode-strip").length).toBeGreaterThan(0);
+    expect(within(reveal).getByRole("list", { name: "見つかった証拠" })).toBeInTheDocument();
+    // 証拠のカードの本文では、手がかりの言葉を黒い帯で隠し、はがれると赤くなる（Bluesky と同じ）
+    const evidence = within(reveal).getByRole("list", { name: "見つかった証拠" });
+    expect(within(evidence).getAllByText("毎週火曜はジム", { selector: ".redaction-word" }).length).toBeGreaterThan(0);
+    expect(evidence.querySelector("mark")).toBeNull();
+
+    excludeSchoolPost();
+    fireEvent.click(screen.getByRole("button", { name: "選択した投稿を除いて再診断" }));
+    await waitFor(() => expect(screen.queryByRole("heading", { name: "ぜんぶ、みえてる" })).not.toBeInTheDocument());
+  });
+});
+
+describe("stamps on the inferences lost by excluding posts", () => {
+  const GYM_POSTS = ["threads:9001", "threads:9002"];
+
+  function stubLosingApi() {
+    const snapshot = profileFixture.snapshot;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path.endsWith("/config")) return json({ mock_enabled: true, gpu_demo_enabled: false, live_enabled: false, max_posts: 30 });
+      if (path.endsWith("/session")) return json({ username: "架空のThreadsアカウント", mock: true });
+      if (path.endsWith("/diagnosis")) return json(snapshot);
+      // ジムの投稿2件を外すと「決まった外出」が崩れる
+      if (path.endsWith("/simulate")) return json({ ...profileFixture.simulate, delete: GYM_POSTS, broken: ["routine"], after: [] });
+      if (path.endsWith("/rediagnose")) {
+        const base = profileFixture.rediagnose;
+        const posts = base.posts.filter((p) => !GYM_POSTS.includes(p.post_id));
+        const clues = base.clues.filter((c) => !GYM_POSTS.includes(c.post_id));
+        return json({ ...base, posts, clues, conclusions: [] });
+      }
+      throw new Error(`unexpected fetch: ${path}`);
+    }));
+  }
+
+  async function excludeGymPosts() {
+    await screen.findByRole("heading", { name: "プロフィール候補" });
+    for (const box of screen.getAllByRole("checkbox", { name: "仮除外する" })) {
+      if (box.closest("li")?.textContent?.includes("ジム")) fireEvent.click(box);
+    }
+  }
+
+  it("stamps 不明 on the lost inference and counts it down after a tentative exclusion", async () => {
+    stubLosingApi();
+    render(<ThreadsPage />);
+    await excludeGymPosts();
+
+    fireEvent.click(screen.getByRole("button", { name: "仮除外を試す" }));
+
+    const figure = await screen.findByRole("figure", { name: "推定できた項目は 1 から 0 になります" });
+    expect(within(figure).getByText("毎週火曜（毎週火曜はジム）")).toBeInTheDocument();
+    expect(within(figure).getByText("不明")).toBeInTheDocument();
+    expect(within(figure).getByText("もう、見つからない")).toBeInTheDocument();
+  });
+
+  it("stamps the lost inference after the rediagnosis too, and not when nothing was lost", async () => {
+    stubLosingApi();
+    render(<ThreadsPage />);
+    await excludeGymPosts();
+
+    fireEvent.click(screen.getByRole("button", { name: "選択した投稿を除いて再診断" }));
+    expect(await screen.findByRole("figure", { name: "推定できた項目は 1 から 0 になります" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "全投稿の結果に戻す" }));
+    await waitFor(() => expect(screen.queryByText("もう、見つからない")).not.toBeInTheDocument());
   });
 });
 
@@ -317,7 +430,7 @@ describe("posts that could not be read", () => {
     render(<ThreadsPage />);
 
     expect(await screen.findByText("1 件の投稿は読み取れなかったため、診断に含めていません。")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "投稿を横断したプロフィール推定" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "プロフィール候補" })).toBeInTheDocument();
   });
 
   it("rejects a malformed post_errors list", async () => {
@@ -332,6 +445,94 @@ describe("posts that could not be read", () => {
     render(<ThreadsPage />);
 
     expect(await screen.findByText("架空のThreadsアカウント")).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "投稿を横断したプロフィール推定" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "プロフィール候補" })).not.toBeInTheDocument();
+  });
+});
+
+/** 診断の実行中（409・再読み込み・重複実行）。診断は中断せず、終わるまで見守って結果を出す */
+describe("a diagnosis that is already running", () => {
+  const IDLE = {
+    state: "idle", stage: null, elapsed_ms: null, posts_total: null, posts_read: 0,
+    read_post_ids: [], stages: [], error: null,
+  };
+  const RUNNING = {
+    ...IDLE, state: "running", stage: "reading", elapsed_ms: 10_000, posts_total: 1,
+    stages: ["checking_model", "fetching", "reading", "inferring"],
+  };
+
+  function stubRunningApi(options: { reload: boolean; endsWithResult: boolean }) {
+    let progressCalls = 0;
+    let diagnosePosted = false;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      const method = init?.method ?? "GET";
+      if (path.endsWith("/config")) return json({ mock_enabled: false, gpu_demo_enabled: false, live_enabled: true, max_posts: 30 });
+      if (path.endsWith("/session")) return json({ username: "reviewer", mock: false, busy: options.reload });
+      if (path.endsWith("/progress")) {
+        // 409 や再読み込みのあと、最初の1回だけ処理中。そのあと結果ありか、結果なしで終わる
+        if (!options.reload && !diagnosePosted) return json(IDLE);
+        progressCalls += 1;
+        if (progressCalls === 1) return json(RUNNING);
+        return json(options.endsWithResult ? { ...IDLE, state: "done" } : IDLE);
+      }
+      if (path.endsWith("/diagnosis")) {
+        // ログイン直後の復元では結果なし。POST のあと（または再読み込みで見守った後）だけ結果がある
+        const ready = options.reload || diagnosePosted;
+        return options.endsWithResult && ready ? json(profileFixture.snapshot) : json({ detail: "診断結果がありません" }, 404);
+      }
+      if (path.endsWith("/posts")) {
+        return json({ mock: false, posts: [{ post_id: "threads:review-1", text: POST_TEXT, created_at: "2026-11-12T12:00:00+09:00", images: [] }] });
+      }
+      if (path.endsWith("/diagnose") && method === "POST") { diagnosePosted = true; return json({ detail: "診断中です" }, 409); }
+      throw new Error(`unexpected fetch: ${path} ${method}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  const diagnoseCalls = (fetchMock: ReturnType<typeof vi.fn>) =>
+    fetchMock.mock.calls.filter(([path]) => String(path).endsWith("/diagnose")).length;
+
+  beforeEach(() => { vi.useFakeTimers({ shouldAdvanceTime: true }); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it("shows a running notice (not a generic error) on 409 and then the finished result without a second POST", async () => {
+    const fetchMock = stubRunningApi({ reload: false, endsWithResult: true });
+    render(<ThreadsPage />);
+    expect(await screen.findByText("@reviewer")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "本人投稿を確認" }));
+    await screen.findByText(POST_TEXT);
+    fireEvent.click(screen.getByRole("button", { name: "AI診断を試す" }));
+
+    expect(await screen.findByText(/診断を実行中です。ページを再読み込みしても処理は続きます/)).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    await vi.advanceTimersByTimeAsync(1_600);
+    await vi.advanceTimersByTimeAsync(1_600);
+    expect(await screen.findByRole("heading", { name: "プロフィール候補" })).toBeInTheDocument();
+    expect(screen.queryByText(/診断を実行中です。ページを再読み込みしても/)).not.toBeInTheDocument();
+    expect(diagnoseCalls(fetchMock)).toBe(1);
+  });
+
+  it("picks the running diagnosis back up after a reload without sending another POST", async () => {
+    const fetchMock = stubRunningApi({ reload: true, endsWithResult: true });
+    render(<ThreadsPage />);
+
+    expect(await screen.findByText(/診断を実行中です。ページを再読み込みしても処理は続きます/)).toBeInTheDocument();
+    await vi.advanceTimersByTimeAsync(1_600);
+    await vi.advanceTimersByTimeAsync(1_600);
+    expect(await screen.findByRole("heading", { name: "プロフィール候補" })).toBeInTheDocument();
+    expect(diagnoseCalls(fetchMock)).toBe(0);
+  });
+
+  it("says the diagnosis did not finish when it ended without a result, and allows a retry", async () => {
+    stubRunningApi({ reload: true, endsWithResult: false });
+    render(<ThreadsPage />);
+
+    await screen.findByText(/診断を実行中です。ページを再読み込みしても処理は続きます/);
+    await vi.advanceTimersByTimeAsync(1_600);
+    await vi.advanceTimersByTimeAsync(1_600);
+    expect(await screen.findByRole("alert")).toHaveTextContent("診断が完了しませんでした");
+    expect(screen.queryByText(/診断を実行中です。ページを再読み込みしても/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "本人投稿を確認" })).toBeEnabled();
   });
 });

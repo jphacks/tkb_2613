@@ -142,14 +142,14 @@
 
 | 制限 | 設定（本番の見本の値） | HTTP・コード | 画面の文言 | 出典 |
 |---|---|---|---|---|
-| 1 アカウント（DID）1 日（日本時間）の診断回数 | `DIAGNOSE_DAILY_LIMIT=3` | 429 `daily_limit`、`Retry-After` は翌 0:00 まで | 「今日の診断は 3 回までです。明日の 0:00（日本時間）からまた診断できます」 | [api/src/tkb_api/routes/diagnose.py](../api/src/tkb_api/routes/diagnose.py):350-359、[web/src/lib/messages.ts](../web/src/lib/messages.ts):295-296、[infra/aws.env.example](../infra/aws.env.example):44 |
-| 全体の同時診断数 | `MAX_CONCURRENT_DIAGNOSES=2` | 503 `busy`、`Retry-After: 30` | 「混雑しています。しばらくしてからもう一度お試しください」 | diagnose.py:360-368、messages.ts:297、aws.env.example:45-46 |
+| 1 アカウント（DID）1 日（日本時間）の診断回数 | `DIAGNOSE_DAILY_LIMIT=0`（2026-11-14 から制限なし。正の値にすると有効） | 429 `daily_limit`、`Retry-After` は翌 0:00 まで | 「今日の診断は 3 回までです。明日の 0:00（日本時間）からまた診断できます」 | [api/src/tkb_api/routes/diagnose.py](../api/src/tkb_api/routes/diagnose.py):350-359、[web/src/lib/messages.ts](../web/src/lib/messages.ts):295-296、[infra/aws.env.example](../infra/aws.env.example):44 |
+| 全体の同時診断数 | `MAX_CONCURRENT_DIAGNOSES=0`（2026-11-14 から制限なし） | 503 `busy`、`Retry-After: 30` | 「混雑しています。しばらくしてからもう一度お試しください」 | diagnose.py:360-368、messages.ts:297、aws.env.example:45-46 |
 | 同じアカウントの同時診断 | 1（固定） | 409 `already_running` | 「このアカウントの別の診断が進んでいます。終わってからもう一度お試しください」 | diagnose.py:346-349、[api/src/tkb_api/limits.py](../api/src/tkb_api/limits.py):146-151、messages.ts:298 |
 | 枠の返し損ね | `DIAGNOSE_SLOT_TIMEOUT_SECONDS=900` | — | 最後の動きから 900 秒で空いたとみなす | limits.py:112-117、aws.env.example:47 |
 | Bluesky 側の回数制限 | — | 503 `bluesky_busy` | 「Bluesky が混雑しています。しばらくしてからもう一度お試しください」 | diagnose.py:287-290、[api/src/tkb_api/errors.py](../api/src/tkb_api/errors.py):24 |
 
 - アプリの制限は **IP ではなくアカウント**（DID）で数える。会場の IP とは関係ない
-- **発表用のデモアカウントは、1日 3 回で止まる**。ログインし直しても回数は戻らない。リハーサルで使い切らないこと。同じセッションで画面を開き直したときは `GET /api/diagnosis` で前の結果を戻せるので、回数を使わない（diagnose.py:297-310）
+- 2026-11-14 から1日の回数制限はない（`DIAGNOSE_DAILY_LIMIT=0`）。正の値に戻した場合は、ログインし直しても回数は戻らないので、リハーサルで使い切らないこと。同じセッションで画面を開き直したときは `GET /api/diagnosis` で前の結果を戻せるので、回数を使わない（diagnose.py:297-310）
 - 本番の `.env` の実際の値は未確認（見本は aws.env.example）
 
 **確かめ方**：ブラウザの開発者ツールのネットワークで `POST /api/diagnose` のステータスと応答の `detail.code` を見る。403 なら WAF、429 / 503 / 409 で JSON の `code` があればアプリ。

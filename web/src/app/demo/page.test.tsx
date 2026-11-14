@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, getDemoDiagnosis, simulateDemo } from "@/lib/api";
 import { messages } from "@/lib/messages";
 import type { DemoDiagnosis } from "@/types/diagnose";
+import { PROFILE_DIAGNOSED_ATTRIBUTES, type ProfileAttribute, type ProfileCandidateSet } from "@/types/profile";
 
 import DemoPage from "./page";
 
@@ -14,17 +15,43 @@ vi.mock("@/lib/api", async (importOriginal) => {
 
 const t = messages.demo;
 const GYM = "at://did:plc:demo/app.bsky.feed.post/2";
+const OTHER = "at://did:plc:demo/app.bsky.feed.post/1";
+const ASSESSMENT = {
+  minimal_scope: "bluesky" as const, offline_subtype: null, psychological_resistance: null, persona_context: null,
+  inference_ease: null, inference_ease_basis: null, harm_severity: null, harm_scenario: null,
+  harm_prerequisites: [], harm_status: "unknown" as const,
+};
+function demoProfileClaims(routineValue: string | null): ProfileCandidateSet[] {
+  const ev = [
+    { post_id: GYM, clue_index: 0, required: true, source: "clue" as const },
+    { post_id: OTHER, clue_index: null, required: true, source: "post_text" as const, excerpt: "夜勤明け" },
+  ];
+  return PROFILE_DIAGNOSED_ATTRIBUTES.map((attribute: ProfileAttribute) => {
+    if (attribute === "routine" && routineValue) {
+      const candidate = {
+        rank: 1, value: routineValue, confidence: 0.7, status: "weak" as const,
+        evidence: ev, evidence_paths: [{ evidence: ev, confidence: 0.7, provenance: "combined_inference" as const }],
+        assessment: ASSESSMENT, observed_at: null, counter_evidence: [],
+      };
+      return { attribute, status: "candidate", candidates: [candidate], candidate_pool: [candidate], reason: null, conflicting_evidence: [] };
+    }
+    return { attribute, status: "unknown", candidates: [], candidate_pool: [], reason: "no_grounded_rule", conflicting_evidence: [] };
+  });
+}
+
 const DEMO: DemoDiagnosis = {
   demo: true,
   posts: [
-    { post_id: "at://did:plc:demo/app.bsky.feed.post/1", text: "夜勤明けのラーメン", created_at: "2026-10-20T08:31:00+09:00", images: [] },
+    { post_id: OTHER, text: "夜勤明けのラーメン", created_at: "2026-10-20T08:31:00+09:00", images: [] },
     { post_id: GYM, text: "毎週火曜はジム", created_at: "2026-10-21T20:10:00+09:00", images: [] },
   ],
   clues: [
     { post_id: GYM, image_index: null, type: "routine_text", value: "毎週火曜はジム", region: null, confidence: 0.9, source: "text" },
   ],
-  conclusions: [{ rule: "R3", attribute: "routine", value: "毎週火曜 20時ごろ", clue_indices: [0], note: "" }],
-  plan: { delete: [GYM], broken: ["routine"], after: [], posts: [{ post_id: GYM, broken: ["routine"] }] },
+  profile_claims: demoProfileClaims("毎週火曜 20時ごろ"),
+  profile_relations: [],
+  profile_claim_suggestions: [GYM],
+  plan: { delete: [GYM], broken: ["routine"], after: demoProfileClaims(null), posts: [{ post_id: GYM, broken: ["routine"] }] },
 };
 
 /** jsdom には ResizeObserver がない（捜査ボードの糸で使う） */
@@ -67,7 +94,7 @@ describe("DemoPage", () => {
 
   it("simulates removing the selected candidates and updates the board", async () => {
     vi.mocked(getDemoDiagnosis).mockResolvedValue(DEMO);
-    vi.mocked(simulateDemo).mockResolvedValue({ delete: [GYM], broken: ["routine"], after: [] });
+    vi.mocked(simulateDemo).mockResolvedValue({ delete: [GYM], broken: ["routine"], after: demoProfileClaims(null) });
     render(<DemoPage />);
     const candidates = await screen.findByRole("list", { name: t.candidatesLabel });
     expect(within(candidates).getByRole("checkbox")).toBeChecked();

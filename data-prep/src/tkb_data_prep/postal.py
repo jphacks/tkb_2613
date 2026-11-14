@@ -41,8 +41,11 @@ class Postal:
     town: str
 
 
-def parse(rows: Iterable[list[str]], source: str) -> list[Postal]:
-    """1 列目が 11〜14 で始まる行だけを重複なしで返す。"""
+def parse(
+    rows: Iterable[list[str]], source: str, pref_codes: Iterable[str] | None = None
+) -> list[Postal]:
+    """指定した都道府県コードの行を重複なしで返す。省略時は従来の1都3県。"""
+    allowed = set(PREFECTURES if pref_codes is None else pref_codes)
     seen: dict[Postal, None] = {}
     for line_no, row in enumerate(rows, start=1):
         if len(row) < MIN_COLUMNS:
@@ -50,7 +53,7 @@ def parse(rows: Iterable[list[str]], source: str) -> list[Postal]:
         muni_code, postal_code = row[0].strip(), row[2].strip()
         if not MUNI_CODE.fullmatch(muni_code) or not POSTAL_CODE.fullmatch(postal_code):
             raise DataPrepError(f"{source}:{line_no}: コードの形式が想定外です")
-        if muni_code[:2] not in PREFECTURES:
+        if muni_code[:2] not in allowed:
             continue
         pref, city, town = (cell.strip() for cell in row[6:9])
         seen[Postal(postal_code, muni_code, pref, city, town)] = None

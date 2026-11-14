@@ -19,14 +19,29 @@ from pathlib import Path
 from typing import Any
 
 import pyarrow.parquet as pq
+from jismesh.utils import to_meshcode
 
 from tkb_common.corporate_name import normalize_corporate_name
+from tkb_common.place_names import PLACE_INDEX_SCHEMA_VERSION, place_name_keys
 from tkb_common.schemas import Clue, ClueType
 from tkb_engine.scoring import tables as scoring_tables
 from tkb_engine.scoring.tables import ScoringTables
 
 DATA_DIR = Path(__file__).resolve().parents[3] / "data" / "processed"
+MAX_PLACE_NAME_MATCHES = 50
 KNOWLEDGE_PATH = Path(__file__).resolve().parents[3] / "data-prep" / "manual" / "knowledge.json"
+
+
+def resolve_places_index_path(data_dir: Path) -> Path | None:
+    """Resolve the POI index in the selected directory, with one national-layout fallback."""
+    selected = data_dir / "places.sqlite3"
+    if selected.is_file():
+        return selected
+    if data_dir.name.casefold() == "national" and data_dir.parent.name.casefold() == "processed":
+        legacy = data_dir.parent / "places.sqlite3"
+        if legacy.is_file():
+            return legacy
+    return None
 
 
 @dataclass(frozen=True)
@@ -126,6 +141,9 @@ class Gazetteer:
     stations: list[dict[str, Any]] = field(default_factory=list)
     postal: list[dict[str, str]] = field(default_factory=list)
     muni_meshes: dict[str, set[str]] = field(default_factory=dict)
+    # The 1km mesh coverage of the configured national municipality table.
+    # None means derive once from muni_meshes; an explicit empty set fails closed.
+    jp_meshes: set[str] | None = None
     knowledge: Knowledge = field(default_factory=Knowledge)
     # 学校ごとに {"name", "kind"（大学・高等学校など）, "city", ...}。表がなければ空
     schools: list[dict[str, str]] = field(default_factory=list)
@@ -142,11 +160,31 @@ class Gazetteer:
     # 推定の結果には使わず、候補の説明に参考として添えるだけ
     ridership: dict[str, int] = field(default_factory=dict)
     ridership_year: int = 0
+    # Census household totals by 500m mesh, used for home_walk_area values and map display.
+    households: dict[str, int] = field(default_factory=dict)
     # 法人番号の公表データの SQLite（data-prep の corporations.sqlite）。行はメモリに載せず、
     # 引くたびに読み取り専用で開く。なければ None
     corporations_path: Path | None = None
+    # 任意POIのSQLite名称索引。データ全件はメモリへ読み込まず、名称一致時だけ行を引く。
+    places_path: Path | None = None
     # 住まいの推定（点数の地図）の表（data-prep の scoring_*.parquet）。なければ None
     scoring: ScoringTables | None = None
+
+    def __post_init__(self) -> None:
+        if self.jp_meshes is None:
+            object.__setattr__(
+                self,
+                "jp_meshes",
+                (
+                    {
+                        str(mesh).strip().removesuffix("*")
+                        for meshes in self.muni_meshes.values()
+                        for mesh in meshes
+                    }
+                    if self.muni_meshes
+                    else set()
+                ),
+            )
 
     @classmethod
     def load(cls, data_dir: Path = DATA_DIR, knowledge: Knowledge | None = None) -> "Gazetteer":
@@ -167,13 +205,135 @@ class Gazetteer:
             ),
             ridership={str(r["station_code"]): int(r["passengers"]) for r in ridership_rows},
             ridership_year=max((int(r["year"]) for r in ridership_rows), default=0),
+            households={
+                str(r["mesh_500m"]): int(r["households"])
+                for r in _optional_table(data_dir / "households_500m.parquet", HOUSEHOLD_COLUMNS)
+            },
             corporations_path=(
                 data_dir / "corporations.sqlite"
                 if (data_dir / "corporations.sqlite").is_file()
                 else None
             ),
+            places_path=resolve_places_index_path(data_dir),
             scoring=scoring_tables.load(data_dir),
         )
+
+    def places_named(self, value: str) -> list[dict[str, Any]]:
+        """Look up exact, conservatively normalized aliases in the optional index."""
+        if self.places_path is None:
+            return []
+        name_keys = place_name_keys(value)
+        if not name_keys or not self.places_index_compatible:
+            return []
+        uri = f"{self.places_path.resolve().as_uri()}?mode=ro&immutable=1"
+        records: dict[str, str] = {}
+        with closing(sqlite3.connect(uri, uri=True)) as db:
+            for name_key in name_keys:
+                rows = db.execute(
+                    "SELECT p.place_id, p.record_json FROM poi_alias AS a "
+                    "JOIN poi_place AS p USING(place_id) WHERE a.name_key = ? "
+                    "AND p.license_verified = 1 ORDER BY p.place_id LIMIT ?",
+                    (name_key, MAX_PLACE_NAME_MATCHES + 1),
+                ).fetchall()
+                for place_id, record_json in rows:
+                    records.setdefault(place_id, record_json)
+        return [
+            json.loads(record_json)
+            for _, record_json in sorted(records.items())[: MAX_PLACE_NAME_MATCHES + 1]
+        ]
+
+    def places_named_in_area(self, value: str, area_label: str) -> list[dict[str, Any]]:
+        """Look up licensed POIs by alias and exact municipality label."""
+        if self.places_path is None or not area_label.strip():
+            return []
+        name_keys = place_name_keys(value)
+        if not name_keys or not self.places_index_compatible:
+            return []
+        uri = f"{self.places_path.resolve().as_uri()}?mode=ro&immutable=1"
+        records: dict[str, str] = {}
+        try:
+            with closing(sqlite3.connect(uri, uri=True)) as db:
+                for name_key in name_keys:
+                    rows = db.execute(
+                        "SELECT p.place_id, p.record_json FROM poi_alias AS a "
+                        "JOIN poi_place AS p USING(place_id) WHERE a.name_key = ? "
+                        "AND p.license_verified = 1 "
+                        "AND json_extract(p.record_json, '$.area_label') = ? "
+                        "ORDER BY p.place_id LIMIT ?",
+                        (name_key, area_label.strip(), MAX_PLACE_NAME_MATCHES + 1),
+                    ).fetchall()
+                    for place_id, record_json in rows:
+                        records.setdefault(place_id, record_json)
+        except sqlite3.Error:
+            return []
+        return [
+            json.loads(record_json)
+            for _, record_json in sorted(records.items())[: MAX_PLACE_NAME_MATCHES + 1]
+        ]
+
+    def is_japan_mesh_coordinate(self, latitude: float, longitude: float) -> bool:
+        """Check coordinate membership in the loaded Japanese 1km mesh coverage."""
+        meshes = self.jp_meshes
+        if not meshes or not (math.isfinite(latitude) and math.isfinite(longitude)):
+            return False
+        if not (20 <= latitude <= 46 and 122 <= longitude <= 154):
+            return False
+        try:
+            mesh = str(int(to_meshcode(latitude, longitude, 3)))
+        except (OverflowError, TypeError, ValueError):
+            return False
+        return mesh in meshes
+
+    def place_coordinates(self, place_id: str) -> tuple[float, float] | None:
+        """Return validated (latitude, longitude) for a licensed local POI ID."""
+        record = self.place_record(place_id)
+        if record is None:
+            return None
+        try:
+            latitude, longitude = float(record["latitude"]), float(record["longitude"])
+        except (KeyError, TypeError, ValueError):
+            return None
+        if not (math.isfinite(latitude) and math.isfinite(longitude)):
+            return None
+        if not (-90 <= latitude <= 90 and -180 <= longitude <= 180):
+            return None
+        return latitude, longitude
+
+    def place_record(self, place_id: str) -> dict[str, Any] | None:
+        """Return a licensed local POI row by stable ID, if it exists in the current index."""
+        if self.places_path is None or not self.places_index_compatible:
+            return None
+        uri = f"{self.places_path.resolve().as_uri()}?mode=ro&immutable=1"
+        try:
+            with closing(sqlite3.connect(uri, uri=True)) as db:
+                row = db.execute(
+                    "SELECT record_json FROM poi_place WHERE place_id = ? AND license_verified = 1",
+                    (place_id,),
+                ).fetchone()
+        except sqlite3.Error:
+            return None
+        if row is None:
+            return None
+        try:
+            record = json.loads(row[0])
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+            return None
+        if not isinstance(record, dict):
+            return None
+        return record
+
+    @property
+    def places_index_compatible(self) -> bool:
+        """Whether the configured SQLite index uses the current shared key schema."""
+        if self.places_path is None:
+            return False
+        uri = f"{self.places_path.resolve().as_uri()}?mode=ro&immutable=1"
+        try:
+            with closing(sqlite3.connect(uri, uri=True)) as db:
+                row = db.execute("PRAGMA user_version").fetchone()
+        except (OSError, sqlite3.Error):
+            return False
+        return bool(row is not None and row[0] == PLACE_INDEX_SCHEMA_VERSION)
 
     def city_munis(self, city: str) -> set[str]:
         """市区町村名（「八王子市」など）の区市町村コード。"""
@@ -432,6 +592,7 @@ def _optional_table(path: Path, columns: list[str] | None = None) -> list[dict[s
 SHELTER_COLUMNS = ["name", "kind", "city"]
 BUS_STOP_COLUMNS = ["name", "operator", "cities"]
 SCHOOL_DISTRICT_COLUMNS = ["kind", "name", "city", "terms", "note"]
+HOUSEHOLD_COLUMNS = ["mesh_500m", "households"]
 
 
 def _school_key(name: str) -> str:

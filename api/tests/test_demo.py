@@ -14,6 +14,8 @@ from tkb_api.config import Settings, get_settings
 from tkb_api.main import create_app
 from tkb_api.routes import demo
 from tkb_api.routes.diagnose import get_gazetteer
+from tkb_common.schemas import PROFILE_DIAGNOSED_ATTRIBUTES
+from tkb_engine import rules
 from tkb_engine.gazetteer import Gazetteer
 
 FIXTURE = Path(__file__).resolve().parents[2] / "eval" / "fixtures" / "demo_observations.json"
@@ -54,24 +56,28 @@ def test_demo_diagnosis_needs_no_login_and_returns_the_fictional_account(
     assert body["demo"] is True
     assert [p["post_id"] for p in body["posts"]] == POST_IDS
     assert len(body["clues"]) == len(DOC["clues"])
-    assert body["conclusions"]
+    assert "conclusions" not in body
+    assert "narrowing" in body
+    assert len(body["profile_claims"]) == len(PROFILE_DIAGNOSED_ATTRIBUTES)
+    assert isinstance(body["profile_relations"], list)
+    assert body["profile_claim_suggestions"] == body["plan"]["delete"]
     assert set(body["plan"]) == {"delete", "broken", "after", "posts"}
-    for conclusion in body["conclusions"]:
-        assert all(0 <= i < len(body["clues"]) for i in conclusion["clue_indices"])
+    assert len(body["plan"]["after"]) == len(PROFILE_DIAGNOSED_ATTRIBUTES)
     assert "set-cookie" not in res.headers
 
 
 def test_demo_simulate_drops_the_selected_posts(client: TestClient) -> None:
-    clues = client.get("/api/demo/diagnosis").json()["clues"]
-
     res = client.post("/api/demo/simulate", json={"delete": [GYM_POST]})
 
     assert res.status_code == 200
     body = res.json()
     assert body["delete"] == [GYM_POST]
     assert "routine" in body["broken"]
-    for conclusion in body["after"]:
-        assert all(clues[i]["post_id"] != GYM_POST for i in conclusion["clue_indices"])
+    assert len(body["after"]) == len(PROFILE_DIAGNOSED_ATTRIBUTES)
+    assert "narrowing" in body
+    for claim_set in body["after"]:
+        for candidate in claim_set["candidate_pool"]:
+            assert all(ref["post_id"] != GYM_POST for ref in candidate["evidence"])
 
 
 def test_demo_simulate_matches_the_plan(client: TestClient) -> None:
@@ -114,23 +120,23 @@ def test_demo_reports_unavailable_without_the_fixture(tmp_path: Path) -> None:
 
 
 class _Counter:
-    """demo の推理と計画の関数を包み、呼ばれた回数を数える。"""
+    """demo のルール推理と計画の関数を包み、呼ばれた回数を数える。"""
 
     def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        self.calls = {"conclusions": 0, "plan": 0}
-        conclusions = pipeline.conclusions_json
-        plan = pipeline.plan_json
+        self.calls = {"infer": 0, "plan": 0}
+        infer = rules.infer
+        plan = pipeline.plan_claims_json
 
-        def counted_conclusions(*args: Any, **kwargs: Any) -> Any:
-            self.calls["conclusions"] += 1
-            return conclusions(*args, **kwargs)
+        def counted_infer(*args: Any, **kwargs: Any) -> Any:
+            self.calls["infer"] += 1
+            return infer(*args, **kwargs)
 
         def counted_plan(*args: Any, **kwargs: Any) -> Any:
             self.calls["plan"] += 1
             return plan(*args, **kwargs)
 
-        monkeypatch.setattr(demo, "conclusions_json", counted_conclusions)
-        monkeypatch.setattr(demo, "plan_json", counted_plan)
+        monkeypatch.setattr(demo, "infer", counted_infer)
+        monkeypatch.setattr(demo, "plan_claims_json", counted_plan)
         monkeypatch.setattr(demo, "_cached", None)
 
 
@@ -152,7 +158,7 @@ def test_demo_diagnosis_is_computed_once_and_reused(monkeypatch: pytest.MonkeyPa
     assert first.status_code == second.status_code == 200
     assert first.headers["content-type"] == "application/json"
     assert first.content == second.content
-    assert counter.calls == {"conclusions": 1, "plan": 1}
+    assert counter.calls == {"infer": 1, "plan": 1}
 
 
 def test_demo_diagnosis_cache_follows_the_settings_and_gazetteer(
@@ -169,7 +175,7 @@ def test_demo_diagnosis_cache_follows_the_settings_and_gazetteer(
             assert client.get("/api/demo/diagnosis").status_code == 200
 
     # 表のパスか地名の表が変われば、前の応答を使わずに計算し直す
-    assert counter.calls == {"conclusions": 3, "plan": 3}
+    assert counter.calls == {"infer": 3, "plan": 3}
 
 
 def test_demo_diagnosis_is_computed_at_startup(
@@ -182,12 +188,12 @@ def test_demo_diagnosis_is_computed_at_startup(
     counter = _Counter(monkeypatch)
 
     with TestClient(create_app()) as client:
-        assert counter.calls == {"conclusions": 1, "plan": 1}
+        assert counter.calls == {"infer": 1, "plan": 1}
         bodies = [client.get("/api/demo/diagnosis") for _ in range(3)]
 
     assert all(res.status_code == 200 for res in bodies)
     assert bodies[0].json()["demo"] is True
-    assert counter.calls == {"conclusions": 1, "plan": 1}
+    assert counter.calls == {"infer": 1, "plan": 1}
 
 
 def test_demo_startup_survives_a_missing_fixture(
@@ -203,4 +209,4 @@ def test_demo_startup_survives_a_missing_fixture(
 
     assert res.status_code == 503
     assert "missing" not in res.text
-    assert counter.calls == {"conclusions": 0, "plan": 0}
+    assert counter.calls == {"infer": 0, "plan": 0}

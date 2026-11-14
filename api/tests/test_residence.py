@@ -3,7 +3,7 @@
 表は engine の小さな架空の地図（tkb_engine.scoring.sample）を使う。
 """
 
-from tkb_api.pipeline import residence_json, simulate_json
+from tkb_api.pipeline import residence_json, simulate_claims_json
 from tkb_common.residence import ResidenceEstimate
 from tkb_common.schemas import Clue, ClueSource, ClueType, Post
 from tkb_engine.gazetteer import CollectionArea, Gazetteer, Knowledge
@@ -115,8 +115,12 @@ def test_residence_leaves_out_excluded_posts_and_keeps_clue_numbers() -> None:
 
 
 def test_simulate_recomputes_the_residence_without_the_chosen_posts() -> None:
-    simulated = simulate_json(CLUES, POSTS, GAZETTEER, [POSTS[2].post_id])
+    simulated = simulate_claims_json([], CLUES, POSTS, [POSTS[2].post_id], gazetteer=GAZETTEER)
 
-    assert set(simulated) == {"delete", "broken", "after", "residence"}
+    assert {"delete", "broken", "after", "narrowing", "residence"} <= set(simulated)
     assert all(e["post_id"] != POSTS[2].post_id for e in simulated["residence"]["evidence"])
-    assert simulate_json(CLUES, POSTS, Gazetteer(), [POSTS[2].post_id])["residence"] is None
+    without_tables = simulate_claims_json(
+        [], CLUES, POSTS, [POSTS[2].post_id], gazetteer=Gazetteer()
+    )
+    assert without_tables["residence"] is None
+    assert "residence" not in simulate_claims_json([], CLUES, POSTS, [POSTS[2].post_id])
