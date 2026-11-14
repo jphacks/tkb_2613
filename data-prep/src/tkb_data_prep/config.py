@@ -11,6 +11,10 @@ PREFECTURES: dict[str, str] = {
     "14": "神奈川県",
 }
 
+# 全国向けの最小Gazetteer生成で使う都道府県コード。既存の関東限定表は
+# PREFECTURES を引き続き使い、対象範囲を意図せず全国へ広げない。
+ALL_PREFECTURE_CODES: tuple[str, ...] = tuple(f"{code:02d}" for code in range(1, 48))
+
 DATA_PREP_DIR = Path(__file__).resolve().parents[2]
 REPO_ROOT = DATA_PREP_DIR.parent
 
@@ -20,6 +24,11 @@ class Paths:
     raw_dir: Path = DATA_PREP_DIR / "raw"
     manual_dir: Path = DATA_PREP_DIR / "manual"
     out_dir: Path = REPO_ROOT / "data" / "processed"
+
+    @property
+    def national_out_dir(self) -> Path:
+        """全国の最小Gazetteer。既存の関東限定表を上書きしない別ディレクトリ。"""
+        return self.out_dir / "national"
 
     @property
     def postal_zip(self) -> Path:
