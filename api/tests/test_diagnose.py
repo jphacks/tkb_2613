@@ -1,4 +1,5 @@
 import json
+import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
@@ -22,6 +23,7 @@ from tkb_api.routes.diagnose import (
     get_photo_place_searcher,
 )
 from tkb_api.routes.session import get_login
+from tkb_common.place_names import PLACE_INDEX_SCHEMA_VERSION
 from tkb_common.schemas import Clue, ClueSource, ClueType, ExternalLookupStatus, Post
 from tkb_detect.errors import ForbiddenEndpointError
 from tkb_detect.extract import Extractor
@@ -599,8 +601,13 @@ def test_photo_place_search_has_separate_consent_and_mock_never_calls_searcher(
 
 
 def test_commons_reference_search_requires_its_own_live_consent(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    # 手元の data/processed に頼らないよう、判定に使う索引とメッシュ表をここで用意する
+    # （CI には公開データがない）。地名表そのものは _client で MINI_GAZETTEER に差し替わる。
+    with sqlite3.connect(tmp_path / "places.sqlite3") as db:
+        db.execute(f"PRAGMA user_version = {PLACE_INDEX_SCHEMA_VERSION}")
+    (tmp_path / "muni_mesh.parquet").touch()
     reference_calls: list[int] = []
     raw = json.loads(FIXTURE.read_text(encoding="utf-8"))["posts"][3]
     post = Post.model_validate({**raw, "images": []})
@@ -620,6 +627,7 @@ def test_commons_reference_search_requires_its_own_live_consent(
         commons_reference_lookup_enabled=True,
         diagnose_daily_limit=3,
         max_posts=5,
+        gazetteer_dir=tmp_path,
     )
     with _real_client(fetch_posts, settings=settings) as client:
         _login(client)
