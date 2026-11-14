@@ -1107,6 +1107,9 @@ _RULE_CONCLUSION_MAPPING: dict[tuple[str, str], tuple[ProfileAttribute, float]] 
     ("X3", "long_term_home_absence"): (ProfileAttribute.ANNOUNCED_LONG_ABSENCE, 0.58),
     ("X4", "frequent_shop"): (ProfileAttribute.FREQUENT_SHOP, 0.56),
     ("X5", "workplace"): (ProfileAttribute.EMPLOYER_NAME, 0.56),
+    ("BP1", "full_name"): (ProfileAttribute.FULL_NAME, 0.62),
+    ("BP1", "long_term_home_absence"): (ProfileAttribute.ANNOUNCED_LONG_ABSENCE, 0.60),
+    ("BP2", "long_term_home_absence"): (ProfileAttribute.ANNOUNCED_LONG_ABSENCE, 0.62),
 }
 
 
@@ -1181,7 +1184,7 @@ def infer_rule_and_link_claims(
     clues: Sequence[Clue],
     gazetteer: Gazetteer | None = None,
 ) -> list[ProfileItem]:
-    """Convert RulesR (R1..R12) and RulesX (X2..X5) conclusions into ProfileItem candidates."""
+    """Convert RulesR (R1..R12), RulesX (X2..X5) and BP1/BP2 conclusions into candidates."""
     conclusions = infer(list(clues), list(posts), gazetteer or Gazetteer())
     grouped_paths: dict[tuple[ProfileAttribute, str], list[ProfileEvidencePath]] = {}
     for conclusion in conclusions:
@@ -1769,6 +1772,7 @@ def _photo_home_area_facts(
                 PhotoPlaceLookupStatus.LOCAL_ONLY,
                 PhotoPlaceLookupStatus.REFERENCE_CHECKED,
                 PhotoPlaceLookupStatus.UNAVAILABLE,
+                PhotoPlaceLookupStatus.WEB_SEARCHED,
             }
             or _forbidden_context(photo_post.text)
             or _has_quoted_or_fiction_context(photo_post.text)
@@ -1779,6 +1783,14 @@ def _photo_home_area_facts(
         if (
             candidate.place_type not in {PhotoPlaceType.FACILITY, PhotoPlaceType.LANDMARK}
             or candidate.photo_relation is not PhotoPlaceRelation.VISIBLE_IN_FRAME
+        ):
+            continue
+        # Brave結果は検証済みの事実ではない。ちょうど1件のBrave由来候補（ローカル候補と
+        # 混ざらない）で、市区町村が分かる場合に限り、弱い根拠として扱う。
+        if result.lookup_status is PhotoPlaceLookupStatus.WEB_SEARCHED and (
+            len(result.candidates) != 1
+            or not candidate.place_id.startswith("brave-place:")
+            or any(source.provider != "Brave Search Place Search" for source in candidate.sources)
         ):
             continue
         home_match = _photo_home_place_match(photo_post.text, candidate.label)

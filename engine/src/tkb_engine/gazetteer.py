@@ -238,6 +238,40 @@ class Gazetteer:
             for _, record_json in sorted(records.items())[: MAX_PLACE_NAME_MATCHES + 1]
         ]
 
+    def places_named_in_area(self, value: str, area_label: str) -> list[dict[str, Any]]:
+        """Look up licensed POIs by alias and exact municipality label.
+
+        Unlike `places_named`, the area filter is applied in SQL before the limit, so a name
+        shared by many municipalities still finds the records of one municipality. At most
+        MAX_PLACE_NAME_MATCHES + 1 rows are returned.
+        """
+        if self.places_path is None or not area_label.strip():
+            return []
+        name_keys = place_name_keys(value)
+        if not name_keys or not self.places_index_compatible:
+            return []
+        uri = f"{self.places_path.resolve().as_uri()}?mode=ro&immutable=1"
+        records: dict[str, str] = {}
+        try:
+            with closing(sqlite3.connect(uri, uri=True)) as db:
+                for name_key in name_keys:
+                    rows = db.execute(
+                        "SELECT p.place_id, p.record_json FROM poi_alias AS a "
+                        "JOIN poi_place AS p USING(place_id) WHERE a.name_key = ? "
+                        "AND p.license_verified = 1 "
+                        "AND json_extract(p.record_json, '$.area_label') = ? "
+                        "ORDER BY p.place_id LIMIT ?",
+                        (name_key, area_label.strip(), MAX_PLACE_NAME_MATCHES + 1),
+                    ).fetchall()
+                    for place_id, record_json in rows:
+                        records.setdefault(place_id, record_json)
+        except sqlite3.Error:
+            return []
+        return [
+            json.loads(record_json)
+            for _, record_json in sorted(records.items())[: MAX_PLACE_NAME_MATCHES + 1]
+        ]
+
     def is_japan_mesh_coordinate(self, latitude: float, longitude: float) -> bool:
         """Check coordinate membership in the loaded Japanese 1km mesh coverage."""
         meshes = self.jp_meshes

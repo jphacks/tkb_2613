@@ -27,6 +27,8 @@ from tkb_common.schemas import (
     PhotoPlaceStatus,
     PhotoPlaceType,
 )
+from tkb_engine.gazetteer import Gazetteer
+from tkb_engine.photo_place import place_candidate_from_record
 
 BRAVE_PLACE_SEARCH_ENDPOINT = "https://api.search.brave.com/res/v1/local/place_search"
 MAX_QUERIES_PER_DIAGNOSIS = 3
@@ -187,13 +189,13 @@ def _external_candidates(
         seen.add(place_id)
         locality = address.get("addressLocality")
         region = address.get("addressRegion")
+        # 居住地域の弱い根拠に使えるのは、市区町村で終わる値だけ（それ以外は None）。
         coarse_area = (
-            " ".join(
-                str(part).strip()
-                for part in (region, locality)
-                if isinstance(part, str) and part.strip()
-            )[:200]
-            or None
+            locality.strip()
+            if isinstance(locality, str)
+            and len(locality.strip()) >= 2
+            and locality.strip().endswith(("市", "区", "町", "村"))
+            else None
         )
         source_id = f"brave-place-search:{identity}"
         candidate = PhotoPlaceCandidate(
@@ -210,7 +212,7 @@ def _external_candidates(
                     source_id=source_id,
                     provider="Brave Search Place Search",
                     dataset="unverified external place result",
-                    license_id=None,
+                    license_id="brave-search-api-terms",
                     record_id=None,
                     version=None,
                     attribution="Brave Search result; not independently verified",
@@ -267,6 +269,28 @@ def _area_key(value: str) -> str:
     return "".join(unicodedata.normalize("NFKC", value).split())
 
 
+def _area_record_candidates(
+    gazetteer: Gazetteer, external: _ExternalCandidate
+) -> list[PhotoPlaceCandidate]:
+    """Brave結果の名称と市区町村でローカルの公的記録を引く（表示上限とは無関係）。"""
+    if not external.locality:
+        return []
+    locality = external.locality.strip()
+    if len(locality) < 2 or not locality.endswith(("市", "区", "町", "村")):
+        return []
+    clue_index = next(
+        (e.clue_index for e in external.candidate.evidence if e.clue_index is not None), None
+    )
+    if clue_index is None:
+        return []
+    candidates = []
+    for row in gazetteer.places_named_in_area(external.candidate.label, locality):
+        candidate = place_candidate_from_record(row, clue_index)
+        if candidate is not None:
+            candidates.append(candidate)
+    return candidates
+
+
 def _corroborating_place_id(
     external: _ExternalCandidate, local_candidates: Sequence[PhotoPlaceCandidate]
 ) -> str | None:
@@ -299,6 +323,7 @@ async def search_photo_places(
     api_key: SecretStr,
     *,
     transport: httpx.AsyncBaseTransport | None = None,
+    gazetteer: Gazetteer | None = None,
 ) -> list[PhotoPlaceResult]:
     """Use only up to three explicitly consented, public facility/station names per diagnosis."""
     key = api_key.get_secret_value().strip()
@@ -407,7 +432,22 @@ async def search_photo_places(
             continue
         merged = list(result.candidates)
         for external in candidates_by_image.get(result_key, []):
-            corroborating = _corroborating_place_id(external, result.candidates)
+            pool = list(result.candidates)
+            if gazetteer is not None:
+                # ローカル検索は同名50件で打ち切られるため、裏付けは名称と市区町村で直接引く。
+                known = {candidate.place_id for candidate in pool}
+                pool.extend(
+                    extra
+                    for extra in _area_record_candidates(gazetteer, external)
+                    if extra.place_id not in known
+                )
+            corroborating = _corroborating_place_id(external, pool)
+            if corroborating is not None:
+                merged.extend(
+                    extra
+                    for extra in pool[len(result.candidates) :]
+                    if extra.place_id == corroborating
+                )
             merged.append(
                 external.candidate.model_copy(update={"corroborated_by": [corroborating]})
                 if corroborating is not None
