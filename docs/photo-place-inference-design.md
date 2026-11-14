@@ -150,7 +150,7 @@ Mapillaryの地理付き街路画像 | 候補を絞った地域の視点画像�
 
 - **共通型/API**: Python/TypeScriptのPhotoPlaceResult、出典・clue evidence検証を追加し、diagnoseの `conclusions` SSEとログインセッション内のメモリsnapshotに追加した。古いsnapshotではこのフィールドが省略されても復元できる。GET診断復元にも含む。
 - **ローカル画像観測**: 駅は駅名OCRとVLMの重なった観測に既存駅Gazetteerの完全一致を要求する。郵便番号は既存Japan Post表に一致させる。施設/地標は写真の `shop/landmark/org_text/place_text` のNFKC完全一致名・別名だけを候補にする。`name_text` は人物名なので対象外。同名IDは `ambiguous`。結果は `visible_in_frame` のみで、撮影地点やプロフィール位置には変換しない。
-- **任意SQLite POI**: `data-prep/src/tkb_data_prep/import_places.py` はローカルGeoJSONLを行単位で読み、`places.sqlite3`へバッチinsertし、`name_key` のindexでlookupする。`engine/data/processed/places.sqlite3` がなければPOIはunknown。公開POIデータのみ保存対象で、投稿画像・本文・診断結果は引き続き保存しない。DBレコードは `place_id, names/aliases, coordinates, basic_category/taxonomy, sources` を保持する。
+- **任意SQLite POI**: `data-prep/src/tkb_data_prep/import_places.py` はローカルGeoJSONLを行単位で読み、API/Gazetteer既定ディレクトリ `data/processed/places.sqlite3` へバッチinsertし、`name_key` のindexでlookupする。索引がなければPOIはunknown。公開POIデータのみ保存対象で、投稿画像・本文・診断結果は引き続き保存しない。DBレコードは `place_id, names/aliases, coordinates, basic_category/taxonomy, sources` を保持する。
 - インポートは `addresses[].country=JP` を既定条件にする。住所国が欠落するデータは入力が日本範囲へ切り出し済みの場合だけ明示フラグで許可。source licenseは各source行から保ち、null値は出典情報とともに保留し検索aliasを作らない。`source-license-map` は人が確認したdataset別 SPDX mapping のみ受け付ける。POI名一致は未確認候補で、所在地の検証済み事実ではない。
 - 同名候補は最大50件を表示し、上限超過時は `too_many_matches` を付け、画面に候補の省略と曖昧さを示す。未校正scoreは保存型にあっても画面へ表示しない。
 - **独立性**: `photo_place_results` は29属性の `profile_claims` / `profile_relations` の入力ではない。仮除外/実削除された投稿の写真候補は画面から除く。候補が現れても撮影地点・居住地・現在地を示さない。

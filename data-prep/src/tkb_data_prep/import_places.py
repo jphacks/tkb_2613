@@ -10,6 +10,8 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
+DEFAULT_OUTPUT = Path("data/processed/places.sqlite3")
+
 
 def _normalized(value: str) -> str:
     value = unicodedata.normalize("NFKC", value).casefold()
@@ -231,7 +233,10 @@ def main() -> None:
         "--input", type=Path, required=True, help="local newline-delimited GeoJSON Features"
     )
     parser.add_argument(
-        "--output", type=Path, required=True, help="engine/data/processed/places.sqlite3"
+        "--output",
+        type=Path,
+        default=DEFAULT_OUTPUT,
+        help=f"API既定gazetteerのSQLite索引 ({DEFAULT_OUTPUT})",
     )
     parser.add_argument("--provider", required=True)
     parser.add_argument("--dataset", required=True)

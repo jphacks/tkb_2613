@@ -46,7 +46,7 @@ data-prep で使う公開データ。データ本体はリポジトリに含め�
 ```powershell
 uv run --project data-prep python -m tkb_data_prep.import_places `
   --input C:\data\places-japan.geojsonl `
-  --output engine\data\processed\places.sqlite3 `
+  --output data\processed\places.sqlite3 `
   --provider "Overture Maps" --dataset "places" --version "取得したrelease ID" `
   --source-license-map C:\data\verified-source-licenses.json
 ```

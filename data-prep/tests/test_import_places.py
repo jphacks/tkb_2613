@@ -1,9 +1,11 @@
 import json
 import sqlite3
+import sys
+from pathlib import Path
 
 import pytest
 
-from tkb_data_prep.import_places import import_geojsonl
+from tkb_data_prep.import_places import DEFAULT_OUTPUT, import_geojsonl, main
 
 
 def _feature(place_id: str, *, country: str | None, license_name: str | None) -> dict[str, object]:
@@ -83,3 +85,16 @@ def test_import_refuses_overwrite(tmp_path) -> None:
     output.touch()
     with pytest.raises(FileExistsError):
         import_geojsonl(source, output, provider="Provider", dataset="places")
+
+
+def test_cli_default_and_help_use_api_gazetteer_directory(monkeypatch, capsys) -> None:
+    assert Path("data/processed/places.sqlite3") == DEFAULT_OUTPUT
+    monkeypatch.setattr(sys, "argv", ["tkb_data_prep.import_places", "--help"])
+
+    with pytest.raises(SystemExit) as result:
+        main()
+
+    assert result.value.code == 0
+    help_text = capsys.readouterr().out.replace("\\", "/")
+    assert "data/processed/places.sqlite3" in help_text
+    assert "engine/data/processed" not in help_text

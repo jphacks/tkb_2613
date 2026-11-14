@@ -15,7 +15,7 @@
 data-prep/raw/
 data-prep/out/
 data/
-engine/data/processed/places.sqlite3*
+data/processed/places.sqlite3*
 eval/photos/
 eval/local/
 *.safetensors
