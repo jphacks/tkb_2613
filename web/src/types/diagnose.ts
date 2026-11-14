@@ -61,11 +61,6 @@ export function isProfileSimulationAfter(
   return isProfileCandidateSetList(after);
 }
 
-/** PR2 で UI を 29 項目へ一本化するまでの旧 Conclusion[] 互換取り出し。 */
-export function legacySimulationConclusions(after: Simulation["after"]): readonly Conclusion[] {
-  return isProfileSimulationAfter(after) ? [] : after;
-}
-
 /**
  * 投稿を実際に消した結果（POST /api/delete の応答）。delete は消せた投稿だけで、broken・after は
  * それを除いて推理し直した結果。api/src/tkb_api/routes/delete.py と同時に変更すること。
@@ -162,6 +157,7 @@ export type DiagnoseEvent =
       readonly conclusions: readonly Conclusion[];
       readonly photo_place_results?: readonly PhotoPlaceResult[];
       readonly profile_claims?: readonly ProfileCandidateSet[];
+      readonly profile_claims_error?: boolean;
       readonly profile_relations?: readonly ProfileRelation[];
       /** Up to three diagnosis-order-stable post IDs selected by exact claim-path removal. */
       readonly profile_claim_suggestions?: readonly string[];
@@ -357,7 +353,7 @@ export function isDiagnosisSnapshot(value: unknown): value is DiagnosisSnapshot 
   } catch {
     return false;
   }
-  return conclusionsEvent?.event === "conclusions";
+  return conclusionsEvent?.event === "conclusions" && !conclusionsEvent.profile_claims_error;
 }
 
 /**
@@ -421,21 +417,24 @@ export function toDiagnoseEvent(
         claim.evidence_paths.every((path) => path.evidence.every(referencesKnownWebFact)),
       ),
     );
-    if (
-      Array.isArray(conclusions) && conclusions.every((c) => isConclusion(c, clueCount)) &&
-      (!hasPhotoPlaceResults || isPhotoPlaceResultList(photoPlaceResults, value.clues)) &&
-      profileClaimsValid && typeof profileText === "string" &&
-      (!hasProfileRelations || isProfileRelationList(profileRelations)) &&
-      Array.isArray(profileClaimSuggestions) && profileClaimSuggestions.length <= 3 &&
+    const profileClaimsError = hasProfileClaims && (!profileClaimsValid || !claimsReferenceKnownWebFacts);
+    const safeProfileClaims = profileClaimsError ? [] : typedProfileClaims;
+    const suggestionsValid = Array.isArray(profileClaimSuggestions) && profileClaimSuggestions.length <= 3 &&
       profileClaimSuggestions.every((postId) => typeof postId === "string" && postId.length > 0) &&
       new Set(profileClaimSuggestions).size === profileClaimSuggestions.length &&
-      profileClaimSuggestions.every((postId) => typedProfileClaims.some((claimSet) =>
+      (profileClaimsError || profileClaimSuggestions.every((postId) => safeProfileClaims.some((claimSet) =>
         claimSet.candidate_pool.some((claim) => claim.evidence_paths.some((path) =>
           path.evidence.some((evidence) => evidence.post_id === postId),
         )),
-      )) &&
+      )));
+    if (
+      Array.isArray(conclusions) && conclusions.every((c) => isConclusion(c, clueCount)) &&
+      (!hasPhotoPlaceResults || isPhotoPlaceResultList(photoPlaceResults, value.clues)) &&
+      typeof profileText === "string" &&
+      (!hasProfileRelations || isProfileRelationList(profileRelations)) &&
+      suggestionsValid &&
       isClueList(selfReportClues) && Array.isArray(webFacts) && webFacts.every(isWebFact) &&
-      new Set(webFacts.map((fact) => fact.id)).size === webFacts.length && claimsReferenceKnownWebFacts &&
+      new Set(webFacts.map((fact) => fact.id)).size === webFacts.length &&
       (webLookupStatus === "not_run" || webLookupStatus === "fixture") &&
       isExternalLookupStatus(externalLookupStatus) &&
       Array.isArray(externalProfileResults) && externalProfileResults.length <= 5 && externalProfileResults.every(isExternalProfileResult) &&
@@ -446,9 +445,10 @@ export function toDiagnoseEvent(
         clues: value.clues,
         conclusions: conclusions as Conclusion[],
         ...(hasPhotoPlaceResults ? { photo_place_results: photoPlaceResults as readonly PhotoPlaceResult[] } : {}),
-        ...(Object.hasOwn(value, "profile_claims") ? { profile_claims: typedProfileClaims } : {}),
+        ...(hasProfileClaims ? { profile_claims: safeProfileClaims } : {}),
+        ...(profileClaimsError ? { profile_claims_error: true } : {}),
         ...(hasProfileRelations ? { profile_relations: profileRelations as readonly ProfileRelation[] } : {}),
-        ...(Object.hasOwn(value, "profile_claim_suggestions") ? { profile_claim_suggestions: profileClaimSuggestions } : {}),
+        ...(Object.hasOwn(value, "profile_claim_suggestions") ? { profile_claim_suggestions: profileClaimsError ? [] : profileClaimSuggestions } : {}),
         ...(Object.hasOwn(value, "web_facts") ? { web_facts: webFacts } : {}),
         ...(Object.hasOwn(value, "web_lookup_status") ? { web_lookup_status: webLookupStatus } : {}),
         ...(Object.hasOwn(value, "external_lookup_status") ? { external_lookup_status: externalLookupStatus } : {}),

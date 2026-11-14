@@ -1,4 +1,4 @@
-import { messages } from "@/lib/messages";
+import { attributeLabel, messages } from "@/lib/messages";
 import type { RiskyPost } from "@/types/diagnose";
 
 const t = messages.plan;
@@ -16,7 +16,7 @@ interface PlanSummaryProps {
 /** 1件ずつ消したときに崩れる項目を、重ねずに並べる（全部消せば少なくともこれらは崩れる） */
 function brokenLabels(risky: readonly RiskyPost[]): string {
   const attributes = [...new Set(risky.flatMap((r) => r.broken))];
-  return attributes.map((a) => messages.board.attributeLabels[a] ?? a).join("・");
+  return attributes.map((a) => attributeLabel(a)).join("・");
 }
 
 /**

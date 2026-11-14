@@ -3,11 +3,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError, deletePosts, simulate } from "@/lib/api";
 import { ESCAPED_MESSAGE } from "@/components/escape-stamps/EscapeStamps";
-import { messages } from "@/lib/messages";
+import { attributeLabel, messages } from "@/lib/messages";
 import type { Clue } from "@/types/clue";
 import type { RiskyPost, Simulation } from "@/types/diagnose";
 import type { Post } from "@/types/post";
-import type { ProfileCandidateSet } from "@/types/profile";
+import { PROFILE_DIAGNOSED_ATTRIBUTES, type ProfileAttribute, type ProfileCandidateSet } from "@/types/profile";
 
 import { RiskyPosts, inviteComposeUrl } from "./RiskyPosts";
 
@@ -30,12 +30,12 @@ function post(n: number, text: string): Post {
 const ADDRESS = post(9, "荷物届いた");
 const GYM = post(2, "ジムおわり 毎週火曜はここ");
 const RISKY: RiskyPost[] = [
-  { post_id: ADDRESS.post_id, broken: ["station", "active_time"] },
+  { post_id: ADDRESS.post_id, broken: ["regular_station", "employer_name"] },
   { post_id: GYM.post_id, broken: ["routine"] },
 ];
 const ALL_BROKEN: Simulation = {
   delete: [ADDRESS.post_id, GYM.post_id],
-  broken: ["station", "active_time", "routine"],
+  broken: ["regular_station", "employer_name", "routine"],
   after: [],
 };
 
@@ -56,8 +56,8 @@ describe("RiskyPosts", () => {
     const items = within(screen.getByRole("list", { name: t.listLabel })).getAllByRole("listitem");
     expect(items).toHaveLength(2);
     expect(items[0]).toHaveTextContent(ADDRESS.text);
-    expect(items[0]).toHaveTextContent(t.breaks("最寄り駅・よくいる時間"));
-    expect(items[1]).toHaveTextContent(t.breaks("決まった外出"));
+    expect(items[0]).toHaveTextContent(t.breaks(`${attributeLabel("regular_station")}・${attributeLabel("employer_name")}`));
+    expect(items[1]).toHaveTextContent(t.breaks(attributeLabel("routine")));
     expect(screen.getAllByRole("checkbox").map((c) => (c as HTMLInputElement).checked)).toEqual([true, true]);
   });
 
@@ -73,28 +73,27 @@ describe("RiskyPosts", () => {
     expect(item).toHaveTextContent(t.directClues(messages.clues.typeLabels.face));
   });
 
-  it("keeps name_text as a direct clue but ignores legacy R8 name breakage in simulation and escape labels", async () => {
+  it("shows provenance-backed 29-attribute breakage labels including full_name", async () => {
     const name: Clue = {
       post_id: ADDRESS.post_id, image_index: null, type: "name_text", value: "内藤大貴",
       region: null, confidence: 0.9, source: "text",
     };
-    const legacyNameOnly = { post_id: ADDRESS.post_id, broken: ["full_name"] };
-    const legacySimulation: Simulation = {
+    const namePost = { post_id: ADDRESS.post_id, broken: ["full_name"] };
+    const sim: Simulation = {
       delete: [ADDRESS.post_id], broken: ["full_name"], after: [],
     };
-    vi.mocked(simulate).mockResolvedValue(legacySimulation);
-    render(<RiskyPosts posts={[ADDRESS]} risky={[legacyNameOnly]} clues={[name]} clueCount={1} onSimulated={vi.fn()} />);
+    vi.mocked(simulate).mockResolvedValue(sim);
+    render(<RiskyPosts posts={[ADDRESS]} risky={[namePost]} clues={[name]} clueCount={1} onSimulated={vi.fn()} />);
 
     const item = screen.getByRole("listitem");
-    expect(item).toHaveTextContent(t.breaksNothing);
+    expect(item).toHaveTextContent(t.breaks(attributeLabel("full_name")));
     expect(item).toHaveTextContent(t.directClues(messages.clues.typeLabels.name_text));
-    expect(item).not.toHaveTextContent(t.breaks(messages.board.attributeLabels.full_name));
 
     fireEvent.click(screen.getByRole("button", { name: t.simulate }));
 
-    expect(await screen.findByText(t.result(1, 0))).toBeInTheDocument();
+    expect(await screen.findByText(t.result(1, 1))).toBeInTheDocument();
     expect(screen.getByText(t.safe)).toBeInTheDocument();
-    expect(within(screen.getByRole("status")).queryByText(messages.board.attributeLabels.full_name)).not.toBeInTheDocument();
+    expect(within(screen.getByRole("status")).getByText(attributeLabel("full_name"))).toBeInTheDocument();
   });
 
   it("does not report escape while a profile candidate still has a surviving evidence path", async () => {
@@ -123,10 +122,10 @@ describe("RiskyPosts", () => {
 
     const item = screen.getByRole("listitem");
     expect(item).toHaveTextContent(t.directClues(messages.clues.typeLabels.name_text));
-    expect(item).not.toHaveTextContent(t.breaks(messages.board.attributeLabels.full_name));
+    expect(item).toHaveTextContent(t.breaks(attributeLabel("full_name")));
     fireEvent.click(screen.getByRole("button", { name: t.simulate }));
 
-    expect(await screen.findByText(t.result(1, 0))).toBeInTheDocument();
+    expect(await screen.findByText(t.result(1, 1))).toBeInTheDocument();
     expect(screen.queryByText(t.safe)).not.toBeInTheDocument();
   });
 
@@ -223,36 +222,82 @@ describe("RiskyPosts", () => {
     await vi.waitFor(() => expect(onSessionExpired).toHaveBeenCalledTimes(1));
   });
 
-  it("shows how many items could be inferred before and after the simulated deletion", async () => {
-    const before = [
-      { rule: "R4", attribute: "station", value: "根津", clue_indices: [0], note: "" },
-      { rule: "R4", attribute: "station", value: "湯島", clue_indices: [1], note: "" },
-      { rule: "R3", attribute: "routine", value: "毎週火曜", clue_indices: [2], note: "" },
-      { rule: "R6", attribute: "active_time", value: "夜", clue_indices: [3], note: "" },
+  it("shows how many 29-attribute items could be inferred before and after the simulated deletion", async () => {
+    const assessment = {
+      minimal_scope: "bluesky" as const, offline_subtype: null, psychological_resistance: null, persona_context: null,
+      inference_ease: null, inference_ease_basis: null, harm_severity: null, harm_scenario: null,
+      harm_prerequisites: [], harm_status: "unknown" as const,
+    };
+    const ev = [
+      { post_id: GYM.post_id, clue_index: null, required: true, source: "post_text" as const, excerpt: "根拠1" },
+      { post_id: ADDRESS.post_id, clue_index: null, required: true, source: "post_text" as const, excerpt: "根拠2" },
     ];
-    vi.mocked(simulate).mockResolvedValue({ ...ALL_BROKEN, broken: ["station", "active_time"], after: [before[2]] });
-    render(<RiskyPosts posts={[GYM, ADDRESS]} risky={RISKY} clueCount={20} onSimulated={vi.fn()} conclusions={before} />);
+    const makeSet = (attribute: ProfileAttribute, values: string[]): ProfileCandidateSet => {
+      const sortedValues = [...values].sort((a, b) => a.localeCompare(b));
+      const candidates = sortedValues.map((value, rankIndex) => ({
+        rank: rankIndex + 1, value, confidence: 0.7, status: "weak" as const,
+        evidence: ev, evidence_paths: [{ evidence: ev, confidence: 0.7, provenance: "direct_disclosure" as const }],
+        assessment, observed_at: null, counter_evidence: [],
+      }));
+      return {
+        attribute,
+        status: candidates.length > 1 ? "ambiguous" : candidates.length === 1 ? "candidate" : "unknown",
+        candidates,
+        candidate_pool: candidates,
+        reason: candidates.length > 0 ? null : "no_grounded_rule",
+        conflicting_evidence: [],
+      };
+    };
+    const before = PROFILE_DIAGNOSED_ATTRIBUTES.map((attribute) =>
+      attribute === "regular_station" ? makeSet(attribute, ["根津", "湯島"])
+        : attribute === "routine" ? makeSet(attribute, ["毎週火曜"])
+          : attribute === "employer_name" ? makeSet(attribute, ["青空株式会社"])
+            : makeSet(attribute, []),
+    );
+    const after = PROFILE_DIAGNOSED_ATTRIBUTES.map((attribute) =>
+      attribute === "routine" ? makeSet(attribute, ["毎週火曜"]) : makeSet(attribute, []),
+    );
+    vi.mocked(simulate).mockResolvedValue({ ...ALL_BROKEN, broken: ["regular_station", "employer_name"], after });
+    render(<RiskyPosts posts={[GYM, ADDRESS]} risky={RISKY} clueCount={20} onSimulated={vi.fn()} profileClaims={before} />);
     expect(screen.queryByRole("figure")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: t.simulate }));
 
-    // 同じ項目（最寄り駅）の結論が2つあっても1と数える：3 → 1
+    // 同じ項目（よく使う駅）の候補が2つあっても1項目と数える：3 → 1
     const figure = await screen.findByRole("figure", { name: t.countLabel(3, 1) });
     expect(figure).toHaveTextContent(t.countHeading);
     // 減ったので、崩れた推定に「不明」の判子を押し、数を 1 つずつ減らし、最後に「もう、見つからない」
     const rows = within(figure).getAllByRole("listitem");
     expect(rows.map((r) => r.textContent)).toEqual([
       expect.stringContaining("根津"),
-      expect.stringContaining("夜"),
+      expect.stringContaining("青空株式会社"),
     ]);
     for (const row of rows) expect(within(row).getByText("不明")).toBeInTheDocument();
     expect(within(figure).getByText(ESCAPED_MESSAGE)).toBeInTheDocument();
   });
 
   it("keeps the plain counts without stamps when nothing was lost", async () => {
-    const before = [{ rule: "R3", attribute: "routine", value: "毎週火曜", clue_indices: [2], note: "" }];
+    const assessment = {
+      minimal_scope: "bluesky" as const, offline_subtype: null, psychological_resistance: null, persona_context: null,
+      inference_ease: null, inference_ease_basis: null, harm_severity: null, harm_scenario: null,
+      harm_prerequisites: [], harm_status: "unknown" as const,
+    };
+    const ev = [
+      { post_id: GYM.post_id, clue_index: null, required: true, source: "post_text" as const, excerpt: "根拠1" },
+      { post_id: ADDRESS.post_id, clue_index: null, required: true, source: "post_text" as const, excerpt: "根拠2" },
+    ];
+    const candidate = {
+      rank: 1, value: "毎週火曜", confidence: 0.7, status: "weak" as const,
+      evidence: ev, evidence_paths: [{ evidence: ev, confidence: 0.7, provenance: "direct_disclosure" as const }],
+      assessment, observed_at: null, counter_evidence: [],
+    };
+    const before = PROFILE_DIAGNOSED_ATTRIBUTES.map((attribute) =>
+      attribute === "routine"
+        ? { attribute, status: "candidate" as const, candidates: [candidate], candidate_pool: [candidate], reason: null, conflicting_evidence: [] }
+        : { attribute, status: "unknown" as const, candidates: [], candidate_pool: [], reason: "no_grounded_rule", conflicting_evidence: [] },
+    );
     vi.mocked(simulate).mockResolvedValue({ ...ALL_BROKEN, broken: [], after: before });
-    render(<RiskyPosts posts={[GYM, ADDRESS]} risky={RISKY} clueCount={20} onSimulated={vi.fn()} conclusions={before} />);
+    render(<RiskyPosts posts={[GYM, ADDRESS]} risky={RISKY} clueCount={20} onSimulated={vi.fn()} profileClaims={before} />);
 
     fireEvent.click(screen.getByRole("button", { name: t.simulate }));
 
@@ -263,10 +308,31 @@ describe("RiskyPosts", () => {
   });
 
   it("keeps showing the counts after deleting for real", async () => {
-    const before = [{ rule: "R3", attribute: "routine", value: "毎週火曜", clue_indices: [0], note: "" }];
-    vi.mocked(simulate).mockResolvedValue(ALL_BROKEN);
-    vi.mocked(deletePosts).mockResolvedValue({ ...ALL_BROKEN, failed: [] });
-    render(<RiskyPosts posts={[GYM, ADDRESS]} risky={RISKY} clueCount={20} onSimulated={vi.fn()} conclusions={before} />);
+    const assessment = {
+      minimal_scope: "bluesky" as const, offline_subtype: null, psychological_resistance: null, persona_context: null,
+      inference_ease: null, inference_ease_basis: null, harm_severity: null, harm_scenario: null,
+      harm_prerequisites: [], harm_status: "unknown" as const,
+    };
+    const ev = [
+      { post_id: GYM.post_id, clue_index: null, required: true, source: "post_text" as const, excerpt: "根拠1" },
+      { post_id: ADDRESS.post_id, clue_index: null, required: true, source: "post_text" as const, excerpt: "根拠2" },
+    ];
+    const candidate = {
+      rank: 1, value: "毎週火曜", confidence: 0.7, status: "weak" as const,
+      evidence: ev, evidence_paths: [{ evidence: ev, confidence: 0.7, provenance: "direct_disclosure" as const }],
+      assessment, observed_at: null, counter_evidence: [],
+    };
+    const before: ProfileCandidateSet[] = PROFILE_DIAGNOSED_ATTRIBUTES.map((attribute) =>
+      attribute === "routine"
+        ? { attribute, status: "candidate", candidates: [candidate], candidate_pool: [candidate], reason: null, conflicting_evidence: [] }
+        : { attribute, status: "unknown", candidates: [], candidate_pool: [], reason: "no_grounded_rule", conflicting_evidence: [] },
+    );
+    const emptyAfter: ProfileCandidateSet[] = PROFILE_DIAGNOSED_ATTRIBUTES.map((attribute) => (
+      { attribute, status: "unknown", candidates: [], candidate_pool: [], reason: "no_grounded_rule", conflicting_evidence: [] }
+    ));
+    vi.mocked(simulate).mockResolvedValue({ ...ALL_BROKEN, after: emptyAfter });
+    vi.mocked(deletePosts).mockResolvedValue({ ...ALL_BROKEN, after: emptyAfter, failed: [] });
+    render(<RiskyPosts posts={[GYM, ADDRESS]} risky={RISKY} clueCount={20} onSimulated={vi.fn()} profileClaims={before} />);
     fireEvent.click(screen.getByRole("button", { name: t.simulate }));
     fireEvent.click(await screen.findByRole("button", { name: t.deleteForReal }));
 
@@ -407,10 +473,33 @@ describe("RiskyPosts", () => {
 });
 
 
-it("does not report escape while the home block can still be inferred", async () => {
+it("does not report escape while a 29-attribute residential_area claim survives", async () => {
+  const assessment = {
+    minimal_scope: "bluesky" as const, offline_subtype: null, psychological_resistance: null, persona_context: null,
+    inference_ease: null, inference_ease_basis: null, harm_severity: null, harm_scenario: null,
+    harm_prerequisites: [], harm_status: "unknown" as const,
+  };
+  const ev = [
+    { post_id: "at://did:plc:abc/app.bsky.feed.post/other", clue_index: null, required: true, source: "post_text" as const, excerpt: "架空町1" },
+    { post_id: "at://did:plc:abc/app.bsky.feed.post/other2", clue_index: null, required: true, source: "post_text" as const, excerpt: "架空町2" },
+  ];
+  const survivingCandidate = {
+    rank: 1, value: "架空町付近", confidence: 0.65, status: "weak" as const,
+    evidence: ev, evidence_paths: [{ evidence: ev, confidence: 0.65, provenance: "combined_inference" as const }],
+    assessment, observed_at: null, counter_evidence: [],
+  };
+  const survivingAfter: ProfileCandidateSet[] = PROFILE_DIAGNOSED_ATTRIBUTES.map((attribute) =>
+    attribute === "residential_area"
+      ? {
+        attribute, status: "candidate",
+        candidates: [survivingCandidate],
+        candidate_pool: [survivingCandidate], reason: null, conflicting_evidence: [],
+      }
+      : { attribute, status: "unknown", candidates: [], candidate_pool: [], reason: "no_grounded_rule", conflicting_evidence: [] },
+  );
   vi.mocked(simulate).mockResolvedValue({
     ...ALL_BROKEN,
-    after: [{ rule: "R6", attribute: "home_block", value: "架空町 1-2 付近", clue_indices: [0], note: "" }],
+    after: survivingAfter,
   });
   renderRisky();
   fireEvent.click(screen.getByRole("button", { name: t.simulate }));
