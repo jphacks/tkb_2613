@@ -145,3 +145,23 @@ def test_describe_cell_and_age_label(tables: ScoringTables) -> None:
     outside = replace(tables, town=np.full(tables.size, -1, dtype=np.int32))
     assert describe_cell(outside, 0)["town"] is None
     assert age_label(22) == "20〜24歳" and age_label(None) is None
+
+
+def test_estimate_reads_town_names_written_in_the_text(tables: ScoringTables) -> None:
+    posts = [post(1, "近所の秋祭り、法被の背中に『弥生』って入ってて地元感あった")]
+
+    result = estimate(posts, [], tables, AREAS)
+
+    assert result is not None
+    assert [(e.signal.layer, e.signal.value, e.applied) for e in result.evidence] == [
+        (5, "弥生", True)
+    ]
+
+
+def test_estimate_counts_a_town_read_from_both_photo_and_text_once(tables: ScoringTables) -> None:
+    posts = [post(2, "近所の猫。電柱に『弥生』", images=1)]
+
+    result = estimate(posts, CLUES, tables, AREAS)
+
+    assert result is not None
+    assert [e.signal.value for e in result.evidence] == ["弥生"]

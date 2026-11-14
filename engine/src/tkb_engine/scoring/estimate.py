@@ -27,6 +27,7 @@ from tkb_engine.scoring.signals import (
     SignalKind,
     photo_town_signals,
     text_signals,
+    text_town_signals,
 )
 from tkb_engine.scoring.tables import ScoringTables
 
@@ -89,6 +90,7 @@ def collect_signals(
     for post in posts:
         found.extend(text_signals(post, lines, stops))
         found.extend(photo_town_signals(post, clues, list(range(len(clues))), towns))
+        found.extend(_new(text_town_signals(post, towns), found))
         found.extend(place_signals(post, stations, shelters))
     return found
 
@@ -152,6 +154,12 @@ def estimate(
         without=without,
         steps=steps,
     )
+
+
+def _new(candidates: Sequence[Signal], found: Sequence[Signal]) -> list[Signal]:
+    """同じ投稿の同じ町名（写真と本文の両方で読めたもの）は1回だけ数える。"""
+    seen = {(s.post_id, s.kind, s.value) for s in found}
+    return [s for s in candidates if (s.post_id, s.kind, s.value) not in seen]
 
 
 def _first(signals: Sequence[Signal], kind: SignalKind) -> str | None:

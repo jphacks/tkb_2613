@@ -98,3 +98,25 @@ def test_photo_town_needs_both_ocr_and_vlm_to_read_the_same_text() -> None:
 )
 def test_photo_town_is_not_used_without_agreement_or_relation(text: str, clues: list[Clue]) -> None:
     assert photo_town_signals(post(text), clues, list(range(len(clues))), TOWNS) == []
+
+
+TOWN_NAMES = ["弥生二丁目", "弥生町一丁目", "根津一丁目", "花見川", "公園通り"]
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("近所の秋祭り、法被の背中に『弥生』って入ってて地元感あった", ["弥生"]),
+        ("近所の弥生のパン屋がおいしい", ["弥生"]),
+        ("近所の公園で花見した", []),  # ふつうの言葉
+        ("旅行先の秋祭り、法被に『弥生』", []),  # 近所の話ではない
+        ("近所の『銀座』という名前の店", []),  # 町名にない
+        ("近所の猫、今日もいた", []),
+    ],
+)
+def test_text_town_signals(text: str, expected: list[str]) -> None:
+    from tkb_engine.scoring.signals import text_town_signals
+
+    found = text_town_signals(post(text), TOWN_NAMES)
+    assert [s.value for s in found] == expected
+    assert all(s.kind == SignalKind.TOWN and s.clue_indices == () for s in found)
