@@ -40,3 +40,4 @@ secrets: ## gitleaks で秘密情報を検査
 data: ## 公開データの取得と変換（data/processed/ に Parquet で出力）
 	data-prep/fetch.sh
 	uv run python -m tkb_data_prep
+	uv run python -m tkb_data_prep.scoring_tables

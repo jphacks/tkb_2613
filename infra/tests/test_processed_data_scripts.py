@@ -108,6 +108,41 @@ def test_upload_stops_when_a_table_is_missing(env: dict[str, str], missing: str)
     assert not (Path(env["FAKE_S3"]) / "uploaded.tar.gz").exists()
 
 
+SCORING = [
+    "scoring_age_500m.parquet",
+    "scoring_towns.parquet",
+    "scoring_cells.parquet",
+    "scoring_stations.parquet",
+    "scoring_station_walk.parquet",
+    "scoring_bus_stops.parquet",
+    "scoring_bus_walk.parquet",
+    "scoring_schools.parquet",
+]
+
+
+def test_upload_adds_scoring_tables_when_all_of_them_exist(env: dict[str, str]) -> None:
+    for name in SCORING:
+        (Path(env["TKB_PROCESSED_DIR"]) / name).write_bytes(f"table {name}".encode())
+
+    done = run([str(UPLOAD), "tkb-bucket"], env)
+
+    assert done.returncode == 0, done.stderr
+    with tarfile.open(Path(env["FAKE_S3"]) / "uploaded.tar.gz") as tar:
+        assert sorted(tar.getnames()) == sorted([*TABLES, *SCORING, "MANIFEST.sha256"])
+    assert run([str(INSTALL), uploaded_sha(env)], env, stdin=f"{URL}\n").returncode == 0
+    assert (Path(env["TKB_APP_DIR"]) / "data" / "processed" / SCORING[0]).is_file()
+
+
+def test_upload_stops_when_only_some_scoring_tables_exist(env: dict[str, str]) -> None:
+    (Path(env["TKB_PROCESSED_DIR"]) / SCORING[0]).write_bytes(b"x")
+
+    done = run([str(UPLOAD), "tkb-bucket"], env)
+
+    assert done.returncode != 0
+    assert "一部だけ" in done.stderr
+    assert not (Path(env["FAKE_S3"]) / "uploaded.tar.gz").exists()
+
+
 def test_upload_refuses_a_bucket_that_can_be_public(env: dict[str, str]) -> None:
     done = run([str(UPLOAD), "tkb-bucket"], {**env, "FAKE_BLOCK": "True\tTrue\tFalse\tTrue"})
 
