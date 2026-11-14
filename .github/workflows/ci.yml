@@ -113,3 +113,19 @@ jobs:
             -v "$PWD:/work:ro" -w /work \
             ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f \
             git --config .gitleaks.toml --redact --verbose .
+
+  actionlint:
+    name: ワークフローの検査（actionlint）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # 本番デプロイ（deploy.yml）を含むワークフローの書き間違いと、run の中のシェルを shellcheck で検査する。
+      # 公式イメージを digest で固定し、ネットワークなしで動かす
+      - name: actionlint で検査
+        run: |
+          docker run --rm --network none --user "$(id -u):$(id -g)" \
+            -v "$PWD:/repo:ro" -w /repo \
+            rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 \
+            -color

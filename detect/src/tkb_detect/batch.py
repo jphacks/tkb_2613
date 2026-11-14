@@ -48,6 +48,7 @@ async def extract_posts(
     fetch_images: FetchImages,
     *,
     concurrency: int = CONCURRENCY,
+    image_fetch_fallback_to_text: bool = False,
 ) -> AsyncGenerator[PostExtraction]:
     if concurrency < 1:
         raise ValueError("concurrency は 1 以上にすること")
@@ -55,7 +56,12 @@ async def extract_posts(
 
     async def run(post: Post) -> PostExtraction:
         async with semaphore:
-            return await _extract_one(extractor, post, fetch_images)
+            return await _extract_one(
+                extractor,
+                post,
+                fetch_images,
+                image_fetch_fallback_to_text=image_fetch_fallback_to_text,
+            )
 
     tasks = [asyncio.create_task(run(post)) for post in posts]
     try:
@@ -68,14 +74,23 @@ async def extract_posts(
 
 
 async def _extract_one(
-    extractor: Extractor, post: Post, fetch_images: FetchImages
+    extractor: Extractor,
+    post: Post,
+    fetch_images: FetchImages,
+    *,
+    image_fetch_fallback_to_text: bool = False,
 ) -> PostExtraction:
     fetch_started = time.monotonic()
     try:
         images = await fetch_images(post) if post.images and extractor.image_enabled else []
     except Exception:
         # 取得の失敗の中身（URL など）は返さない
-        return PostExtraction(post_id=post.post_id, clues=[], error=FETCH_FAILED_MESSAGE)
+        if not image_fetch_fallback_to_text:
+            return PostExtraction(post_id=post.post_id, clues=[], error=FETCH_FAILED_MESSAGE)
+        # Threadsでは一時的なCDN失敗で本文まで失わない。画像情報を外したコピーを
+        # extractorへ渡すことで、画像数の整合性検査を保ったまま本文だけを読む。
+        post = post.model_copy(update={"images": []})
+        images = []
     finally:
         logger.info(
             "診断の内訳：画像取得 %.2f 秒（写真 %d 枚）",

@@ -90,6 +90,25 @@ describe("DiagnoseLoading", () => {
     expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
   });
 
+  it("uses the counts it is given instead of counting found posts", () => {
+    render(<DiagnoseLoading active posts={[]} found={{}} status="" progress={{ done: 2, total: 7 }} />);
+
+    const bar = screen.getByRole("progressbar", { name: t.progressLabel });
+    expect(bar).toHaveAttribute("aria-valuenow", "2");
+    expect(bar).toHaveAttribute("aria-valuemax", "7");
+  });
+
+  it("shows no bar when the real progress is not known", () => {
+    render(
+      <DiagnoseLoading active posts={[post(1, "a")]} found={{}} status="" progress={null}>
+        <p>経過 0:05</p>
+      </DiagnoseLoading>,
+    );
+
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+    expect(screen.getByText("経過 0:05")).toBeInTheDocument();
+  });
+
   it("changes its line every few seconds", () => {
     vi.useFakeTimers();
     render(<DiagnoseLoading active posts={[]} found={{}} status="" />);

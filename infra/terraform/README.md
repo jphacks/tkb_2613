@@ -164,6 +164,8 @@ journalctl -u tkb-app -n 50 --no-pager
 
 tar に入れる表（11個。1つでも欠けたら上げない）：`stations`・`postal`・`area_codes`・`muni_mesh`・`households_500m`（e-Stat のメッシュ統計から）・`schools`・`shelters`・`bus_stops`・`school_districts`・`ridership` の `.parquet` と、法人番号の `corporations.sqlite`。固めると約 75MB、展開すると約 220MB。
 
+任意で、写真場所のPOI索引 `places.sqlite3`（国土数値情報 P05 の役場・公的集会施設など。作り方は [data-prep/SOURCES.md](../../data-prep/SOURCES.md)）も入れる。`data/processed/places.sqlite3` があればそれを、なければ `data/processed/national/places.sqlite3` を使い、どちらの場合も tar では直下に置く。本番の api は11個がそろった `data/processed` を選び、POI索引もその直下だけを見るため、`national/` の下のままでは使われない。索引がなければ写真場所の候補はいつも「不明」になる（他の推理には影響しない）。P05 全国版で約 100MB 増える。Overture Maps Places の関東1都6県分（約103万件）を足した索引は約 2GB（P05 のみは約 100MB）で、tar に入れると約 2GB が S3 経由で EC2 に届き、展開後も約 2GB のディスクを使うので、EC2 のディスクの空きと署名付き URL の有効秒数（既定 900 秒、最大 3600 秒）を先に確かめる。置き場所は同じく `data/processed/places.sqlite3` で、作り方は [data-prep/SOURCES.md](../../data-prep/SOURCES.md) の「Overture Places 関東1都6県の索引」（`data/processed/kanto/places.sqlite3` を `data/processed/` 直下へコピーする）。索引の schema version（`PRAGMA user_version`）が api と合わないものは api が読まないので、api を更新したら索引も作り直して届け直す。
+
 ### 1. 手元で表を作る
 
 e-Stat の地域メッシュ統計（`data-prep/raw/estat/`）と国税庁の法人番号の zip（`data-prep/raw/houjin/`）は、どちらもブラウザで落として手で置く（[data-prep/README.md](../../data-prep/README.md)）。置いたら：
@@ -220,7 +222,7 @@ aws s3 rm "s3://$BUCKET/processed/<上げたファイル名>"
   - `home_area=弥生`、`home_block=弥生二丁目付近`
 - ブラウザで `https://<配信ID>.cloudfront.net/demo` を開き、推理の結論に「最寄り駅：根津駅」と「ゴミの収集地区：文京区 弥生1・2丁目」が出る
 - アプリの EC2 で `docker stats --no-stream tkb_2613-api-1` のメモリが、表を入れる前より約 72MB 増えた程度（法人番号の SQLite はメモリに載せず、引くたびにディスクから読む）
-- `ls -l /opt/tkb_2613/data/processed` が 11 個で、どれも `-rw-r--r--`
+- `ls -l /opt/tkb_2613/data/processed` が 11 個（POI索引を入れたら `places.sqlite3` を足して 12 個）で、どれも `-rw-r--r--`
 
 ### 表を戻す
 
@@ -236,6 +238,86 @@ mv processed processed.bad && mv processed.prev processed && systemctl restart t
 - `curl -s https://<配信ID>.cloudfront.net/api/features` が `share_enabled=false` と設定した `auth_mode` を返す
 - アプリの EC2 で `docker logs tkb_2613-api-1 2>&1 | grep 閲覧リンク` が「閲覧リンク：オフ（SHARE_ENABLED）」
 - GPU を止めた状態で診断すると「ただいま準備中です」
+
+## GitHub Actions から本番デプロイする
+
+リポジトリに書き込めるメンバーなら誰でも、Actions の「本番デプロイ」→「Run workflow」（ブランチは main のまま）で、**その時点の最新の main** を本番に出せる。中身は上の「既存 EC2 の起動スクリプト更新」と同じ手順（checkout → 起動スクリプトを入れ直す → `systemctl restart tkb-app`）。
+
+| 段階 | 場所 | すること |
+|---|---|---|
+| 1 | Actions（`.github/workflows/deploy.yml`） | 最新の main か、そのコミットの CI が成功しているかを確かめる。違えば何もしない |
+| 2 | Actions | OIDC でロール `tkb_2613-github-deploy` を引き受ける（長期のキーなし。main のジョブだけ） |
+| 3 | Actions → SSM | ドキュメント `tkb_2613-deploy` をアプリの EC2 に送る。渡すのはコミット SHA だけ |
+| 4 | アプリの EC2（`infra/deploy.sh`） | ロック → 最新の main かを再確認 → 前のイメージを `:rollback-<前のSHA>` で残す → checkout → 起動し直す |
+| 5 | アプリの EC2 | api の healthcheck、web の `/` と `/api/features`、公開オリジンでの `infra/prod_smoke.py` |
+| 6 | アプリの EC2 | 5 が失敗したら前のコミットに戻して起動し直し、もう一度確かめる |
+| 7 | Actions | 実行者・コミット・前のコミット・結果・所要時間を、実行の Summary に出す |
+
+- ロールにできるのは、このドキュメントをアプリの EC2 に送ることと、結果を読むことだけ。任意のシェル（`AWS-RunShellScript`）は送れず、GPU の起動・停止もできない
+- `.env`・`data/processed`・`eval/local` は git の管理外なので、checkout でも変わらない。秘密は起動スクリプトが毎回 Secrets Manager から読む
+- 同時には動かない（Actions の `concurrency` と、EC2 の `flock`）。追跡しているファイルを EC2 で手で直してあると、消さないように止まる
+- Actions を途中で止めても、EC2 側のデプロイとロールバックは最後まで進む。結果は SSM のコマンド ID（Summary にある）で確かめる
+- ロールバックは前のコミットから作り直す（ビルドのキャッシュがあれば1〜2分）。それも失敗したときは、残した `:rollback-<SHA>` のイメージと `git checkout <前のSHA>` で手で戻す
+
+### 初回の準備（インフラ担当が1回だけ）
+
+1. Terraform でロールとドキュメントを作る。**`-target` で、この3つだけを apply する**（2026-11-14 時点で、WAF にも main のコードとの差がある。診断のレート制限に `/api/draft-check` を足す変更で、これは別に判断する）
+
+   ```bash
+   cd infra/terraform
+   terraform plan -out=deploy.tfplan \
+     -target=aws_ssm_document.deploy \
+     -target=aws_iam_role.github_deploy \
+     -target=aws_iam_role_policy.github_deploy
+   terraform apply deploy.tfplan
+   # apply のたびに state をリポジトリの外へコピーする（上の「apply のたびに state を…」）
+   ```
+
+2. ロールの ARN を GitHub の **secret** `AWS_DEPLOY_ROLE_ARN` に入れる（アカウント番号を公開のログに出さないため、variable ではなく secret にする）。画面にも履歴にも出さずに入れる：
+
+   ```bash
+   aws iam get-role --role-name tkb_2613-github-deploy --query Role.Arn --output text \
+     | gh secret set AWS_DEPLOY_ROLE_ARN -R jphacks/tkb_2613
+   ```
+
+3. 一度、Actions から実行して Summary が「成功」になることを確かめる
+
+### うまくいかなかったとき
+
+Summary の結果ごとに、することが決まっている。「前のコミット」と SSM コマンド ID は Summary にある。
+
+| 結果 | 本番の状態 | すること |
+|---|---|---|
+| ⛔ 始める前に中止 / EC2 に送る前に中止 | 変わっていない | 理由（最新の main でない、CI が未完了、EC2 に手元の変更がある など）を直して、もう一度 Run workflow |
+| ⏸ 別のデプロイが実行中 | 変わっていない | 前のデプロイが終わってから実行する |
+| ↩️ 前のコミットに戻した | 前のコミットで動いている（確認済み） | 失敗の理由（EC2 の出力の `prod_smoke.py` の NG 行など）を PR で直してから、もう一度実行 |
+| 🚨 ロールバックも失敗 | 止まっているか、不完全 | すぐにインフラ担当へ。下の「手で戻す」 |
+| Actions を途中で止めた・待ちきれなかった | EC2 ではデプロイとロールバックが最後まで進む | 15分ほど待って画面を確かめ、もう一度実行する（実行中なら「別のデプロイが実行中」で止まるだけ）。インフラ担当は `aws ssm get-command-invocation --region us-east-1 --instance-id i-0e4f78053c9564025 --command-id <ID>` で結果を見られる |
+| SSM の状態が Undeliverable・Failed で、EC2 の出力がない | 変わっていない（SSM のエージェントに届いていない） | インフラ担当が `aws ssm describe-instance-information` で EC2 がオンラインか確かめる |
+
+**手で戻す（インフラ担当）**：SSM でアプリの EC2 に入り、前のコミットで起動し直す。
+
+```bash
+sudo -i
+cd /opt/tkb_2613
+git log -1 --oneline; docker ps -a; journalctl -u tkb-app -n 100 --no-pager   # 何が起きたか
+git checkout <前のコミットの SHA>
+install -m 700 infra/tkb-app-start.sh /usr/local/bin/tkb-app-start
+systemctl restart tkb-app
+python3 infra/prod_smoke.py "$(sed -n 's/^PUBLIC_URL=//p' .env)"
+```
+
+ビルドそのものができない（ディスク不足、Docker Hub や PyPI に届かない など）ときは、デプロイの前に残したイメージを、ビルドせずに使う。秘密の渡し方は起動スクリプトのままにする。
+
+```bash
+docker tag tkb_2613-api:rollback-<前のSHAの7桁> tkb_2613-api:latest
+docker tag tkb_2613-web:rollback-<前のSHAの7桁> tkb_2613-web:latest
+sed 's/ up --build -d/ up --no-build -d/' /usr/local/bin/tkb-app-start > /run/tkb-app-start-nobuild
+bash /run/tkb-app-start-nobuild; rm -f /run/tkb-app-start-nobuild
+df -h /; docker system df   # ディスク不足なら docker builder prune で空ける
+```
+
+それでも戻らず、利用者に壊れた画面を見せたくないときは、「全遮断・停止」の 1（WAF で全員を遮断）を使う。
 
 ## 全遮断・停止（docs/aws-migration.md の 7章）
 

@@ -1,20 +1,23 @@
 import { describe, expect, it } from "vitest";
 
-import { PROFILE_ATTRIBUTE_CATALOG, PROFILE_CATEGORIES, isExternalProfileResult, isProfileItem, isWebFact, profileClaimAfterDeletion, profileClaimsAfterDeletion, type ProfileAttribute, type ProfileItem } from "./profile";
+import { PROFILE_ATTRIBUTE_CATALOG, PROFILE_CATEGORIES, PROFILE_DIAGNOSED_ATTRIBUTES, isExternalProfileResult, isProfileCandidateSet, isProfileCandidateSetList, isProfileItem, isProfileRelationList, isWebFact, profileCandidateAfterDeletion, profileClaimAfterDeletion, profileRelationsAfterDeletion, type ClaimAssessment, type ProfileAttribute, type ProfileCandidate, type ProfileCandidateSet, type ProfileEvidence, type ProfileItem, type ProfileRelation } from "./profile";
 
 describe("profile metadata catalog", () => {
-  it("contains the 25 candidate IDs and labels with unrated legacy fields", () => {
+  it("contains the 30 candidate IDs and labels with unrated legacy fields", () => {
     const expected: Record<ProfileAttribute, string> = {
       facial_appearance: "顔貌（自撮り・他撮り・反射）", full_name: "本名（フルネーム）",
       given_name: "下の名前", nickname: "呼ばれている名前", other_social_account: "別SNSのアカウント / 本垢",
+      age: "年齢・年代", birthday: "誕生日",
       realtime_location: "リアルタイムの現在地", home_building: "自宅の建物候補", home_room: "自宅の部屋・階・位置",
-      home_nearest_station: "自宅の最寄り駅", regular_station: "日常的に利用する駅", regular_line: "日常的に利用する路線",
+      home_nearest_station: "自宅の最寄り駅", regular_station: "投稿時点の通勤利用駅候補", regular_line: "日常的に利用する路線",
       residential_area: "居住エリア（市区町村・町域）", announced_long_absence: "予告された長期不在",
       actual_home_absence: "実際の自宅不在", employer_name: "雇用主名の推定",
       workplace_building_candidate: "勤務先建物候補", workplace_area: "勤務先エリア（オフィス街）",
-      school: "通学先（大学・キャンパス・学校）", frequent_shop: "行きつけの店（ジム・美容院・カフェ）",
-      vehicle_model: "自家用車の車種", partial_plate: "ナンバーの一部", partner_status: "配偶者・交際相手の有無",
-      partner_attributes: "配偶者・交際相手の属性", child_age: "子どもの年齢", child_school: "子どもの通園・通学先",
+      school: "通学先（大学・キャンパス・学校）", occupation: "職種・属性", frequent_shop: "行きつけの店（ジム・美容院・カフェ）",
+      vehicle_model: "自家用車の車種", partial_plate: "ナンバーの一部", active_time: "主な活動時間帯", routine: "定期行動・習慣",
+      partner_status: "配偶者・交際相手の有無",
+      partner_attributes: "配偶者・交際相手の属性", home_walk_area: PROFILE_ATTRIBUTE_CATALOG.home_walk_area.label,
+      child_age: "子どもの年齢", child_school: "子どもの通園・通学先",
     };
     expect(Object.keys(PROFILE_ATTRIBUTE_CATALOG).sort()).toEqual(Object.keys(expected).sort());
     expect(Object.fromEntries(Object.entries(PROFILE_ATTRIBUTE_CATALOG).map(([id, item]) => [id, item.label]))).toEqual(expected);
@@ -36,8 +39,8 @@ describe("profileClaimAfterDeletion", () => {
     attribute: "residential_area", value: "架空の区", confidence: 0.8, status: "found",
     evidence: [ref(a, "A"), ref(b, "B"), ref(c, "C"), ref(d, "D")],
     evidence_paths: [
-      { evidence: [ref(a, "A"), ref(b, "B")], confidence: 0.8 },
-      { evidence: [ref(c, "C"), ref(d, "D")], confidence: 0.6 },
+      { evidence: [ref(a, "A"), ref(b, "B")], confidence: 0.8, provenance: "combined_inference" },
+      { evidence: [ref(c, "C"), ref(d, "D")], confidence: 0.6, provenance: "combined_inference" },
     ],
   };
 
@@ -50,37 +53,44 @@ describe("profileClaimAfterDeletion", () => {
     expect(after?.status).toBe("weak");
   });
 
+  it("keeps a found grade when a direct-disclosure path survives below the old score threshold", () => {
+    const withProvenance: ProfileItem = {
+      ...item,
+      confidence: 0.86,
+      evidence_paths: [
+        { evidence: [ref(a, "直接公開 A"), ref(b, "直接公開 B")], confidence: 0.72, provenance: "direct_disclosure" },
+        { evidence: [ref(c, "複合 C"), ref(d, "複合 D")], confidence: 0.86, provenance: "combined_inference" },
+      ],
+    };
+
+    const after = profileClaimAfterDeletion(withProvenance, new Set([c]));
+
+    expect(after?.confidence).toBe(0.72);
+    expect(after?.status).toBe("found");
+    expect(after?.evidence_paths?.map((path) => path.provenance)).toEqual(["direct_disclosure"]);
+  });
+
+  it("downgrades a found claim when deletion leaves only combined-inference paths", () => {
+    const withProvenance: ProfileItem = {
+      ...item,
+      confidence: 0.86,
+      evidence_paths: [
+        { evidence: [ref(a, "直接公開 A"), ref(b, "直接公開 B")], confidence: 0.72, provenance: "direct_disclosure" },
+        { evidence: [ref(c, "複合 C"), ref(d, "複合 D")], confidence: 0.86, provenance: "combined_inference" },
+      ],
+    };
+
+    const after = profileClaimAfterDeletion(withProvenance, new Set([a]));
+
+    expect(after?.confidence).toBe(0.86);
+    expect(after?.status).toBe("weak");
+    expect(after?.evidence_paths?.map((path) => path.provenance)).toEqual(["combined_inference"]);
+  });
+
   it("returns null when every known path is removed and undefined when paths are unavailable", () => {
     expect(profileClaimAfterDeletion(item, new Set([a, c]))).toBeNull();
     const legacy: ProfileItem = { ...item, evidence_paths: undefined };
     expect(profileClaimAfterDeletion(legacy, new Set([a]))).toBeUndefined();
-  });
-});
-
-describe("profileClaimsAfterDeletion", () => {
-  const a = "at://did:plc:test/app.bsky.feed.post/a";
-  const b = "at://did:plc:test/app.bsky.feed.post/b";
-  const c = "at://did:plc:test/app.bsky.feed.post/c";
-  const ref = (post_id: string) => ({ post_id, clue_index: null, required: true, source: "post_text" as const, excerpt: post_id });
-  const withPath: ProfileItem = {
-    attribute: "residential_area", value: "架空の区", confidence: 0.85, status: "found",
-    evidence: [ref(a), ref(b)],
-    evidence_paths: [{ evidence: [ref(a), ref(b)], confidence: 0.85 }],
-  };
-  const legacy: ProfileItem = { attribute: "employer_name", value: "架空商事", confidence: 0.9, status: "found", evidence: [ref(c)] };
-
-  it("returns the claims as they are when nothing was deleted", () => {
-    const claims = [withPath, legacy];
-    expect(profileClaimsAfterDeletion(claims, new Set())).toBe(claims);
-  });
-
-  it("drops a claim whose evidence path was deleted", () => {
-    expect(profileClaimsAfterDeletion([withPath, legacy], new Set([a]))).toEqual([legacy]);
-  });
-
-  it("drops a claim without paths only when its own evidence was deleted", () => {
-    expect(profileClaimsAfterDeletion([legacy], new Set([a]))).toEqual([legacy]);
-    expect(profileClaimsAfterDeletion([legacy], new Set([c]))).toEqual([]);
   });
 });
 
@@ -93,8 +103,17 @@ describe("isProfileItem", () => {
     expect(isProfileItem({ ...base, value: "会社名", status: "found" })).toBe(true);
     expect(isProfileItem({ ...base, value: null, status: "unknown" })).toBe(true);
   });
+
+  it("accepts a non-empty open data citation without a post or clue reference", () => {
+    const item = {
+      attribute: "residential_area", value: "架空の区", confidence: 0.65, status: "weak",
+      evidence: [{ post_id: null, clue_index: null, required: true, source: "open_data", excerpt: "出典：架空の境界データ" }],
+    };
+    expect(isProfileItem(item)).toBe(true);
+    expect(isProfileItem({ ...item, evidence: [{ ...item.evidence[0], excerpt: "" }] })).toBe(false);
+  });
   it("accepts source-aware text evidence paths", () => {
-    expect(isProfileItem({ ...base, value: "会社名", status: "weak", evidence_paths: [{ confidence: 0.65, evidence: [
+    expect(isProfileItem({ ...base, value: "会社名", status: "weak", evidence_paths: [{ provenance: "combined_inference", confidence: 0.65, evidence: [
       { post_id: "p1", clue_index: null, required: true, source: "post_text", image_index: null, excerpt: "うちの会社の研修" },
       { post_id: "p2", clue_index: null, required: true, source: "post_text", image_index: null, excerpt: "会社名の研修" },
     ] }] })).toBe(true);
@@ -104,17 +123,11 @@ describe("isProfileItem", () => {
     expect(isProfileItem({ ...base, value: "青空社", status: "weak", evidence: [webEvidence] })).toBe(true);
     expect(isProfileItem({ ...base, value: "青空社", status: "weak", evidence: [{ ...webEvidence, post_id: "post" }] })).toBe(false);
   });
-  it("accepts open-data evidence only with a citation and no post reference", () => {
-    const cited = { post_id: null, clue_index: null, required: true, source: "open_data", excerpt: "架空の施設は架空の区の指定避難所（出典：国土地理院）" };
-    expect(isProfileItem({ ...base, value: "架空の区", status: "weak", evidence: [cited] })).toBe(true);
-    expect(isProfileItem({ ...base, value: "架空の区", status: "weak", evidence: [{ ...cited, post_id: "post" }] })).toBe(false);
-    expect(isProfileItem({ ...base, value: "架空の区", status: "weak", evidence: [{ ...cited, excerpt: "" }] })).toBe(false);
-    expect(isProfileItem({ ...base, value: "架空の区", status: "weak", evidence: [{ ...cited, web_fact_id: "w" }] })).toBe(false);
-  });
   it.each([
     ["unknown with a value", { ...base, value: "会社名", status: "unknown" }],
     ["negative clue index", { ...base, value: "会社名", status: "found", evidence: [{ ...base.evidence[0], clue_index: -1 }] }],
     ["single-item evidence path", { ...base, value: "会社名", status: "found", evidence_paths: [{ evidence: [base.evidence[0]] }] }],
+    ["path without provenance", { ...base, value: "会社名", status: "found", evidence_paths: [{ evidence: base.evidence, confidence: 0.65 }] }],
   ])("rejects %s", (_label, item) => expect(isProfileItem(item)).toBe(false));
 
   it("validates the optional four-axis assessment fields and conditional requirements", () => {
@@ -173,6 +186,156 @@ describe("isProfileItem", () => {
     for (const invalid of invalidAssessments) {
       expect(isProfileItem(withAssessment(invalid))).toBe(false);
     }
+  });
+});
+
+describe("profile candidate sets", () => {
+  const evidence: ProfileEvidence[] = [
+    { post_id: "at://did:plc:test/app.bsky.feed.post/a", clue_index: null, required: true, source: "post_text", image_index: null, excerpt: "投稿 A" },
+    { post_id: "at://did:plc:test/app.bsky.feed.post/b", clue_index: null, required: true, source: "post_text", image_index: null, excerpt: "投稿 B" },
+  ];
+  const assessment: ClaimAssessment = {
+    minimal_scope: "bluesky", offline_subtype: null, psychological_resistance: null, persona_context: null,
+    inference_ease: null, inference_ease_basis: null, harm_severity: null, harm_scenario: null,
+    harm_prerequisites: [], harm_status: "unknown",
+  };
+  const candidate = (value: string, confidence = 0.65, status: "found" | "weak" = "weak", observed_at?: string | null, rank = 1): ProfileCandidate => ({
+    rank, value, confidence, status, evidence, evidence_paths: [{ evidence, confidence, provenance: "combined_inference" }], assessment,
+    observed_at: observed_at ?? null, counter_evidence: [],
+  });
+  const set = (attribute: ProfileAttribute, pool: readonly ProfileCandidate[], status?: "candidate" | "ambiguous"): ProfileCandidateSet => {
+    const strongest = pool[0];
+    const visible = strongest?.status === "weak"
+      ? pool.filter((entry) => entry.status === "weak").slice(0, 3)
+      : pool.filter((entry) => entry.status === "found" && strongest.confidence - entry.confidence <= 0.15).slice(0, 3);
+    return {
+      attribute,
+      status: status ?? (visible.length > 1 ? "ambiguous" : "candidate"),
+      candidates: visible,
+      candidate_pool: pool,
+      reason: null,
+      conflicting_evidence: [],
+    };
+  };
+  const rawSet = (pool: readonly ProfileCandidate[], candidates: readonly ProfileCandidate[] = pool): ProfileCandidateSet => ({
+    attribute: "residential_area", status: "ambiguous", candidates, candidate_pool: pool,
+    reason: null, conflicting_evidence: [],
+  });
+
+  it("accepts one candidate and multiple weak candidates despite a wider score gap", () => {
+    expect(isProfileCandidateSet(set("residential_area", [candidate("架空の区")]))).toBe(true);
+    expect(isProfileCandidateSet(set("residential_area", [candidate("架空の区A", 0.90, "weak", null, 1), candidate("架空の区B", 0.60, "weak", null, 2)]))).toBe(true);
+  });
+
+  it("rejects a strong displayed set outside the 0.15 margin or mixed grades", () => {
+    expect(isProfileCandidateSet(rawSet([
+      candidate("A", 0.80, "found", null, 1), candidate("B", 0.64, "found", null, 2),
+    ]))).toBe(false);
+    expect(isProfileCandidateSet(rawSet([
+      candidate("A", 0.65, "found", null, 1), candidate("B", 0.65, "weak", null, 2),
+    ]))).toBe(false);
+  });
+
+  it("rejects duplicate normalized pool values and more than three displayed candidates", () => {
+    expect(isProfileCandidateSet(rawSet([
+      candidate("Ａ", 0.65, "weak", null, 1), candidate("a", 0.65, "weak", null, 2),
+    ]))).toBe(false);
+    const four = [
+      candidate("A", 0.65, "weak", null, 1), candidate("B", 0.65, "weak", null, 2),
+      candidate("C", 0.65, "weak", null, 3), candidate("D", 0.65, "weak", null, 4),
+    ];
+    expect(isProfileCandidateSet(rawSet(four))).toBe(false);
+  });
+
+  it("uses the shared NFKC, trim, lowercase candidate normalization", () => {
+    const candidates = [candidate("STRASSE", 0.65, "weak", null, 1), candidate("Straße", 0.65, "weak", null, 2)];
+    expect(isProfileCandidateSet(set("residential_area", candidates))).toBe(true);
+  });
+
+  it("requires an explanation for an empty candidate set", () => {
+    expect(isProfileCandidateSet({ attribute: "residential_area", status: "unknown", candidates: [], candidate_pool: [], reason: null, conflicting_evidence: [] })).toBe(false);
+  });
+
+  it("requires a timezone-aware observation timestamp only for real-time location candidates", () => {
+    expect(isProfileCandidateSet(set("realtime_location", [candidate("駅前", 0.65, "weak", "2026-11-12T10:00:00+09:00")]))).toBe(true);
+    expect(isProfileCandidateSet(set("realtime_location", [candidate("駅前")]))).toBe(false);
+    expect(isProfileCandidateSet(set("realtime_location", [candidate("駅前", 0.65, "weak", "2026-11-12T10:00:00")]))).toBe(false);
+    expect(isProfileCandidateSet(set("school", [candidate("架空大学", 0.65, "weak", "2026-11-12T10:00:00+09:00")]))).toBe(false);
+  });
+
+  it("requires a complete catalog-driven diagnosis set, excluding home_room", () => {
+    const sets: ProfileCandidateSet[] = PROFILE_DIAGNOSED_ATTRIBUTES.map((attribute) => ({
+      attribute, status: "unknown", candidates: [], candidate_pool: [], reason: "no_grounded_rule", conflicting_evidence: [],
+    }));
+    expect(sets).toHaveLength(PROFILE_DIAGNOSED_ATTRIBUTES.length);
+    expect(isProfileCandidateSetList(sets)).toBe(true);
+    expect(isProfileCandidateSetList([...sets, { attribute: "home_room", status: "unknown", candidates: [], candidate_pool: [], reason: "excluded", conflicting_evidence: [] }])).toBe(false);
+  });
+
+  it("reduces an ambiguous set to the one surviving grounded candidate after hypothetical deletion", () => {
+    const evidenceC: ProfileEvidence[] = [
+      { post_id: "at://did:plc:test/app.bsky.feed.post/c", clue_index: null, required: true, source: "post_text", image_index: null, excerpt: "投稿 C" },
+      { post_id: "at://did:plc:test/app.bsky.feed.post/d", clue_index: null, required: true, source: "post_text", image_index: null, excerpt: "投稿 D" },
+    ];
+    const candidates = [
+      candidate("区A", 0.65, "weak", null, 1),
+      { ...candidate("区B", 0.60, "weak", null, 2), evidence: evidenceC, evidence_paths: [{ evidence: evidenceC, confidence: 0.60, provenance: "combined_inference" as const }] },
+    ];
+    const candidateSet = set("residential_area", candidates);
+    const after = profileCandidateAfterDeletion(candidateSet, new Set(["at://did:plc:test/app.bsky.feed.post/a"]));
+    expect(after.status).toBe("candidate");
+    expect(after.candidates).toHaveLength(1);
+    expect(after.candidates[0].value).toBe("区B");
+  });
+
+  it("suppresses realtime currentness when deletion removes the timestamped path", () => {
+    const reference = (post_id: string, excerpt: string): ProfileEvidence => ({
+      post_id, clue_index: null, required: true, source: "post_text", excerpt,
+    });
+    const pathA = [reference("at://did:plc:test/app.bsky.feed.post/a", "fresh clue A"), reference("at://did:plc:test/app.bsky.feed.post/b", "fresh clue B")];
+    const pathB = [reference("at://did:plc:test/app.bsky.feed.post/c", "older clue C"), reference("at://did:plc:test/app.bsky.feed.post/d", "older clue D")];
+    const realtime = candidate("根津駅", 0.65, "weak", "2026-11-12T10:00:00+09:00");
+    const withPaths = {
+      ...realtime,
+      evidence: [...pathA, ...pathB],
+      evidence_paths: [
+        { evidence: pathA, confidence: 0.65, provenance: "combined_inference" as const },
+        { evidence: pathB, confidence: 0.6, provenance: "combined_inference" as const },
+      ],
+    };
+    const candidateSet = set("realtime_location", [withPaths]);
+    const after = profileCandidateAfterDeletion(candidateSet, new Set(["at://did:plc:test/app.bsky.feed.post/a"]));
+    expect(after.candidates[0].evidence_paths).toHaveLength(1);
+    expect(after.candidates[0].observed_at).toBeNull();
+  });
+
+  it("removes relationship edges when an evidence post or either endpoint candidate is deleted", () => {
+    const relation: ProfileRelation = {
+      kind: "home_nearest_is_commute_origin",
+      left: { kind: "profile_candidate", attribute: "home_nearest_station", value: "根津駅" },
+      right: { kind: "profile_candidate", attribute: "regular_station", value: "根津駅" },
+      evidence_paths: [{ evidence, confidence: 0.55, provenance: "combined_inference" }],
+    };
+    expect(isProfileRelationList([relation])).toBe(true);
+    expect(profileRelationsAfterDeletion([relation], new Set([evidence[0].post_id!]), [])).toEqual([]);
+    const homeSet = set("home_nearest_station", [candidate("根津駅")]);
+    const regularSet = set("regular_station", [candidate("根津駅")]);
+    expect(profileRelationsAfterDeletion([relation], new Set([evidence[0].post_id!]), [homeSet, regularSet])).toEqual([]);
+  });
+
+  it("removes a denial from an unknown set when its post is hypothetically excluded", () => {
+    const denial: ProfileEvidence = {
+      post_id: "at://did:plc:test/app.bsky.feed.post/a", clue_index: null, required: true,
+      source: "post_text", excerpt: "ここは自宅ではありません",
+    };
+    const set: ProfileCandidateSet = {
+      attribute: "residential_area", status: "unknown", candidates: [], candidate_pool: [],
+      reason: "explicit_negation", conflicting_evidence: [denial],
+    };
+    const after = profileCandidateAfterDeletion(set, new Set([denial.post_id!]));
+    expect(after.status).toBe("unknown");
+    expect(after.reason).toBe("no_grounded_rule");
+    expect(after.conflicting_evidence).toEqual([]);
   });
 });
 

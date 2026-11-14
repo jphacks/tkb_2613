@@ -1,9 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  InvalidDiagnoseEventError, STRONG_CONFIDENCE, confidenceLevel, isDemoDiagnosis, isDiagnosisSnapshot,
-  toDiagnoseEvent,
-} from "./diagnose";
+import { InvalidDiagnoseEventError, isDiagnosisSnapshot, isLegacySharedSnapshot, isSimulation, isThreadsSimulation, toDiagnoseEvent } from "./diagnose";
+import { PROFILE_DIAGNOSED_ATTRIBUTES } from "./profile";
 
 const POST = {
   post_id: "at://did:plc:xxxx/app.bsky.feed.post/3kxxxx",
@@ -29,62 +27,46 @@ const CONCLUSION = {
   clue_indices: [0],
   note: "",
 };
+const PROFILE_CLAIMS = PROFILE_DIAGNOSED_ATTRIBUTES.map((attribute) => ({
+  attribute, status: "unknown", candidates: [], candidate_pool: [],
+  reason: "no_grounded_rule", conflicting_evidence: [],
+}));
 
 describe("isDiagnosisSnapshot", () => {
   const snapshot = {
-    posts: [POST],
-    clues: [CLUE],
-    conclusions: [CONCLUSION],
-    plan: { delete: [], broken: [], after: [CONCLUSION], posts: [] },
+    posts: [POST], clues: [CLUE], profile_claims: PROFILE_CLAIMS,
+    plan: { delete: [], broken: [], after: PROFILE_CLAIMS, posts: [] },
   };
 
-  it("accepts a snapshot without deleted posts (shared results do not have them)", () => {
+  it("accepts deletion-aware snapshots and rejects IDs outside the snapshot", () => {
     expect(isDiagnosisSnapshot(snapshot)).toBe(true);
-  });
-
-  it("accepts deleted posts that were part of the diagnosis", () => {
     expect(isDiagnosisSnapshot({ ...snapshot, deleted: [POST.post_id] })).toBe(true);
     expect(isDiagnosisSnapshot({ ...snapshot, deleted: [] })).toBe(true);
-  });
-
-  it("rejects deleted posts that were not diagnosed or are not strings", () => {
-    expect(isDiagnosisSnapshot({ ...snapshot, deleted: ["at://did:plc:other/app.bsky.feed.post/3k"] })).toBe(false);
+    expect(isDiagnosisSnapshot({ ...snapshot, deleted: ["at://did:plc:other/app.bsky.feed.post/missing"] })).toBe(false);
     expect(isDiagnosisSnapshot({ ...snapshot, deleted: [1] })).toBe(false);
-    expect(isDiagnosisSnapshot({ ...snapshot, deleted: null })).toBe(false);
+    expect(isDiagnosisSnapshot({ ...snapshot, conclusions: [] })).toBe(false);
   });
 });
 
-describe("isDemoDiagnosis", () => {
-  const snapshot = {
-    posts: [POST],
-    clues: [CLUE],
-    conclusions: [CONCLUSION],
-    plan: { delete: [], broken: [], after: [], posts: [] },
-  };
-
-  it("accepts only snapshots marked as the demo", () => {
-    expect(isDemoDiagnosis({ ...snapshot, demo: true })).toBe(true);
-    expect(isDemoDiagnosis(snapshot)).toBe(false);
-    expect(isDemoDiagnosis({ ...snapshot, demo: "true" })).toBe(false);
-    expect(isDemoDiagnosis({ demo: true })).toBe(false);
+describe("simulation API boundaries", () => {
+  it("accepts legacy conclusions only on the Threads compatibility validator", () => {
+    const legacy = { delete: [], broken: ["routine"], after: [CONCLUSION] };
+    expect(isSimulation(legacy)).toBe(false);
+    expect(isThreadsSimulation(legacy)).toBe(true);
   });
 });
 
-describe("conclusion confidence", () => {
-  it("accepts a confidence between 0 and 1 and conclusions without one", () => {
-    const event = (conclusion: unknown) =>
-      toDiagnoseEvent("conclusions", JSON.stringify({ clues: [CLUE], conclusions: [conclusion] }));
-    expect(event({ ...CONCLUSION, confidence: 0.95 })).not.toBeNull();
-    expect(event(CONCLUSION)).not.toBeNull();
-    for (const bad of [-0.1, 1.5, "0.9", null]) {
-      expect(() => event({ ...CONCLUSION, confidence: bad })).toThrow(InvalidDiagnoseEventError);
-    }
-  });
-
-  it("splits confidence into strong and weak at STRONG_CONFIDENCE", () => {
-    expect(confidenceLevel({ ...CONCLUSION, confidence: STRONG_CONFIDENCE })).toBe("strong");
-    expect(confidenceLevel({ ...CONCLUSION, confidence: STRONG_CONFIDENCE - 0.01 })).toBe("weak");
-    expect(confidenceLevel(CONCLUSION)).toBeNull();
+describe("isLegacySharedSnapshot", () => {
+  it("accepts saved legacy Conclusion and plan before/after values", () => {
+    const oldConclusion = { ...CONCLUSION, clue_indices: [] };
+    expect(isLegacySharedSnapshot({
+      posts: [POST],
+      clues: [CLUE],
+      conclusions: [oldConclusion],
+      plan: {
+        delete: [], broken: ["routine"], before: [oldConclusion], after: [oldConclusion], posts: [],
+      },
+    })).toBe(true);
   });
 });
 
@@ -110,10 +92,103 @@ describe("toDiagnoseEvent", () => {
   });
 
   it("reads a conclusions event", () => {
-    const data = { clues: [CLUE], conclusions: [CONCLUSION] };
+    const data = { clues: [CLUE], profile_claims: PROFILE_CLAIMS };
     expect(toDiagnoseEvent("conclusions", JSON.stringify(data))).toEqual({
       event: "conclusions",
       ...data,
+    });
+    expect(() => toDiagnoseEvent("conclusions", JSON.stringify({ ...data, conclusions: [CONCLUSION] })))
+      .toThrow(InvalidDiagnoseEventError);
+  });
+
+  it("validates per-image place candidates, clue references, and source licenses", () => {
+    const photoClue = { ...CLUE, image_index: 0, type: "shop", source: "ocr", region: [1, 1, 5, 5] };
+    const result = {
+      post_id: POST.post_id, image_index: 0, status: "candidate", granularity: "facility",
+      candidates: [{
+        place_id: "places:one", label: "架空の施設", place_type: "facility", photo_relation: "visible_in_frame",
+        area_label: null, score: 0.91, evidence: [{ kind: "clue", clue_index: 0, reference_id: null }],
+        source_ids: ["source:one"], sources: [{
+          source_id: "source:one", provider: "fixture", dataset: "places", license_id: "CC-BY-4.0",
+          record_id: "one", version: "v1", attribution: null,
+        }],
+      }],
+      reason_codes: [], lookup_status: "local_only",
+    };
+    expect(toDiagnoseEvent("conclusions", JSON.stringify({ clues: [photoClue], profile_claims: PROFILE_CLAIMS, photo_place_results: [result] })))
+      .toMatchObject({ event: "conclusions", photo_place_results: [result] });
+    expect(() => toDiagnoseEvent("conclusions", JSON.stringify({
+      clues: [photoClue], profile_claims: PROFILE_CLAIMS, photo_place_results: [{ ...result, candidates: [{
+        ...result.candidates[0], evidence: [{ kind: "clue", clue_index: 4, reference_id: null }],
+      }] }],
+    }))).toThrow(InvalidDiagnoseEventError);
+    expect(() => toDiagnoseEvent("conclusions", JSON.stringify({
+      clues: [photoClue], profile_claims: PROFILE_CLAIMS, photo_place_results: [{ ...result, status: "ambiguous" }],
+    }))).toThrow(InvalidDiagnoseEventError);
+  });
+
+  it("accepts a corroboration only when it points to another candidate in the same result", () => {
+    const photoClue = { ...CLUE, image_index: 0, type: "shop", source: "ocr", region: [1, 1, 5, 5] };
+    const candidate = (place_id: string, extra: object = {}) => ({
+      place_id, label: "市民会館", place_type: "facility", photo_relation: "visible_in_frame",
+      area_label: "府中市", score: null, evidence: [{ kind: "clue", clue_index: 0, reference_id: null }],
+      source_ids: [`source:${place_id}`], sources: [], ...extra,
+    });
+    const result = (candidates: object[]) => ({
+      post_id: POST.post_id, image_index: 0, status: "ambiguous", granularity: "facility",
+      candidates, reason_codes: ["multiple_matches"], lookup_status: "web_searched",
+    });
+    const event = (candidates: object[]) => JSON.stringify({ clues: [photoClue], profile_claims: PROFILE_CLAIMS, photo_place_results: [result(candidates)] });
+
+    expect(toDiagnoseEvent("conclusions", event([candidate("p05:1"), candidate("brave:1", { corroborated_by: ["p05:1"] })])))
+      .toMatchObject({ event: "conclusions" });
+    for (const refs of [["p05:missing"], ["brave:1"], "p05:1", ["p05:1", "p05:1"]]) {
+      expect(() => toDiagnoseEvent("conclusions", event([candidate("p05:1"), candidate("brave:1", { corroborated_by: refs })])))
+        .toThrow(InvalidDiagnoseEventError);
+    }
+  });
+
+  it("reads all candidate sets, including attributes that remain unknown", () => {
+    const profile_claims = PROFILE_DIAGNOSED_ATTRIBUTES.map((attribute) => ({
+      attribute,
+      status: "unknown",
+      candidates: [],
+      candidate_pool: [],
+      reason: "no_grounded_rule",
+      conflicting_evidence: [],
+    }));
+    expect(toDiagnoseEvent("conclusions", JSON.stringify({
+      clues: [CLUE], profile_claims, profile_claim_suggestions: [],
+    }))).toMatchObject({ event: "conclusions", profile_claims });
+    expect(toDiagnoseEvent("conclusions", JSON.stringify({
+      clues: [CLUE], profile_claims: profile_claims.slice(1), profile_claim_suggestions: [],
+    }))).toMatchObject({
+      event: "conclusions",
+      clues: [CLUE],
+      profile_claims: [],
+      profile_claims_error: true,
+    });
+    expect(isDiagnosisSnapshot({
+      posts: [POST],
+      deleted: [],
+      clues: [CLUE],
+      profile_claims: profile_claims.slice(1),
+      plan: { delete: [], broken: [], after: [], posts: [] },
+    })).toBe(false);
+  });
+
+  it("reads scoreless profile relations with complete evidence paths", () => {
+    const profile_relations = [{
+      kind: "home_nearest_is_commute_origin",
+      left: { kind: "profile_candidate", attribute: "home_nearest_station", value: "根津駅" },
+      right: { kind: "profile_candidate", attribute: "regular_station", value: "根津駅" },
+      evidence_paths: [{ confidence: 0.55, provenance: "combined_inference", evidence: [
+        { post_id: POST.post_id, clue_index: null, required: true, source: "post_text", excerpt: "私の自宅最寄り駅は根津駅です" },
+        { post_id: "at://did:plc:xxxx/app.bsky.feed.post/other", clue_index: null, required: true, source: "post_text", excerpt: "私は毎朝、自宅最寄りから通勤しています" },
+      ] }],
+    }];
+    expect(toDiagnoseEvent("conclusions", JSON.stringify({ clues: [], profile_claims: PROFILE_CLAIMS, profile_relations }))).toMatchObject({
+      event: "conclusions", profile_relations,
     });
   });
 
@@ -133,17 +208,35 @@ describe("toDiagnoseEvent", () => {
     );
   });
 
-  it("reads a plan event", () => {
+  it("reads a plan event with profile candidate sets", () => {
+    const profileClaims = PROFILE_DIAGNOSED_ATTRIBUTES.map((attribute) => ({
+      attribute,
+      status: "unknown",
+      candidates: [],
+      candidate_pool: [],
+      reason: "no_grounded_rule",
+      conflicting_evidence: [],
+    }));
     const data = {
       delete: [POST.post_id],
       broken: ["routine"],
-      after: [],
+      after: profileClaims,
       posts: [{ post_id: POST.post_id, broken: ["routine"] }],
     };
     expect(toDiagnoseEvent("plan", JSON.stringify(data))).toEqual({
       event: "plan",
       ...data,
     });
+  });
+
+  it("rejects a legacy Conclusion plan on the Bluesky event contract", () => {
+    const data = {
+      delete: [POST.post_id],
+      broken: ["routine"],
+      after: [CONCLUSION],
+      posts: [{ post_id: POST.post_id, broken: ["routine"] }],
+    };
+    expect(() => toDiagnoseEvent("plan", JSON.stringify(data))).toThrow(InvalidDiagnoseEventError);
   });
 
   it("rejects a plan event without the per-post breakdown", () => {
@@ -183,23 +276,16 @@ describe("toDiagnoseEvent", () => {
       "clues",
       JSON.stringify({ post_id: "x", clues: [], error: 1 }),
     ],
-    [
-      "evidence pointing outside the clues",
-      "conclusions",
-      JSON.stringify({
-        clues: [CLUE],
-        conclusions: [{ ...CONCLUSION, clue_indices: [1] }],
-      }),
-    ],
-    [
-      "conclusion missing a field",
-      "conclusions",
-      JSON.stringify({
-        clues: [CLUE],
-        conclusions: [{ ...CONCLUSION, value: undefined }],
-      }),
-    ],
   ])("throws on %s", (_, event, data) => {
     expect(() => toDiagnoseEvent(event, data)).toThrow();
+  });
+
+  it.each([
+    PROFILE_CLAIMS.map((claim, index) => index === 0 ? { ...claim, reason: null } : claim),
+    PROFILE_CLAIMS.slice(1),
+  ])("surfaces malformed candidate sets as a board warning", (profile_claims) => {
+    expect(toDiagnoseEvent("conclusions", JSON.stringify({ clues: [CLUE], profile_claims }))).toMatchObject({
+      event: "conclusions", profile_claims: [], profile_claims_error: true,
+    });
   });
 });

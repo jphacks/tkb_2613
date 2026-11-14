@@ -14,10 +14,14 @@ export function parseThreadsLang(value: string | null | undefined): ThreadsLang 
 
 /** エラーは文字列ではなくキーで持ち、表示するときに現在の言語へ翻訳する（切り替えに追従させる） */
 export type ThreadsErrorKey =
-  | "timeout" | "network" | "modelUnavailable" | "busy" | "forbidden" | "loginAgain" | "failed"
+  | "timeout" | "network" | "modelUnavailable" | "busy" | "diagnosing" | "diagnosisEnded" | "forbidden" | "loginAgain" | "failed"
   | "diagnosisUnreadable" | "configUnreadable" | "connectFailed" | "sessionUnreadable"
   | "postsUnreadable" | "authorizeUnverified" | "simulationUnreadable"
   | "authDenied" | "authState" | "authFailed";
+
+/** サーバーが返す診断の段階（GET /api/threads/progress の stage）。実際に行った順に並べる */
+export const THREADS_DIAGNOSE_STAGES = ["checking_model", "fetching", "reading", "inferring"] as const;
+export type ThreadsDiagnoseStage = (typeof THREADS_DIAGNOSE_STAGES)[number];
 
 export class ThreadsError extends Error {
   constructor(readonly key: ThreadsErrorKey) {
@@ -36,7 +40,9 @@ export interface ThreadsText {
   readonly intro: string;
   readonly startAria: string;
   readonly consent: string;
+  readonly consentWithImage: string;
   readonly noMedia: string;
+  readonly withMedia: string;
   readonly mockLogin: string;
   readonly gpuLogin: string;
   readonly liveLogin: string;
@@ -47,11 +53,14 @@ export interface ThreadsText {
   readonly reviewPosts: string;
   readonly postsAria: string;
   readonly postsFetched: (count: number) => string;
+  readonly postsFetchedWithImages: (count: number) => string;
   readonly detailsSummary: string;
   readonly postId: string;
   readonly postTime: string;
   readonly media: string;
   readonly mediaValue: string;
+  readonly mediaValueImage: string;
+  readonly imageDiagnosis: string;
   readonly checkTitle: string;
   readonly checkIntro: string;
   readonly checkButton: string;
@@ -64,8 +73,16 @@ export interface ThreadsText {
   readonly listSeparator: string;
   readonly aiSummary: string;
   readonly aiNote: string;
+  readonly aiNoteWithImages: string;
   readonly aiButton: string;
-  readonly aiBusy: string;
+  readonly diagnosing: string;
+  readonly stagesLabel: string;
+  readonly stageLabels: Readonly<Record<ThreadsDiagnoseStage, string>>;
+  readonly stageDone: string;
+  readonly stageCurrent: string;
+  readonly postsRead: (read: number, total: number) => string;
+  readonly elapsedLive: (clock: string) => string;
+  readonly diagnosingNotice: string;
   readonly resultFull: string;
   readonly resultRe: string;
   readonly resultCount: (posts: number, clues: number, conclusions: number) => string;
@@ -95,7 +112,9 @@ const ja: ThreadsText = {
   intro: "自分の投稿本文と投稿時刻を取得して一覧・詳細を表示し、固定ルールによる公開情報のセルフチェックを行います。 セルフチェックはAIではありません。Threadsへの投稿・編集・削除は行いません。",
   startAria: "Threads診断の開始",
   consent: "Threadsから自分の投稿ID・本文・投稿時刻・メディア種別を取得し、一覧・詳細表示とAIを使わない公開情報セルフチェックに利用することに同意します。取得データはログアウトまたはセッション期限で消えます。",
+  consentWithImage: "Threadsから自分の投稿ID・本文・投稿時刻・メディア種別と、画像付き投稿の画像1枚目を取得し、一覧・詳細表示、公開情報セルフチェック、任意のAI診断に利用することに同意します。取得データはログアウトまたはセッション期限で消えます。",
   noMedia: "画像・動画のURLやデータは取得しません。表示とセルフチェックには本文と投稿時刻を使います。任意のAI診断はモデル稼働時だけ利用できます。",
+  withMedia: "画像付き投稿では画像1枚目を取得し、プレビューと任意のAI診断に使います。動画・複数画像・カルーセルは対象外です。",
   mockLogin: "架空のThreads投稿で試す",
   gpuLogin: "架空のThreads投稿をGPUで診断",
   liveLogin: "Threadsでログイン",
@@ -106,11 +125,14 @@ const ja: ThreadsText = {
   reviewPosts: "本人投稿を確認",
   postsAria: "取得した本人投稿",
   postsFetched: (count) => `本人投稿 ${count} 件を取得しました。本文と投稿時刻だけを表示しています。この表示にAIは使っていません。`,
+  postsFetchedWithImages: (count) => `本人投稿 ${count} 件を取得しました。画像付き投稿は画像1枚目も表示します。この表示にAIは使っていません。`,
   detailsSummary: "取得情報の詳細",
   postId: "投稿ID：",
   postTime: "投稿時刻：",
   media: "メディア：",
   mediaValue: "種別だけをAPIへ要求し、画像・動画のURLやデータは取得していません",
+  mediaValueImage: "画像1枚目をプレビューと任意のAI診断に使用します",
+  imageDiagnosis: "画像つき診断",
   checkTitle: "AIを使わない公開情報セルフチェック",
   checkIntro: "取得済み本文をこのブラウザ内の固定ルールで確認します。外部サービスやモデルへ送信せず、文字列の所有者・実在性・意味は推定しません。",
   checkButton: "公開情報をセルフチェック",
@@ -129,8 +151,21 @@ const ja: ThreadsText = {
   listSeparator: "、",
   aiSummary: "任意機能：AI診断（モデル稼働時のみ）",
   aiNote: "この機能はMeta審査の操作には不要です。チーム管理の本文モデルが停止中は利用できません。上のセルフチェックとは別機能です。",
+  aiNoteWithImages: "画像付き投稿は本文・投稿時刻・画像1枚目をチーム管理のモデルで診断します。モデル停止中は利用できません。上のセルフチェックとは別機能です。",
   aiButton: "AI診断を試す",
-  aiBusy: "AI診断中…",
+  diagnosing: "AI診断中です。このページを再読み込みしても、診断は続きます。",
+  stagesLabel: "診断の段階",
+  stageLabels: {
+    checking_model: "AIモデルに接続",
+    fetching: "投稿を取得",
+    reading: "本文・画像を解析",
+    inferring: "推理結果を生成",
+  },
+  stageDone: "完了",
+  stageCurrent: "実行中",
+  postsRead: (read, total) => `${read} / ${total} 件`,
+  elapsedLive: (clock) => `経過 ${clock}`,
+  diagnosingNotice: "診断を実行中です。ページを再読み込みしても処理は続きます。終わると結果を自動で表示します（数分かかることがあります）。",
   resultFull: "診断結果",
   resultRe: "仮除外後の再診断",
   resultCount: (posts, clues, conclusions) => `投稿 ${posts} 件・手がかり ${clues} 件・推定 ${conclusions} 件`,
@@ -165,6 +200,8 @@ const ja: ThreadsText = {
     authDenied: "Threadsの認可が完了しませんでした。もう一度お試しください。",
     authState: "認証を確認できませんでした。最初からログインし直してください。",
     authFailed: "Threadsの認証に失敗しました。時間を置いて再度お試しください。",
+    diagnosing: "診断を実行中です。終わるまでお待ちください。",
+    diagnosisEnded: "診断が完了しませんでした。もう一度お試しください。",
   },
 };
 
@@ -178,7 +215,9 @@ const en: ThreadsText = {
   intro: "This page retrieves the text and timestamps of your own Threads posts, shows them as a list with details, and runs a fixed-rule self-check for publicly visible information. The self-check is not AI. This app never publishes, edits, or deletes anything on Threads.",
   startAria: "Start the Threads review",
   consent: "I agree that this app retrieves my own Threads post IDs, text, timestamps, and media types, and uses them to show the list and details and to run the non-AI public-information self-check. The retrieved data is removed when I log out or when the session expires.",
+  consentWithImage: "I agree that this app retrieves my own Threads post IDs, text, timestamps, media types, and the first image of image posts for display, the public-information self-check, and the optional AI diagnosis. The retrieved data is removed when I log out or when the session expires.",
   noMedia: "Image and video URLs and data are not retrieved. The display and the self-check use only post text and timestamps. The optional AI diagnosis is available only while the model is running.",
+  withMedia: "For image posts, the first image is retrieved for preview and the optional AI diagnosis. Videos, multiple images, and carousels are not supported.",
   mockLogin: "Try with fictional Threads posts",
   gpuLogin: "Diagnose fictional Threads posts on GPU",
   liveLogin: "Log in with Threads",
@@ -189,11 +228,14 @@ const en: ThreadsText = {
   reviewPosts: "Review my posts",
   postsAria: "Retrieved own posts",
   postsFetched: (count) => `Retrieved ${count} of your own ${count === 1 ? "post" : "posts"}. Only the text and timestamps are shown. No AI is used for this display.`,
+  postsFetchedWithImages: (count) => `Retrieved ${count} of your own ${count === 1 ? "post" : "posts"}. The first image is also shown for image posts. No AI is used for this display.`,
   detailsSummary: "Retrieved data details",
   postId: "Post ID: ",
   postTime: "Timestamp: ",
   media: "Media: ",
   mediaValue: "Only the media type is requested from the API. Image and video URLs and data are not retrieved.",
+  mediaValueImage: "The first image is used for preview and the optional AI diagnosis.",
+  imageDiagnosis: "Image diagnosis",
   checkTitle: "Public-information self-check (not AI)",
   checkIntro: "This check applies fixed text patterns to the retrieved text inside your browser. Nothing is sent to external services or models, and it does not infer who owns a string, whether it is real, or what it means.",
   checkButton: "Check visible public information",
@@ -212,8 +254,21 @@ const en: ThreadsText = {
   listSeparator: ", ",
   aiSummary: "Optional: AI diagnosis (only while the model is running)",
   aiNote: "This feature is not needed to review the app. It is unavailable while the team-managed text model is stopped. It is separate from the self-check above.",
+  aiNoteWithImages: "Image posts are diagnosed using the text, timestamp, and first image on the team-managed model. It is unavailable while the model is stopped and is separate from the self-check above.",
   aiButton: "Try the AI diagnosis",
-  aiBusy: "AI diagnosis in progress…",
+  diagnosing: "The AI diagnosis is running. It continues even if you reload this page.",
+  stagesLabel: "Diagnosis steps",
+  stageLabels: {
+    checking_model: "Connect to the AI model",
+    fetching: "Fetch posts",
+    reading: "Analyze text and images",
+    inferring: "Build the inference results",
+  },
+  stageDone: "done",
+  stageCurrent: "in progress",
+  postsRead: (read, total) => `${read} / ${total} posts`,
+  elapsedLive: (clock) => `Elapsed ${clock}`,
+  diagnosingNotice: "A diagnosis is running. It keeps running if you reload this page, and the result appears automatically when it finishes (this can take a few minutes).",
   resultFull: "Diagnosis result",
   resultRe: "Re-diagnosis after provisional exclusion",
   resultCount: (posts, clues, conclusions) => `${posts} posts · ${clues} clues · ${conclusions} inferences`,
@@ -248,6 +303,8 @@ const en: ThreadsText = {
     authDenied: "Threads authorization was not completed. Please try again.",
     authState: "The login could not be verified. Please start the login again.",
     authFailed: "Threads authentication failed. Please wait a moment and try again.",
+    diagnosing: "A diagnosis is already running. Please wait for it to finish.",
+    diagnosisEnded: "The diagnosis did not finish. Please try again.",
   },
 };
 

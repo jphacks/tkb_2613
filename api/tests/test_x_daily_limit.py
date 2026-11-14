@@ -26,12 +26,10 @@ LIVE: dict[str, Any] = {
 }
 
 
-def test_default_limit_is_small() -> None:
+def test_default_has_no_daily_limit() -> None:
     settings = Settings(_env_file=None)
     assert settings.x_max_posts == 5
-    assert settings.x_daily_resource_limit == 12
-    # 既定の上限で、本人確認と5件の取得を2回だけできる
-    assert 2 * one_check_cost(settings.x_max_posts) == settings.x_daily_resource_limit
+    assert settings.x_daily_resource_limit == 0
 
 
 def test_costs_follow_the_api_minimum_page_size() -> None:
@@ -56,10 +54,10 @@ def test_budget_refuses_over_the_limit_and_resets_on_the_next_utc_day() -> None:
         budget.reserve(-1)
 
 
-def test_zero_limit_refuses_everything() -> None:
+def test_zero_limit_means_unlimited() -> None:
     budget = DailyResourceBudget(0)
-    assert not budget.reserve(1)
-    assert budget.reserve(0)
+    assert budget.reserve(10_000)
+    assert budget.can_afford(10_000)
 
 
 def _app(**overrides: Any) -> FastAPI:

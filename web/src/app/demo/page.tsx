@@ -4,12 +4,14 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
 import { ConclusionBoard } from "@/components/conclusion-board/ConclusionBoard";
+import { NarrowingStages } from "@/components/narrowing/NarrowingStages";
 import { PostCard } from "@/components/post-list/PostCard";
 import { Reveal } from "@/components/reveal/Reveal";
 import { ApiError, getDemoDiagnosis, simulateDemo } from "@/lib/api";
-import { messages } from "@/lib/messages";
-import { validNameConclusions } from "@/lib/reveal";
-import type { DemoDiagnosis, Simulation } from "@/types/diagnose";
+import { attributeLabel, messages } from "@/lib/messages";
+import { isProfileSimulationAfter, type DemoDiagnosis, type Simulation } from "@/types/diagnose";
+import { visibleNarrowing } from "@/types/narrowing";
+import { profileClaimsAfterDeletion } from "@/types/profile";
 
 const t = messages.demo;
 const r = messages.risky;
@@ -35,7 +37,14 @@ export default function DemoPage() {
     return () => controller.abort();
   }, []);
 
-  const conclusions = result ? validNameConclusions(result.conclusions) : [];
+  const baseProfileClaims = result?.profile_claims ?? [];
+  const excluded = new Set(simulation?.delete ?? []);
+  const visibleProfileClaims = simulation
+    ? isProfileSimulationAfter(simulation.after)
+      ? simulation.after
+      : profileClaimsAfterDeletion(baseProfileClaims, excluded)
+    : baseProfileClaims;
+  const visibleSuggestions = (result?.profile_claim_suggestions ?? []).filter((id) => !excluded.has(id));
 
   return (
     <>
@@ -51,11 +60,18 @@ export default function DemoPage() {
         {error && <p role="alert" className="border-l-4 border-seeker bg-seeker/10 px-4 py-3">{error}</p>}
         {result && (
           <>
-            <Reveal posts={result.posts} clues={result.clues} conclusions={conclusions} />
+            <Reveal posts={result.posts} clues={result.clues} conclusions={[]} profileClaims={visibleProfileClaims} excludedPostIds={excluded}>
+              <NarrowingStages narrowing={visibleNarrowing(simulation ? simulation.narrowing : result.narrowing, excluded)} />
+            </Reveal>
             <ConclusionBoard
               clues={result.clues}
-              conclusions={simulation ? validNameConclusions(simulation.after) : conclusions}
+              conclusions={[]}
               unknown={simulation?.broken}
+              profileClaims={visibleProfileClaims}
+              profileRelations={result.profile_relations ?? []}
+              deletedPostIds={simulation?.delete ?? []}
+              profileClaimSuggestions={visibleSuggestions}
+              posts={result.posts}
             />
             <DemoCandidates result={result} onSimulated={setSimulation} />
             <ol aria-label={messages.diagnose.postsLabel} className="max-w-2xl space-y-5">
@@ -139,7 +155,7 @@ function DemoCandidates({ result, onSimulated }: {
               <span className="min-w-0">
                 <span className="block break-words">{byId.get(c.post_id)?.text || r.noText}</span>
                 <span className="mt-1 block text-sm font-bold text-seeker">
-                  {c.broken.length > 0 ? r.breaks(c.broken.map((a) => messages.board.attributeLabels[a] ?? a).join("・")) : r.breaksNothing}
+                  {c.broken.length > 0 ? r.breaks(c.broken.map((a) => attributeLabel(a)).join("・")) : r.breaksNothing}
                 </span>
               </span>
             </label>

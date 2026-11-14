@@ -14,7 +14,7 @@ from tkb_api.routes import diagnose as bluesky_diagnose
 from tkb_api.routes import threads
 from tkb_common.schemas import Clue, ClueSource, ClueType, Post
 from tkb_detect.errors import DetectError
-from tkb_engine.cross_post import infer_owner_claims_with_web
+from tkb_engine.cross_post import infer_owner_candidate_sets_with_web
 from tkb_engine.gazetteer import Gazetteer
 from tkb_engine.planner import simulate
 from tkb_engine.rules import infer
@@ -184,8 +184,8 @@ async def test_inference_runs_off_the_event_loop(monkeypatch: pytest.MonkeyPatch
 
     monkeypatch.setattr(
         pipeline,
-        "infer_owner_claims_with_web",
-        recording("profile", infer_owner_claims_with_web),
+        "infer_owner_candidate_sets_with_web",
+        recording("profile", infer_owner_candidate_sets_with_web),
     )
     monkeypatch.setattr(threads, "simulate_deletion", recording("simulate", simulate))
     monkeypatch.setattr(threads, "infer", recording("rediagnose", infer))

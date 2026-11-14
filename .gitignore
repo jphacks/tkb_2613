@@ -15,7 +15,9 @@
 data-prep/raw/
 data-prep/out/
 data/
+data/processed/places.sqlite3*
 eval/photos/
+eval/local/
 *.safetensors
 *.gguf
 *.onnx
