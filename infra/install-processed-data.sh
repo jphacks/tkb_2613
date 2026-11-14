@@ -42,7 +42,9 @@ echo "$SHA  $WORK/processed.tar.gz" | sha256sum -c --quiet - || fail "sha256 が
 while read -r mode _ _ _ _ name rest; do
   [ -z "$rest" ] || fail "tar に想定外の名前があります"
   [[ "$mode" == -* ]] || fail "tar に普通のファイル以外が入っています：$name"
-  [[ "$name" =~ ^[a-z0-9_]+\.(parquet|sqlite)$|^MANIFEST\.sha256$ ]] || fail "tar に想定外の名前があります：$name"
+  # places.sqlite3 は写真場所のPOI索引（任意）
+  [[ "$name" =~ ^[a-z0-9_]+\.(parquet|sqlite)$|^places\.sqlite3$|^MANIFEST\.sha256$ ]] ||
+    fail "tar に想定外の名前があります：$name"
 done < <(tar -tvzf "$WORK/processed.tar.gz" --numeric-owner)
 
 NEW="$WORK/processed"
