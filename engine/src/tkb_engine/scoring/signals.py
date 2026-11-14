@@ -12,6 +12,7 @@ import unicodedata
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
+from functools import lru_cache
 
 from tkb_common.schemas import Clue, ClueSource, ClueType, Post
 from tkb_engine.cross_post_facts import forbidden_context
@@ -203,6 +204,67 @@ def _birthday(post_id: str, sentence: str) -> list[Signal]:
         return []
     month, day = (match.group(1), match.group(2)) if match.group(1) else match.group(3, 4)
     return [Signal(SignalKind.BIRTHDAY, post_id, f"{int(month)}月{int(day)}日", excerpt(sentence))]
+
+
+QUOTED_RE = re.compile(r"[『「]([^』」]{2,20})[』」]")
+KANJI_RUN_RE = re.compile(r"[\u4e00-\u9fff々ヶ]{2,}")
+# 町名の頭にもなるが、ふつうの言葉として書かれることが多いので、かぎ括弧なしでは使わない
+COMMON_WORDS = frozenset(
+    {"公園", "中央", "本町", "駅前", "大学", "学園", "新町", "花見", "東京", "日本", "今日", "明日"}
+)
+
+
+@lru_cache(maxsize=4)
+def _town_index(town_names: tuple[str, ...]) -> tuple[frozenset[str], frozenset[str]]:
+    """（名前の一部すべて, 名前の頭の部分）。どちらも2文字以上。"""
+    parts: set[str] = set()
+    heads: set[str] = set()
+    for name in town_names:
+        for i in range(len(name)):
+            for j in range(i + TOWN_FRAGMENT_MIN, len(name) + 1):
+                parts.add(name[i:j])
+        for j in range(TOWN_FRAGMENT_MIN, len(name) + 1):
+            heads.add(name[:j])
+    return frozenset(parts), frozenset(heads)
+
+
+def text_town_signals(post: Post, town_names: Sequence[str]) -> list[Signal]:
+    """本文の町名の一部（「法被の背中に『弥生』」など）。同じ文に近所の話があるときだけ。
+
+    かぎ括弧の中に町名の一部（2文字以上）があればそれを使う。なければ、漢字の並びのうち
+    町名の頭に当たる一番長いもの（ふつうの言葉 COMMON_WORDS と、近所を示す言葉は除く）。
+    """
+    parts, heads = _town_index(tuple(town_names))
+    found: dict[str, Signal] = {}
+    for sentence in sentences(post.text):
+        if forbidden_context(sentence) or not any(w in sentence for w in NEAR_HOME_WORDS):
+            continue
+        quoted = [q for q in QUOTED_RE.findall(sentence) if q in parts]
+        fragments = quoted or [
+            f
+            for run in KANJI_RUN_RE.findall(sentence)
+            if (f := _longest_head(run, heads)) is not None
+        ]
+        for fragment in fragments:
+            found.setdefault(
+                fragment, Signal(SignalKind.TOWN, post.post_id, fragment, excerpt(sentence))
+            )
+    return list(found.values())
+
+
+def _longest_head(run: str, heads: frozenset[str]) -> str | None:
+    best: str | None = None
+    for i in range(len(run)):
+        for j in range(i + TOWN_FRAGMENT_MIN, len(run) + 1):
+            piece = run[i:j]
+            if (
+                piece in heads
+                and piece not in COMMON_WORDS
+                and not any(piece in w or w in piece for w in NEAR_HOME_WORDS)
+                and (best is None or len(piece) > len(best))
+            ):
+                best = piece
+    return best
 
 
 def photo_town_signals(
