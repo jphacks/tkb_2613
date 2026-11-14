@@ -311,6 +311,10 @@ describe("profile claims on the Threads diagnosis", () => {
     // 身元カードに推定、証拠のカードに本文の手がかりが出る
     expect(within(reveal).getByRole("article", { name: "プロフィールと手がかり" })).toBeInTheDocument();
     expect(within(reveal).getByText("毎週火曜（毎週火曜はジム）")).toBeInTheDocument();
+    // 身元カードの推定の値は、地名の漢字が回ってから解読される（Bluesky と同じ）。読み上げには値そのものを渡す
+    const card = within(reveal).getByRole("article", { name: "プロフィールと手がかり" });
+    expect(within(card).getByText("毎週火曜（毎週火曜はジム）")).toHaveClass("sr-only");
+    expect(card.querySelectorAll(".decode-strip").length).toBeGreaterThan(0);
     expect(within(reveal).getByRole("list", { name: "見つかった証拠" })).toBeInTheDocument();
     // 証拠のカードの本文では、手がかりの言葉を黒い帯で隠し、はがれると赤くなる（Bluesky と同じ）
     const evidence = within(reveal).getByRole("list", { name: "見つかった証拠" });

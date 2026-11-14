@@ -1,11 +1,13 @@
 "use client";
 
 import { messages } from "@/lib/messages";
+import { paced, staggerDelay } from "@/lib/motion";
 import { postImageSrc } from "@/lib/post-image";
-import { paced } from "@/lib/motion";
 import { cropStyle, type FacePhoto } from "@/lib/reveal";
 import { useLoadedSize } from "@/lib/useLoadedSize";
 import type { Conclusion } from "@/types/diagnose";
+
+import { DecodeText } from "./DecodeText";
 
 const t = messages.identity;
 
@@ -32,6 +34,9 @@ function Roller({ value }: { value: number }) {
     </span>
   );
 }
+
+/** 推定の値の解読を始める時刻（秒）。行が判子のように押し終わってから（0.5 + 0.35 秒） */
+const DECODE_START = 0.85;
 
 /** 写真の枠に出す人影。顔の手がかりがないとき */
 function Silhouette() {
@@ -149,7 +154,9 @@ export function IdentityCard({ name, nameProvenance, nameAmbiguous, face, conclu
                   {messages.board.attributeLabels[c.attribute] ?? c.attribute}
                 </span>
                 <span className="mr-2 rounded-sm bg-ink/10 px-1.5 py-0.5 text-xs">{t.inferred}</span>
-                <span className="text-lg font-bold text-seeker sm:text-xl">{c.value}</span>
+                <span className="text-lg font-bold text-seeker sm:text-xl">
+                  <DecodeText value={c.value} delay={DECODE_START + staggerDelay(i, conclusions.length, { duration: 0.8 })} />
+                </span>
               </li>
             ))}
           </ul>
