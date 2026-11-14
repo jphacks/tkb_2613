@@ -4,24 +4,27 @@ import { useEffect, useRef, useState } from "react";
 
 import { ConclusionBoard } from "@/components/conclusion-board/ConclusionBoard";
 import { DiagnoseLoading } from "@/components/diagnose-loading/DiagnoseLoading";
-import { PlanSummary } from "@/components/plan-summary/PlanSummary";
+import { NarrowingStages } from "@/components/narrowing/NarrowingStages";
 import { PostCard, type PostClues } from "@/components/post-list/PostCard";
+import { PlanSummary } from "@/components/plan-summary/PlanSummary";
 import { Reveal } from "@/components/reveal/Reveal";
 import { RiskyPosts } from "@/components/risky-posts/RiskyPosts";
 import { useSession } from "@/components/session/SessionProvider";
 import { ResultShare } from "@/components/diagnose/ResultShare";
 import { ApiError, diagnose, getDiagnosis, getFeatures } from "@/lib/api";
 import { messages } from "@/lib/messages";
-import { validNameConclusions } from "@/lib/reveal";
 import type { Clue } from "@/types/clue";
-import type { Conclusion, RiskyPost, Simulation } from "@/types/diagnose";
+import { isProfileSimulationAfter, type PhotoPlaceResult, type RiskyPost, type Simulation } from "@/types/diagnose";
+import { visibleNarrowing, type Narrowing } from "@/types/narrowing";
 import type { Post } from "@/types/post";
-import { profileClaimsAfterDeletion, type ExternalLookupStatus, type ExternalProfileResult, type ProfileItem, type WebFact } from "@/types/profile";
+import { profileClaimsAfterDeletion, type ExternalLookupStatus, type ExternalProfileResult, type ProfileCandidateSet, type ProfileRelation, type WebFact } from "@/types/profile";
 
 const t = messages.diagnose;
-
-/** まーだだよ の見出しの id（RiskyPosts の h3）。要約から飛ぶ先 */
 const RISKY_HEADING_ID = "risky-heading";
+
+function isUnauthorized(error: unknown): boolean {
+  return error instanceof ApiError && error.kind === "unauthorized";
+}
 
 /**
  * 診断の状態。connecting は押してから最初のイベントが届くまで、reading は投稿が届いている間、
@@ -37,8 +40,11 @@ type Phase =
 
 interface Result {
   clues: readonly Clue[];
-  conclusions: readonly Conclusion[];
-  profileClaims?: readonly ProfileItem[];
+  narrowing?: Narrowing | null;
+  photoPlaceResults?: readonly PhotoPlaceResult[];
+  profileClaims?: readonly ProfileCandidateSet[];
+  profileClaimsError?: boolean;
+  profileRelations?: readonly ProfileRelation[];
   profileClaimSuggestions?: readonly string[];
   webFacts?: readonly WebFact[];
   externalLookupStatus?: ExternalLookupStatus;
@@ -62,11 +68,6 @@ function statusText(phase: Phase, postCount: number, searchedCount: number): str
   }
 }
 
-/** api が 401（セッションの時間切れ）を返したか */
-function isUnauthorized(e: unknown): boolean {
-  return e instanceof ApiError && e.kind === "unauthorized";
-}
-
 interface DiagnosePanelProps {
   /** 結果を叩きつけたら true、診断をやり直したら false。ホームがタイトルをしまうのに使う */
   onRevealedChange?: (revealed: boolean) => void;
@@ -83,11 +84,13 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
   const [result, setResult] = useState<Result | null>(null);
   const [risky, setRisky] = useState<readonly RiskyPost[] | null>(null);
   const [simulation, setSimulation] = useState<Simulation | null>(null);
-  // 開き直したときに api から受け取る、診断のあとに消した投稿。一覧では「削除済み」と示し、候補と身元カードから外す
-  const [deleted, setDeleted] = useState<ReadonlySet<string>>(() => new Set());
+  const [deleted, setDeleted] = useState<ReadonlySet<string>>(new Set());
   const [publicWebLookupConsent, setPublicWebLookupConsent] = useState(false);
-  // api が「公開Web検索を使える」と答えたときだけ同意欄を出す（Brave のキーがない実モードでは出さない）
   const [publicWebLookupAvailable, setPublicWebLookupAvailable] = useState(false);
+  const [photoPlaceWebLookupConsent, setPhotoPlaceWebLookupConsent] = useState(false);
+  const [photoPlaceWebLookupAvailable, setPhotoPlaceWebLookupAvailable] = useState(false);
+  const [photoPlaceReferenceConsent, setPhotoPlaceReferenceConsent] = useState(false);
+  const [photoPlaceReferenceAvailable, setPhotoPlaceReferenceAvailable] = useState(false);
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   const controller = useRef<AbortController | null>(null);
   const restoreController = useRef<AbortController | null>(null);
@@ -102,6 +105,8 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
     const current = new AbortController();
     getFeatures({ signal: current.signal }).then((features) => {
       if (!current.signal.aborted) setPublicWebLookupAvailable(features.public_web_lookup_available === true);
+      if (!current.signal.aborted) setPhotoPlaceWebLookupAvailable(features.photo_place_web_lookup_available === true);
+      if (!current.signal.aborted) setPhotoPlaceReferenceAvailable(features.commons_reference_lookup_available === true);
     });
     return () => current.abort();
   }, []);
@@ -115,6 +120,8 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
     getDiagnosis({ signal: current.signal })
       .then((snapshot) => {
         if (!snapshot || current.signal.aborted || controller.current) return;
+        const gone = new Set(snapshot.deleted ?? []);
+        setDeleted(gone);
         setPosts(snapshot.posts);
         setFound(Object.fromEntries(snapshot.posts.map((post) => [
           post.post_id,
@@ -122,8 +129,11 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
         ])));
         setResult({
           clues: snapshot.clues,
-          conclusions: validNameConclusions(snapshot.conclusions),
+          narrowing: snapshot.narrowing ?? null,
+          photoPlaceResults: snapshot.photo_place_results ?? [],
           profileClaims: snapshot.profile_claims ?? [],
+          profileClaimsError: false,
+          profileRelations: snapshot.profile_relations ?? [],
           profileClaimSuggestions: snapshot.profile_claim_suggestions ?? [],
           webFacts: snapshot.web_facts ?? [],
           externalLookupStatus: snapshot.external_lookup_status ?? "not_requested",
@@ -131,15 +141,13 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
           ownerProfileText: snapshot.owner_profile_text ?? "",
           selfReportClues: snapshot.self_report_clues ?? [],
         });
-        const gone = new Set(snapshot.deleted ?? []);
-        setDeleted(gone);
-        setRisky(snapshot.plan.posts.filter((risky) => !gone.has(risky.post_id)));
+        setRisky(snapshot.plan.posts.filter((post) => !gone.has(post.post_id)));
         setPhase({ kind: "done", postsSeen: snapshot.posts.length });
         onRevealedChange?.(true);
       })
-      .catch((e: unknown) => {
-        // 時間切れはログイン画面に戻す。それ以外の失敗は、診断ボタンからやり直せる。
-        if (!current.signal.aborted && isUnauthorized(e)) expire();
+      .catch((error: unknown) => {
+        // 復元に失敗しても、診断ボタンからやり直せる。
+        if (!current.signal.aborted && isUnauthorized(error)) expire();
       });
     return () => current.abort();
   }, [sessionDid, onRevealedChange, expire]);
@@ -152,8 +160,12 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
   if (session.status !== "authenticated") return null;
 
   async function start() {
-    const consentForThisRun = publicWebLookupAvailable && publicWebLookupConsent;
+    const consentForThisRun = publicWebLookupConsent;
+    const photoPlaceConsentForThisRun = photoPlaceWebLookupConsent;
+    const photoPlaceReferenceConsentForThisRun = photoPlaceReferenceConsent;
     setPublicWebLookupConsent(false);
+    setPhotoPlaceWebLookupConsent(false);
+    setPhotoPlaceReferenceConsent(false);
     restoreController.current?.abort();
     controller.current?.abort();
     const current = new AbortController();
@@ -162,12 +174,17 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
     setFound({});
     setResult(null);
     setRisky(null);
-    setDeleted(new Set());
     setSimulation(null);
+    setDeleted(new Set());
     onRevealedChange?.(false);
     setPhase({ kind: "connecting" });
     try {
-      for await (const event of diagnose({ signal: current.signal, publicWebLookupConsent: consentForThisRun })) {
+      for await (const event of diagnose({
+        signal: current.signal,
+        publicWebLookupConsent: consentForThisRun,
+        photoPlaceWebLookupConsent: photoPlaceConsentForThisRun,
+        photoPlaceReferenceConsent: photoPlaceReferenceConsentForThisRun,
+      })) {
         switch (event.event) {
           case "post":
             setPosts((prev) => [...prev, event.post]);
@@ -180,8 +197,11 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
           case "conclusions":
             setResult({
               clues: event.clues,
-              conclusions: validNameConclusions(event.conclusions),
+              narrowing: event.narrowing ?? null,
+              photoPlaceResults: event.photo_place_results ?? [],
               profileClaims: event.profile_claims ?? [],
+              profileClaimsError: event.profile_claims_error ?? false,
+              profileRelations: event.profile_relations ?? [],
               profileClaimSuggestions: event.profile_claim_suggestions ?? [],
               webFacts: event.web_facts ?? [],
               externalLookupStatus: event.external_lookup_status ?? "not_requested",
@@ -201,10 +221,7 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
       }
     } catch (e) {
       if (current.signal.aborted) return;
-      if (isUnauthorized(e)) {
-        expire();
-        return;
-      }
+      if (isUnauthorized(e)) { expire(); return; }
       setPhase({ kind: "error", message: e instanceof ApiError ? e.message : t.failed });
     }
   }
@@ -212,31 +229,46 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
   const busy = phase.kind === "connecting" || phase.kind === "reading" || phase.kind === "searching";
   const status = statusText(phase, posts.length, Object.keys(found).length);
   const livePosts = deleted.size === 0 ? posts : posts.filter((post) => !deleted.has(post.post_id));
-  // 消した投稿（開き直す前に消したもの＋いま消した・仮に除いたもの）。プロフィール推定もこれを除いて出す
-  const excluded = simulation ? new Set([...deleted, ...simulation.delete]) : deleted;
-  const profileClaims = profileClaimsAfterDeletion(result?.profileClaims ?? [], excluded);
-  const profileClaimSuggestions = (result?.profileClaimSuggestions ?? []).filter((id) => !excluded.has(id));
-  const postList = <PostList posts={posts} found={found} deleted={deleted} />;
+  const simulatedGone = simulation?.delete ?? [];
+  const excluded = simulation ? new Set([...deleted, ...simulatedGone]) : deleted;
+  const beforeProfileClaims = profileClaimsAfterDeletion(result?.profileClaims ?? [], deleted);
+  const visibleProfileClaims = simulation && isProfileSimulationAfter(simulation.after)
+    ? profileClaimsAfterDeletion(simulation.after, deleted)
+    : profileClaimsAfterDeletion(result?.profileClaims ?? [], excluded);
+  const visibleProfileClaimSuggestions = (result?.profileClaimSuggestions ?? []).filter((id) => !excluded.has(id));
 
   // 結果が出たら再診断ボタンを下へ移し、身元カード→写真→捜査ボードを続けて見せる。
-  // afterResult のときは、赤い「診断する」の代わりに控えめな「もう一度診断する」と、回数を使う注意を出す。
+  const postList = (
+    <ol aria-label={t.postsLabel} className="max-w-2xl space-y-5">
+      {posts.map((post) => (
+        <li key={post.post_id}>
+          {deleted.has(post.post_id) && <p className="mb-2 text-xs font-bold text-ink/60">{t.deletedBadge}</p>}
+          <PostCard post={post} found={found[post.post_id]} />
+        </li>
+      ))}
+    </ol>
+  );
+
   const controls = (afterResult: boolean) => (
     <div>
-        {publicWebLookupAvailable && (
-          <label className="mb-4 flex max-w-2xl items-start gap-3 rounded-sm border border-ink/20 px-4 py-3 text-sm">
-            <input type="checkbox" checked={publicWebLookupConsent} onChange={(event) => setPublicWebLookupConsent(event.currentTarget.checked)} disabled={busy} className="mt-1 size-4 shrink-0 accent-seeker" />
-            <span><span className="block font-bold">{t.publicWebConsentLabel}</span><span className="mt-1 block text-xs text-ink/70">{t.publicWebConsentNote}</span></span>
-          </label>
-        )}
+        {publicWebLookupAvailable && <label className="mb-4 flex max-w-2xl items-start gap-3 rounded-sm border border-ink/20 px-4 py-3 text-sm">
+          <input type="checkbox" checked={publicWebLookupConsent} onChange={(event) => setPublicWebLookupConsent(event.currentTarget.checked)} disabled={busy} className="mt-1 size-4 shrink-0 accent-seeker" />
+          <span><span className="block font-bold">公開Webで外部SNS・ブログ・記事の候補を検索する（この診断のみ）</span><span className="mt-1 block text-xs text-ink/70">同意すると、実モードではログイン中の公開BlueskyハンドルだけをBraveへ送ります。検索語は最大90日保持され、利用には有料プランと支払情報の登録が必要です。投稿文・プロフィール文・写真は送りません。候補だけでは同一人物と判断しません。モックモードは固定の架空結果を使い、外部通信しません。</span></span>
+        </label>}
+        <label className="mb-4 flex max-w-2xl items-start gap-3 rounded-sm border border-ink/20 px-4 py-3 text-sm">
+          <input type="checkbox" checked={photoPlaceWebLookupConsent} onChange={(event) => setPhotoPlaceWebLookupConsent(event.currentTarget.checked)} disabled={busy || !photoPlaceWebLookupAvailable} className="mt-1 size-4 shrink-0 accent-seeker" />
+          <span><span className="block font-bold">{t.photoPlaceWebConsentLabel}</span><span className="mt-1 block text-xs text-ink/70">{t.photoPlaceWebConsentNote}</span>{!photoPlaceWebLookupAvailable && <span className="mt-1 block text-xs text-ink/70">{t.photoPlaceWebConsentUnavailable}</span>}</span>
+        </label>
+        <label className="mb-4 flex max-w-2xl items-start gap-3 rounded-sm border border-ink/20 px-4 py-3 text-sm">
+          <input type="checkbox" checked={photoPlaceReferenceConsent} onChange={(event) => setPhotoPlaceReferenceConsent(event.currentTarget.checked)} disabled={busy || !photoPlaceReferenceAvailable} className="mt-1 size-4 shrink-0 accent-seeker" />
+          <span><span className="block font-bold">{t.photoPlaceReferenceConsentLabel}</span><span className="mt-1 block text-xs text-ink/70">{t.photoPlaceReferenceConsentNote}</span>{!photoPlaceReferenceAvailable && <span className="mt-1 block text-xs text-ink/70">{t.photoPlaceReferenceConsentUnavailable}</span>}</span>
+        </label>
         {afterResult ? (
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-            <button type="button" onClick={start} disabled={busy} aria-describedby="rediagnose-note" className="rounded-sm border border-ink/50 px-4 py-2 hover:bg-ink/10 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-ink disabled:cursor-not-allowed disabled:opacity-60">
-              {t.rediagnose}
-            </button>
+            <button type="button" onClick={start} disabled={busy} aria-describedby="rediagnose-note" className="rounded-sm border border-ink/50 px-4 py-2 hover:bg-ink/10 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-ink disabled:cursor-not-allowed disabled:opacity-60">{t.rediagnose}</button>
             <p id="rediagnose-note" className="text-sm text-ink/70">{t.rediagnoseNote}</p>
           </div>
-        ) : (
-        <button
+        ) : <button
           type="button"
           onClick={start}
           disabled={busy}
@@ -249,8 +281,7 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
             />
           )}
           {t.start}
-        </button>
-        )}
+        </button>}
 
         {/* 診断の間は専用の画面を出し、done で捜査ボードに切り替える */}
         {status && <DiagnoseLoading active={busy} posts={posts} found={found} status={status} />}
@@ -268,9 +299,9 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
         {t.heading}
       </h2>
       {!busy && result && (
-        <Reveal posts={livePosts} clues={result.clues} conclusions={result.conclusions}>
-          {/* いちばん大事な「どれを消せばよいか」を、身元カードのすぐ下で、長い結果を読む前に示す */}
-          {risky && <PlanSummary risky={risky} targetId={RISKY_HEADING_ID} />}
+        <Reveal posts={livePosts} clues={result.clues} conclusions={[]} profileClaims={visibleProfileClaims} excludedPostIds={excluded}>
+          <NarrowingStages narrowing={visibleNarrowing(simulation ? simulation.narrowing : result.narrowing, excluded)} />
+          {risky && <PlanSummary risky={risky.filter((post) => !excluded.has(post.post_id))} targetId={RISKY_HEADING_ID} />}
         </Reveal>
       )}
       {(busy || !result) && controls(false)}
@@ -278,11 +309,15 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
       {!busy && result && (
         <ConclusionBoard
           clues={result.clues}
-          conclusions={simulation ? validNameConclusions(simulation.after) : result.conclusions}
+          photoPlaceResults={result.photoPlaceResults?.filter((item) => !excluded.has(item.post_id))}
+          conclusions={[]}
           unknown={simulation?.broken}
-          profileClaims={profileClaims}
-          profileClaimSuggestions={profileClaimSuggestions}
-          posts={posts}
+          profileClaims={visibleProfileClaims}
+          profileClaimsError={result.profileClaimsError}
+          profileRelations={result.profileRelations}
+          deletedPostIds={simulation?.delete ?? []}
+          profileClaimSuggestions={visibleProfileClaimSuggestions}
+          posts={livePosts}
           webFacts={result.webFacts}
           externalLookupStatus={result.externalLookupStatus}
           externalProfileResults={result.externalProfileResults}
@@ -292,41 +327,18 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
       )}
 
       {!busy && result && risky && (
-        <RiskyPosts posts={posts} risky={risky} clues={result.clues} clueCount={result.clues.length} conclusions={result.conclusions} onSimulated={setSimulation} onSessionExpired={expire} />
+        <RiskyPosts posts={livePosts} risky={risky.filter((post) => !deleted.has(post.post_id))} clues={result.clues} clueCount={result.clues.length} profileClaims={beforeProfileClaims} onSimulated={setSimulation} onDeleted={(deletion) => setDeleted((prev) => new Set([...prev, ...deletion.delete.filter((id) => !deletion.failed.includes(id))]))} onSessionExpired={expire} />
       )}
       {!busy && result && <ResultShare />}
       {!busy && result && controls(true)}
 
       {posts.length > 0 && (busy || !result) && postList}
       {posts.length > 0 && !busy && result && (
-        // 結果が出たら、読んだ投稿の一覧は折りたたむ（結果の画面を短くし、消す操作を先に見せる）
         <details className="max-w-2xl">
           <summary className="cursor-pointer font-bold">{t.postsSummary(posts.length)}</summary>
           <div className="mt-5">{postList}</div>
         </details>
       )}
     </section>
-  );
-}
-
-
-function PostList({ posts, found, deleted }: {
-  posts: readonly Post[];
-  found: Readonly<Record<string, PostClues>>;
-  deleted: ReadonlySet<string>;
-}) {
-  return (
-    <ol aria-label={t.postsLabel} className="max-w-2xl space-y-5">
-      {posts.map((post) => (
-        <li key={post.post_id}>
-          {deleted.has(post.post_id) && (
-            <p className="mb-1 inline-block rounded-sm bg-ink px-2 py-0.5 text-xs font-bold text-paper">
-              {t.deletedBadge}
-            </p>
-          )}
-          <PostCard post={post} found={found[post.post_id]} />
-        </li>
-      ))}
-    </ol>
   );
 }

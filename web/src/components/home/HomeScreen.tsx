@@ -20,6 +20,34 @@ export function HomeScreen() {
   return <HomeContent key={account} />;
 }
 
+/** 対応している SNS。Threads と X はそれぞれの画面へのリンクにする */
+function SupportedNetworks() {
+  const s = messages.home.sns;
+  const link = "underline underline-offset-4 hover:text-seeker";
+  return (
+    <section aria-labelledby="supported-sns" className="mt-4 text-sm text-ink/80">
+      <h2 id="supported-sns" className="font-bold">
+        {s.heading}
+      </h2>
+      <ul aria-labelledby="supported-sns" className="mt-1 flex flex-wrap gap-x-5 gap-y-1">
+        <li>{s.bluesky}</li>
+        <li>
+          <Link href="/threads" className={link}>
+            {s.threads}
+          </Link>
+          <span className="text-ink/60">{s.threadsNote}</span>
+        </li>
+        <li>
+          <Link href="/x" className={link}>
+            {s.x}
+          </Link>
+          <span className="text-ink/60">{s.xNote}</span>
+        </li>
+      </ul>
+    </section>
+  );
+}
+
 /**
  * ホーム画面の中身。診断の結果が出たら、タイトルとログイン中の表示をしまい、結果だけを見せる。
  * ログアウトはページの一番下に小さく残す。
@@ -51,6 +79,7 @@ function HomeContent() {
               </Link>
             </p>
           )}
+          {session.status === "anonymous" && <SupportedNetworks />}
         </>
       )}
       {/* 結果を出している間も、ページの名前は読み上げで伝える */}

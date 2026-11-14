@@ -2,19 +2,19 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { EscapeStamps, type BrokenInference } from "@/components/escape-stamps/EscapeStamps";
 import { ApiError, deletePosts, simulate } from "@/lib/api";
-import { messages } from "@/lib/messages";
-import { isLikelyNameText, validNameConclusions } from "@/lib/reveal";
+import { attributeLabel, messages } from "@/lib/messages";
+import { isLikelyNameText } from "@/lib/reveal";
 import type { Clue } from "@/types/clue";
-import type { Conclusion, Deletion, RiskyPost, Simulation } from "@/types/diagnose";
+import { type Deletion, type RiskyPost, type Simulation } from "@/types/diagnose";
 import type { Post } from "@/types/post";
+import type { ProfileCandidateSet } from "@/types/profile";
 
 import { DeleteConfirm } from "./DeleteConfirm";
 
 const t = messages.risky;
 
-/** engine の IMPORTANT_ATTRIBUTES（tkb_engine/planner.py）とそろえる。 */
-const IMPORTANT_ATTRIBUTES = ["full_name", "birthday", "home_block", "home_area", "long_term_home_absence", "home_district", "home_city", "workplace", "school", "home_school_commute", "given_name_or_nickname", "station", "age", "frequent_shop", "line", "active_time", "routine"] as const;
 const DIRECT_CLUES = ["face", "name_text", "address_text", "phone", "postal_code"] as const;
 
 /** 投稿の本文はこの文字数で切って見せる */
@@ -27,21 +27,16 @@ interface RiskyPostsProps {
   clues?: readonly Clue[];
   /** 診断の手がかりの数（simulate の結果の根拠の番号を確かめる） */
   clueCount: number;
+  /** カタログ属性の候補セット（シミュレート後の件数比較と逃げ切り判定に使う） */
+  profileClaims?: readonly ProfileCandidateSet[];
+  onSessionExpired?: () => void;
   /** 消したらどうなるか・実際に消した結果。元に戻したり選び直したりしたら null */
   onSimulated: (simulation: Simulation | null) => void;
-  /** api が 401（セッションの時間切れ）を返したときに呼ぶ。ログイン画面に戻すのは呼び出し側 */
-  onSessionExpired?: () => void;
-  /** 消す前の結論（捜査ボードに出しているもの）。あれば、消す前後の「推定できた項目」の数を大きく出す */
-  conclusions?: readonly Conclusion[];
-}
-
-/** 推定できた項目の数（同じ項目に結論が2つあっても1と数える） */
-function countAttributes(conclusions: readonly Conclusion[]): number {
-  return new Set(conclusions.map((c) => c.attribute)).size;
+  onDeleted?: (deletion: Deletion) => void;
 }
 
 function labelsOf(attributes: readonly string[]): string {
-  return attributes.map((a) => messages.board.attributeLabels[a] ?? a).join("・");
+  return attributes.map((a) => attributeLabel(a)).join("・");
 }
 
 function excerpt(text: string): string {
@@ -49,12 +44,26 @@ function excerpt(text: string): string {
   return text.length > EXCERPT_LENGTH ? `${text.slice(0, EXCERPT_LENGTH)}…` : text;
 }
 
+function supportedCount(claims: readonly ProfileCandidateSet[]): number {
+  return claims.filter((claimSet) => claimSet.candidates.length > 0).length;
+}
+
+function brokenProfileInferences(claims: readonly ProfileCandidateSet[], lost: readonly string[]): BrokenInference[] {
+  return lost.map((attribute) => {
+    const candidates = claims.find((c) => c.attribute === attribute)?.candidates ?? [];
+    return {
+      label: attributeLabel(attribute),
+      value: candidates.map((c) => c.value).join(" / "),
+    };
+  });
+}
+
 /**
  * 危ない投稿（診断の plan）を並べ、選んだ投稿を消したらどうなるかを見せる（まーだだよ）。
  * 結果は捜査ボードに渡して、崩れた項目を「不明」にする。
  * 試したあと、確認ダイアログで OK したときだけ Bluesky から実際に消す（もういいよ）。消したあとは選び直せない。
  */
-export function RiskyPosts({ posts, risky, clues = [], clueCount, onSimulated, onSessionExpired, conclusions }: RiskyPostsProps) {
+export function RiskyPosts({ posts, risky, clues = [], clueCount, profileClaims = [], onSimulated, onDeleted, onSessionExpired }: RiskyPostsProps) {
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set(risky.map((r) => r.post_id)));
   const [result, setResult] = useState<Simulation | null>(null);
   const [pending, setPending] = useState(false);
@@ -63,6 +72,12 @@ export function RiskyPosts({ posts, risky, clues = [], clueCount, onSimulated, o
   const [deleting, setDeleting] = useState(false);
   const [deletion, setDeletion] = useState<Deletion | null>(null);
   const controller = useRef<AbortController | null>(null);
+
+  function expiredBy(error: unknown): boolean {
+    if (!(error instanceof ApiError) || error.kind !== "unauthorized" || !onSessionExpired) return false;
+    onSessionExpired();
+    return true;
+  }
 
   useEffect(() => () => controller.current?.abort(), []);
 
@@ -99,13 +114,6 @@ export function RiskyPosts({ posts, risky, clues = [], clueCount, onSimulated, o
     });
   }
 
-  /** 401 なら呼び出し側に知らせて true（エラー文は出さない）。呼び出し側がいなければ false でエラー文を出す */
-  function expiredBy(e: unknown): boolean {
-    if (!(e instanceof ApiError) || e.kind !== "unauthorized" || !onSessionExpired) return false;
-    onSessionExpired();
-    return true;
-  }
-
   async function confirmDelete() {
     if (!result) return;
     setDeleting(true);
@@ -115,6 +123,7 @@ export function RiskyPosts({ posts, risky, clues = [], clueCount, onSimulated, o
       const deleted = await deletePosts(result.delete, clueCount);
       setDeletion(deleted);
       onSimulated(deleted);
+      onDeleted?.(deleted);
       setConfirming(false);
     } catch (e) {
       setConfirming(false);
@@ -149,13 +158,19 @@ export function RiskyPosts({ posts, risky, clues = [], clueCount, onSimulated, o
   }
 
   const shown = deletion ?? result;
-  const gone = new Set(shown?.delete ?? []);
+  const gone = new Set(deletion
+    ? deletion.delete.filter((id) => !deletion.failed.includes(id))
+    : result?.delete ?? []);
   const directCluesLeft = clues.some((c) => !gone.has(c.post_id) && directClueLabel(c) !== null);
-  const escaped = shown !== null && !directCluesLeft && IMPORTANT_ATTRIBUTES.every((a) => !shown.after.some((c) => c.attribute === a));
-  // 捜査ボードと同じく、名前らしくない名前の結論は数えない
-  const counts = shown !== null && conclusions !== undefined
-    ? { before: countAttributes(conclusions), after: countAttributes(validNameConclusions(shown.after)) }
+  const afterProfileClaims = shown?.after ?? [];
+  const hasSurvivingProfileCandidate = supportedCount(afterProfileClaims) > 0;
+  const escaped = shown !== null && (deletion?.failed.length ?? 0) === 0 && !directCluesLeft && !hasSurvivingProfileCandidate;
+  const counts = shown !== null && profileClaims.length > 0
+    ? { before: supportedCount(profileClaims), after: supportedCount(afterProfileClaims) }
     : null;
+  const brokenItems = shown !== null && counts !== null && counts.after < counts.before
+    ? brokenProfileInferences(profileClaims, shown.broken)
+    : [];
 
   return (
     <section aria-labelledby="risky-heading" aria-busy={pending} className="max-w-2xl space-y-4">
@@ -163,6 +178,17 @@ export function RiskyPosts({ posts, risky, clues = [], clueCount, onSimulated, o
         {t.heading}
       </h3>
       <p className="text-ink/80">{t.lead}</p>
+      {/* 減ったときは、崩れた推定に判子を押して数を1つずつ減らす。減らなかったときは今までどおり N → M だけ */}
+      {counts && shown && counts.after < counts.before && brokenItems.length > 0 ? (
+        <EscapeStamps
+          key={`${deletion ? "deleted" : "simulated"}:${shown.delete.join(",")}`}
+          before={counts.before}
+          after={counts.after}
+          broken={brokenItems}
+        />
+      ) : (
+        counts && <CountChange before={counts.before} after={counts.after} />
+      )}
 
       <ol aria-label={t.listLabel} className="space-y-3">
         {risky.map((r) => {
@@ -189,7 +215,9 @@ export function RiskyPosts({ posts, risky, clues = [], clueCount, onSimulated, o
                     <span className="mt-0.5 block text-xs text-ink/60">{t.photos(post.images.length)}</span>
                   )}
                   <span className="mt-1 block text-sm font-bold text-seeker">
-                    {r.broken.length > 0 ? t.breaks(labelsOf(r.broken)) : t.breaksNothing}
+                    {r.broken.length > 0
+                      ? t.breaks(labelsOf(r.broken))
+                      : t.breaksNothing}
                   </span>
                   {direct.length > 0 && <span className="mt-1 block text-sm text-ink/80">{t.directClues(direct.join("・"))}</span>}
                 </span>
@@ -241,7 +269,6 @@ export function RiskyPosts({ posts, risky, clues = [], clueCount, onSimulated, o
           {t.simulating}
         </p>
       )}
-      {counts && <CountChange before={counts.before} after={counts.after} />}
       {result && !deletion && (
         <div role="status" className="space-y-1">
           <p className="font-bold">{t.result(result.delete.length, result.broken.length)}</p>
@@ -269,32 +296,6 @@ export function RiskyPosts({ posts, risky, clues = [], clueCount, onSimulated, o
   );
 }
 
-/**
- * 友だちに「診断してみて」と誘う Bluesky の投稿画面の URL。本文は固定の誘い文とサイトの URL だけ。
- * 引数はオリジンだけなので、推定結果・件数・ハンドル・投稿の中身は入りようがない
- */
-export function inviteComposeUrl(origin: string): string {
-  const text = `${messages.invite.text}\n${origin}/`;
-  return `https://bsky.app/intent/compose?text=${encodeURIComponent(text)}`;
-}
-
-/** 結果の最後に置く、誘いのリンク。投稿するかは本人が Bluesky の画面で決める（新しい権限は要らない） */
-function InviteLink() {
-  return (
-    <p className="border-t border-ink/15 pt-4">
-      <a
-        href={inviteComposeUrl(window.location.origin)}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="font-bold underline underline-offset-4 hover:text-seeker focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-ink"
-      >
-        {messages.invite.link}
-      </a>
-      <span className="mt-1 block text-sm text-ink/60">{messages.invite.note}</span>
-    </p>
-  );
-}
-
 function directClueLabel(clue: Clue): string | null {
   if (!DIRECT_CLUES.some((type) => type === clue.type)) return null;
   if (clue.type === "face" && clue.confidence < 0.8) return null;
@@ -302,18 +303,23 @@ function directClueLabel(clue: Clue): string | null {
   return messages.clues.typeLabels[clue.type];
 }
 
-/** 消す前後で「推定できた項目」の数がどう変わるかを、いちばん大きく見せる */
 function CountChange({ before, after }: { before: number; after: number }) {
-  return (
-    <figure aria-label={t.countLabel(before, after)} className="border-y-2 border-ink py-4 text-center">
-      <figcaption className="text-sm tracking-widest text-ink/70">{t.countHeading}</figcaption>
-      <p aria-hidden className="mt-1 font-display text-6xl leading-none tabular-nums sm:text-7xl">
-        <span>{before}</span>
-        <span className="mx-3 text-ink/40 sm:mx-5">→</span>
-        <span className={after < before ? "text-seeker" : ""}>{after}</span>
-      </p>
-    </figure>
-  );
+  return <figure aria-label={t.countLabel(before, after)} className="border-y-2 border-ink py-4 text-center">
+    <figcaption className="text-sm tracking-widest text-ink/70">{t.countHeading}</figcaption>
+    <p aria-hidden className="mt-1 font-display text-6xl leading-none tabular-nums sm:text-7xl"><span>{before}</span><span className="mx-3 text-ink/40 sm:mx-5">→</span><span className={after < before ? "text-seeker" : ""}>{after}</span></p>
+  </figure>;
+}
+
+export function inviteComposeUrl(origin: string): string {
+  const text = `${messages.invite.text}\n${origin}/`;
+  return `https://bsky.app/intent/compose?text=${encodeURIComponent(text)}`;
+}
+
+function InviteLink() {
+  return <p className="border-t border-ink/15 pt-4">
+    <a href={inviteComposeUrl(window.location.origin)} target="_blank" rel="noopener noreferrer" className="font-bold underline underline-offset-2">{messages.invite.link}</a>
+    <span className="mt-1 block text-sm text-ink/60">{messages.invite.note}</span>
+  </p>;
 }
 
 /** 実際に消したあと：消せた数、消せなかった数、逃げ切れたか */

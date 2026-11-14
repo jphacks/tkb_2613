@@ -26,6 +26,19 @@ describe("isPost", () => {
     expect(isPost({ ...POST, images: [] })).toBe(true);
   });
 
+  it("accepts only unambiguous Meta CDN images for Threads posts", () => {
+    const threads = { ...POST, post_id: "threads:123" };
+    expect(isPost({ ...threads, images: [{ ...IMAGE, url: "https://scontent.cdninstagram.com/photo.jpg" }] })).toBe(true);
+    for (const url of [
+      "https://user:password@scontent.cdninstagram.com/photo.jpg",
+      "https://scontent.cdninstagram.com:8443/photo.jpg",
+      "https://scontent.cdninstagram.com/photo.jpg#fragment",
+      "https://cdninstagram.com.evil.example/photo.jpg",
+    ]) {
+      expect(isPost({ ...threads, images: [{ ...IMAGE, url }] })).toBe(false);
+    }
+  });
+
   it.each([
     ["null", null],
     ["image outside the CDN", { ...POST, images: [{ ...IMAGE, url: "https://example.com/a.jpg" }] }],

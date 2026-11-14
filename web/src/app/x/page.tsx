@@ -119,7 +119,8 @@ async function call(path: string, method: "GET" | "POST" | "DELETE" = "GET", bod
       method,
       credentials: "same-origin",
       cache: "no-store",
-      signal: AbortSignal.timeout(20_000),
+      // 取得・診断などの POST は時間切れで止めない
+      signal: method === "POST" ? undefined : AbortSignal.timeout(20_000),
       headers: body === undefined ? undefined : { "Content-Type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body),
     });

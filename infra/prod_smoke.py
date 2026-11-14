@@ -10,11 +10,11 @@ Python の標準ライブラリだけで動く（uv がなくてもよい）。�
    画面経由では届かない。ログイン不要で軽い `/api/features` を生存確認に使う）。
    本番は閲覧リンクをオフにするので `share_enabled` が false であること
    （`--allow-share-enabled` で外す）
-3. `/api/demo/diagnosis` の conclusions に「最寄り駅：根津駅」と
-   「ゴミの収集地区：文京区 弥生1・2丁目」がある。
-   画面の表示名は `web/src/lib/messages.ts` の ATTRIBUTE_LABELS で attribute から引くので、
-   データ上は attribute=station / value=根津駅、
-   attribute=home_district / value=文京区 弥生1・2丁目 を探す
+3. `/api/demo/diagnosis` の profile_claims（候補カタログセット）に「自宅の最寄り駅：根津駅」と
+   「居住エリア：文京区」の候補がある。
+   画面の表示名は `web/src/types/profile.ts` のカタログで attribute から引くので、
+   データ上は attribute=home_nearest_station / candidates[].value=根津駅、
+   attribute=residential_area / candidates[].value=文京区 を探す
 4. `/__internal/*`（Next.js の内部経路）と `/api/detect` が入口で遮断される。
    遮断は WAF の block-internal・block-detect（infra/terraform/edge.tf）で、
    CloudFront が 403 を返す。
@@ -44,10 +44,10 @@ DEFAULT_TIMEOUT_SECONDS = 10.0
 MAX_BODY_BYTES = 2 * 1024 * 1024
 USER_AGENT = "tkb-prod-smoke/1"
 
-# (attribute, 表示名, 値)。表示名は web/src/lib/messages.ts の ATTRIBUTE_LABELS と同じ
+# (attribute, 表示名, 値)。表示名は web/src/types/profile.ts のカタログの label と同じ
 EXPECTED_CONCLUSIONS: tuple[tuple[str, str, str], ...] = (
-    ("station", "最寄り駅", "根津駅"),
-    ("home_district", "ゴミの収集地区", "文京区 弥生1・2丁目"),
+    ("home_nearest_station", "自宅の最寄り駅", "根津駅"),
+    ("residential_area", "居住エリア（市区町村・町域）", "文京区"),
 )
 
 # 外から遮断されるべき経路。%5F%5Finternal は Next.js のフォルダー名どおりの表記
@@ -168,13 +168,15 @@ def judge_demo(resp: Response, attribute: str, label: str, value: str) -> tuple[
     if problem:
         return False, problem
     data = _json(resp)
-    conclusions = data.get("conclusions") if isinstance(data, dict) else None
-    if not isinstance(conclusions, list):
-        return False, "応答に conclusions の配列がない"
+    claim_sets = data.get("profile_claims") if isinstance(data, dict) else None
+    if not isinstance(claim_sets, list):
+        return False, "応答に profile_claims の配列がない"
     found = [
-        c.get("value")
-        for c in conclusions
-        if isinstance(c, dict) and c.get("attribute") == attribute
+        candidate.get("value")
+        for claim_set in claim_sets
+        if isinstance(claim_set, dict) and claim_set.get("attribute") == attribute
+        for candidate in claim_set.get("candidates") or []
+        if isinstance(candidate, dict)
     ]
     if value in found:
         return True, f"{label}：{value}"

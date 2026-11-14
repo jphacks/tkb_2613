@@ -1,6 +1,7 @@
 """投稿を横断する推定の材料（事実）の型。cross_post と open_data で共有する。"""
 
 import unicodedata
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -87,7 +88,7 @@ def is_distinctive_bridge(value: str) -> bool:
 
 
 def matching_text_clue(
-    clues: list[Clue], post_id: str, value: str, clue_type: ClueType
+    clues: Sequence[Clue], post_id: str, value: str, clue_type: ClueType
 ) -> tuple[int, Clue] | None:
     for index, clue in enumerate(clues):
         if (
