@@ -14,7 +14,7 @@ export function parseThreadsLang(value: string | null | undefined): ThreadsLang 
 
 /** エラーは文字列ではなくキーで持ち、表示するときに現在の言語へ翻訳する（切り替えに追従させる） */
 export type ThreadsErrorKey =
-  | "timeout" | "network" | "modelUnavailable" | "busy" | "forbidden" | "loginAgain" | "failed"
+  | "timeout" | "network" | "modelUnavailable" | "busy" | "diagnosing" | "diagnosisEnded" | "forbidden" | "loginAgain" | "failed"
   | "diagnosisUnreadable" | "configUnreadable" | "connectFailed" | "sessionUnreadable"
   | "postsUnreadable" | "authorizeUnverified" | "simulationUnreadable"
   | "authDenied" | "authState" | "authFailed";
@@ -72,6 +72,7 @@ export interface ThreadsText {
   readonly aiNoteWithImages: string;
   readonly aiButton: string;
   readonly aiBusy: string;
+  readonly diagnosingNotice: string;
   readonly resultFull: string;
   readonly resultRe: string;
   readonly resultCount: (posts: number, clues: number, conclusions: number) => string;
@@ -143,6 +144,7 @@ const ja: ThreadsText = {
   aiNoteWithImages: "画像付き投稿は本文・投稿時刻・画像1枚目をチーム管理のモデルで診断します。モデル停止中は利用できません。上のセルフチェックとは別機能です。",
   aiButton: "AI診断を試す",
   aiBusy: "AI診断中…",
+  diagnosingNotice: "診断を実行中です。ページを再読み込みしても処理は続きます。終わると結果を自動で表示します（数分かかることがあります）。",
   resultFull: "診断結果",
   resultRe: "仮除外後の再診断",
   resultCount: (posts, clues, conclusions) => `投稿 ${posts} 件・手がかり ${clues} 件・推定 ${conclusions} 件`,
@@ -177,6 +179,8 @@ const ja: ThreadsText = {
     authDenied: "Threadsの認可が完了しませんでした。もう一度お試しください。",
     authState: "認証を確認できませんでした。最初からログインし直してください。",
     authFailed: "Threadsの認証に失敗しました。時間を置いて再度お試しください。",
+    diagnosing: "診断を実行中です。終わるまでお待ちください。",
+    diagnosisEnded: "診断が完了しませんでした。もう一度お試しください。",
   },
 };
 
@@ -232,6 +236,7 @@ const en: ThreadsText = {
   aiNoteWithImages: "Image posts are diagnosed using the text, timestamp, and first image on the team-managed model. It is unavailable while the model is stopped and is separate from the self-check above.",
   aiButton: "Try the AI diagnosis",
   aiBusy: "AI diagnosis in progress…",
+  diagnosingNotice: "A diagnosis is running. It keeps running if you reload this page, and the result appears automatically when it finishes (this can take a few minutes).",
   resultFull: "Diagnosis result",
   resultRe: "Re-diagnosis after provisional exclusion",
   resultCount: (posts, clues, conclusions) => `${posts} posts · ${clues} clues · ${conclusions} inferences`,
@@ -266,6 +271,8 @@ const en: ThreadsText = {
     authDenied: "Threads authorization was not completed. Please try again.",
     authState: "The login could not be verified. Please start the login again.",
     authFailed: "Threads authentication failed. Please wait a moment and try again.",
+    diagnosing: "A diagnosis is already running. Please wait for it to finish.",
+    diagnosisEnded: "The diagnosis did not finish. Please try again.",
   },
 };
 

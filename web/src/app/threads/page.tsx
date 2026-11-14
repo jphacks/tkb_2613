@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 
 import { ConclusionBoard } from "@/components/conclusion-board/ConclusionBoard";
@@ -39,7 +39,9 @@ type ThreadsConfig = {
   max_posts: number;
   image_diagnosis_enabled?: boolean;
 };
-type ThreadsSession = { username: string; mock: boolean };
+type ThreadsSession = { username: string; mock: boolean; busy?: boolean };
+const DIAGNOSIS_POLL_MS = 3_000;
+const DIAGNOSIS_FOLLOW_LIMIT_MS = 2_100_000;
 
 const LANGUAGES: readonly { readonly code: ThreadsLang; readonly label: string }[] = [
   { code: "ja", label: "日本語" },
@@ -83,6 +85,8 @@ async function call(path: string, method: "GET" | "POST" | "DELETE" = "GET", bod
     throw new ThreadsError("network");
   }
   if (!response.ok) {
+    // 409 は「すでに診断中」。simulate / rediagnose の 409（診断前）とは別なので、診断と投稿取得だけ見分ける
+    if (response.status === 409 && (path === "diagnose" || path === "posts")) throw new ThreadsError("diagnosing");
     if (response.status === 504) throw new ThreadsError("timeout");
     if (response.status === 503 && path === "diagnose") throw new ThreadsError("modelUnavailable");
     if (response.status === 429 || response.status === 503) throw new ThreadsError("busy");
@@ -185,8 +189,36 @@ export default function ThreadsPage() {
   const [fetchedPosts, setFetchedPosts] = useState<readonly Post[] | null>(null);
   const [publicCheckDone, setPublicCheckDone] = useState(false);
   const [busy, setBusy] = useState(false);
+  // api が診断を実行中（再読み込み後や、別のタブ・重複要求で 409 になったとき）。完了まで session を見守る
+  const [diagnosing, setDiagnosing] = useState(false);
+  const mounted = useRef(true);
   const [error, setError] = useState<ThreadsErrorKey | null>(null);
   const t = THREADS_TEXT[lang];
+
+  /** 実行中の診断が終わるまで session を見て、終わったら結果を取り出す（診断は中断しない） */
+  async function followDiagnosis() {
+    setDiagnosing(true);
+    try {
+      const deadline = Date.now() + DIAGNOSIS_FOLLOW_LIMIT_MS;
+      for (;;) {
+        await new Promise((resolve) => setTimeout(resolve, DIAGNOSIS_POLL_MS));
+        if (!mounted.current) return;
+        const latest = await call("session");
+        if (!isSession(latest)) throw new ThreadsError("sessionUnreadable");
+        if (latest.busy !== true) break;
+        if (Date.now() > deadline) throw new ThreadsError("timeout");
+      }
+      let result: ThreadsDiagnosis;
+      try { result = requireDiagnosis(await call("diagnosis")); }
+      catch (cause) {
+        // 結果がない（診断が失敗して終わった）ときは、失敗として知らせて再実行できるようにする
+        throw cause instanceof ThreadsError && cause.key === "failed" ? new ThreadsError("diagnosisEnded") : cause;
+      }
+      if (mounted.current) { setOriginal(result); setView(result); }
+    } finally {
+      if (mounted.current) setDiagnosing(false);
+    }
+  }
 
   useEffect(() => {
     document.documentElement.lang = t.htmlLang;
@@ -195,6 +227,7 @@ export default function ThreadsPage() {
 
   useEffect(() => {
     let active = true;
+    mounted.current = true;
     void (async () => {
       const authError = new URLSearchParams(window.location.search).get("auth_error");
       if (authError) {
@@ -213,21 +246,35 @@ export default function ThreadsPage() {
         const connected = await call("session");
         if (!active || !isSession(connected)) return;
         setSession(connected);
+        if (connected.busy === true) {
+          // 診断の最中に再読み込みした。続きの結果を待つ
+          setBusy(true);
+          void followDiagnosis().catch((cause) => { if (active) setError(errorKeyOf(cause, "failed")); })
+            .finally(() => { if (active) setBusy(false); });
+          return;
+        }
         try {
           const restored = requireDiagnosis(await call("diagnosis"));
           if (active) { setOriginal(restored); setView(restored); }
         } catch { /* 診断前なら結果はない。 */ }
       } catch { /* 未ログイン時の 401 は通常状態。 */ }
     })();
-    return () => { active = false; };
+    return () => { active = false; mounted.current = false; };
   }, []);
 
   async function perform(action: () => Promise<void>) {
     setBusy(true);
     setError(null);
-    try { await action(); }
+    try {
+      try { await action(); }
+      catch (cause) {
+        // すでに診断中なら、汎用エラーにせず、その診断の完了を待って結果を出す
+        if (cause instanceof ThreadsError && cause.key === "diagnosing") await followDiagnosis();
+        else throw cause;
+      }
+    }
     catch (cause) { setError(errorKeyOf(cause, "failed")); }
-    finally { setBusy(false); }
+    finally { if (mounted.current) setBusy(false); }
   }
 
   function toggle(postId: string) {
@@ -325,7 +372,7 @@ export default function ThreadsPage() {
             setFetchedPosts(data.posts);
             setPublicCheckDone(false);
           })}>{t.reviewPosts}</button>}
-        {busy && <p role="status" className="text-sm text-ink/70">{t.loading}</p>}
+        {busy && !diagnosing && <p role="status" className="text-sm text-ink/70">{t.loading}</p>}
         {!original && fetchedPosts && <section aria-label={t.postsAria} className="space-y-4">
           <p className="text-sm text-ink/70">{config?.image_diagnosis_enabled
             ? t.postsFetchedWithImages(fetchedPosts.length) : t.postsFetched(fetchedPosts.length)}</p>
@@ -371,6 +418,7 @@ export default function ThreadsPage() {
         </details>}
       </section>}
 
+      {diagnosing && <p role="status" className="mt-6 border-l-4 border-ink/40 bg-paper-deep p-3">{t.diagnosingNotice}</p>}
       {error && <p role="alert" className="mt-6 border-l-4 border-seeker p-3">{t.errors[error]}</p>}
 
       {original && current && <div className="mt-12 space-y-10">

@@ -57,7 +57,11 @@ async def test_mock_x_diagnosis_simulation_and_rediagnosis() -> None:
         assert login.status_code == 200
         assert "httponly" in login.headers["set-cookie"].lower()
         session = await client.get("/api/threads/session")
-        assert session.json() == {"username": "架空のThreadsアカウント", "mock": True}
+        assert session.json() == {
+            "username": "架空のThreadsアカウント",
+            "mock": True,
+            "busy": False,
+        }
         result = await client.post("/api/threads/diagnose", headers=HEADERS)
         assert result.status_code == 200
         snapshot = result.json()
@@ -147,6 +151,7 @@ async def test_oauth_state_cookie_identity_and_replay(monkeypatch: pytest.Monkey
         assert (await client.get("/api/threads/session")).json() == {
             "username": "tester",
             "mock": False,
+            "busy": False,
         }
         assert (await client.get("/api/x/session")).status_code == 401
         replay = await client.get("/api/threads/callback", params={"state": state, "code": "code"})
