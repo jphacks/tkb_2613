@@ -138,6 +138,42 @@ def test_commons_reference_lookup_requires_enabled_live_cap_and_compatible_index
     )
 
 
+def test_commons_feature_uses_same_national_places_index_resolution(tmp_path: Path) -> None:
+    processed = tmp_path / "data" / "processed"
+    national = processed / "national"
+    national.mkdir(parents=True)
+
+    def write_index(path: Path, version: int) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with sqlite3.connect(path) as db:
+            db.execute(f"PRAGMA user_version = {version}")
+
+    def is_available(directory: Path) -> bool:
+        return Settings(
+            _env_file=None,
+            mock_mode=False,
+            commons_reference_lookup_enabled=True,
+            diagnose_daily_limit=3,
+            gazetteer_dir=directory,
+        ).commons_reference_lookup_available
+
+    root_index = processed / "places.sqlite3"
+    national_index = national / "places.sqlite3"
+    write_index(root_index, PLACE_INDEX_SCHEMA_VERSION)
+    assert is_available(national) is True
+
+    write_index(national_index, PLACE_INDEX_SCHEMA_VERSION - 1)
+    assert is_available(national) is False
+
+    write_index(national_index, PLACE_INDEX_SCHEMA_VERSION)
+    assert is_available(national) is True
+
+    explicit_parent = tmp_path / "custom"
+    explicit = explicit_parent / "tables"
+    write_index(explicit_parent / "places.sqlite3", PLACE_INDEX_SCHEMA_VERSION)
+    assert is_available(explicit) is False
+
+
 @pytest.mark.parametrize("mock_mode", [True, False])
 def test_gazetteer_dependency_uses_selected_directory_in_mock_and_live_modes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mock_mode: bool

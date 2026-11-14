@@ -9,6 +9,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from tkb_api.limits import PublicWindow
 from tkb_common.place_names import PLACE_INDEX_SCHEMA_VERSION
+from tkb_engine.gazetteer import resolve_places_index_path
 
 # 偽の X API を許す手元のホスト
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
@@ -21,8 +22,8 @@ def _has_complete_gazetteer(directory: Path) -> bool:
 
 def _has_compatible_place_index(directory: Path) -> bool:
     """Check only that the local POI index exists and uses the supported schema."""
-    path = directory / "places.sqlite3"
-    if not path.is_file():
+    path = resolve_places_index_path(directory)
+    if path is None:
         return False
     try:
         uri = f"{path.resolve().as_uri()}?mode=ro&immutable=1"

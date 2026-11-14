@@ -29,6 +29,18 @@ MAX_PLACE_NAME_MATCHES = 50
 KNOWLEDGE_PATH = Path(__file__).resolve().parents[3] / "data-prep" / "manual" / "knowledge.json"
 
 
+def resolve_places_index_path(data_dir: Path) -> Path | None:
+    """Resolve the POI index in the selected directory, with one national-layout fallback."""
+    selected = data_dir / "places.sqlite3"
+    if selected.is_file():
+        return selected
+    if data_dir.name.casefold() == "national" and data_dir.parent.name.casefold() == "processed":
+        legacy = data_dir.parent / "places.sqlite3"
+        if legacy.is_file():
+            return legacy
+    return None
+
+
 @dataclass(frozen=True)
 class TrashBag:
     """自治体の指定ゴミ袋。price は1枚の値段（円）。color は分からなければ空。"""
@@ -172,9 +184,7 @@ class Gazetteer:
                 if (data_dir / "corporations.sqlite").is_file()
                 else None
             ),
-            places_path=(
-                data_dir / "places.sqlite3" if (data_dir / "places.sqlite3").is_file() else None
-            ),
+            places_path=resolve_places_index_path(data_dir),
         )
 
     def places_named(self, value: str) -> list[dict[str, Any]]:
