@@ -15,6 +15,7 @@ import {
   simulate,
 } from "./api";
 import { messages } from "@/lib/messages";
+import { PROFILE_DIAGNOSED_ATTRIBUTES } from "@/types/profile";
 
 const RESPONSE = {
   clues: [
@@ -245,7 +246,11 @@ describe("diagnose", () => {
     expect(init?.method).toBe("POST");
     expect(init?.credentials).toBe("include");
     expect(init?.headers).toEqual({ "Content-Type": "application/json" });
-    expect(init?.body).toBe(JSON.stringify({ public_web_lookup_consent: false }));
+    expect(init?.body).toBe(JSON.stringify({
+      public_web_lookup_consent: false,
+      photo_place_web_lookup_consent: false,
+      photo_place_reference_consent: false,
+    }));
   });
 
   it("sends explicit per-run public lookup consent", async () => {
@@ -256,7 +261,30 @@ describe("diagnose", () => {
     }
     expect(received).toEqual(["done"]);
     const [, init] = fetchFn.mock.calls[0];
-    expect(init?.body).toBe(JSON.stringify({ public_web_lookup_consent: true }));
+    expect(init?.body).toBe(JSON.stringify({
+      public_web_lookup_consent: true,
+      photo_place_web_lookup_consent: false,
+      photo_place_reference_consent: false,
+    }));
+  });
+
+  it("sends photo place consent independently from profile web consent", async () => {
+    const fetchFn = mockFetch(sse('event: done\ndata: {"posts_seen":0}\n\n'));
+    for await (const event of diagnose({
+      baseUrl: "http://api.test",
+      publicWebLookupConsent: false,
+      photoPlaceWebLookupConsent: true,
+      photoPlaceReferenceConsent: true,
+    })) {
+      // The done event only completes the request.
+      expect(event.event).toBe("done");
+    }
+    const [, init] = fetchFn.mock.calls[0];
+    expect(init?.body).toBe(JSON.stringify({
+      public_web_lookup_consent: false,
+      photo_place_web_lookup_consent: true,
+      photo_place_reference_consent: true,
+    }));
   });
 
   it("skips events the screen does not know yet", async () => {
@@ -323,13 +351,15 @@ describe("diagnose", () => {
   });
 });
 
+function unknownCandidateSets() {
+  return PROFILE_DIAGNOSED_ATTRIBUTES.map((attribute) => ({
+    attribute, status: "unknown", candidates: [], candidate_pool: [], reason: "no_grounded_rule", conflicting_evidence: [],
+  }));
+}
+
 describe("simulate", () => {
   const POST_ID = "at://did:plc:abc/app.bsky.feed.post/3k9";
-  const RESULT = {
-    delete: [POST_ID],
-    broken: ["station"],
-    after: [{ rule: "R3", attribute: "routine", value: "毎週火曜", clue_indices: [2], note: "" }],
-  };
+  const RESULT = { delete: [POST_ID], broken: ["regular_station"], after: unknownCandidateSets() };
 
   function json(body: unknown, status = 200): Response {
     return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -346,9 +376,9 @@ describe("simulate", () => {
     expect(JSON.parse(init?.body as string)).toEqual({ delete: [POST_ID] });
   });
 
-  it("rejects evidence numbers beyond the diagnosed clues", async () => {
-    mockFetch(json(RESULT));
-    await expect(simulate([POST_ID], 2)).rejects.toMatchObject({ kind: "invalid_response" });
+  it("rejects results that do not cover every diagnosed attribute", async () => {
+    mockFetch(json({ ...RESULT, after: RESULT.after.slice(1) }));
+    await expect(simulate([POST_ID], 3)).rejects.toMatchObject({ kind: "invalid_response" });
   });
 
   it("asks to diagnose first when the api has no diagnosis", async () => {
@@ -365,7 +395,7 @@ describe("simulate", () => {
 describe("deletePosts", () => {
   const POST_ID = "at://did:plc:abc/app.bsky.feed.post/3k9";
   const KEPT_ID = "at://did:plc:abc/app.bsky.feed.post/3k2";
-  const RESULT = { delete: [POST_ID], failed: [KEPT_ID], broken: ["station"], after: [] };
+  const RESULT = { delete: [POST_ID], failed: [KEPT_ID], broken: ["regular_station"], after: unknownCandidateSets() };
 
   function json(body: unknown, status = 200): Response {
     return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -411,8 +441,8 @@ describe("getFeatures", () => {
   });
 
   it("reads whether public web lookup is available", async () => {
-    mockFetch(new Response(JSON.stringify({ share_enabled: false, auth_mode: "oauth", public_web_lookup_available: true })));
-    expect(await getFeatures()).toEqual({ share_enabled: false, auth_mode: "oauth", public_web_lookup_available: true });
+    mockFetch(new Response(JSON.stringify({ share_enabled: false, auth_mode: "oauth", public_web_lookup_available: true, photo_place_web_lookup_available: false, commons_reference_lookup_available: true })));
+    expect(await getFeatures()).toEqual({ share_enabled: false, auth_mode: "oauth", public_web_lookup_available: true, photo_place_web_lookup_available: false, commons_reference_lookup_available: true });
   });
 
   it("ignores a public web lookup flag that is not a boolean", async () => {

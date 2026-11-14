@@ -10,7 +10,7 @@ from tkb_api.bluesky import Diagnosis, LoginResult, SessionStore
 from tkb_api.config import Settings, get_settings
 from tkb_api.main import create_app
 from tkb_api.routes.diagnose import get_gazetteer
-from tkb_common.schemas import Clue, Post
+from tkb_common.schemas import PROFILE_DIAGNOSED_ATTRIBUTES, Clue, Post
 from tkb_engine.gazetteer import Gazetteer
 
 # ブラウザは POST・DELETE に Origin を付ける（元に戻せない操作は Origin を確かめる）
@@ -70,11 +70,20 @@ def test_diagnose_streams_the_plan_before_done(client: TestClient) -> None:
     events = _diagnose(client)
 
     proposal = events["plan"]
-    assert set(proposal["delete"]) == {BIRTHDAY_POST, ADDRESS_POST, GYM_POST}
-    assert {"station", "active_time", "routine"} <= set(proposal["broken"])
-    # 生年月日を先に守り、場所や決まった外出も消す。
-    remaining = {c["attribute"] for c in proposal["after"]}
-    assert not remaining & {"birthday", "age", "station", "active_time", "routine"}
+    assert proposal["delete"] == events["conclusions"]["profile_claim_suggestions"]
+    assert {BIRTHDAY_POST, ADDRESS_POST} <= set(proposal["delete"])
+    assert {"given_name", "age", "birthday", "home_nearest_station", "residential_area"} <= set(
+        proposal["broken"]
+    )
+    assert len(proposal["after"]) == len(PROFILE_DIAGNOSED_ATTRIBUTES)
+    supported_after = {c["attribute"] for c in proposal["after"] if c["candidates"]}
+    assert not supported_after & {
+        "given_name",
+        "age",
+        "birthday",
+        "home_nearest_station",
+        "residential_area",
+    }
     by_post = {p["post_id"]: p["broken"] for p in proposal["posts"]}
     assert set(proposal["delete"]) <= by_post.keys()
 
@@ -93,28 +102,32 @@ def test_simulate_requires_a_finished_diagnosis(client: TestClient) -> None:
 
 def test_simulate_breaks_the_station_when_the_address_post_is_deleted(client: TestClient) -> None:
     _login(client)
-    clues = _diagnose(client)["conclusions"]["clues"]
+    _diagnose(client)
 
     res = client.post("/api/simulate", json={"delete": [ADDRESS_POST]})
 
     assert res.status_code == 200
     body = res.json()
     assert body["delete"] == [ADDRESS_POST]
-    assert {"station", "active_time", "home_area"} <= set(body["broken"])
-    # 残った結論の根拠の番号は、診断の clues での番号。消した投稿の手がかりは指さない
-    for conclusion in body["after"]:
-        assert all(clues[i]["post_id"] != ADDRESS_POST for i in conclusion["clue_indices"])
-    assert any(c["attribute"] == "routine" for c in body["after"])
+    assert "home_nearest_station" in body["broken"]
+    assert len(body["after"]) == len(PROFILE_DIAGNOSED_ATTRIBUTES)
+    assert "narrowing" in body
+    # 残った候補の根拠経路は、消した投稿の手がかりを指さない
+    for claim_set in body["after"]:
+        for candidate in claim_set["candidate_pool"]:
+            assert all(ref["post_id"] != ADDRESS_POST for ref in candidate["evidence"])
+    routine = next(c for c in body["after"] if c["attribute"] == "routine")
+    assert routine["candidates"]
 
 
 def test_simulate_with_nothing_selected_breaks_nothing(client: TestClient) -> None:
     _login(client)
-    conclusions = _diagnose(client)["conclusions"]["conclusions"]
+    profile_claims = _diagnose(client)["conclusions"]["profile_claims"]
 
     body = client.post("/api/simulate", json={"delete": []}).json()
 
     assert body["broken"] == []
-    assert body["after"] == conclusions
+    assert body["after"] == profile_claims
 
 
 def test_simulate_rejects_posts_that_were_not_diagnosed(client: TestClient) -> None:
@@ -139,9 +152,11 @@ def test_simulate_starts_from_the_posts_left_after_a_delete(client: TestClient) 
     body = res.json()
     # 消したジムの投稿の分（決まった外出）は、仮除外の結果に戻ってこない
     assert body["broken"] == []
-    assert all(c["attribute"] != "routine" for c in body["after"])
-    # 復元した結論と同じで、番号も診断時の clues での番号
-    assert body["after"] == client.get("/api/diagnosis").json()["conclusions"]
+    routine = next(c for c in body["after"] if c["attribute"] == "routine")
+    assert routine["candidates"] == []
+    # 復元した候補セットと同じ
+    assert body["after"] == client.get("/api/diagnosis").json()["profile_claims"]
+    assert "narrowing" in body
 
 
 def test_simulate_matches_the_restored_plan_after_a_delete(client: TestClient) -> None:

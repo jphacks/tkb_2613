@@ -26,7 +26,7 @@ from tkb_api import bluesky
 from tkb_api.bluesky import BlueskySession, PostsDeleter, SessionStore
 from tkb_api.config import Settings, get_settings
 from tkb_api.origin import same_origin
-from tkb_api.pipeline import simulate_json
+from tkb_api.pipeline import simulate_claims_json
 from tkb_api.routes.diagnose import get_gazetteer
 from tkb_api.routes.session import current_session, current_session_id, get_session_store
 from tkb_api.schemas import DeleteRequest
@@ -91,8 +91,8 @@ async def delete(
     session_id: Annotated[str, Depends(current_session_id)],
     session: Annotated[BlueskySession, Depends(current_session)],
     settings: Annotated[Settings, Depends(get_settings)],
-    gazetteer: Annotated[Gazetteer, Depends(get_gazetteer)],
     delete_posts: Annotated[PostsDeleter, Depends(get_delete_posts)],
+    gazetteer: Annotated[Gazetteer, Depends(get_gazetteer)],
 ) -> dict[str, Any]:
     diagnosis = store.get_diagnosis(session_id)
     if diagnosis is None:
@@ -118,5 +118,13 @@ async def delete(
 
     store.mark_deleted(session_id, done)
 
-    sim = simulate_json(diagnosis.clues, diagnosis.posts, gazetteer, done, diagnosis.deleted)
+    sim = simulate_claims_json(
+        diagnosis.profile_claims,
+        diagnosis.clues,
+        diagnosis.posts,
+        done,
+        diagnosis.deleted,
+        diagnosis_at=diagnosis.diagnosis_at,
+        gazetteer=gazetteer,
+    )
     return {**sim, "failed": failed, "bluesky_busy": bluesky_busy}

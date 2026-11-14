@@ -43,7 +43,8 @@ age・birthday・occupation・active_time・routine は16項目にない。
 R2・R3、R7 の時間割、R9 の誕生日は投稿の時刻を使うので、投稿の日付が TIME_MIN_DAYS 日以上に
 散らばっているときだけ使う（同じ日にまとめて投稿したアカウントでは時刻が生活を表さない）。
 
-X2〜X5（生まれた年・留守の予定・行きつけの店・勤務先）は links.py。別々の投稿をつなぐルール。
+X2〜X5（生まれた年・留守の予定・行きつけの店・勤務先）は links.py。徒歩圏は、既存の
+`home_nearest_station` 候補と本人の徒歩投稿から ProfileCandidateSet に導く。
 
 ルールを足すときは rule_rN(clues, posts, ...) -> list[Conclusion] を書き、infer に並べる。
 しきい値は下の「しきい値」にまとめる。値は eval/fixtures/demo_observations.json で決めた仮の値で、

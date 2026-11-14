@@ -16,6 +16,7 @@ from tkb_api.routes.delete import get_delete_posts
 from tkb_api.routes.diagnose import get_gazetteer
 from tkb_api.routes.session import SESSION_COOKIE, get_login
 from tkb_common.schemas import (
+    PROFILE_DIAGNOSED_ATTRIBUTES,
     Clue,
     Post,
     ProfileAttribute,
@@ -23,6 +24,10 @@ from tkb_common.schemas import (
     ProfileEvidencePath,
     ProfileItem,
     ProfileStatus,
+)
+from tkb_engine.cross_post import (
+    evaluate_profile_candidates,
+    infer_owner_candidate_sets_with_web,
 )
 from tkb_engine.gazetteer import Gazetteer
 
@@ -76,8 +81,12 @@ def _login(client: TestClient) -> None:
 def _seed_diagnosis(client: TestClient) -> None:
     """診断を流さずに、セッションに診断の結果を置く。"""
     store: SessionStore = client.app.state.sessions  # type: ignore[attr-defined]
+    profile_claims = tuple(
+        infer_owner_candidate_sets_with_web(POSTS, CLUES, [], gazetteer=MINI_GAZETTEER)
+    )
     store.set_diagnosis(
-        client.cookies[SESSION_COOKIE], Diagnosis(posts=tuple(POSTS), clues=tuple(CLUES))
+        client.cookies[SESSION_COOKIE],
+        Diagnosis(posts=tuple(POSTS), clues=tuple(CLUES), profile_claims=profile_claims),
     )
 
 
@@ -137,7 +146,7 @@ def test_mock_delete_does_not_contact_bluesky_and_rediagnoses(client: TestClient
     assert body["delete"] == [GYM_POST]
     assert body["failed"] == []
     assert "routine" in body["broken"]
-    assert all(c["attribute"] != "routine" for c in body["after"])
+    assert next(c for c in body["after"] if c["attribute"] == "routine")["candidates"] == []
 
 
 def test_deleted_posts_stay_out_of_the_restored_diagnosis(client: TestClient) -> None:
@@ -153,15 +162,15 @@ def test_deleted_posts_stay_out_of_the_restored_diagnosis(client: TestClient) ->
     # 投稿と手がかりは診断時のまま（番号を変えない）
     assert [p["post_id"] for p in data["posts"]] == POST_IDS
     assert len(data["clues"]) == len(CLUES)
-    # 消した投稿は削除候補にならず、崩れた項目は結論にない
+    # 消した投稿は削除候補にならず、崩れた項目は候補から落ちる
     assert GYM_POST not in data["plan"]["delete"]
     assert all(p["post_id"] != GYM_POST for p in data["plan"]["posts"])
-    assert all(c["attribute"] != "routine" for c in data["conclusions"])
-    # 結論の番号は診断時の clues での番号で、消した投稿の手がかりを指さない
-    assert data["conclusions"] == deleted["after"]
-    for conclusion in [*data["conclusions"], *data["plan"]["after"]]:
-        for i in conclusion["clue_indices"]:
-            assert data["clues"][i]["post_id"] != GYM_POST
+    routine = next(c for c in data["profile_claims"] if c["attribute"] == "routine")
+    assert routine["candidates"] == []
+    assert data["profile_claims"] == deleted["after"]
+    for claim_set in [*data["profile_claims"], *data["plan"]["after"]]:
+        for candidate in claim_set["candidate_pool"]:
+            assert all(ref["post_id"] != GYM_POST for ref in candidate["evidence"])
 
 
 def _claim(attribute: ProfileAttribute, *paths: tuple[str, str]) -> ProfileItem:
@@ -195,24 +204,32 @@ def test_restored_profile_claims_drop_the_ones_whose_evidence_was_deleted(
     two_ways = _claim(ProfileAttribute.REGULAR_STATION, (GYM_POST, other), (other, third))
     _login(client)
     store: SessionStore = client.app.state.sessions  # type: ignore[attr-defined]
+    candidate_sets = [
+        candidate_set
+        for candidate_set in evaluate_profile_candidates([only_gym, two_ways], POSTS, clues=CLUES)
+        if candidate_set.attribute
+        in {ProfileAttribute.RESIDENTIAL_AREA, ProfileAttribute.REGULAR_STATION}
+    ]
     store.set_diagnosis(
         client.cookies[SESSION_COOKIE],
         Diagnosis(
             posts=tuple(POSTS),
             clues=tuple(CLUES),
-            profile_claims=(only_gym, two_ways),
+            profile_claims=tuple(candidate_sets),
             profile_claim_suggestions=(GYM_POST, other),
         ),
     )
     before = client.get("/api/diagnosis").json()
-    assert len(before["profile_claims"]) == 2
+    assert len(before["profile_claims"]) == len(PROFILE_DIAGNOSED_ATTRIBUTES)
+    assert sum(bool(claim["candidate_pool"]) for claim in before["profile_claims"]) == 2
 
     client.post("/api/delete", json={"delete": [GYM_POST]})
     data = client.get("/api/diagnosis").json()
 
     # 消した投稿だけが根拠の推定は出さない。別の経路が残る推定は、残った経路だけで出す
-    assert [c["attribute"] for c in data["profile_claims"]] == ["regular_station"]
-    survivor = data["profile_claims"][0]
+    claims = {claim["attribute"]: claim for claim in data["profile_claims"]}
+    assert claims["residential_area"]["candidate_pool"] == []
+    survivor = claims["regular_station"]["candidate_pool"][0]
     assert all(e["post_id"] != GYM_POST for e in survivor["evidence"])
     assert len(survivor["evidence_paths"]) == 1
     assert data["profile_claim_suggestions"] == [other]
@@ -257,7 +274,7 @@ def test_a_second_delete_starts_from_the_posts_left_after_the_first(client: Test
     assert body["delete"] == [ADDRESS_POST]
     # 1回目に消したジムの投稿の分は、2回目の結果に戻ってこない
     assert "routine" not in body["broken"]
-    assert all(c["attribute"] != "routine" for c in body["after"])
+    assert next(c for c in body["after"] if c["attribute"] == "routine")["candidates"] == []
     assert client.get("/api/diagnosis").json()["deleted"] == [GYM_POST, ADDRESS_POST]
 
 
@@ -292,7 +309,7 @@ def test_real_delete_deletes_as_the_session_account_and_reports_failures() -> No
     assert body["failed"] == [ADDRESS_POST]
     # 消せなかった住所の投稿の分は崩れない
     assert "routine" in body["broken"]
-    assert "station" not in body["broken"]
+    assert "home_nearest_station" not in body["broken"]
     # 消せた投稿だけを記録する
     assert restored["deleted"] == [GYM_POST]
 

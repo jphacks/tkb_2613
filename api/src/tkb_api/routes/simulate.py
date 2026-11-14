@@ -15,7 +15,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from tkb_api.bluesky import SessionStore
-from tkb_api.pipeline import simulate_json
+from tkb_api.pipeline import simulate_claims_json
 from tkb_api.routes.diagnose import get_gazetteer
 from tkb_api.routes.session import current_session_id, get_session_store
 from tkb_api.schemas import SimulateRequest
@@ -40,6 +40,12 @@ def simulate(
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT, "診断した投稿の中から選んでください"
         )
-    return simulate_json(
-        diagnosis.clues, diagnosis.posts, gazetteer, body.delete, diagnosis.deleted
+    return simulate_claims_json(
+        diagnosis.profile_claims,
+        diagnosis.clues,
+        diagnosis.posts,
+        body.delete,
+        diagnosis.deleted,
+        diagnosis_at=diagnosis.diagnosis_at,
+        gazetteer=gazetteer,
     )

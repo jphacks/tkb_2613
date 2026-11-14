@@ -31,7 +31,7 @@ def _utc_today() -> date:
 
 
 class DailyResourceBudget:
-    """UTC の日付ごとに、予約したリソース数を数える。"""
+    """UTC の日付ごとに、予約したリソース数を数える。limit が 0 なら制限しない。"""
 
     def __init__(self, limit: int, today: Callable[[], date] = _utc_today) -> None:
         self.limit = limit
@@ -52,7 +52,7 @@ class DailyResourceBudget:
             return max(0, self.limit - self._used)
 
     def can_afford(self, amount: int) -> bool:
-        return amount <= self.remaining()
+        return not self.limit or amount <= self.remaining()
 
     def reserve(self, amount: int) -> bool:
         """amount を予約できれば True。足りなければ何も数えずに False。"""
@@ -60,7 +60,7 @@ class DailyResourceBudget:
             raise ValueError("amount は 0 以上にしてください")
         with self._lock:
             self._roll()
-            if self._used + amount > self.limit:
+            if self.limit and self._used + amount > self.limit:
                 return False
             self._used += amount
             return True

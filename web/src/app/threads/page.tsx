@@ -4,23 +4,44 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 
 import { ConclusionBoard } from "@/components/conclusion-board/ConclusionBoard";
+import { EscapeStamps, brokenInferences, countAttributes, lostAttributes } from "@/components/escape-stamps/EscapeStamps";
 import { PostCard } from "@/components/post-list/PostCard";
+import { Reveal } from "@/components/reveal/Reveal";
+import { ThreadsDiagnosing } from "@/components/threads/ThreadsDiagnosing";
 import { THREADS_TEXT, ThreadsError, type ThreadsErrorKey, type ThreadsLang } from "@/lib/threads-i18n";
 import { checkThreadsPublicText } from "@/lib/threads-public-check";
+import { useThreadsDiagnosis } from "@/lib/useThreadsDiagnosis";
 import { useThreadsLang } from "@/lib/useThreadsLang";
-import { isDiagnosisSnapshot, isSimulation, type DiagnosisSnapshot, type Simulation } from "@/types/diagnose";
+import { isDiagnosisSnapshot, isThreadsSimulation, type Conclusion, type DiagnosisSnapshot, type RiskyPost, type ThreadsSimulation } from "@/types/diagnose";
 import { isPost, type Post } from "@/types/post";
-import { profileClaimsAfterDeletion } from "@/types/profile";
+import {
+  PROFILE_DIAGNOSED_ATTRIBUTES,
+  isProfileItem,
+  profileClaimsAfterDeletion,
+  type ClaimAssessment,
+  type ProfileCandidate,
+  type ProfileCandidateSet,
+  type ProfileItem,
+} from "@/types/profile";
 
 type PostError = { readonly post_id: string; readonly error: string };
-type ThreadsDiagnosis = DiagnosisSnapshot & {
+type ThreadsDiagnosis = Omit<DiagnosisSnapshot, "plan"> & {
+  /** Thread compatibility still returns its own legacy inference list. */
+  readonly conclusions: readonly Conclusion[];
+  readonly plan: ThreadsSimulation & { readonly posts: readonly RiskyPost[] };
   readonly elapsed_ms?: number;
   readonly mock?: boolean;
   /** 読み取りに失敗して診断から外した投稿（api の post_errors）。再診断の応答にはない */
   readonly post_errors?: readonly PostError[];
 };
-type ThreadsConfig = { mock_enabled: boolean; gpu_demo_enabled: boolean; live_enabled: boolean; max_posts: number };
-type ThreadsSession = { username: string; mock: boolean };
+type ThreadsConfig = {
+  mock_enabled: boolean;
+  gpu_demo_enabled: boolean;
+  live_enabled: boolean;
+  max_posts: number;
+  image_diagnosis_enabled?: boolean;
+};
+type ThreadsSession = { username: string; mock: boolean; busy?: boolean };
 
 const LANGUAGES: readonly { readonly code: ThreadsLang; readonly label: string }[] = [
   { code: "ja", label: "日本語" },
@@ -34,7 +55,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function isConfig(value: unknown): value is ThreadsConfig {
   return isRecord(value) && typeof value.mock_enabled === "boolean" &&
     typeof value.gpu_demo_enabled === "boolean" &&
-    typeof value.live_enabled === "boolean" && typeof value.max_posts === "number";
+    typeof value.live_enabled === "boolean" && typeof value.max_posts === "number" &&
+    (value.image_diagnosis_enabled === undefined || typeof value.image_diagnosis_enabled === "boolean");
 }
 
 function isSession(value: unknown): value is ThreadsSession {
@@ -52,7 +74,8 @@ async function call(path: string, method: "GET" | "POST" | "DELETE" = "GET", bod
       method,
       credentials: "same-origin",
       cache: "no-store",
-      signal: AbortSignal.timeout(path === "diagnose" ? 2_100_000 : 20_000),
+      // 診断は時間がかかっても待ち続ける（時間切れで止めない）
+      signal: path === "diagnose" ? undefined : AbortSignal.timeout(20_000),
       headers: body === undefined ? undefined : { "Content-Type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
@@ -63,6 +86,8 @@ async function call(path: string, method: "GET" | "POST" | "DELETE" = "GET", bod
     throw new ThreadsError("network");
   }
   if (!response.ok) {
+    // 409 は「すでに診断中」。simulate / rediagnose の 409（診断前）とは別なので、診断と投稿取得だけ見分ける
+    if (response.status === 409 && (path === "diagnose" || path === "posts")) throw new ThreadsError("diagnosing");
     if (response.status === 504) throw new ThreadsError("timeout");
     if (response.status === 503 && path === "diagnose") throw new ThreadsError("modelUnavailable");
     if (response.status === 429 || response.status === 503) throw new ThreadsError("busy");
@@ -79,11 +104,78 @@ function isPostErrors(value: unknown): value is readonly PostError[] {
     isRecord(item) && typeof item.post_id === "string" && typeof item.error === "string"));
 }
 
+function isLegacyConclusions(value: unknown): value is readonly Conclusion[] {
+  return Array.isArray(value) && value.every((item) => isRecord(item) &&
+    typeof item.rule === "string" && typeof item.attribute === "string" &&
+    typeof item.value === "string" && typeof item.note === "string" &&
+    Array.isArray(item.clue_indices) && item.clue_indices.every((index) => Number.isInteger(index) && index >= 0));
+}
+
+const EMPTY_ASSESSMENT: ClaimAssessment = {
+  minimal_scope: "bluesky", offline_subtype: null, psychological_resistance: null,
+  persona_context: null, inference_ease: null, inference_ease_basis: null,
+  harm_severity: null, harm_scenario: null, harm_prerequisites: [], harm_status: "unknown",
+};
+
+/** Threads still returns ProfileItem rows; adapt them at this route boundary. */
+function threadsCandidateSets(raw: unknown, posts: readonly Post[]): readonly ProfileCandidateSet[] | null {
+  if (!Array.isArray(raw)) return null;
+  const claims: ProfileItem[] = [];
+  for (const value of raw) {
+    if (!isRecord(value)) return null;
+    const paths = Array.isArray(value.evidence_paths)
+      ? value.evidence_paths.map((path: unknown) => isRecord(path)
+        ? { ...path, provenance: path.provenance ?? "combined_inference" } : path)
+      : value.evidence_paths;
+    const claim = { ...value, evidence_paths: paths };
+    if (!isProfileItem(claim)) return null;
+    claims.push(claim);
+  }
+  return PROFILE_DIAGNOSED_ATTRIBUTES.map((attribute) => {
+    const ranked = claims.filter((claim) => claim.attribute === attribute && claim.value !== null &&
+      (claim.evidence_paths?.length ?? 0) > 0)
+      .sort((a, b) => b.confidence - a.confidence || (a.value ?? "").localeCompare(b.value ?? ""));
+    const candidate_pool: ProfileCandidate[] = ranked.flatMap((claim, index) => {
+      if (claim.value === null || !claim.evidence_paths) return [];
+      const observed_at = attribute === "realtime_location"
+        ? posts.find((post) => claim.evidence.some((ref) => ref.post_id === post.post_id))?.created_at ?? null
+        : null;
+      if (attribute === "realtime_location" && observed_at === null) return [];
+      return [{
+        rank: index + 1, value: claim.value, confidence: claim.confidence, status: claim.status,
+        evidence: claim.evidence, evidence_paths: claim.evidence_paths,
+        assessment: claim.assessment ?? EMPTY_ASSESSMENT, observed_at, counter_evidence: [],
+      }];
+    });
+    const leading = candidate_pool[0];
+    const candidates = leading ? candidate_pool.filter((candidate) =>
+      candidate.status === leading.status &&
+      (leading.status === "weak" || leading.confidence - candidate.confidence <= 0.15)).slice(0, 3) : [];
+    return {
+      attribute, status: candidates.length > 1 ? "ambiguous" : candidates.length ? "candidate" : "unknown",
+      candidates, candidate_pool, conflicting_evidence: [],
+      reason: candidates.length ? null : "no_grounded_rule",
+    };
+  });
+}
+
 function requireDiagnosis(value: unknown): ThreadsDiagnosis {
-  if (!isDiagnosisSnapshot(value) || !isPostErrors((value as { post_errors?: unknown }).post_errors)) {
+  if (!isRecord(value) || !isPostErrors(value.post_errors) || !isLegacyConclusions(value.conclusions)) {
     throw new ThreadsError("diagnosisUnreadable");
   }
-  return value as ThreadsDiagnosis;
+  const { conclusions, ...withoutLegacyConclusion } = value;
+  const profileClaims = threadsCandidateSets(value.profile_claims, Array.isArray(value.posts)
+    ? value.posts.filter(isPost) : []);
+  const adapted = profileClaims === null ? withoutLegacyConclusion : { ...withoutLegacyConclusion, profile_claims: profileClaims };
+  if (!isRecord(adapted.plan) || !isThreadsSimulation(adapted.plan, Array.isArray(adapted.clues) ? adapted.clues.length : 0)) {
+    throw new ThreadsError("diagnosisUnreadable");
+  }
+  const { after: _legacyAfter, ...planWithoutLegacyAfter } = adapted.plan;
+  if (!Array.isArray(adapted.profile_claims) ||
+    !isDiagnosisSnapshot({ ...adapted, plan: { ...planWithoutLegacyAfter, after: adapted.profile_claims } })) {
+    throw new ThreadsError("diagnosisUnreadable");
+  }
+  return { ...adapted, conclusions } as unknown as ThreadsDiagnosis;
 }
 
 export default function ThreadsPage() {
@@ -94,11 +186,15 @@ export default function ThreadsPage() {
   const [original, setOriginal] = useState<ThreadsDiagnosis | null>(null);
   const [view, setView] = useState<ThreadsDiagnosis | null>(null);
   const [selected, setSelected] = useState<readonly string[]>([]);
-  const [preview, setPreview] = useState<Simulation | null>(null);
+  const [preview, setPreview] = useState<ThreadsSimulation | null>(null);
   const [fetchedPosts, setFetchedPosts] = useState<readonly Post[] | null>(null);
   const [publicCheckDone, setPublicCheckDone] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ThreadsErrorKey | null>(null);
+  const { diagnosing, start: startDiagnosis, resume: resumeDiagnosis } = useThreadsDiagnosis(call, requireDiagnosis, {
+    onResult: (result) => { setOriginal(result); setView(result); },
+    onError: setError,
+  });
   const t = THREADS_TEXT[lang];
 
   useEffect(() => {
@@ -126,19 +222,34 @@ export default function ThreadsPage() {
         const connected = await call("session");
         if (!active || !isSession(connected)) return;
         setSession(connected);
+        if (connected.busy === true) {
+          // 診断の最中に再読み込みした。progress を見て続きの結果を待つ
+          void resumeDiagnosis();
+          return;
+        }
         try {
           const restored = requireDiagnosis(await call("diagnosis"));
           if (active) { setOriginal(restored); setView(restored); }
-        } catch { /* 診断前なら結果はない。 */ }
+        } catch {
+          // 結果がなければ、再読み込みの前に始めた診断が続いていないか確かめる
+          if (active) void resumeDiagnosis();
+        }
       } catch { /* 未ログイン時の 401 は通常状態。 */ }
     })();
     return () => { active = false; };
-  }, []);
+  }, [resumeDiagnosis]);
 
   async function perform(action: () => Promise<void>) {
     setBusy(true);
     setError(null);
-    try { await action(); }
+    try {
+      try { await action(); }
+      catch (cause) {
+        // すでに診断中なら、汎用エラーにせず、その診断の進み具合を出して完了を待つ
+        if (!(cause instanceof ThreadsError) || cause.key !== "diagnosing") throw cause;
+        if (!(await resumeDiagnosis())) throw cause;
+      }
+    }
     catch (cause) { setError(errorKeyOf(cause, "failed")); }
     finally { setBusy(false); }
   }
@@ -156,6 +267,14 @@ export default function ThreadsPage() {
   const profileClaims = profileClaimsAfterDeletion(current?.profile_claims ?? [], previewExcluded);
   const profileClaimSuggestions = (current?.profile_claim_suggestions ?? []).filter((id) => !previewExcluded.has(id));
   const publicFindings = fetchedPosts ? checkThreadsPublicText(fetchedPosts) : [];
+  // 仮除外の試算か、仮除外後の再診断で推定できた項目が減ったら、崩れた推定に判子を押して数を減らす（Bluesky と同じ）
+  const lost = !original ? [] : preview ? preview.broken : view && view !== original ? lostAttributes(original.conclusions, view.conclusions) : [];
+  const escape = original && lost.length > 0 ? {
+    key: `${preview ? "simulated" : "rediagnosed"}:${(preview?.delete ?? selected).join(",")}`,
+    before: countAttributes(original.conclusions),
+    after: countAttributes(original.conclusions.filter((c) => !lost.includes(c.attribute))),
+    broken: brokenInferences(original.conclusions, lost),
+  } : null;
   return (
     <main className="mx-auto max-w-4xl px-5 py-12">
       <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
@@ -176,9 +295,9 @@ export default function ThreadsPage() {
         <section className="mt-10 max-w-2xl space-y-5" aria-label={t.startAria}>
           <label className="flex gap-3 rounded-sm border border-ink/30 bg-paper-deep p-4">
             <input type="checkbox" className="mt-1 shrink-0" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
-            <span>{t.consent}</span>
+            <span>{config?.image_diagnosis_enabled ? t.consentWithImage : t.consent}</span>
           </label>
-          <p className="text-sm text-ink/70">{t.noMedia}</p>
+          <p className="text-sm text-ink/70">{config?.image_diagnosis_enabled ? t.withMedia : t.noMedia}</p>
           <div className="flex flex-wrap gap-3">
             {config?.mock_enabled && <button type="button" disabled={!consent || busy}
               className="rounded-sm bg-seeker px-5 py-3 font-bold text-paper disabled:opacity-50"
@@ -213,33 +332,49 @@ export default function ThreadsPage() {
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-sm bg-paper-deep p-4">
           <p className="[overflow-wrap:anywhere]"><span className="mr-2 inline-block bg-ink px-2 py-0.5 font-bold text-paper">Threads</span>
             {session.mock ? session.username : `@${session.username}`}</p>
-          <button type="button" disabled={busy} className="text-sm underline" onClick={() => void perform(async () => {
+          <button type="button" disabled={busy || diagnosing !== null} className="text-sm underline disabled:opacity-50" onClick={() => void perform(async () => {
             await call("session", "DELETE");
             setSession(null); setOriginal(null); setView(null); setSelected([]); setPreview(null); setFetchedPosts(null); setPublicCheckDone(false);
           })}>{t.logout}</button>
         </div>
-        {!original && <button type="button" disabled={busy}
+        {!original && !diagnosing && <button type="button" disabled={busy}
           className="rounded-sm border border-ink px-5 py-3 font-bold disabled:opacity-50"
           onClick={() => void perform(async () => {
             const data = await call("posts");
             if (!isRecord(data) || data.mock !== session.mock || !Array.isArray(data.posts) ||
-                !data.posts.every((post) => isPost(post) && post.post_id.startsWith("threads:") && post.images.length === 0)) {
+                !data.posts.every((post) => isPost(post) && post.post_id.startsWith("threads:") &&
+                  post.images.length <= (config?.image_diagnosis_enabled ? 1 : 0))) {
               throw new ThreadsError("postsUnreadable");
             }
             setFetchedPosts(data.posts);
             setPublicCheckDone(false);
           })}>{t.reviewPosts}</button>}
-        {busy && <p role="status" className="text-sm text-ink/70">{t.loading}</p>}
+        {busy && !diagnosing && <p role="status" className="text-sm text-ink/70">{t.loading}</p>}
+        {diagnosing && <ThreadsDiagnosing t={t} posts={fetchedPosts ?? []} progress={diagnosing.progress}
+          startedAt={diagnosing.startedAt} status={diagnosing.resumed ? t.diagnosingNotice : t.diagnosing} />}
         {!original && fetchedPosts && <section aria-label={t.postsAria} className="space-y-4">
-          <p className="text-sm text-ink/70">{t.postsFetched(fetchedPosts.length)}</p>
+          <p className="text-sm text-ink/70">{config?.image_diagnosis_enabled
+            ? t.postsFetchedWithImages(fetchedPosts.length) : t.postsFetched(fetchedPosts.length)}</p>
+          {/* 診断の開始は、長い投稿一覧より前に置く（スマホでも最初の画面に入る） */}
+          {!diagnosing && <section aria-labelledby="threads-ai-heading"
+            className="space-y-3 rounded-sm border border-ink/25 bg-paper-deep p-4 shadow-[4px_4px_0_oklch(5%_0.03_265)] sm:p-5">
+            <h2 id="threads-ai-heading" className="font-bold">{t.aiSummary}</h2>
+            <p className="text-sm text-ink/70">{config?.image_diagnosis_enabled ? t.aiNoteWithImages : t.aiNote}</p>
+            <button type="button" disabled={busy}
+              className="w-full rounded-sm bg-seeker px-6 py-3 font-bold text-paper disabled:opacity-50 sm:w-auto"
+              onClick={() => { setError(null); void startDiagnosis(); }}>{t.aiButton}</button>
+          </section>}
           <ol className="space-y-5">{fetchedPosts.map((post) => <li key={post.post_id}>
+            {post.images.length > 0 && <p className="mb-2 text-xs font-bold text-seeker">{t.imageDiagnosis}</p>}
             <PostCard post={post} locale={lang} />
             <details className="mt-2 text-sm text-ink/70">
               <summary className="cursor-pointer underline underline-offset-4">{t.detailsSummary}</summary>
               <dl className="mt-2 grid gap-1 [overflow-wrap:anywhere]">
                 <div><dt className="inline font-bold">{t.postId}</dt><dd className="inline">{post.post_id}</dd></div>
                 <div><dt className="inline font-bold">{t.postTime}</dt><dd className="inline">{post.created_at}</dd></div>
-                <div><dt className="inline font-bold">{t.media}</dt><dd className="inline">{t.mediaValue}</dd></div>
+                <div><dt className="inline font-bold">{t.media}</dt><dd className="inline">
+                  {post.images.length > 0 ? t.mediaValueImage : t.mediaValue}
+                </dd></div>
               </dl>
             </details>
           </li>)}</ol>
@@ -259,21 +394,13 @@ export default function ThreadsPage() {
             </div>}
           </section>
         </section>}
-        {!original && fetchedPosts && <details className="rounded-sm border border-ink/20 p-4">
-          <summary className="cursor-pointer font-bold">{t.aiSummary}</summary>
-          <p className="mt-3 text-sm text-ink/70">{t.aiNote}</p>
-          <button type="button" disabled={busy}
-            className="mt-3 rounded-sm bg-seeker px-6 py-3 font-bold text-paper disabled:opacity-50"
-            onClick={() => void perform(async () => {
-              const result = requireDiagnosis(await call("diagnose", "POST"));
-              setOriginal(result); setView(result);
-            })}>{busy ? t.aiBusy : t.aiButton}</button>
-        </details>}
       </section>}
 
       {error && <p role="alert" className="mt-6 border-l-4 border-seeker p-3">{t.errors[error]}</p>}
 
       {original && current && <div className="mt-12 space-y-10">
+        {/* 全投稿の診断が出た瞬間だけ、Bluesky と同じ演出で「ここまでわかった」を叩きつける（文言は日本語のまま） */}
+        {view === original && <Reveal posts={original.posts} clues={original.clues} conclusions={original.conclusions} />}
         <div aria-live="polite" className="border-l-4 border-seeker bg-paper-deep p-4">
           <p className="font-bold">{view === original ? t.resultFull : t.resultRe}</p>
           <p className="text-sm text-ink/70">{t.resultCount(current.posts.length, current.clues.length, current.conclusions.length)}
@@ -311,13 +438,14 @@ export default function ThreadsPage() {
               <input type="checkbox" checked={selected.includes(post.post_id)} onChange={() => toggle(post.post_id)} />
               {t.exclude}
             </label>
+            {post.images.length > 0 && <p className="mb-2 text-xs font-bold text-seeker">{t.imageDiagnosis}</p>}
             <PostCard post={post} locale={lang} found={{ clues: original.clues.filter((clue) => clue.post_id === post.post_id), error: null }} />
           </li>)}</ol>
           <div className="flex flex-wrap gap-3">
             <button type="button" disabled={!selected.length || busy} className="rounded-sm border border-ink px-4 py-2 disabled:opacity-50"
               onClick={() => void perform(async () => {
                 const result = await call("simulate", "POST", { delete: selected });
-                if (!isSimulation(result, original.clues.length)) throw new ThreadsError("simulationUnreadable");
+                if (!isThreadsSimulation(result, original.clues.length)) throw new ThreadsError("simulationUnreadable");
                 setPreview(result);
               })}>{t.simulate}</button>
             <button type="button" disabled={!selected.length || busy} className="rounded-sm bg-seeker px-4 py-2 font-bold text-paper disabled:opacity-50"
@@ -327,6 +455,7 @@ export default function ThreadsPage() {
               })}>{t.rediagnose}</button>
             {view !== original && <button type="button" className="underline" onClick={() => { setView(original); setPreview(null); setSelected([]); }}>{t.showAll}</button>}
           </div>
+          {escape && <EscapeStamps key={escape.key} before={escape.before} after={escape.after} broken={escape.broken} />}
           {preview && <p role="status">{t.brokenItems(preview.broken.length ? preview.broken.join(t.listSeparator) : t.none)}</p>}
         </section>
       </div>}

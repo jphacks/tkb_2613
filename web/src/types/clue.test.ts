@@ -53,6 +53,13 @@ describe("isDetectResponse", () => {
     ).toBe(true);
   });
 
+  it("accepts vehicle_model from both photo and text", () => {
+    expect(isDetectResponse({ clues: [
+      { ...PHOTO_CLUE, type: "vehicle_model" },
+      { ...TEXT_CLUE, type: "vehicle_model" },
+    ] })).toBe(true);
+  });
+
   it.each([
     ["null", null],
     ["missing clues", {}],
@@ -81,7 +88,7 @@ describe("clue enums", () => {
       [
         "station_sign", "rail_view", "reflection", "shop", "landmark", "address_text",
         "postal_code", "phone", "plate", "uniform", "face", "key", "code", "local_item", "notice",
-        "name_text", "org_text", "handle_text", "place_text",
+        "name_text", "org_text", "handle_text", "place_text", "vehicle_model",
         "age_text", "routine_text", "relation_text",
       ].sort(),
     );

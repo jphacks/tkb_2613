@@ -37,6 +37,35 @@ def test_accepts_post_without_images() -> None:
     assert Post.model_validate({**POST, "images": []}).images == []
 
 
+def test_accepts_meta_cdn_image_only_for_threads_post() -> None:
+    image = {**IMAGE, "url": "https://scontent.cdninstagram.com/photo.jpg"}
+    threads = Post.model_validate({**POST, "post_id": "threads:123", "images": [image]})
+    assert threads.images[0].url == image["url"]
+
+    with pytest.raises(ValidationError):
+        Post.model_validate({**POST, "images": [image]})
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://user:password@scontent.cdninstagram.com/photo.jpg",
+        "https://scontent.cdninstagram.com:8443/photo.jpg",
+        "https://scontent.cdninstagram.com/photo.jpg#fragment",
+        "https://cdninstagram.com.evil.example/photo.jpg",
+    ],
+)
+def test_threads_image_rejects_ambiguous_meta_urls(url: str) -> None:
+    with pytest.raises(ValidationError):
+        Post.model_validate(
+            {
+                **POST,
+                "post_id": "threads:123",
+                "images": [{**IMAGE, "url": url}],
+            }
+        )
+
+
 @pytest.mark.parametrize(
     ("label", "data"),
     [

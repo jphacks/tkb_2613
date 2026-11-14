@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import { messages } from "@/lib/messages";
+import { postImageSrc } from "@/lib/post-image";
 import { type Size, toPercentBox } from "@/lib/region";
 import type { Clue } from "@/types/clue";
 import type { Post, PostImage } from "@/types/post";
@@ -40,7 +41,7 @@ function PostPhoto({ image, clues }: { image: PostImage; clues: readonly Clue[] 
   return (
     <div
       className="relative overflow-hidden rounded-sm border border-ink/15 bg-paper-deep"
-      style={{ aspectRatio: `${image.width} / ${image.height}` }}
+      style={{ aspectRatio: `${size?.width ?? image.width} / ${size?.height ?? image.height}` }}
     >
       {failed ? (
         <p className="flex h-full items-center justify-center p-3 text-center text-sm text-ink/60">
@@ -50,7 +51,7 @@ function PostPhoto({ image, clues }: { image: PostImage; clues: readonly Clue[] 
         // Bluesky の CDN の画像をそのまま表示するので next/image は使わない
         // eslint-disable-next-line @next/next/no-img-element
         <img
-          src={image.url}
+          src={postImageSrc(image)}
           alt={name}
           loading="lazy"
           referrerPolicy="no-referrer"
