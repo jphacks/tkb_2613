@@ -86,12 +86,12 @@ Python は `common/` の Pydantic モデル（`tkb_common.schemas`）、TypeScri
 ### プロフィールの項目（捜査ボードの1行）
 
 ```json
-{"attribute": "commute_station_or_line", "value": "〇〇駅", "confidence": 0.81, "status": "found",
+{"attribute": "regular_station", "value": "〇〇駅", "confidence": 0.81, "status": "found",
  "evidence": [{"post_id": "at://.../3kxxxx", "clue_index": 3, "required": true}]}
 ```
 
-- `attribute`：`facial_appearance` / `full_name` / `given_name_or_nickname` / `other_social_account` / `realtime_location` / `home_building_or_room` / `commute_station_or_line` / `residential_area` / `long_term_home_absence` / `workplace` / `workplace_area` / `school` / `frequent_shop` / `vehicle_model_or_partial_plate` / `partner_status_and_attributes` / `children_age_and_school`
-- 表示名、4つのカテゴリ、パーソナル度、推測しやすさは Python と TypeScript のプロフィール項目カタログで定義する。これらは診断ごとの推定確度ではない
+- `attribute`：`facial_appearance` / `full_name` / `given_name` / `nickname` / `other_social_account` / `age` / `birthday` / `realtime_location` / `home_building` / `home_room` / `home_nearest_station` / `home_walk_area` / `regular_station` / `regular_line` / `residential_area` / `announced_long_absence` / `actual_home_absence` / `employer_name` / `workplace_building_candidate` / `workplace_area` / `school` / `occupation` / `frequent_shop` / `vehicle_model` / `partial_plate` / `active_time` / `routine` / `partner_status` / `partner_attributes` / `child_age` / `child_school`（カタログは31項目。`home_room` はカタログにだけ置き、診断して `ProfileCandidateSet` を返すのは残りの30項目 `PROFILE_DIAGNOSED_ATTRIBUTES`）
+- 表示名と4つのカテゴリ（`identity_and_face` / `home_and_location` / `affiliation_and_work` / `activity_and_family`）は Python と TypeScript のプロフィール項目カタログで定義する。旧パーソナル度・推測しやすさは廃止し null。カタログにあることは、実際に推定できるという意味ではない
 - `value`：具体値を示せない場合は null。`status` が unknown のときは null にする
 - `status`：found（推定できた）/ weak（弱い）/ unknown（不明）
 - `evidence`：根拠の手がかり。`required: true` は、その手がかりが消えるとこの項目が成り立たないもの
@@ -99,12 +99,12 @@ Python は `common/` の Pydantic モデル（`tkb_common.schemas`）、TypeScri
 ### 削除の提案
 
 ```json
-{"delete": ["at://.../3kxxxx", "at://.../3myyyy"], "broken": ["workplace", "commute_station_or_line"], "before": [/* 項目 */], "after": [/* 項目 */]}
+{"delete": ["at://.../3kxxxx", "at://.../3myyyy"], "broken": ["employer_name", "regular_station"], "before": [/* 項目 */], "after": [/* 項目 */]}
 ```
 
 ## 推定と最小削除の考え方（engine）
 
-- プロフィール推定：`engine/src/tkb_engine/cross_post.py` の `evaluate_profile_candidates` が、`home_room` を除くカタログ属性を `ProfileCandidateSet` として出力し、`profile_relations` とともに返す（言語モデルを使わない推理ルール R1〜R12 `engine/src/tkb_engine/rules.py`、X1〜X5 `engine/src/tkb_engine/links.py` の結果も含め、`age`・`birthday`・`occupation`・`active_time`・`routine` などを含む診断対象カタログ属性へ統合）。指定ゴミ袋・収集地区・大学の時間割は知識表 `data-prep/manual/knowledge.json`、学校の名前と所在地は `make data` で作る schools 表（文部科学省の学校コード）を引く。知識表は行ごとに出典を書き、未確認のところはそう書く。文京区の収集地区の行は、文京区のオープンデータ「ごみと資源の収集日」から `python -m tkb_data_prep.bunkyo_collection` で作る。W1 徒歩圏は既存の `home_nearest_station` 候補の完全根拠経路と同じ駅名を示す本人の徒歩投稿を結合した `home_walk_area` 候補として推定する。各代替駅経路を保持し、値には徒歩半径と世帯メッシュ推定を含める。値は再診断でも保存したまま、駅根拠または徒歩投稿が失われた場合に候補を落とす。`narrowing` の地図はこの候補から投影する。R5（収集地区）は、朝の「燃えるゴミ出し忘れた」のような投稿の曜日も読み、指定ゴミ袋がない区では住所・郵便番号の手がかりで区を決める。写真のバーコードは言語モデルではなく `detect/src/tkb_detect/barcode.py`（zxing-cpp と日本郵便のカスタマバーコード）で読む。BCBP搭乗券は `common/src/tkb_common/bcbp.py` で解析し、予約番号PNRは clueを返す前に `*` でマスクする。搭乗券の旅客氏名は投稿者本人と確認できない推定候補として扱う
+- プロフィール推定：`engine/src/tkb_engine/cross_post.py` の `evaluate_profile_candidates` が、`home_room` を除く30項目を `ProfileCandidateSet` として出力し、`profile_relations` とともに返す（言語モデルを使わない推理ルール R1〜R12 `engine/src/tkb_engine/rules.py`、X1〜X5 `engine/src/tkb_engine/links.py` の結果も含め、`age`・`birthday`・`occupation`・`active_time`・`routine` などを含む30項目へ統合）。指定ゴミ袋・収集地区・大学の時間割は知識表 `data-prep/manual/knowledge.json`、学校の名前と所在地は `make data` で作る schools 表（文部科学省の学校コード）を引く。知識表は行ごとに出典を書き、未確認のところはそう書く。文京区の収集地区の行は、文京区のオープンデータ「ごみと資源の収集日」から `python -m tkb_data_prep.bunkyo_collection` で作る。W1 徒歩圏は既存の `home_nearest_station` 候補の完全根拠経路と同じ駅名を示す本人の徒歩投稿を結合した `home_walk_area` 候補として推定する。各代替駅経路を保持し、値には徒歩半径と世帯メッシュ推定を含める。値は再診断でも保存したまま、駅根拠または徒歩投稿が失われた場合に候補を落とす。`narrowing` の地図はこの候補から投影する。R5（収集地区）は、朝の「燃えるゴミ出し忘れた」のような投稿の曜日も読み、指定ゴミ袋がない区では住所・郵便番号の手がかりで区を決める。写真のバーコードは言語モデルではなく `detect/src/tkb_detect/barcode.py`（zxing-cpp と日本郵便のカスタマバーコード）で読む。BCBP搭乗券は `common/src/tkb_common/bcbp.py` で解析し、予約番号PNRは clueを返す前に `*` でマスクする。搭乗券の旅客氏名は投稿者本人と確認できない推定候補として扱う
 - 駅名は `data-prep` の stations 表で実在を確認する。最寄り駅（R1）の候補が複数残ったときは、国土数値情報の駅別乗降客数を説明に参考として添えるだけで、どの駅にするかには使わない
 - W1 の徒歩圏と世帯数は独立したConclusionルールではなく、`home_walk_area` ProfileCandidateSetとしてカタログに追加する。駅候補の完全根拠経路ごとに徒歩投稿を結合し、値と地図は同じ計算結果から作る。仮除外・削除後は再計算済み候補から再投影する。世帯データは `make data` が作るローカル `households_500m.parquet` を使う。
 - 最小削除：`plan_profile_candidate_deletion`（`engine/src/tkb_engine/cross_post.py`）が、投稿を外したときに候補がすべて崩れる属性カタログの重み（`PROFILE_ATTRIBUTE_WEIGHTS`: 120 / 100 / 85 / 65 / 45 / 25）の合計、ついで残存候補数の減少が最も大きい投稿を貪欲法で最大3件選ぶ。Bluesky の SSE `plan`、`/api/simulate`、`/api/delete`、`/api/demo/*` はいずれも `ProfileCandidateSet[]` で `after` と `broken` を返す（`/threads` は既存互換ルートを維持）
@@ -152,7 +152,7 @@ Python は `common/` の Pydantic モデル（`tkb_common.schemas`）、TypeScri
 
 既存：`MOCK_MODE`、`VLM_BASE_URL`、`VLM_API_KEY`、`VLM_MODEL`、`OCR_BASE_URL`。鍵を `NEXT_PUBLIC_` で始まる変数に入れない。
 
-プロフィール推定は `home_room` を除く `ProfileAttribute` カタログ全件の `ProfileCandidateSet` に一本化する。新属性はカタログに追加して診断・再診断・UIへ通す。Bluesky、demo、共有結果の公開レスポンスは候補セットを唯一のプロフィール結果とし、R/X/BPの `Conclusion` は内部中間値としてのみ使う。`/threads` は既存のConclusion互換レスポンスを維持する。`residential_area` には、事前に取得した国土地理院の避難所の表と、国土数値情報のバス停留所（令和4年度版）を「X は Y にある」という知識として使う経路がある（`engine/src/tkb_engine/open_data.py`、`open_data_bus.py`）。`child_school` は、本人の子どもの学校の X（「娘の小学校のひまわり祭り」）と別の投稿の「X は〇〇小学校」が同じ X でつながり、学区の表で学校が1つに決まるときだけ推定し（`child_school.py`）、その学区の区市町村を居住地域の経路に足す（`open_data_school.py`）。`employer_name` には、本人が明示した勤務先の名前を国税庁の法人番号の表（`data/processed/corporations.sqlite`。api のメモリに載せず、引くたびにディスクから読む）で正式名称に結ぶ経路がある。公開データの根拠は `source=open_data` で、画面に出典を出す。投稿ごとの観測手がかりと、投稿を横断した推定を区別し、根拠経路は `docs/profile-classification-v2.md` に合わせる。
+プロフィール推定は `home_room` を除く `ProfileAttribute` カタログ全件（30項目）の `ProfileCandidateSet` に一本化する。新属性はカタログに追加して診断・再診断・UIへ通す。Bluesky、demo、共有結果の公開レスポンスは候補セットを唯一のプロフィール結果とし、R/X/BPの `Conclusion` は内部中間値としてのみ使う。`/threads` は既存のConclusion互換レスポンスを維持する。`residential_area` には、事前に取得した国土地理院の避難所の表と、国土数値情報のバス停留所（令和4年度版）を「X は Y にある」という知識として使う経路がある（`engine/src/tkb_engine/open_data.py`、`open_data_bus.py`）。`child_school` は、本人の子どもの学校の X（「娘の小学校のひまわり祭り」）と別の投稿の「X は〇〇小学校」が同じ X でつながり、学区の表で学校が1つに決まるときだけ推定し（`child_school.py`）、その学区の区市町村を居住地域の経路に足す（`open_data_school.py`）。`employer_name` には、本人が明示した勤務先の名前を国税庁の法人番号の表（`data/processed/corporations.sqlite`。api のメモリに載せず、引くたびにディスクから読む）で正式名称に結ぶ経路がある。公開データの根拠は `source=open_data` で、画面に出典を出す。投稿ごとの観測手がかりと、投稿を横断した推定を区別し、根拠経路は `docs/profile-classification-v2.md` に合わせる。
 
 OAuth：`AUTH_MODE`（ローカル既定 `app_password`、本番は採用試験を通れば `oauth`）、`PUBLIC_URL`（公開の HTTPS オリジン）、`OAUTH_WEB_ORIGIN`（api から web への Docker 内部 URL）、`API_INTERNAL_ORIGIN`（web から api への Docker 内部 URL）、`INTERNAL_AUTH_SECRET`（起動時に生成し、両コンテナへ別の一時ファイルで渡す）。
 
