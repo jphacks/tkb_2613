@@ -32,7 +32,15 @@ from tkb_api.pipeline import (
 from tkb_api.routes.diagnose import _cached_gazetteer
 from tkb_api.schemas import SimulateRequest
 from tkb_api.threads_poc import THREADS_API, ThreadsPocError, _get, fetch_own_posts, to_post
-from tkb_common.schemas import Clue, ClueSource, ClueType, Post, ProfileEvidence, ProfileItem
+from tkb_common.schemas import (
+    Clue,
+    ClueSource,
+    ClueType,
+    Post,
+    ProfileCandidateSet,
+    ProfileEvidence,
+    ProfileItem,
+)
 from tkb_detect.batch import PostExtraction
 from tkb_detect.errors import DetectError
 from tkb_detect.extract import Extractor, build_extractor
@@ -633,16 +641,14 @@ async def diagnose(request: Request) -> dict[str, Any]:
         conclusion = results["conclusions"]
         current.posts = posts
         current.clues = [Clue.model_validate(item) for item in conclusion["clues"]]
-        current.profile_claims = [
-            ProfileItem.model_validate(item) for item in conclusion["profile_claims"]
-        ]
+        current.profile_claims = _threads_profile_items(conclusion["profile_claims"])
         current.profile_claim_suggestions = list(conclusion["profile_claim_suggestions"])
         current.snapshot = {
             "posts": [post.model_dump(mode="json") for post in posts],
             "clues": conclusion["clues"],
             "conclusions": conclusion["conclusions"],
             "plan": results["plan"],
-            "profile_claims": conclusion["profile_claims"],
+            "profile_claims": [claim.model_dump(mode="json") for claim in current.profile_claims],
             "profile_claim_suggestions": current.profile_claim_suggestions,
             "post_errors": post_errors,
             "elapsed_ms": round((time.monotonic() - started) * 1000),
@@ -698,6 +704,26 @@ def _rediagnosed(current: ThreadsSession, gone: set[str], gazetteer: Gazetteer) 
         **_claims_without(current, gone),
         "mock": current.token is None,
     }
+
+
+def _threads_profile_items(raw_sets: list[dict[str, Any]]) -> list[ProfileItem]:
+    """Keep the existing Threads response shape at the shared pipeline boundary."""
+    items: list[ProfileItem] = []
+    for raw_set in raw_sets:
+        candidate_set = ProfileCandidateSet.model_validate(raw_set)
+        for candidate in candidate_set.candidates:
+            items.append(
+                ProfileItem(
+                    attribute=candidate_set.attribute,
+                    value=candidate.value,
+                    confidence=candidate.confidence,
+                    status=candidate.status,
+                    evidence=candidate.evidence,
+                    evidence_paths=candidate.evidence_paths,
+                    assessment=candidate.assessment,
+                )
+            )
+    return items
 
 
 def _claims_without(current: ThreadsSession, gone: set[str]) -> dict[str, Any]:

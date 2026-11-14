@@ -26,14 +26,14 @@ import json
 import logging
 import time
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
-from datetime import datetime
+from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Any
 
 from atproto import AsyncClient
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, StrictBool
 from starlette.background import BackgroundTask
 
@@ -75,7 +75,10 @@ from tkb_common.schemas import (
 from tkb_detect.batch import PostExtraction
 from tkb_detect.errors import DetectError
 from tkb_detect.extract import Extractor, build_extractor
-from tkb_engine.cross_post import claims_after_deletion
+from tkb_engine.cross_post import (
+    profile_relations_after_deletion,
+    recalculate_profile_candidate_sets,
+)
 from tkb_engine.gazetteer import Gazetteer
 
 router = APIRouter(prefix="/api")
@@ -89,12 +92,65 @@ def _sse(event: str, data: dict[str, Any]) -> str:
 def _load_demo_posts(settings: Settings) -> list[Post]:
     try:
         doc = json.loads(settings.demo_fixture_path.read_text(encoding="utf-8"))
-        return [Post.model_validate(p) for p in doc["posts"]]
+        posts: list[Post] = []
+        for raw_post in doc["posts"]:
+            post = dict(raw_post)
+            images = []
+            for raw_image in post.get("images", []):
+                image = dict(raw_image)
+                local_file = image.pop("local_file", None)
+                if local_file is not None:
+                    if not isinstance(local_file, str) or Path(local_file).name != local_file:
+                        raise ValueError("invalid local fixture image")
+                    image["mock_asset"] = local_file
+                images.append(image)
+            post["images"] = images
+            posts.append(Post.model_validate(post))
+        return posts
     except (OSError, ValueError, KeyError, TypeError):
         # pydantic の ValidationError は ValueError の仲間。パスや中身はエラーの文言に入れない
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE, "モック用のデータを読み込めませんでした"
         ) from None
+
+
+@router.get("/mock-assets/{asset_name}")
+def mock_asset(asset_name: str, request: Request) -> FileResponse:
+    """Serve fixture images from the fixture's sibling images directory in mock mode only."""
+    settings = request.app.state.settings
+    if (
+        not settings.mock_mode
+        or not settings.mock_local_assets_enabled
+        or Path(asset_name).name != asset_name
+    ):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "画像が見つかりません")
+    referenced_assets = {
+        image.mock_asset
+        for post in _load_demo_posts(settings)
+        for image in post.images
+        if image.mock_asset is not None
+    }
+    if asset_name not in referenced_assets:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "画像が見つかりません")
+    image_root = (settings.demo_fixture_path.parent / "images").resolve()
+    image_path = (image_root / asset_name).resolve()
+    if image_path.parent != image_root or not image_path.is_file():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "画像が見つかりません")
+    media_type = {
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".webp": "image/webp",
+        ".heic": "image/heic",
+        ".heif": "image/heif",
+    }.get(image_path.suffix.lower())
+    if media_type is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "画像が見つかりません")
+    return FileResponse(
+        image_path,
+        media_type=media_type,
+        headers={"X-Content-Type-Options": "nosniff"},
+    )
 
 
 async def _stream(events: AsyncIterator[tuple[str, dict[str, Any]]]) -> AsyncIterator[str]:
@@ -301,26 +357,32 @@ def read_diagnosis(
     session_id: Annotated[str, Depends(current_session_id)],
     gazetteer: Annotated[Gazetteer, Depends(get_gazetteer)],
 ) -> dict[str, Any]:
-    """同じログインセッションで画面を開き直したとき、直近の完了結果を返す。
-
-    posts と clues は診断時のまま返す（手がかりの番号を変えない）。そのあとに消した投稿は
-    deleted に入れ、conclusions と plan は消した投稿を除いて計算する（番号は clues での番号）。
-    profile_claims も消した投稿を根拠から除き、根拠がなくなった推定は返さない（画面と同じ規則）。
-    """
+    """同じログインセッションで画面を開き直したとき、直近の完了結果を返す。"""
     diagnosis = store.get_diagnosis(session_id)
     if diagnosis is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "復元できる診断結果はありません")
     posts, clues, deleted = diagnosis.posts, diagnosis.clues, diagnosis.deleted
+    deleted_ids = set(deleted)
+    remaining_posts = [post for post in posts if post.post_id not in deleted_ids]
+    remaining_clues = [clue for clue in clues if clue.post_id not in deleted_ids]
+    profile_claims = recalculate_profile_candidate_sets(
+        diagnosis.profile_claims,
+        deleted_ids,
+        remaining_posts,
+        clues=remaining_clues,
+        diagnosis_at=diagnosis.diagnosis_at,
+    )
+    profile_relations = profile_relations_after_deletion(
+        diagnosis.profile_relations, deleted, profile_claims
+    )
     return {
         "posts": [post.model_dump(mode="json") for post in posts],
         "clues": [clue.model_dump(mode="json") for clue in clues],
         "deleted": list(deleted),
         "conclusions": conclusions_json(clues, posts, gazetteer, deleted),
         "plan": plan_json(clues, posts, gazetteer, deleted),
-        "profile_claims": [
-            claim.model_dump(mode="json")
-            for claim in claims_after_deletion(diagnosis.profile_claims, deleted)
-        ],
+        "profile_claims": [claim.model_dump(mode="json") for claim in profile_claims],
+        "profile_relations": [relation.model_dump(mode="json") for relation in profile_relations],
         "profile_claim_suggestions": [
             post_id for post_id in diagnosis.profile_claim_suggestions if post_id not in deleted
         ],
@@ -418,60 +480,6 @@ async def diagnose(
     # ここで診断を本当に始める。今日の回数はここで数える（混雑やモデル・Bluesky の不調で
     # 始められなかった分は数えない）
     lease.count()
-    try:
-        return await _start_stream(
-            settings,
-            session,
-            session_id,
-            store,
-            events,
-            fetch_profile_text,
-            extractor_factory,
-            gazetteer,
-            external_searcher,
-            public_web_lookup_consent,
-            lease,
-        )
-    except BaseException:
-        # 応答を返す前に失敗したら、枠を返す（返さないと DIAGNOSE_SLOT_TIMEOUT_SECONDS の間
-        # この人も、枠が埋まれば全員も、診断を始められなくなる）
-        lease.release()
-        raise
-
-
-async def _fetch_owner_profile_text(
-    settings: Settings, session: BlueskySession, fetch_profile_text: ProfileTextFetcher
-) -> str:
-    """本人のプロフィール文を取る。取れなくても診断は止めず、空のプロフィール文として続ける。"""
-    try:
-        if session.client is not None:
-            return await fetch_profile_text(session.client, session.did)
-        if session.auth_method == "oauth" and settings.auth_mode == "oauth":
-            profile_client = AsyncClient(base_url="https://public.api.bsky.app/xrpc")
-            try:
-                return await fetch_profile_text(profile_client, session.did)
-            finally:
-                await profile_client.request.close()
-    except Exception as e:
-        # プロフィール文は補助なので、どんな失敗でも診断を続ける。
-        # 例外の中身には DID などが入りうるので、種類だけを出す
-        logger.warning("プロフィール文を取得できず、空として続けます（%s）", type(e).__name__)
-    return ""
-
-
-async def _start_stream(
-    settings: Settings,
-    session: BlueskySession,
-    session_id: str,
-    store: SessionStore,
-    events: tuple[list[Post], AsyncIterator[PostExtraction], float],
-    fetch_profile_text: ProfileTextFetcher,
-    extractor_factory: ExtractorFactory,
-    gazetteer: Gazetteer,
-    external_searcher: ExternalProfileSearcher,
-    public_web_lookup_consent: bool,
-    lease: Lease,
-) -> StreamingResponse:
     store.set_diagnosis(session_id, None)
     posts, extractions, interval = events
 
@@ -492,19 +500,30 @@ async def _start_stream(
             )
             external_lookup_status = ExternalLookupStatus.FIXTURE
     else:
-        owner_profile_text = await _fetch_owner_profile_text(settings, session, fetch_profile_text)
+        try:
+            if session.client is not None:
+                owner_profile_text = await fetch_profile_text(session.client, session.did)
+            elif session.auth_method == "oauth" and settings.auth_mode == "oauth":
+                profile_client = AsyncClient(base_url="https://public.api.bsky.app/xrpc")
+                try:
+                    owner_profile_text = await fetch_profile_text(profile_client, session.did)
+                finally:
+                    await profile_client.request.close()
+        except bluesky.BlueskyUnavailableError:
+            # 投稿の診断は続ける。プロフィール文は補助的な根拠にすぎない。
+            owner_profile_text = ""
         if owner_profile_text:
-            profile_extractor = _build_extractor(extractor_factory)
+            try:
+                profile_extractor = _build_extractor(extractor_factory)
+            except BaseException:
+                lease.release()
+                raise
 
             def analyze_profile(text: str) -> Awaitable[list[Clue]]:
                 return profile_extractor.extract_profile_text(session.did, text)
 
             owner_profile_analyzer = analyze_profile
-        if public_web_lookup_consent and not settings.public_web_lookup_available:
-            # キーがないのに同意が送られた（画面は欄を出さないので古い画面か直接の呼び出し）。
-            # Brave には何も送らず、検索できなかったことだけを返す
-            external_lookup_status = ExternalLookupStatus.UNAVAILABLE
-        elif public_web_lookup_consent:
+        if public_web_lookup_consent and settings.public_web_lookup_available:
 
             async def lookup_external() -> ExternalLookupResult:
                 lookup = await external_searcher(session.handle)
@@ -513,8 +532,11 @@ async def _start_stream(
                 )
 
             external_lookup = lookup_external
+        elif public_web_lookup_consent:
+            external_lookup_status = ExternalLookupStatus.UNAVAILABLE
 
     profile_result: dict[str, Any] = {}
+    diagnosis_at = datetime.now(UTC)
 
     def save_profile_result(result: dict[str, Any]) -> None:
         profile_result.update(result)
@@ -526,6 +548,7 @@ async def _start_stream(
                 posts=tuple(posts),
                 clues=tuple(clues),
                 profile_claims=tuple(profile_result.get("profile_claims", ())),
+                profile_relations=tuple(profile_result.get("profile_relations", ())),
                 profile_claim_suggestions=tuple(
                     profile_result.get("profile_claim_suggestions", ())
                 ),
@@ -537,6 +560,7 @@ async def _start_stream(
                 ),
                 owner_profile_text=profile_result.get("owner_profile_text", ""),
                 self_report_clues=tuple(profile_result.get("self_report_clues", ())),
+                diagnosis_at=diagnosis_at,
             ),
         )
 
@@ -547,6 +571,7 @@ async def _start_stream(
         interval,
         on_finished=save,
         on_result=save_profile_result,
+        diagnosis_at=diagnosis_at,
         owner_profile_text=owner_profile_text,
         owner_profile_analyzer=owner_profile_analyzer,
         web_facts=web_facts,

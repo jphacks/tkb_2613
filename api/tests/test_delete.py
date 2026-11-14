@@ -24,6 +24,7 @@ from tkb_common.schemas import (
     ProfileItem,
     ProfileStatus,
 )
+from tkb_engine.cross_post import evaluate_profile_candidates
 from tkb_engine.gazetteer import Gazetteer
 
 # ブラウザは POST・DELETE に Origin を付ける（元に戻せない操作は Origin を確かめる）
@@ -195,24 +196,32 @@ def test_restored_profile_claims_drop_the_ones_whose_evidence_was_deleted(
     two_ways = _claim(ProfileAttribute.REGULAR_STATION, (GYM_POST, other), (other, third))
     _login(client)
     store: SessionStore = client.app.state.sessions  # type: ignore[attr-defined]
+    candidate_sets = [
+        candidate_set
+        for candidate_set in evaluate_profile_candidates([only_gym, two_ways], POSTS, clues=CLUES)
+        if candidate_set.attribute
+        in {ProfileAttribute.RESIDENTIAL_AREA, ProfileAttribute.REGULAR_STATION}
+    ]
     store.set_diagnosis(
         client.cookies[SESSION_COOKIE],
         Diagnosis(
             posts=tuple(POSTS),
             clues=tuple(CLUES),
-            profile_claims=(only_gym, two_ways),
+            profile_claims=tuple(candidate_sets),
             profile_claim_suggestions=(GYM_POST, other),
         ),
     )
     before = client.get("/api/diagnosis").json()
-    assert len(before["profile_claims"]) == 2
+    assert len(before["profile_claims"]) == 24
+    assert sum(bool(claim["candidate_pool"]) for claim in before["profile_claims"]) == 2
 
     client.post("/api/delete", json={"delete": [GYM_POST]})
     data = client.get("/api/diagnosis").json()
 
     # 消した投稿だけが根拠の推定は出さない。別の経路が残る推定は、残った経路だけで出す
-    assert [c["attribute"] for c in data["profile_claims"]] == ["regular_station"]
-    survivor = data["profile_claims"][0]
+    claims = {claim["attribute"]: claim for claim in data["profile_claims"]}
+    assert claims["residential_area"]["candidate_pool"] == []
+    survivor = claims["regular_station"]["candidate_pool"][0]
     assert all(e["post_id"] != GYM_POST for e in survivor["evidence"])
     assert len(survivor["evidence_paths"]) == 1
     assert data["profile_claim_suggestions"] == [other]

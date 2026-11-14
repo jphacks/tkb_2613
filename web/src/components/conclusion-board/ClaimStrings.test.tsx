@@ -35,7 +35,7 @@ function claim(paths: ProfileEvidence[][]): ProfileItem {
     confidence: 0.65,
     status: "weak",
     evidence: paths.flat(),
-    evidence_paths: paths.map((evidence) => ({ evidence, confidence: 0.65 })),
+    evidence_paths: paths.map((evidence) => ({ evidence, confidence: 0.65, provenance: "combined_inference" })),
   };
 }
 

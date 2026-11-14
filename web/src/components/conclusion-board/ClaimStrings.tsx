@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { staggerDelay } from "@/lib/motion";
 import type { Post } from "@/types/post";
-import type { ProfileEvidence, ProfileItem } from "@/types/profile";
+import type { ProfileEvidence, ProfileEvidencePath } from "@/types/profile";
 
 import "./claim-strings.css";
 
@@ -27,8 +27,14 @@ function excerpt(text: string): string {
   return chars.length > EXCERPT ? `${chars.slice(0, EXCERPT).join("")}…` : text;
 }
 
+/** 赤い糸に使う推定の部分。ProfileItem と、候補の一覧の ProfileCandidate のどちらも渡せる */
+type StringClaim = {
+  readonly value: string | null;
+  readonly evidence_paths?: readonly ProfileEvidencePath[];
+};
+
 /** 道筋ごとの起点の投稿。同じ投稿が2つの道筋の起点になるときは1枚にまとめる */
-function anchorPosts(claim: ProfileItem, posts: readonly Post[]): Post[] {
+function anchorPosts(claim: StringClaim, posts: readonly Post[]): Post[] {
   const byId = new Map(posts.map((p) => [p.post_id, p]));
   const anchors = (claim.evidence_paths ?? []).flatMap((path) => {
     const post = byId.get(anchorOf(path.evidence)?.post_id ?? "");
@@ -39,11 +45,11 @@ function anchorPosts(claim: ProfileItem, posts: readonly Post[]): Post[] {
 
 /**
  * プロフィールの推定で、根拠の道筋が2つ以上あるとき、それぞれの道筋の投稿のカードから答えへ赤い糸を順に伸ばし、
- * 最後に答えの箱が弾むように出る。根拠は profile_claims の evidence_paths だけを使う。道筋が1つなら何も出さない。
+ * 最後に答えの箱が弾むように出る。根拠は profile_claims の候補の evidence_paths だけを使う。道筋が1つなら何も出さない。
  * 結果の下の方にあるので、画面に入るまで動きを止めておく（止まっている間は糸がない状態）。
  * 動きを減らす設定では、張り終わった糸と答えを最初から見せる。
  */
-export function ClaimStrings({ claim, posts }: { claim: ProfileItem; posts: readonly Post[] }) {
+export function ClaimStrings({ claim, posts }: { claim: StringClaim; posts: readonly Post[] }) {
   const ref = useRef<HTMLElement>(null);
   const [inView, setInView] = useState(false);
   const anchors = claim.value ? anchorPosts(claim, posts) : [];

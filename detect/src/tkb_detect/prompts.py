@@ -27,6 +27,9 @@ TYPE_DESCRIPTIONS: dict[ClueType, str] = {
     ClueType.POSTAL_CODE: "郵便番号（一部でも）",
     ClueType.PHONE: "電話番号（一部でも）",
     ClueType.PLATE: "車やバイクのナンバープレート",
+    ClueType.VEHICLE_MODEL: (
+        "写真や本文に明示された車種名・メーカーの車名。車体の形だけから車種を推測しない"
+    ),
     ClueType.UNIFORM: "制服・作業着・作業靴・社員証・名札",
     ClueType.FACE: "人の顔。value には写っている人数などだけを書き、誰かは書かない",
     ClueType.KEY: "鍵",

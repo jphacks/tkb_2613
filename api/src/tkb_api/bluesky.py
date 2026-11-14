@@ -11,6 +11,7 @@ import threading
 import time
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, replace
+from datetime import datetime
 
 from atproto import AsyncClient, models
 from atproto_client.exceptions import (
@@ -27,7 +28,8 @@ from tkb_common.schemas import (
     ExternalProfileResult,
     Post,
     PostImage,
-    ProfileItem,
+    ProfileCandidateSet,
+    ProfileRelation,
     WebFact,
 )
 
@@ -221,7 +223,8 @@ class Diagnosis:
 
     posts: tuple[Post, ...]
     clues: tuple[Clue, ...]
-    profile_claims: tuple[ProfileItem, ...] = ()
+    profile_claims: tuple[ProfileCandidateSet, ...] = ()
+    profile_relations: tuple[ProfileRelation, ...] = ()
     profile_claim_suggestions: tuple[str, ...] = ()
     web_facts: tuple[WebFact, ...] = ()
     web_lookup_status: str = "not_run"
@@ -232,6 +235,7 @@ class Diagnosis:
     # この診断のあとに Bluesky から消せた投稿の ID（消した順）。posts と clues は診断時のまま残し、
     # 手がかりの番号（clue_indices）を変えない。結論と削除候補を作るときに、ここの投稿を除く
     deleted: tuple[str, ...] = ()
+    diagnosis_at: datetime | None = None
 
 
 class SessionStore:
