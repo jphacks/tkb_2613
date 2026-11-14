@@ -73,8 +73,9 @@ data "aws_iam_policy_document" "github_deploy_assume" {
 }
 
 resource "aws_iam_role" "github_deploy" {
-  name                 = "tkb_2613-github-deploy"
-  description          = "GitHub Actions の本番デプロイ。SSM ドキュメント tkb_2613-deploy をアプリの EC2 に送るだけ"
+  name = "tkb_2613-github-deploy"
+  # IAM の description は Latin-1 の文字だけ（日本語は CreateRole が ValidationError で断る）
+  description          = "GitHub Actions production deploy: sends SSM document tkb_2613-deploy to the app EC2 only"
   assume_role_policy   = data.aws_iam_policy_document.github_deploy_assume.json
   max_session_duration = 3600
 }
