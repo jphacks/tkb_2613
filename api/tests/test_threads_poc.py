@@ -104,5 +104,7 @@ async def test_threads_post_flows_through_existing_extraction_and_inference() ->
         )
     ]
     assert [name for name, _ in events] == ["post", "clues", "conclusions", "plan", "done"]
-    assert events[2][1]["conclusions"][0]["attribute"] == "routine"
+    # 本体の診断は Conclusion ではなく30項目の候補セットを流す（/threads は route 側で互換変換）。
+    claims = {item["attribute"]: item for item in events[2][1]["profile_claims"]}
+    assert claims["routine"]["status"] != "unknown"
     assert events[-1][1] == {"posts_seen": 1}

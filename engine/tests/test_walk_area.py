@@ -83,7 +83,9 @@ def _envelope(post_id: str) -> Clue:
     )
 
 
-def _candidate_sets(clues: list[Clue], station_values: tuple[str, ...] = ("根津駅",)):
+def _candidate_sets(
+    clues: list[Clue], station_values: tuple[str, ...] = ("根津駅",)
+) -> list[ProfileCandidateSet]:
     evidence = [
         ProfileEvidence(post_id=clue.post_id, clue_index=i, required=True)
         for i, clue in enumerate(clues)
@@ -159,12 +161,14 @@ def _candidate_sets(clues: list[Clue], station_values: tuple[str, ...] = ("根�
             evidence=block_evidence,
             evidence_paths=[ProfileEvidencePath(evidence=block_evidence, confidence=0.62)],
         )
-        sets.append(ProfileCandidateSet(
-            attribute=ProfileAttribute.RESIDENTIAL_AREA,
-            status=ProfileCandidateSetStatus.CANDIDATE,
-            candidates=[block_candidate],
-            candidate_pool=[block_candidate],
-        ))
+        sets.append(
+            ProfileCandidateSet(
+                attribute=ProfileAttribute.RESIDENTIAL_AREA,
+                status=ProfileCandidateSetStatus.CANDIDATE,
+                candidates=[block_candidate],
+                candidate_pool=[block_candidate],
+            )
+        )
     return sets
 
 
@@ -294,9 +298,7 @@ def test_walk_range_uses_existing_station_candidate_and_its_evidence() -> None:
     walk_candidate = walk_set.candidates[0]
     assert "約" in walk_candidate.value and "世帯" in walk_candidate.value
     evidence_posts = {
-        evidence.post_id
-        for path in walk_candidate.evidence_paths
-        for evidence in path.evidence
+        evidence.post_id for path in walk_candidate.evidence_paths for evidence in path.evidence
     }
     assert evidence_posts == {"s1", "s2", "w"}
     result = narrowing(clues, [*STATION_POSTS, WALK_POST], claims, _gaz())
@@ -316,9 +318,12 @@ def test_walk_range_disappears_when_either_candidate_or_walk_post_is_removed() -
     after_walk_removed = recalculate_profile_candidate_sets(
         claims, {"w"}, STATION_POSTS, clues=clues
     )
-    assert next(
-        item for item in after_walk_removed if item.attribute is ProfileAttribute.HOME_WALK_AREA
-    ).candidates == []
+    assert (
+        next(
+            item for item in after_walk_removed if item.attribute is ProfileAttribute.HOME_WALK_AREA
+        ).candidates
+        == []
+    )
     after_station_removed = recalculate_profile_candidate_sets(
         claims, {"s1", "s2"}, [WALK_POST], clues=clues
     )
@@ -332,15 +337,17 @@ def test_simulation_keeps_global_clue_indexes_after_deleting_the_first_post() ->
     posts = [prefix_post, *STATION_POSTS, WALK_POST]
     claims = _candidate_sets(clues)
 
-    after = recalculate_profile_candidate_sets(
-        claims, {"prefix"}, posts[1:], clues=clues
+    after = recalculate_profile_candidate_sets(claims, {"prefix"}, posts[1:], clues=clues)
+    original_value = (
+        next(item for item in claims if item.attribute is ProfileAttribute.HOME_WALK_AREA)
+        .candidates[0]
+        .value
     )
-    original_value = next(
-        item for item in claims if item.attribute is ProfileAttribute.HOME_WALK_AREA
-    ).candidates[0].value
-    recalculated_value = next(
-        item for item in after if item.attribute is ProfileAttribute.HOME_WALK_AREA
-    ).candidates[0].value
+    recalculated_value = (
+        next(item for item in after if item.attribute is ProfileAttribute.HOME_WALK_AREA)
+        .candidates[0]
+        .value
+    )
     assert recalculated_value == original_value
     result = narrowing(clues, posts[1:], after, _gaz())
 

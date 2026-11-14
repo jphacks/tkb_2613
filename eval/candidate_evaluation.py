@@ -17,9 +17,7 @@ PROFILE_CANDIDATE_ATTRIBUTES = {
     attribute.value for attribute in ProfileAttribute if attribute is not ProfileAttribute.HOME_ROOM
 }
 if len(PROFILE_CANDIDATE_ATTRIBUTES) != len(ProfileAttribute) - 1:
-    raise RuntimeError(
-        "ProfileAttribute schema must diagnose every attribute except home_room"
-    )
+    raise RuntimeError("ProfileAttribute schema must diagnose every attribute except home_room")
 
 
 def _pair(attribute: str, value: str) -> dict[str, str]:

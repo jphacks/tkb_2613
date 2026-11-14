@@ -256,7 +256,6 @@ def get_gazetteer(settings: Annotated[Settings, Depends(get_settings)]) -> Gazet
     return _cached_gazetteer(settings.gazetteer_dir)
 
 
-
 def get_photo_place_searcher(
     settings: Annotated[Settings, Depends(get_settings)],
     gazetteer: Annotated[Gazetteer, Depends(get_gazetteer)],

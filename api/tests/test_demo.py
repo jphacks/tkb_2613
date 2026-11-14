@@ -15,6 +15,7 @@ from tkb_api.main import create_app
 from tkb_api.routes import demo
 from tkb_api.routes.diagnose import get_gazetteer
 from tkb_common.schemas import PROFILE_DIAGNOSED_ATTRIBUTES
+from tkb_engine import rules
 from tkb_engine.gazetteer import Gazetteer
 
 FIXTURE = Path(__file__).resolve().parents[2] / "eval" / "fixtures" / "demo_observations.json"
@@ -123,7 +124,7 @@ class _Counter:
 
     def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
         self.calls = {"infer": 0, "plan": 0}
-        infer = demo.infer
+        infer = rules.infer
         plan = pipeline.plan_claims_json
 
         def counted_infer(*args: Any, **kwargs: Any) -> Any:

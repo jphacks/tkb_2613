@@ -215,7 +215,7 @@ describe("ConclusionBoard", () => {
     expect(screen.getAllByText("投稿の組み合わせから推定")).toHaveLength(2);
     expect(screen.getAllByText("株式会社青空")).toHaveLength(1);
     expect(screen.getByText("通学先（大学・キャンパス・学校）")).toBeInTheDocument();
-    expect(screen.getAllByText(messages.board.unknown)).toHaveLength(28);
+    expect(screen.getAllByText(messages.board.unknown)).toHaveLength(PROFILE_DIAGNOSED_ATTRIBUTES.length - 1);
     expect(screen.queryByRole("heading", { name: "プロフィール候補" })).not.toBeInTheDocument();
     expect(within(screen.getByRole("list", { name: messages.board.evidence })).getAllByRole("listitem")).toHaveLength(1);
     expect(container.querySelectorAll("svg.red-strings path")).toHaveLength(1);

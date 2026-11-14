@@ -6,6 +6,7 @@ from pydantic import ValidationError
 from tkb_common.schemas import (
     PROFILE_ATTRIBUTE_CATALOG,
     PROFILE_CATEGORY_LABELS,
+    PROFILE_DIAGNOSED_ATTRIBUTES,
     ClaimAssessment,
     EvidenceScope,
     ProfileAttribute,
@@ -17,8 +18,11 @@ from tkb_common.schemas import (
 POST_ID = "at://did:plc:xxxx/app.bsky.feed.post/3kxxxx"
 
 
-def test_profile_catalog_has_all_30_candidate_ids_and_metadata() -> None:
-    assert len(ProfileAttribute) == 30
+def test_profile_catalog_has_all_31_ids_and_metadata() -> None:
+    # home_room はカタログにだけ置き、診断対象（PROFILE_DIAGNOSED_ATTRIBUTES）は30項目。
+    assert len(ProfileAttribute) == 31
+    assert len(PROFILE_DIAGNOSED_ATTRIBUTES) == 30
+    assert ProfileAttribute.HOME_ROOM not in PROFILE_DIAGNOSED_ATTRIBUTES
     assert set(PROFILE_ATTRIBUTE_CATALOG) == set(ProfileAttribute)
     assert len(PROFILE_CATEGORY_LABELS) == 4
     assert all(item.label for item in PROFILE_ATTRIBUTE_CATALOG.values())
@@ -38,6 +42,7 @@ def test_profile_catalog_has_all_30_candidate_ids_and_metadata() -> None:
         "home_building": "自宅の建物候補",
         "home_room": "自宅の部屋・階・位置",
         "home_nearest_station": "自宅の最寄り駅",
+        "home_walk_area": "自宅から駅までの徒歩圏",
         "regular_station": "投稿時点の通勤利用駅候補",
         "regular_line": "日常的に利用する路線",
         "residential_area": "居住エリア（市区町村・町域）",

@@ -85,8 +85,10 @@ def _candidate_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
     except (TypeError, ValueError):
         return payload
     attributes = [claim.attribute for claim in claims]
-    if not claims or len(attributes) != len(set(attributes)) or any(
-        attribute not in PROFILE_DIAGNOSED_ATTRIBUTES for attribute in attributes
+    if (
+        not claims
+        or len(attributes) != len(set(attributes))
+        or any(attribute not in PROFILE_DIAGNOSED_ATTRIBUTES for attribute in attributes)
     ):
         return payload
     result = dict(payload)

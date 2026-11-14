@@ -73,12 +73,18 @@ def _render_diagnosis(
     rule_conclusions = infer(list(clues), list(posts), gazetteer)
     profile_claims = tuple(
         infer_owner_candidate_sets_with_web(
-            list(posts), list(clues), [], gazetteer=gazetteer,
+            list(posts),
+            list(clues),
+            [],
+            gazetteer=gazetteer,
             rule_conclusions=rule_conclusions,
         )
     )
     profile_relations = infer_owner_profile_relations(
-        list(posts), profile_claims, clues=list(clues), gazetteer=gazetteer,
+        list(posts),
+        profile_claims,
+        clues=list(clues),
+        gazetteer=gazetteer,
         rule_conclusions=rule_conclusions,
     )
     narrowed = narrowing(list(clues), list(posts), profile_claims, gazetteer)

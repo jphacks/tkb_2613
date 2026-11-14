@@ -85,11 +85,16 @@ def test_old_candidate_share_drops_redundant_conclusions_without_recomputing() -
                 "candidate_pool": [],
                 "conflicting_evidence": [],
                 "reason": "no_grounded_rule",
-                "reason": "no_grounded_rule",
             }
         ],
         "conclusions": [legacy_conclusion],
-        "plan": {"delete": [], "broken": [], "before": [legacy_conclusion], "after": [legacy_conclusion], "posts": []},
+        "plan": {
+            "delete": [],
+            "broken": [],
+            "before": [legacy_conclusion],
+            "after": [legacy_conclusion],
+            "posts": [],
+        },
     }
 
     result = _candidate_snapshot(payload)
@@ -138,7 +143,7 @@ def test_legacy_shared_links_are_returned_unchanged_until_expiry(tmp_path: Path)
         },
     }
     with _client(settings) as client:
-        store = client.app.state.shares
+        store: ShareStore = client.app.state.shares  # type: ignore[attr-defined]
         token = store.create(legacy, "did:plc:legacy")
         response = client.post("/api/shared-result", json={"token": token})
         assert response.status_code == 200

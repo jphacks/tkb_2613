@@ -173,7 +173,7 @@ def _kept_indices(clues: Sequence[Clue], gone: Iterable[str]) -> list[int]:
 
 
 def _remaining(
-    clues: Sequence[Clue], posts: Sequence[Post], excluded: Sequence[str]
+    clues: Sequence[Clue], posts: Sequence[Post], excluded: Iterable[str]
 ) -> tuple[list[Clue], list[Post]]:
     gone = set(excluded)
     return [c for c in clues if c.post_id not in gone], [p for p in posts if p.post_id not in gone]
@@ -256,9 +256,7 @@ def simulate_claims_json(
     if gazetteer is not None:
         gone = set(excluded) | set(delete)
         _, remaining_posts = _remaining(clues, posts, gone)
-        result["narrowing"] = narrowing(
-            clues, remaining_posts, sim.after, gazetteer
-        )
+        result["narrowing"] = narrowing(clues, remaining_posts, sim.after, gazetteer)
     return result
 
 

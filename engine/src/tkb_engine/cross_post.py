@@ -1185,8 +1185,10 @@ def infer_rule_and_link_claims(
     rule_conclusions: Sequence[Conclusion] | None = None,
 ) -> list[ProfileItem]:
     """Convert RulesR (R1..R12), RulesX (X2..X5) and BP1/BP2 conclusions into candidates."""
-    conclusions = list(rule_conclusions) if rule_conclusions is not None else infer(
-        list(clues), list(posts), gazetteer or Gazetteer()
+    conclusions = (
+        list(rule_conclusions)
+        if rule_conclusions is not None
+        else infer(list(clues), list(posts), gazetteer or Gazetteer())
     )
     grouped_paths: dict[tuple[ProfileAttribute, str], list[ProfileEvidencePath]] = {}
     for conclusion in conclusions:
@@ -1375,7 +1377,8 @@ def infer_home_walk_area_claims(
                         ],
                         gazetteer,
                     )
-                ) is not None
+                )
+                is not None
             ]
             if not walk_results:
                 continue
@@ -1563,8 +1566,10 @@ def infer_owner_profile_relations(
                         )
                     )
     if clues:
-        conclusions = list(rule_conclusions) if rule_conclusions is not None else infer(
-            list(clues), list(posts), gazetteer or Gazetteer()
+        conclusions = (
+            list(rule_conclusions)
+            if rule_conclusions is not None
+            else infer(list(clues), list(posts), gazetteer or Gazetteer())
         )
         school_set = by_attribute.get(ProfileAttribute.SCHOOL)
         if school_set is not None and school_set.candidates:
@@ -1822,9 +1827,7 @@ def infer_owner_claims(
         claims = add_school_district_residence(claims, gazetteer)
     if include_heuristic_rules:
         claims.extend(
-            infer_rule_and_link_claims(
-                posts, clues, gazetteer, rule_conclusions=rule_conclusions
-            )
+            infer_rule_and_link_claims(posts, clues, gazetteer, rule_conclusions=rule_conclusions)
         )
     return claims
 

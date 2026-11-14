@@ -51,9 +51,7 @@ def narrowing(
                 for item in evidence
                 if item.clue_index is not None and item.clue_index < len(clues)
             ]
-            walk_area_result = walk_area(
-                clues, posts, candidate.value, station_indices, gaz
-            )
+            walk_area_result = walk_area(clues, posts, candidate.value, station_indices, gaz)
             if walk_area_result is not None:
                 walk_candidate = next(
                     (
@@ -128,7 +126,9 @@ def _station_for_walk(
     return None
 
 
-def _residential_block(candidate_set, clues: Sequence[Clue]) -> dict[str, Any] | None:
+def _residential_block(
+    candidate_set: ProfileCandidateSet | None, clues: Sequence[Clue]
+) -> dict[str, Any] | None:
     if candidate_set is None or candidate_set.status is not ProfileCandidateSetStatus.CANDIDATE:
         return None
     by_index = {i: clue for i, clue in enumerate(clues)}
@@ -151,10 +151,14 @@ def _residential_block(candidate_set, clues: Sequence[Clue]) -> dict[str, Any] |
     candidate, indexes = eligible[0]
     return {
         "value": candidate.value,
-        "post_ids": list(dict.fromkeys([
-            *(item.post_id for item in candidate.evidence if item.post_id),
-            *_post_ids(clues, sorted(indexes)),
-        ])),
+        "post_ids": list(
+            dict.fromkeys(
+                [
+                    *(item.post_id for item in candidate.evidence if item.post_id),
+                    *_post_ids(clues, sorted(indexes)),
+                ]
+            )
+        ),
     }
 
 
