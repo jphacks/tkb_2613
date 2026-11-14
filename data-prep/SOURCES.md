@@ -80,6 +80,32 @@ uv run --project data-prep python -m tkb_data_prep.import_places `
 
 取込POIの名称完全一致は未確認候補に過ぎず、Overtureが記載する重複・junk・属性欠落などの品質課題もある。名称だけで所在地を検証済みと表示しない。POI indexはテキスト/座標で、全国の参照画像DBとは別物。参照画像照合を追加する場合は候補周辺の許諾画像だけを個別取得し、別途sourceとライセンスを記録する。
 
+### Overture Places 関東1都6県の索引（P05と合算）
+
+| 項目 | 内容 |
+|---|---|
+| 出典 | Overture Maps Foundation, Places（release `2026-10-21.0`）。<https://docs.overturemaps.org/guides/places/> ・ 帰属 <https://docs.overturemaps.org/attribution/> ・ schema <https://docs.overturemaps.org/schema/reference/places/place/> |
+| 取得日 | 2026-11-14（release番号は <https://docs.overturemaps.org/getting-data/> と `overturemaps releases list` で確認） |
+| license | テーマ全体の単一licenseではなく、行の `sources[].license` にsourceごとに入っている。関東分の実データでは `CDLA-Permissive-2.0`（Meta等）、`Apache-2.0`（Foursquare）、`CC0-1.0`（AllThePlaces）の3種だけで、nullは0件だった。そのため `--source-license-map` は使っていない。licenseがnullの行が将来のreleaseで現れた場合は、既存の挙動どおり検索aliasを作らない |
+| 帰属表示 | Foursquare行は「Copyright 2024 Foursquare Labs, Inc. All rights reserved.」と「Foursquare data was transformed to the Overture schema.」（<https://opensource.foursquare.com/places-notice-txt/>）を表示する条件がある。他のsourceは各licenseのURLを記録する。画面に出すときは索引の `sources[].attribution` / `license_id` を使う |
+| 範囲 | 関東1都6県（茨城・栃木・群馬・埼玉・千葉・東京・神奈川＝都道府県コード08〜14）。bbox `138.35,34.85,140.95,37.2` で取得後、`muni_mesh.parquet` の1km meshの市区町村コード先頭2桁が08〜14のものだけを残す。県境をまたぐmeshは、関東側の市区町村が1つでも含まれれば残るため、福島・山梨・静岡などの境界の数百件が混ざり得る |
+| 件数 | P05 79,529件 + Overture 1,032,210件 = 1,111,739件（ファイル約1.96GB）。bboxで取得した生データは1,132,013行・約213MB |
+
+作り方（管理者向け。ディスクは生データ約0.2GB、中間索引約1.9GB、完成索引約2GBが要る。取込は約12分、合算は約5分）：
+
+```bash
+# 1. 取得（overturemaps CLI。リポジトリの依存には入れず一時実行する）
+uv tool run --from overturemaps overturemaps download   --bbox=138.35,34.85,140.95,37.2 -f geoparquet -t place -r 2026-10-21.0   -o data/raw/overture/kanto_places_2026-10-21.0.parquet
+
+# 2. 関東分だけの索引にする（CLIの出力には theme/type 列がないので --assume-place-rows が要る）
+uv run --project data-prep python -m tkb_data_prep.import_places   --input data/raw/overture/kanto_places_2026-10-21.0.parquet --input-format geoparquet   --assume-place-rows --prefecture-codes 08,09,10,11,12,13,14   --output data/processed/kanto/overture_kanto.sqlite3   --mesh-index data/processed/national/muni_mesh.parquet   --provider "Overture Maps" --dataset overture-places --version 2026-10-21.0   --attribution "Overture Maps Foundation, Places 2026-10-21.0 (https://docs.overturemaps.org/attribution/)"
+
+# 3. P05の索引と合算（入力は読むだけ。出力が既にあれば止まる）
+uv run --project data-prep python -m tkb_data_prep.merge_places   --input data/processed/national/places.sqlite3 data/processed/kanto/overture_kanto.sqlite3   --output data/processed/kanto/places.sqlite3
+```
+
+`--prefecture-codes` は `--mesh-index` の `muni_code` を使う。`--assume-place-rows` は `overturemaps download -t place` の出力（行がすべてPlacesの `place`）にだけ使い、`theme` / `type` 列がある入力ではその値も確認する。私有住居カテゴリの除外は従来どおり効く。Overtureは名称の表記ゆれ・重複・閉店済みを含むので、名称が一致しても未確認候補として扱う。
+
 - 文京区オープンデータ「ごみと資源の収集日」（https://www.city.bunkyo.lg.jp/documents/6059/syusyubi.csv）を加工して作成
 
 `manual/knowledge.json` は推理ルールが引く手作りの知識表（自治体の指定ゴミ袋、ゴミの収集地区、大学の時間割）。公開データの加工ではなく、行ごとの `source` に出典か「要確認」「架空（デモ用）」を書く。デモ用の架空の行を実データとして画面や発表に出さない。

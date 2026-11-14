@@ -7,7 +7,8 @@ import json
 import re
 import unicodedata
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from typing import Any
 
 from tkb_common.schemas import (
     Clue,
@@ -204,6 +205,50 @@ def _postal_candidates(
     return list(result.values())
 
 
+def place_candidate_from_record(
+    row: Mapping[str, Any], clue_index: int
+) -> PhotoPlaceCandidate | None:
+    """Build a visible-in-frame candidate from a licensed local POI row, or None if unusable."""
+    place_id, label = row.get("place_id"), row.get("label")
+    if not isinstance(place_id, str) or not isinstance(label, str) or not place_id or not label:
+        return None
+    raw_sources = row.get("sources", [])
+    sources = (
+        [
+            PhotoPlaceSource.model_validate(source)
+            for source in raw_sources
+            if isinstance(source, dict)
+        ]
+        if isinstance(raw_sources, list)
+        else []
+    )
+    # Records with unknown or mixed source licensing remain in the index but are
+    # withheld from candidate generation until their provenance is resolved.
+    if not sources or any(source.license_id is None for source in sources):
+        return None
+    source_ids = row.get("source_ids", [])
+    if not isinstance(source_ids, list) or not source_ids:
+        source_ids = [source.source_id for source in sources] or [f"local-poi:{place_id}"]
+    category = row.get("basic_category")
+    place_type = (
+        PhotoPlaceType.LANDMARK
+        if str(category).casefold() == "landmark"
+        else PhotoPlaceType.FACILITY
+    )
+    candidate = PhotoPlaceCandidate(
+        place_id=place_id,
+        label=label,
+        place_type=place_type,
+        photo_relation=PhotoPlaceRelation.VISIBLE_IN_FRAME,
+        area_label=row.get("area_label") if isinstance(row.get("area_label"), str) else None,
+        score=None,
+        evidence=[PhotoPlaceEvidence(kind="clue", clue_index=clue_index)],
+        source_ids=[str(source_id) for source_id in source_ids],
+        sources=sources,
+    )
+    return candidate
+
+
 def _poi_candidates(
     image_clues: list[tuple[int, Clue]], gazetteer: Gazetteer
 ) -> tuple[list[PhotoPlaceCandidate], bool]:
@@ -220,50 +265,10 @@ def _poi_candidates(
         matches = gazetteer.places_named(clue.value)
         truncated = truncated or len(matches) > MAX_PLACE_NAME_MATCHES
         for row in matches[:MAX_PLACE_NAME_MATCHES]:
-            place_id, label = row.get("place_id"), row.get("label")
-            if (
-                not isinstance(place_id, str)
-                or not isinstance(label, str)
-                or not place_id
-                or not label
-            ):
+            candidate = place_candidate_from_record(row, clue_index)
+            if candidate is None:
                 continue
-            raw_sources = row.get("sources", [])
-            sources = (
-                [
-                    PhotoPlaceSource.model_validate(source)
-                    for source in raw_sources
-                    if isinstance(source, dict)
-                ]
-                if isinstance(raw_sources, list)
-                else []
-            )
-            # Records with unknown or mixed source licensing remain in the index but are
-            # withheld from candidate generation until their provenance is resolved.
-            if not sources or any(source.license_id is None for source in sources):
-                continue
-            source_ids = row.get("source_ids", [])
-            if not isinstance(source_ids, list) or not source_ids:
-                source_ids = [source.source_id for source in sources] or [f"local-poi:{place_id}"]
-            category = row.get("basic_category")
-            place_type = (
-                PhotoPlaceType.LANDMARK
-                if str(category).casefold() == "landmark"
-                else PhotoPlaceType.FACILITY
-            )
-            candidate = PhotoPlaceCandidate(
-                place_id=place_id,
-                label=label,
-                place_type=place_type,
-                photo_relation=PhotoPlaceRelation.VISIBLE_IN_FRAME,
-                area_label=row.get("area_label")
-                if isinstance(row.get("area_label"), str)
-                else None,
-                score=None,
-                evidence=[PhotoPlaceEvidence(kind="clue", clue_index=clue_index)],
-                source_ids=[str(source_id) for source_id in source_ids],
-                sources=sources,
-            )
+            place_id = candidate.place_id
             existing = result.get(place_id)
             if existing is None:
                 result[place_id] = candidate

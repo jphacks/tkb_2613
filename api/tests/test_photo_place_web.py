@@ -1,7 +1,9 @@
 import asyncio
 import json
+import sqlite3
 import sys
 from collections.abc import Coroutine
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -9,6 +11,7 @@ import pytest
 from pydantic import SecretStr
 
 from tkb_api.photo_place_web import BRAVE_PLACE_SEARCH_ENDPOINT, search_photo_places
+from tkb_common.place_names import PLACE_INDEX_SCHEMA_VERSION, place_name_keys
 from tkb_common.schemas import (
     Clue,
     ClueSource,
@@ -21,6 +24,7 @@ from tkb_common.schemas import (
     PhotoPlaceSource,
     PhotoPlaceStatus,
 )
+from tkb_engine.gazetteer import Gazetteer
 
 
 def _run[T](coroutine: Coroutine[Any, Any, T]) -> T:
@@ -137,7 +141,7 @@ def test_place_search_sends_only_allowlisted_name_and_keeps_unverified_candidate
     [candidate] = result.candidates
     assert candidate.photo_relation.value == "visible_in_frame"
     assert candidate.score is None
-    assert candidate.area_label == "東京都 府中市"
+    assert candidate.area_label == "府中市"
     assert candidate.evidence[0].clue_index == 0
     [source] = candidate.sources
     assert source.source_url == "https://example.org/place"
@@ -522,3 +526,101 @@ def test_missing_key_does_not_mark_images_without_any_allowlisted_clue_unavailab
     )[0]
     assert result.status is PhotoPlaceStatus.UNKNOWN
     assert result.lookup_status is PhotoPlaceLookupStatus.LOCAL_ONLY
+
+
+def _p05_record(place_id: str, label: str, area_label: str, prefecture_code: str) -> dict[str, Any]:
+    return {
+        "place_id": place_id,
+        "label": label,
+        "area_label": area_label,
+        "basic_category": "facility",
+        "sources": [
+            {
+                "source_id": f"P05-22:{place_id}",
+                "provider": "国土交通省 国土数値情報",
+                "dataset": "P05-22",
+                "license_id": "PDL1.0",
+                "record_id": f"P05-22_{prefecture_code}_000001",
+                "version": "2022",
+            }
+        ],
+    }
+
+
+def _places_index(path: Path, records: list[dict[str, Any]]) -> Gazetteer:
+    with sqlite3.connect(path) as db:
+        db.execute(f"PRAGMA user_version = {PLACE_INDEX_SCHEMA_VERSION}")
+        db.executescript(
+            "CREATE TABLE poi_place (place_id TEXT PRIMARY KEY, "
+            "license_verified INTEGER NOT NULL, record_json TEXT NOT NULL);"
+            "CREATE TABLE poi_alias (name_key TEXT NOT NULL, place_id TEXT NOT NULL, "
+            "PRIMARY KEY(name_key, place_id));"
+            "CREATE INDEX poi_alias_name_idx ON poi_alias(name_key);"
+        )
+        for record in records:
+            db.execute(
+                "INSERT INTO poi_place VALUES (?, 1, ?)",
+                (record["place_id"], json.dumps(record, ensure_ascii=False)),
+            )
+            db.executemany(
+                "INSERT OR IGNORE INTO poi_alias VALUES (?, ?)",
+                ((key, record["place_id"]) for key in place_name_keys(record["label"])),
+            )
+    return Gazetteer(places_path=path)
+
+
+def _search_with_gazetteer(
+    result: PhotoPlaceResult, response: dict[str, Any], gazetteer: Gazetteer
+) -> PhotoPlaceResult:
+    return _run(
+        search_photo_places(
+            [result],
+            [_clue("市民会館")],
+            SecretStr("test-token"),
+            transport=httpx.MockTransport(
+                lambda _request: httpx.Response(
+                    200, headers={"content-type": "application/json"}, json=response
+                )
+            ),
+            gazetteer=gazetteer,
+        )
+    )[0]
+
+
+def _shown_other_records(count: int) -> list[PhotoPlaceCandidate]:
+    return [
+        _official_candidate(f"p05:a{index:03d}", "市民会館", f"架空{index}市", "13")
+        for index in range(count)
+    ]
+
+
+def test_corroboration_finds_record_beyond_the_local_fifty_match_cut(tmp_path: Path) -> None:
+    others = [_p05_record(f"p05:a{i:03d}", "市民会館", f"架空{i}市", "13") for i in range(60)]
+    target = _p05_record("p05:z-target", "市民会館", "府中市", "13")
+    gazetteer = _places_index(tmp_path / "places.sqlite3", [*others, target])
+    shown = _shown_other_records(50)  # place_id 順の上位50件。対象は含まれない
+
+    result = _search_with_gazetteer(_ambiguous(*shown), _response("市民会館"), gazetteer)
+
+    ids = [candidate.place_id for candidate in result.candidates]
+    brave = next(c for c in result.candidates if c.place_id.startswith("brave-place:"))
+    assert brave.corroborated_by == ["p05:z-target"]
+    assert "p05:z-target" in ids
+    assert len(ids) <= 50
+    assert "too_many_matches" in result.reason_codes
+
+
+def test_corroboration_by_area_lookup_requires_exactly_one_record(tmp_path: Path) -> None:
+    others = [_p05_record(f"p05:a{i:03d}", "市民会館", f"架空{i}市", "13") for i in range(60)]
+    twins = [
+        _p05_record("p05:z-1", "市民会館", "府中市", "13"),
+        _p05_record("p05:z-2", "市民会館", "府中市", "13"),
+    ]
+    gazetteer = _places_index(tmp_path / "places.sqlite3", [*others, *twins])
+
+    result = _search_with_gazetteer(
+        _ambiguous(*_shown_other_records(49)), _response("市民会館"), gazetteer
+    )
+
+    brave = next(c for c in result.candidates if c.place_id.startswith("brave-place:"))
+    assert brave.corroborated_by == []
