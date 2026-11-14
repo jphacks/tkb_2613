@@ -6,9 +6,8 @@ import pytest
 from tkb_engine.gazetteer import CollectionArea
 from tkb_engine.scoring import layers
 from tkb_engine.scoring.constants import OUTSIDE_WEIGHT
-from tkb_engine.scoring.layers import Shelter
 from tkb_engine.scoring.signals import Signal, SignalKind
-from tkb_engine.scoring.tables import ScoringTables
+from tkb_engine.scoring.tables import ScoringTables, Shelter
 
 
 def test_walk_minutes_uses_the_80m_per_minute_rule(tables: ScoringTables) -> None:

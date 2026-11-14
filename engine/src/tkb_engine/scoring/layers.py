@@ -7,7 +7,6 @@
 import math
 import re
 from collections.abc import Sequence
-from dataclasses import dataclass
 
 import numpy as np
 import numpy.typing as npt
@@ -21,7 +20,7 @@ from tkb_engine.scoring.constants import (
     WALK_METERS_PER_MINUTE,
 )
 from tkb_engine.scoring.signals import Signal, SignalKind
-from tkb_engine.scoring.tables import ScoringTables, Walk
+from tkb_engine.scoring.tables import ScoringTables, Shelter, Walk
 
 Weights = npt.NDArray[np.float64]
 LINE_PREFIX = re.compile(r"^\d+号線")
@@ -30,13 +29,6 @@ EARTH_RADIUS_M = 6_371_008.8
 KANJI_DIGITS = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
 CENSUS_CHOME = re.compile(r"^(.+?)([一二三四五六七八九十]+)丁目$")
 AREA_CHOME = re.compile(r"^(.+?)(\d+(?:[・～~\-]\d+)*)丁目")
-
-
-@dataclass(frozen=True)
-class Shelter:
-    name: str
-    lat: float
-    lon: float
 
 
 def short_line_name(line_name: str) -> str:

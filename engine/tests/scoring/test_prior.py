@@ -144,3 +144,21 @@ def test_prior_of_20_to_24_matches_the_census_mesh_total() -> None:
     # 令和2年国勢調査 地域メッシュ統計（T001192）の秘匿されていない行の和（1,971,515 人）と一致する
     assert prior(loaded, 22).sum() == pytest.approx(float(census.sum()), rel=1e-6)
     assert prior(loaded, 22).sum() == pytest.approx(1_971_515, abs=1)
+
+
+def test_load_reads_shelter_points_when_the_table_exists(
+    tmp_path: Path, tables: ScoringTables
+) -> None:
+    write_tables(tmp_path, tables)
+    assert scoring_tables.load(tmp_path).shelters == []  # type: ignore[union-attr]
+    pq.write_table(
+        pa.table(
+            {"name": ["東京大学"], "kind": ["指定緊急避難場所"], "lat": [35.7], "lon": [139.7]}
+        ),
+        tmp_path / "shelters.parquet",
+    )
+
+    loaded = scoring_tables.load(tmp_path)
+
+    assert loaded is not None
+    assert loaded.shelters == [scoring_tables.Shelter("東京大学", 35.7, 139.7)]
