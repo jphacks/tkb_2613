@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { ConclusionBoard } from "@/components/conclusion-board/ConclusionBoard";
 import { DiagnoseLoading } from "@/components/diagnose-loading/DiagnoseLoading";
 import { NarrowingStages } from "@/components/narrowing/NarrowingStages";
+import { ResidenceStages } from "@/components/residence/ResidenceStages";
 import { PostCard, type PostClues } from "@/components/post-list/PostCard";
 import { PlanSummary } from "@/components/plan-summary/PlanSummary";
 import { Reveal } from "@/components/reveal/Reveal";
@@ -17,10 +18,16 @@ import type { Clue } from "@/types/clue";
 import { isProfileSimulationAfter, type PhotoPlaceResult, type RiskyPost, type Simulation } from "@/types/diagnose";
 import { visibleNarrowing, type Narrowing } from "@/types/narrowing";
 import type { Post } from "@/types/post";
+import { isResidenceEstimate, type ResidenceEstimate } from "@/types/residence";
 import { profileClaimsAfterDeletion, type ExternalLookupStatus, type ExternalProfileResult, type ProfileCandidateSet, type ProfileRelation, type WebFact } from "@/types/profile";
 
 const t = messages.diagnose;
 const RISKY_HEADING_ID = "risky-heading";
+
+/** 表示用の付属品なので、形が違えば出さない（診断そのものは止めない） */
+function validResidence(value: unknown, clueCount: number): ResidenceEstimate | null {
+  return isResidenceEstimate(value, clueCount) ? value : null;
+}
 
 function isUnauthorized(error: unknown): boolean {
   return error instanceof ApiError && error.kind === "unauthorized";
@@ -41,6 +48,8 @@ type Phase =
 interface Result {
   clues: readonly Clue[];
   narrowing?: Narrowing | null;
+  /** 住まいの推定（点数の地図）。表がない・場所の手がかりがなければ null で、f1 の絞り込みを出す */
+  residence?: ResidenceEstimate | null;
   photoPlaceResults?: readonly PhotoPlaceResult[];
   profileClaims?: readonly ProfileCandidateSet[];
   profileClaimsError?: boolean;
@@ -130,6 +139,7 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
         setResult({
           clues: snapshot.clues,
           narrowing: snapshot.narrowing ?? null,
+          residence: validResidence(snapshot.residence, snapshot.clues.length),
           photoPlaceResults: snapshot.photo_place_results ?? [],
           profileClaims: snapshot.profile_claims ?? [],
           profileClaimsError: false,
@@ -213,6 +223,9 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
           case "plan":
             setRisky(event.posts);
             break;
+          case "residence":
+            setResult((prev) => (prev ? { ...prev, residence: validResidence(event.residence, prev.clues.length) } : prev));
+            break;
           case "done":
             setPhase({ kind: "done", postsSeen: event.posts_seen });
             onRevealedChange?.(true);
@@ -231,6 +244,12 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
   const livePosts = deleted.size === 0 ? posts : posts.filter((post) => !deleted.has(post.post_id));
   const simulatedGone = simulation?.delete ?? [];
   const excluded = simulation ? new Set([...deleted, ...simulatedGone]) : deleted;
+  // 仮除外のあとは、除いた投稿で計算し直した推定（simulate の residence）を出す
+  const shownResidence = result
+    ? simulation
+      ? validResidence(simulation.residence, result.clues.length)
+      : (result.residence ?? null)
+    : null;
   const beforeProfileClaims = profileClaimsAfterDeletion(result?.profileClaims ?? [], deleted);
   const visibleProfileClaims = simulation && isProfileSimulationAfter(simulation.after)
     ? profileClaimsAfterDeletion(simulation.after, deleted)
@@ -300,7 +319,11 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
       </h2>
       {!busy && result && (
         <Reveal posts={livePosts} clues={result.clues} conclusions={[]} profileClaims={visibleProfileClaims} excludedPostIds={excluded}>
-          <NarrowingStages narrowing={visibleNarrowing(simulation ? simulation.narrowing : result.narrowing, excluded)} />
+          {shownResidence ? (
+            <ResidenceStages residence={shownResidence} posts={livePosts} />
+          ) : (
+            <NarrowingStages narrowing={visibleNarrowing(simulation ? simulation.narrowing : result.narrowing, excluded)} />
+          )}
           {risky && <PlanSummary risky={risky.filter((post) => !excluded.has(post.post_id))} targetId={RISKY_HEADING_ID} />}
         </Reveal>
       )}

@@ -6,11 +6,13 @@ import { useEffect, useRef, useState } from "react";
 import { ConclusionBoard } from "@/components/conclusion-board/ConclusionBoard";
 import { NarrowingStages } from "@/components/narrowing/NarrowingStages";
 import { PostCard } from "@/components/post-list/PostCard";
+import { ResidenceStages } from "@/components/residence/ResidenceStages";
 import { Reveal } from "@/components/reveal/Reveal";
 import { ApiError, getDemoDiagnosis, simulateDemo } from "@/lib/api";
 import { attributeLabel, messages } from "@/lib/messages";
 import { isProfileSimulationAfter, type DemoDiagnosis, type Simulation } from "@/types/diagnose";
 import { visibleNarrowing } from "@/types/narrowing";
+import { isResidenceEstimate } from "@/types/residence";
 import { profileClaimsAfterDeletion } from "@/types/profile";
 
 const t = messages.demo;
@@ -44,6 +46,9 @@ export default function DemoPage() {
       ? simulation.after
       : profileClaimsAfterDeletion(baseProfileClaims, excluded)
     : baseProfileClaims;
+  // 住まいの推定は表示用の付属品。形が違えば出さず、f1 の絞り込みを出す
+  const residenceSource = simulation ? simulation.residence : result?.residence;
+  const residence = result && isResidenceEstimate(residenceSource, result.clues.length) ? residenceSource : null;
   const visibleSuggestions = (result?.profile_claim_suggestions ?? []).filter((id) => !excluded.has(id));
 
   return (
@@ -61,7 +66,11 @@ export default function DemoPage() {
         {result && (
           <>
             <Reveal posts={result.posts} clues={result.clues} conclusions={[]} profileClaims={visibleProfileClaims} excludedPostIds={excluded}>
-              <NarrowingStages narrowing={visibleNarrowing(simulation ? simulation.narrowing : result.narrowing, excluded)} />
+              {residence ? (
+                <ResidenceStages residence={residence} posts={result.posts.filter((post) => !excluded.has(post.post_id))} />
+              ) : (
+                <NarrowingStages narrowing={visibleNarrowing(simulation ? simulation.narrowing : result.narrowing, excluded)} />
+              )}
             </Reveal>
             <ConclusionBoard
               clues={result.clues}

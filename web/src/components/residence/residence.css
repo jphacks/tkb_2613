@@ -1,0 +1,108 @@
+/* 住まいの推定（ResidenceStages・ResidenceMap）。
+   ここに書く見た目は「最後の状態」。動きは animation の from 側に書き、fill-mode: both で
+   始まるまでは from の状態にしておく。動きを減らす設定では globals.css が animation を止めるので、
+   最後の状態（すべての段、最後の人数が赤）だけが見える。
+   遅れは calc(var(--stage-pace, 1) * …) で渡すので、発表モードでは間が伸びる */
+
+.residence:not(.residence-playing) * {
+  animation-play-state: paused;
+}
+
+.residence-row {
+  animation: residence-row-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.residence-past {
+  position: relative;
+  display: inline-block;
+  color: color-mix(in oklch, var(--ink) 45%, transparent);
+  animation: residence-dim 0.4s ease-out both;
+}
+
+.residence-strike {
+  position: absolute;
+  top: 50%;
+  left: -0.1em;
+  right: -0.1em;
+  height: 0.08em;
+  background: var(--seeker);
+  transform-origin: left center;
+  animation: residence-strike-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.residence-cell {
+  fill: var(--ink);
+}
+
+.residence-geo {
+  fill: var(--seeker);
+}
+
+.residence-region {
+  fill: none;
+  stroke: var(--seeker);
+  stroke-width: 2px;
+}
+
+.residence-station {
+  fill: var(--paper);
+  stroke: var(--ink);
+  stroke-width: 0.2;
+}
+
+.residence-label {
+  fill: var(--ink);
+  paint-order: stroke;
+  stroke: var(--paper);
+  stroke-width: 0.35;
+  font-weight: 700;
+}
+
+.residence-town {
+  fill: var(--seeker);
+}
+
+.residence-toggle {
+  transition: background-color 150ms ease-out, color 150ms ease-out;
+}
+
+.residence-toggle:hover,
+.residence-toggle[aria-pressed="true"] {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.residence-toggle:focus-visible {
+  outline: 3px solid var(--seeker);
+  outline-offset: 2px;
+}
+
+.residence-bar {
+  transform-origin: left center;
+  animation: residence-strike-in 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* 発表モード：数をさらに大きくする */
+html.stage .residence-count {
+  font-size: clamp(1.6rem, 4.2vw, 3.25rem);
+  line-height: 1.1;
+}
+
+@keyframes residence-row-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.5rem);
+  }
+}
+
+@keyframes residence-dim {
+  from {
+    color: var(--ink);
+  }
+}
+
+@keyframes residence-strike-in {
+  from {
+    transform: scaleX(0);
+  }
+}
