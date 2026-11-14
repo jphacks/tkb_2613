@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { messages } from "@/lib/messages";
 import type { Clue } from "@/types/clue";
 import type { Conclusion } from "@/types/diagnose";
-import type { ProfileCandidateSet } from "@/types/profile";
+import { PROFILE_CATEGORIES, PROFILE_CATEGORY_LABELS, PROFILE_DIAGNOSED_ATTRIBUTES, type ProfileCandidateSet } from "@/types/profile";
 
 import { ConclusionBoard } from "./ConclusionBoard";
 
@@ -185,9 +185,9 @@ describe("ConclusionBoard", () => {
     expect(screen.getByText(/これは別の日の投稿だと書いてある/)).toBeInTheDocument();
   });
 
-  it("shows only candidate attributes and keeps direct and combined provenance on one value", () => {
-    const firstPost = { post_id: CLUE.post_id, clue_index: null, required: true, source: "post_text" as const, excerpt: "私の勤務先は青空社です" };
-    const secondPost = { ...firstPost, post_id: "at://did:plc:test/app.bsky.feed.post/second", excerpt: "青空社の正式社名は株式会社青空" };
+  it("renders all 4 category headings and 29 attributes in unified mode, keeping direct and combined provenance", () => {
+    const firstPost = { post_id: CLUE.post_id, clue_index: 0, required: true, source: "post_text" as const, excerpt: "私の勤務先は青空社です" };
+    const secondPost = { ...firstPost, clue_index: null, post_id: "at://did:plc:test/app.bsky.feed.post/second", excerpt: "青空社の正式社名は株式会社青空" };
     const assessment = {
       minimal_scope: "bluesky" as const, offline_subtype: null, psychological_resistance: null, persona_context: null,
       inference_ease: null, inference_ease_basis: null, harm_severity: null, harm_scenario: null,
@@ -201,18 +201,42 @@ describe("ConclusionBoard", () => {
         { evidence: [firstPost, secondPost], confidence: 0.68, provenance: "combined_inference" as const },
       ], assessment, observed_at: null, counter_evidence: [],
     };
-    const candidateSet: ProfileCandidateSet = {
-      attribute: "employer_name", status: "candidate", candidates: [candidate], candidate_pool: [candidate], reason: null, conflicting_evidence: [],
-    };
-    const unknownSet: ProfileCandidateSet = {
-      attribute: "school", status: "unknown", candidates: [], candidate_pool: [], reason: "no_grounded_rule", conflicting_evidence: [],
-    };
-    render(<ConclusionBoard clues={[]} conclusions={[]} profileClaims={[candidateSet, unknownSet]} />);
+    const allSets: ProfileCandidateSet[] = PROFILE_DIAGNOSED_ATTRIBUTES.map((attribute) => (
+      attribute === "employer_name"
+        ? { attribute, status: "candidate", candidates: [candidate], candidate_pool: [candidate], reason: null, conflicting_evidence: [] }
+        : { attribute, status: "unknown", candidates: [], candidate_pool: [], reason: "no_grounded_rule", conflicting_evidence: [] }
+    ));
+    const { container } = render(<ConclusionBoard clues={[CLUE]} conclusions={[]} profileClaims={allSets} />);
 
+    for (const category of PROFILE_CATEGORIES) {
+      expect(screen.getByRole("heading", { name: PROFILE_CATEGORY_LABELS[category] })).toBeInTheDocument();
+    }
     expect(screen.getAllByText("自分で直接公開")).toHaveLength(2);
     expect(screen.getAllByText("投稿の組み合わせから推定")).toHaveLength(2);
     expect(screen.getAllByText("株式会社青空")).toHaveLength(1);
-    expect(screen.queryByText("通学先（大学・キャンパス・学校）")).not.toBeInTheDocument();
+    expect(screen.getByText("通学先（大学・キャンパス・学校）")).toBeInTheDocument();
+    expect(screen.getAllByText(messages.board.unknown)).toHaveLength(28);
+    expect(screen.queryByRole("heading", { name: "プロフィール候補" })).not.toBeInTheDocument();
+    expect(within(screen.getByRole("list", { name: messages.board.evidence })).getAllByRole("listitem")).toHaveLength(1);
+    expect(container.querySelectorAll("svg.red-strings path")).toHaveLength(1);
+  });
+
+  it("marks broken attributes as unknown in unified mode", () => {
+    const allSets: ProfileCandidateSet[] = PROFILE_DIAGNOSED_ATTRIBUTES.map((attribute) => (
+      { attribute, status: "unknown", candidates: [], candidate_pool: [], reason: "no_grounded_rule", conflicting_evidence: [] }
+    ));
+    render(<ConclusionBoard clues={[CLUE]} conclusions={[]} profileClaims={allSets} unknown={["employer_name"]} />);
+
+    expect(screen.getByText(messages.board.found)).toBeInTheDocument();
+    expect(screen.getByText(messages.board.unknownNote)).toBeInTheDocument();
+    expect(screen.getAllByText(messages.board.unknown)).toHaveLength(29);
+  });
+
+  it("shows profileClaimsError banner when profile_claims could not be read", () => {
+    render(<ConclusionBoard clues={[]} conclusions={[]} profileClaims={[]} profileClaimsError />);
+
+    expect(screen.getByRole("alert")).toHaveTextContent(messages.board.profileClaimsError);
+    expect(screen.queryByText(messages.board.empty)).not.toBeInTheDocument();
   });
 
   it("shows names only in provenance-labelled profile candidate cards, not legacy R8 conclusions", () => {

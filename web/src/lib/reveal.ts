@@ -1,6 +1,7 @@
 import type { Clue, ClueType, Region } from "@/types/clue";
 import type { Conclusion } from "@/types/diagnose";
 import type { Post, PostImage } from "@/types/post";
+import type { ProfileCandidateSet } from "@/types/profile";
 
 /** 診断のあとに叩きつける証拠の最大枚数 */
 export const MAX_REVEAL = 8;
@@ -57,6 +58,23 @@ function dangerRank(type: ClueType): number {
   return i === -1 ? DANGER_ORDER.length : i;
 }
 
+function profileClueIndexSet(profileClaims: readonly ProfileCandidateSet[]): Set<number> {
+  const used = new Set<number>();
+  for (const claimSet of profileClaims) {
+    for (const candidate of claimSet.candidates) {
+      for (const reference of candidate.evidence) {
+        if (typeof reference.clue_index === "number") used.add(reference.clue_index);
+      }
+      for (const path of candidate.evidence_paths) {
+        for (const reference of path.evidence) {
+          if (typeof reference.clue_index === "number") used.add(reference.clue_index);
+        }
+      }
+    }
+  }
+  return used;
+}
+
 /**
  * 叩きつける証拠を選ぶ。推定の根拠になったものを先に、そのあとは危ない種類の順に並べる。
  * 同じ種類で同じ値の手がかり（別の投稿の「夜勤明け」など）は 1 枚にまとめる。
@@ -65,9 +83,13 @@ function revealItems(
   posts: readonly Post[],
   clues: readonly Clue[],
   conclusions: readonly Conclusion[],
+  profileClaims: readonly ProfileCandidateSet[] = [],
 ): RevealItem[] {
   const byId = new Map(posts.map((p) => [p.post_id, p]));
-  const used = new Set(conclusions.flatMap((c) => c.clue_indices));
+  const used = new Set([
+    ...conclusions.flatMap((c) => c.clue_indices),
+    ...profileClueIndexSet(profileClaims),
+  ]);
   const items = clues.flatMap((clue, clueIndex): RevealItem[] => {
     const post = byId.get(clue.post_id);
     if (!post) return [];
@@ -83,8 +105,9 @@ export function pickReveal(
   clues: readonly Clue[],
   conclusions: readonly Conclusion[],
   max: number = MAX_REVEAL,
+  profileClaims: readonly ProfileCandidateSet[] = [],
 ): RevealItem[] {
-  const items = revealItems(posts, clues, conclusions);
+  const items = revealItems(posts, clues, conclusions, profileClaims);
   items.sort(
     (a, b) =>
       Number(b.used) - Number(a.used) ||
@@ -110,10 +133,19 @@ export function pickSpotlight(
   clues: readonly Clue[],
   conclusions: readonly Conclusion[],
   excludedPostIds: ReadonlySet<string> = new Set(),
+  profileClaims: readonly ProfileCandidateSet[] = [],
 ): RevealItem[] {
   const seen = new Set<ClueType>();
-  const inferredName = conclusions.find((c) => NAME_ATTRIBUTES.includes(c.attribute) && isLikelyNameText(c.value))?.value.replace(/\s+/g, "") ?? null;
-  return revealItems(posts, clues, conclusions)
+  const profileNameCandidate =
+    profileClaims.find((set) => set.attribute === "full_name" && set.candidates.length === 1)?.candidates[0]?.value ??
+    profileClaims.find((set) => (set.attribute === "given_name" || set.attribute === "nickname") && set.candidates.length === 1)?.candidates[0]?.value ??
+    null;
+  const inferredName = (
+    profileNameCandidate ??
+    conclusions.find((c) => NAME_ATTRIBUTES.includes(c.attribute) && isLikelyNameText(c.value))?.value ??
+    null
+  )?.replace(/\s+/g, "") ?? null;
+  return revealItems(posts, clues, conclusions, profileClaims)
     .filter((item) => {
       if (excludedPostIds.has(item.clue.post_id)) return false;
       if (item.clue.type === "face") {

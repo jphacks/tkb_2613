@@ -1,7 +1,7 @@
 import { act, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { messages } from "@/lib/messages";
+import { attributeLabel, messages } from "@/lib/messages";
 import type { Clue } from "@/types/clue";
 import type { Conclusion } from "@/types/diagnose";
 import type { Post } from "@/types/post";
@@ -258,5 +258,31 @@ describe("Reveal", () => {
     const { container } = render(<Reveal posts={[POST]} clues={[]} conclusions={[]} />);
 
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it("shows non-name 29-attribute profile claims and marks their clue_index evidence as used", () => {
+    const assessment = {
+      minimal_scope: "bluesky" as const, offline_subtype: null, psychological_resistance: null, persona_context: null,
+      inference_ease: null, inference_ease_basis: null, harm_severity: null, harm_scenario: null,
+      harm_prerequisites: [], harm_status: "unknown" as const,
+    };
+    const evidence = [{ post_id: POST.post_id, clue_index: 0, required: true, source: "post_text" as const, excerpt: "夜勤明け" }];
+    const claimSet: ProfileCandidateSet = {
+      attribute: "routine",
+      status: "candidate",
+      candidates: [{
+        rank: 1, value: "夜勤シフト", confidence: 0.7, status: "weak",
+        evidence, evidence_paths: [{ evidence, confidence: 0.7, provenance: "direct_disclosure" }],
+        assessment, observed_at: null, counter_evidence: [],
+      }],
+      candidate_pool: [],
+      reason: null,
+      conflicting_evidence: [],
+    };
+    render(<Reveal posts={[POST]} clues={[TEXT_CLUE]} conclusions={[]} profileClaims={[claimSet]} />);
+
+    expect(within(screen.getByRole("list", { name: t.conclusionsLabel })).getByText(attributeLabel("routine"))).toBeInTheDocument();
+    expect(within(screen.getByRole("list", { name: t.conclusionsLabel })).getByText("夜勤シフト")).toBeInTheDocument();
+    expect(within(screen.getByRole("list", { name: t.evidenceLabel })).getByText(t.used)).toBeInTheDocument();
   });
 });
