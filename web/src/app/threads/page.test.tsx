@@ -85,6 +85,41 @@ describe("Threads review flow without a model", () => {
     await waitFor(() => expect(screen.queryByText("@reviewer")).not.toBeInTheDocument());
     expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining("/diagnose"), expect.anything());
   });
+
+  it("previews the first image and labels image diagnosis when the flag is enabled", async () => {
+    const imageUrl = "https://scontent.cdninstagram.com/photo.jpg?token=redacted";
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path.endsWith("/config")) return json({
+        mock_enabled: false,
+        gpu_demo_enabled: false,
+        live_enabled: true,
+        max_posts: 30,
+        image_diagnosis_enabled: true,
+      });
+      if (path.endsWith("/session")) return json({ username: "reviewer", mock: false });
+      if (path.endsWith("/diagnosis")) return json({ detail: "none" }, 404);
+      if (path.endsWith("/posts")) return json({
+        mock: false,
+        posts: [{
+          post_id: "threads:image-1",
+          text: "画像付き投稿",
+          created_at: "2026-11-12T12:00:00+09:00",
+          images: [{ index: 0, url: imageUrl, alt: "", width: 1, height: 1 }],
+        }],
+      });
+      throw new Error(`unexpected fetch: ${path}`);
+    }));
+
+    const { container } = render(<ThreadsPage />);
+    expect(await screen.findByText("@reviewer")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "本人投稿を確認" }));
+
+    expect(await screen.findByText("画像つき診断")).toBeInTheDocument();
+    expect(container.querySelector(`img[src="${imageUrl}"]`)).toBeInTheDocument();
+    fireEvent.click(screen.getByText("取得情報の詳細"));
+    expect(screen.getByText(/画像1枚目をプレビュー/)).toBeInTheDocument();
+  });
 });
 
 describe("Japanese is the default display language", () => {

@@ -30,13 +30,14 @@ class FakeExtractor:
     def __init__(self, reachable: bool = True) -> None:
         self.reachable = reachable
         self.read: list[str] = []
+        self.images: list[list[bytes]] = []
 
     async def model_reachable(self, timeout_s: float) -> bool:
         return self.reachable
 
     async def extract_post(self, post: Post, images: list[bytes]) -> list[Clue]:
-        assert images == []  # 写真は読まない
         self.read.append(post.post_id)
+        self.images.append(images)
         return [
             Clue(
                 post_id=post.post_id,
@@ -111,6 +112,7 @@ async def test_live_posts_are_read_by_the_same_vllm_as_bluesky(
 
     assert response.status_code == 200
     assert extractor.read == ["threads:1"]
+    assert extractor.images == [[]]
     [kwargs] = calls
     assert kwargs["text_backend"] == "vlm"
     assert kwargs["vlm_base_url"] == VLM["vlm_base_url"]
@@ -145,6 +147,54 @@ async def test_ollama_can_still_be_chosen_by_setting(monkeypatch: pytest.MonkeyP
 
 def test_the_default_text_backend_is_vllm() -> None:
     assert Settings(_env_file=None).threads_text_backend == "vlm"
+    assert Settings(_env_file=None).threads_image_diagnosis is False
+
+
+@pytest.mark.anyio
+async def test_image_flag_passes_first_image_to_existing_vllm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    extractor = FakeExtractor()
+    requested_images: list[bool] = []
+
+    async def fetch(
+        token: str, limit: int, *, include_images: bool = False
+    ) -> tuple[str, list[Post]]:
+        del token, limit
+        requested_images.append(include_images)
+        post = to_post(
+            {
+                "id": "1",
+                "text": "架空の本文",
+                "timestamp": "2026-11-11T00:00:00+09:00",
+                "media_type": "IMAGE",
+                "media_url": "https://scontent.cdninstagram.com/photo.jpg",
+            },
+            include_image=True,
+        )
+        assert post is not None
+        return "42", [post]
+
+    async def fetch_images(post: Post) -> list[bytes]:
+        assert len(post.images) == 1
+        return [b"image-bytes"]
+
+    monkeypatch.setattr(threads, "fetch_own_posts", fetch)
+    session = threads.ThreadsSession(
+        token="test-only-token",  # noqa: S106
+        owner_id="42",
+        username="tester",
+        expires_at=float("inf"),
+    )
+    posts = await threads._own_posts(session, _settings(threads_image_diagnosis=True))
+    extracted = [
+        item async for item in threads.extract_posts(extractor, posts, fetch_images, concurrency=1)
+    ]
+
+    assert requested_images == [True]
+    assert extractor.images == [[b"image-bytes"]]
+    assert extracted[0].error is None
+    assert posts[0].images[0].index == 0
 
 
 @pytest.mark.anyio

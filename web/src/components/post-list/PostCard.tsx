@@ -41,7 +41,7 @@ function PostPhoto({ image, clues }: { image: PostImage; clues: readonly Clue[] 
   return (
     <div
       className="relative overflow-hidden rounded-sm border border-ink/15 bg-paper-deep"
-      style={{ aspectRatio: `${image.width} / ${image.height}` }}
+      style={{ aspectRatio: `${size?.width ?? image.width} / ${size?.height ?? image.height}` }}
     >
       {failed ? (
         <p className="flex h-full items-center justify-center p-3 text-center text-sm text-ink/60">

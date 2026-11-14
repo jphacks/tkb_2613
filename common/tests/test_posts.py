@@ -37,6 +37,15 @@ def test_accepts_post_without_images() -> None:
     assert Post.model_validate({**POST, "images": []}).images == []
 
 
+def test_accepts_meta_cdn_image_only_for_threads_post() -> None:
+    image = {**IMAGE, "url": "https://scontent.cdninstagram.com/photo.jpg"}
+    threads = Post.model_validate({**POST, "post_id": "threads:123", "images": [image]})
+    assert threads.images[0].url == image["url"]
+
+    with pytest.raises(ValidationError):
+        Post.model_validate({**POST, "images": [image]})
+
+
 @pytest.mark.parametrize(
     ("label", "data"),
     [
