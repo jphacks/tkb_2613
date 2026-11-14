@@ -8,6 +8,7 @@ data-prep で使う公開データ。データ本体はリポジトリに含め�
 | 郵便番号データ（住所の郵便番号、1レコード1行、UTF-8形式） | 日本郵便株式会社 | https://www.post.japanpost.jp/service/search/zipcode/download/utf/zip/utf_ken_all.zip | 「郵便番号データに限っては日本郵便株式会社は著作権を主張しません。自由に配布していただいて結構です。」（[説明書](https://www.post.japanpost.jp/zipcode/dl/readme.html)） | 2026-10-23 |
 | 市区町村別メッシュ・コード一覧（全国01〜47。関東向け既存処理は11〜14） | 総務省統計局 | https://www.stat.go.jp/data/mesh/csv/01.csv〜47.csv（都道府県別） | [統計局ホームページの利用ルール](https://www.stat.go.jp/info/riyou.html)（公共データ利用規約 第1.0版に準拠、CC BY 4.0 と互換） | 出典確認 2026-11-14。全国版を取得・生成済み（加工済みParquetはローカルignored出力） |
 | 国土数値情報 鉄道データ（N02、2024年度） | 国土交通省 | https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-N02-2024.html | オープンデータ（[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/deed.ja)） | 2026-10-23 |
+| 国土数値情報 市町村役場等及び公的集会施設データ（P05、第3.0版、2022年4月基準） | 国土交通省 | 詳細 https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-P05-v3_0.html / ZIP https://nlftp.mlit.go.jp/ksj/gml/data/P05/P05-22/P05-22_GML.zip （7.98MB） | 個別ページの「適用する利用規約に基づく（オープンデータ）」に従い、現行サイト規約のPDL1.0で利用。出典と加工表示を記録 | 2026-11-14取得・生成。79,532件を検査、国内mesh gate通過79,529件・47/47県、SQLite 102,424,576 bytes（全てignored） |
 | 令和2年国勢調査 地域メッシュ統計 4次メッシュ（500m）「人口及び世帯」 | 総務省統計局（政府統計の総合窓口 e-Stat） | https://www.e-stat.go.jp/gis （統計GIS のデータダウンロード。ブラウザで取得） | [e-Stat の利用規約](https://www.e-stat.go.jp/terms-of-use)（政府標準利用規約 第2.0版に準拠、CC BY 4.0 と互換） | 2026-10-23 |
 | 学校コード（令和8年5月1日時点・暫定版、CSV） | 文部科学省 | https://www.mext.go.jp/b_menu/toukei/mext_01087.html | [文部科学省ホームページの利用ルール](https://www.mext.go.jp/b_menu/1351168.htm)（公共データ利用規約 第1.0版に準拠、CC BY 4.0 と互換） | 2026-10-25 |
 | 国土数値情報 バス停留所データ（P11、令和4年度版。平成22年度版は使わない） | 国土交通省 | https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-P11-v3_0.html （`P11-22_{11..14}_SHP.zip`） | 「国土数値情報ダウンロードサイトコンテンツ利用規約」に基づく（オープンデータ）。平成22年度版は非商用なので取り込まない | 2026-11-12 |
@@ -25,6 +26,7 @@ data-prep で使う公開データ。データ本体はリポジトリに含め�
 - 郵便番号データ：日本郵便株式会社「郵便番号データ」
 - 出典：総務省統計局「市区町村別メッシュ・コード一覧」（https://www.stat.go.jp/data/mesh/m_itiran.html）を加工して作成
 - 「国土数値情報（鉄道データ）」（国土交通省）（https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-N02-2024.html）を加工して作成
+- 「国土数値情報（市町村役場等及び公的集会施設データ、第3.0版）」（国土交通省）（https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-P05-v3_0.html）、PDL1.0（https://www.digital.go.jp/resources/open_data/public_data_license_v1.0）をもとに作成。所在地属性（P05_004）は破棄し、名称・施設分類・位置・行政区域コードのみ索引化
 - 出典：政府統計の総合窓口（e-Stat）（https://www.e-stat.go.jp/）、総務省統計局「令和2年国勢調査 地域メッシュ統計」を加工して作成
 - 出典：文部科学省「学校コード」（https://www.mext.go.jp/b_menu/toukei/mext_01087.html）を加工して作成
 - 出典：総務省「市外局番の一覧」（https://www.soumu.go.jp/main_content/001072458.doc）を加工して作成
@@ -40,6 +42,17 @@ data-prep で使う公開データ。データ本体はリポジトリに含め�
 `manual/area_codes.csv` は総務省「市外局番の一覧」から 1都3県を含む行を写したもので、上の出典の書き方に従う。
 
 ## 任意POI索引の取込
+
+全国の公的施設候補には国土数値情報P05の2022年版を利用できる。公式ZIPの取得先は `https://nlftp.mlit.go.jp/ksj/gml/data/P05/P05-22/P05-22_GML.zip`。ZIPは外側に都道府県別ZIPを47個含み、各ZIPにはGeoJSON FeatureCollection・Shapefile・メタデータが入る（`_GML.zip` という名称でも、配布ZIP内にGML本文はなくGeoJSONを使う）。2026-11-14の検査で79,532件を確認し、分類コードは1:1,908、2:4,272、3:2,562、4:21,302、5:49,488だった。国内bbox/1km mesh gateで79,529件（47/47県）を索引化し、3件はmesh所属を確認できず除外した。SQLiteは102,424,576 bytes、`area_label` は79,529件すべてに付与できた。primary nameは67,948種類、うち同一名称を持つ複数レコードが15,093件ある。名前検索キーは92,960種類で、そのうち4,546キーが複数POIへ対応し、該当する15,204 POIは曖昧候補として扱う。変換は都道府県を一つずつ読み、47県の存在と属性コードを事前検証してから索引を作成する。入力上限は16 MiB、各都道府県ZIP/entry/GeoJSON上限は16 MiB、全entry展開合計128 MiB、個別Featureは1 MiB。ZIPを展開せずに処理し、絶対/親相対パスを拒否する。
+
+```powershell
+uv run --project data-prep python -m tkb_data_prep.import_ksj_p05 `
+  --input data\raw\P05-22_GML.zip `
+  --output data\processed\national\places.sqlite3 `
+  --mesh-index data\processed\national\muni_mesh.parquet
+```
+
+生成する索引は新規作成のみで、同じ出力がある場合は上書きしない。POI索引schema v3、名称・位置・施設分類コード・自治体コード・source provenanceを保存する。完全所在地は取り込まない。`area_label` はP05行政区域コードを全国mesh Parquet内の自治体コード・自治体名に一意対応できる場合だけ付与し、対応しない場合はnull。日本国内bboxと1km mesh所属ゲートを適用する。出典・加工表示とPDL1.0、元データURL、版年を各sourceへ保存する。P05公式ページは、すべての施設情報を取得できていない可能性に注意を促している。
 
 全国POIのダウンロードやクラウド件数照会は実行しない。データ本体もコミットしない。Overture Placesは全国規模のGeoParquetで、取得/地域別抽出は[公式getting-dataガイド](https://docs.overturemaps.org/getting-data/)に従い、実行前に対象release・取得量・空き容量を確認する。次のアダプタは、利用者が別途準備したローカルGeoParquetをPyArrowのbatch iteratorで処理し、GeoJSONL中間ファイルを作らず既存SQLite索引へ書く。ファイルには `theme` と `type` の列を残し、値がそれぞれ `places` / `place` の行だけを対象にする。したがって住所テーマの点は取り込まれない。ジオメトリはWKB Pointに限定し、住所の国コードはJPのみ受け付ける。JP以外または複数国が含まれるレコードは拒否する。国コード欠落を許可する `--allow-country-missing` は、すべての行に日本の保守的境界（経度122〜154度、緯度20〜46度、境界を含む）を適用し、範囲外を拒否する。さらに必須の `muni_mesh.parquet` を一度ロードし、既存の `jismesh` 変換で得る1km三次mesh codeが全国の市区町村mesh一覧に含まれることを要求する。既定pathは `data/processed/national/muni_mesh.parquet` で、存在しない場合はfail closed。出力を使う前に `make data-national-gazetteer` で作成するか `--mesh-index` で別の全国mesh表を指定する。この判定は行政区域ポリゴンとの正確な点内判定ではなく1km cell membershipであり、海岸沿いでは自治体と海が同じcellに入る場合がある。つまりbboxとmesh gateは遠方の国外点を除外する保守的な候補filterで、海岸線境界を証明しない。[公式Place schema](https://docs.overturemaps.org/schema/reference/places/place/)の `addresses[].locality` から、日本語の市区町村接尾辞で明示された一意の値だけを粗い `area_label` として保存する（Address schema上の `locality` は市町村または近隣地区を含み得るため、該当形式でない・複数値が競合する場合はnull）。`freeform`・番地・郵便番号等は保存しない。明示的な私有住居カテゴリ（`home`, `house`, `private_house`, `private_residence`, `residence`, `residential_building`, `residential`, `apartment`, `apartments`, `dwelling`）も除外する。
 

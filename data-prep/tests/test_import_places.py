@@ -13,6 +13,7 @@ from tkb_data_prep.import_places import (
     DEFAULT_MESH_INDEX,
     DEFAULT_OUTPUT,
     MeshIndexError,
+    _validate_source_urls,
     import_geojsonl,
     import_geoparquet,
     main,
@@ -36,6 +37,7 @@ def _feature(
     country: str | None,
     license_name: str | None,
     coordinates: tuple[float, float] = (139.0, 35.0),
+    source_url: str | None = None,
 ) -> dict[str, object]:
     source = {
         "dataset": "provider-dataset",
@@ -44,6 +46,8 @@ def _feature(
     }
     if license_name is not None:
         source["license"] = license_name
+    if source_url is not None:
+        source["source_url"] = source_url
     properties: dict[str, object] = {
         "id": place_id,
         "names": {"primary": "中央施設", "common": {"ja": ["ちゅうおう"]}},
@@ -101,6 +105,68 @@ def test_stream_import_indexes_only_licensed_japan_records(tmp_path) -> None:
         )
     assert matches == [("places:licensed",)]
     assert stored["sources"][0]["license_id"] is None
+
+
+@pytest.mark.parametrize(
+    "untrusted_url",
+    [
+        "javascript:alert(1)",
+        "http://example.com/poi",
+        "https://127.0.0.1/private",
+        "https://192.168.1.1/private",
+        "https://[::1]/private",
+        "https://user:password@example.com/poi",
+        "file:///C:/Users/private.txt",
+    ],
+)
+def test_untrusted_imported_source_urls_are_not_persisted(
+    tmp_path: Path, untrusted_url: str
+) -> None:
+    source = tmp_path / "untrusted-url.geojsonl"
+    source.write_text(
+        json.dumps(
+            _feature(
+                "untrusted-url",
+                country="JP",
+                license_name="PDL1.0",
+                source_url=untrusted_url,
+            )
+        ),
+        encoding="utf-8",
+    )
+    output = tmp_path / "places.sqlite3"
+    import_geojsonl(
+        source,
+        output,
+        mesh_index_path=_mesh_index(tmp_path),
+        provider="Provider",
+        dataset="places",
+    )
+    with sqlite3.connect(output) as db:
+        stored = json.loads(db.execute("SELECT record_json FROM poi_place").fetchone()[0])
+    assert stored["sources"][0]["source_url"] is None
+
+
+@pytest.mark.parametrize(
+    "untrusted_url",
+    [
+        "javascript:alert(1)",
+        "http://example.com/poi",
+        "https://127.0.0.1/private",
+        "https://user:password@example.com/poi",
+        "https://localhost/private",
+        "file:///C:/Users/private.txt",
+    ],
+)
+def test_trusted_source_url_mapping_rejects_unsafe_urls(untrusted_url: str) -> None:
+    with pytest.raises(ValueError, match="trusted source URLs"):
+        _validate_source_urls({"dataset": untrusted_url})
+
+
+def test_trusted_source_url_mapping_accepts_public_https() -> None:
+    assert _validate_source_urls({"dataset": "https://nlftp.mlit.go.jp/ksj/"}) == {
+        "dataset": "https://nlftp.mlit.go.jp/ksj/"
+    }
 
 
 def test_import_indexes_explicit_space_dot_width_and_kana_variants(tmp_path) -> None:
@@ -350,20 +416,20 @@ def test_geoparquet_batches_filter_country_private_address_and_unknown_license(t
     output = tmp_path / "places.sqlite3"
     mesh_index = _mesh_index(tmp_path)
 
-    assert import_geoparquet(
-        source,
-        output,
-        mesh_index_path=mesh_index,
-        provider="Overture Maps",
-        dataset="places",
-        batch_size=2,
-    ) == 2
+    assert (
+        import_geoparquet(
+            source,
+            output,
+            mesh_index_path=mesh_index,
+            provider="Overture Maps",
+            dataset="places",
+            batch_size=2,
+        )
+        == 2
+    )
     with sqlite3.connect(output) as db:
         ids = {row[0] for row in db.execute("SELECT place_id FROM poi_place")}
-        aliases = {
-            row[0]
-            for row in db.execute("SELECT place_id FROM poi_alias")
-        }
+        aliases = {row[0] for row in db.execute("SELECT place_id FROM poi_alias")}
         stored = json.loads(
             db.execute(
                 "SELECT record_json FROM poi_place WHERE place_id = ?", ("places:jp-ok",)
@@ -427,10 +493,29 @@ def test_geoparquet_requires_partition_columns_and_refuses_overwrite(tmp_path) -
     output = tmp_path / "exists.sqlite3"
     output.write_bytes(b"keep")
     with pytest.raises(FileExistsError):
-        import_geoparquet(
-            valid, output, mesh_index_path=mesh_index, provider="P", dataset="D"
-        )
+        import_geoparquet(valid, output, mesh_index_path=mesh_index, provider="P", dataset="D")
     assert output.read_bytes() == b"keep"
+
+
+def test_interrupted_import_keeps_incomplete_schema_version(tmp_path: Path) -> None:
+    source = tmp_path / "interrupted.geojsonl"
+    valid = _feature("before-error", country="JP", license_name="CC-BY-4.0")
+    source.write_text(json.dumps(valid) + "\nnot-json\n", encoding="utf-8")
+    output = tmp_path / "partial.sqlite3"
+
+    with pytest.raises(ValueError, match="invalid GeoJSONL at line 2"):
+        import_geojsonl(
+            source,
+            output,
+            mesh_index_path=_mesh_index(tmp_path),
+            provider="Provider",
+            dataset="places",
+            batch_size=1,
+        )
+
+    with sqlite3.connect(output) as db:
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 0
+        assert db.execute("SELECT count(*) FROM poi_place").fetchone()[0] == 1
 
 
 def test_cli_default_and_help_use_api_gazetteer_directory(monkeypatch, capsys) -> None:

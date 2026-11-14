@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import sqlite3
 from collections.abc import Iterator
+from contextlib import closing
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import pyarrow.parquet as pq
 from shapely import wkb
@@ -80,6 +83,7 @@ def _is_private(properties: dict[str, Any]) -> bool:
     basic = properties.get("basic_category")
     if isinstance(basic, str):
         values.add(basic.casefold().replace("-", "_").replace(" ", "_"))
+
     def collect_categories(value: Any) -> None:
         if isinstance(value, str):
             values.add(value.casefold().replace("-", "_").replace(" ", "_"))
@@ -191,6 +195,7 @@ def _source_records(
     license_map: dict[str, str],
     version: str | None,
     attribution: str | None,
+    trusted_source_urls: dict[str, str],
 ) -> list[dict[str, Any]]:
     sources: list[dict[str, Any]] = []
     if isinstance(raw_sources, list):
@@ -210,6 +215,9 @@ def _source_records(
                     if source.get("version") or version
                     else None,
                     "attribution": attribution,
+                    # Raw imported URLs are user-controlled data. Only callers that
+                    # supply a trusted per-dataset mapping may expose a clickable URL.
+                    "source_url": trusted_source_urls.get(source_dataset),
                 }
             )
     if not sources:
@@ -222,9 +230,43 @@ def _source_records(
                 "record_id": place_id,
                 "version": version,
                 "attribution": attribution,
+                "source_url": trusted_source_urls.get(dataset),
             }
         )
     return sources
+
+
+def _validate_source_urls(values: dict[str, str] | None) -> dict[str, str]:
+    """Validate trusted source links before persisting them for UI rendering."""
+    validated: dict[str, str] = {}
+    for dataset, value in (values or {}).items():
+        if not dataset or not isinstance(value, str) or not value.strip():
+            raise ValueError("trusted source URL mapping must contain nonempty strings")
+        parsed = urlsplit(value)
+        host = parsed.hostname
+        if (
+            parsed.scheme.casefold() != "https"
+            or not host
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.port not in (None, 443)
+        ):
+            raise ValueError("trusted source URLs must use public HTTPS without credentials")
+        normalized_host = host.casefold().rstrip(".")
+        if normalized_host in {"localhost", "localhost.localdomain"} or normalized_host.endswith(
+            (".localhost", ".local", ".internal")
+        ):
+            raise ValueError("trusted source URLs must use a public host")
+        try:
+            address = ipaddress.ip_address(normalized_host)
+        except ValueError:
+            if "." not in normalized_host:
+                raise ValueError("trusted source URLs must use a public host") from None
+        else:
+            if not address.is_global:
+                raise ValueError("trusted source URLs must use a public host")
+        validated[dataset] = value
+    return validated
 
 
 def _import_features(
@@ -237,6 +279,7 @@ def _import_features(
     version: str | None = None,
     license_map: dict[str, str] | None = None,
     attribution: str | None = None,
+    trusted_source_urls: dict[str, str] | None = None,
     country: str = "JP",
     allow_country_missing: bool = False,
     batch_size: int = 1000,
@@ -246,11 +289,13 @@ def _import_features(
         raise ValueError("batch_size must be positive")
     if country.strip().upper() != "JP":
         raise ValueError("the place index currently supports country=JP only")
+    trusted_urls = _validate_source_urls(trusted_source_urls)
     if output_path.exists():
         raise FileExistsError(f"refusing to overwrite existing index: {output_path}")
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(output_path) as db:
-        db.execute(f"PRAGMA user_version = {PLACE_INDEX_SCHEMA_VERSION}")
+    with closing(sqlite3.connect(output_path)) as db:
+        # A crash after a batch commit must not make a partial index appear usable.
+        db.execute("PRAGMA user_version = 0")
         db.executescript(
             """
             CREATE TABLE poi_place (
@@ -324,6 +369,7 @@ def _import_features(
                 license_map=license_map or {},
                 version=version,
                 attribution=attribution,
+                trusted_source_urls=trusted_urls,
             )
             record = {
                 "place_id": place_id,
@@ -361,6 +407,7 @@ def _import_features(
             count += 1
             if count % batch_size == 0:
                 db.commit()
+        db.execute(f"PRAGMA user_version = {PLACE_INDEX_SCHEMA_VERSION}")
         db.commit()
         return count
 
