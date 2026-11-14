@@ -10,6 +10,8 @@ import type { DiagnoseEvent } from "@/types/diagnose";
 import type { Post } from "@/types/post";
 import { PROFILE_DIAGNOSED_ATTRIBUTES, type ProfileAttribute, type ProfileCandidateSet } from "@/types/profile";
 
+import { SAMPLE_RESIDENCE } from "@/fixtures/residence";
+
 import { DiagnosePanel } from "./DiagnosePanel";
 
 const d = messages.diagnose;
@@ -131,6 +133,40 @@ describe("DiagnosePanel", () => {
     expect(screen.getAllByText("保存済みの投稿")).toHaveLength(3);
     expect(screen.getByRole("list", { name: messages.risky.listLabel })).toBeInTheDocument();
     expect(diagnose).not.toHaveBeenCalled();
+  });
+
+  it("shows the residence map instead of the old narrowing when the diagnosis has one", async () => {
+    const savedPost = post(1, "保存済みの投稿");
+    vi.mocked(getSession).mockResolvedValue(ALICE);
+    vi.mocked(getDiagnosis).mockResolvedValue({
+      posts: [savedPost], clues: [clue(savedPost.post_id, "毎週火曜はジム")],
+      profile_claims: profileClaimsWith(),
+      plan: { delete: [], broken: [], after: profileClaimsWith(), posts: [] },
+      residence: SAMPLE_RESIDENCE,
+    });
+    render(<SessionProvider><DiagnosePanel /></SessionProvider>);
+
+    expect(await screen.findByText(messages.residence.heading)).toBeInTheDocument();
+    expect(screen.queryByText(messages.narrowing.heading)).toBeNull();
+  });
+
+  it("streams the residence event after the plan", async () => {
+    const first = post(1, "千代田線、また止まってる…");
+    vi.mocked(diagnose).mockImplementation(async function* () {
+      yield { event: "post", post: first };
+      yield { event: "clues", post_id: first.post_id, clues: [], error: null };
+      yield { event: "conclusions", clues: [], profile_claims: profileClaimsWith() };
+      yield { event: "plan", delete: [], broken: [], after: profileClaimsWith(), posts: [] };
+      yield { event: "residence", residence: { ...SAMPLE_RESIDENCE, evidence: [{ ...SAMPLE_RESIDENCE.evidence[0], clue_indices: [5] }] } };
+      yield { event: "done", posts_seen: 1 };
+    });
+    vi.mocked(getSession).mockResolvedValue(ALICE);
+    render(<SessionProvider><DiagnosePanel /></SessionProvider>);
+    fireEvent.click(await screen.findByRole("button", { name: d.start }));
+
+    // 根拠の手がかりの番号が範囲の外なら、付属品として出さない（診断は止めない）
+    expect(await screen.findByRole("region", { name: b.heading })).toBeInTheDocument();
+    expect(screen.queryByText(messages.residence.heading)).toBeNull();
   });
 
   it("puts the delete summary above the board and folds the read posts", async () => {
