@@ -150,3 +150,23 @@ truth claim に `evidence_paths` が付く場合は、予測の証拠経路と�
 - R5（収集地区）：住所の一部「文京区千駄木x丁目」と土曜朝の「燃えるゴミ出し忘れた」で `文京区 千駄木3～5丁目`
 - 居住地域（residential_area）：避難所（千駄木小学校）・バス停（千駄木三丁目、都営バス）・子どもの学校（林町小学校）の学区の3経路が `文京区` で重なる。確からしさは経路の最大（0.65、weak）
 - 避難所・バス停・学区の表は区市町村までしか持たないので、町まで重なるのは R5 だけ
+
+## photo_place_real_eval.py
+
+手元の写真（`eval/local/`）に対する OCR・VLM の出力を正解表と比べ、写真場所推定の鎖（①観測 → ②POI・駅の照合 → ③一意性 → ④居住地域の経路）がどの段で切れるかを画像ごとに出す。正解表 `eval/local/photo_place_gt.json` は写っている場所関係の手がかり（`type` / `value`）と、期待する場所を目視で書いたもの（gitignore 対象）。判読が難しい手がかりは `"uncertain": true` で再現率の分母から外す。
+
+```bash
+# 乾式：作ってある手がかりのJSONを読む（GPU・通信は使わない）
+uv run python eval/photo_place_real_eval.py --posts eval/local/demo_posts.json \
+  --gt eval/local/photo_place_gt.json --clues-file eval/local/demo_posts.agent_simulated.json
+
+# 実モード：detect を呼ぶ。GPUサーバー（VLM と OCR）の起動と VLM_BASE_URL / OCR_BASE_URL の設定が必要
+uv run python eval/photo_place_real_eval.py --posts eval/local/demo_posts.json \
+  --gt eval/local/photo_place_gt.json --live --out eval/local/real_eval_result.json
+```
+
+- `--live` で接続できないときは、理由を標準エラーに出して終了コード2で止まる。画像はローカルファイルから読み、detect の既存クライアントとガードを通してチームのサーバーにだけ送る
+- 出力はJSON（`--out` で保存）。ファイル名、post_id、手がかりの `type` と `value`、段ごとの判定だけで、画像・本文・キーは含まない
+- 値の比較は NFKC・大小文字・空白の差を無視し、短い側（3文字以上）が含まれていれば一致とする。`partial` の手がかりと電話・住所・郵便番号は `x` を任意1文字として扱う
+- `first_break_counts` が切れた段の集計。期待する場所のない画像は、候補を返したら `spurious_candidate`
+- 地理の表（`data/processed/national/`）が必要。POI 索引は公的施設中心なので、店舗・商業施設の名前だけでは候補が出ないことがある
