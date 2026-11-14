@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import { messages } from "@/lib/messages";
+import { postImageSrc } from "@/lib/post-image";
 import { type Size, toPercentBox } from "@/lib/region";
 import type { Clue } from "@/types/clue";
 import type { Post, PostImage } from "@/types/post";
@@ -50,7 +51,7 @@ function PostPhoto({ image, clues }: { image: PostImage; clues: readonly Clue[] 
         // Bluesky の CDN の画像をそのまま表示するので next/image は使わない
         // eslint-disable-next-line @next/next/no-img-element
         <img
-          src={image.url}
+          src={postImageSrc(image)}
           alt={name}
           loading="lazy"
           referrerPolicy="no-referrer"

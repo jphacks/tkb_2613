@@ -96,13 +96,81 @@ def test_completed_diagnosis_can_be_read_again_only_in_its_session(client: TestC
     streamed_claims = _events(result.text)[-3][1]
     assert streamed_claims["external_lookup_status"] == "fixture"
     assert data["profile_claims"] == streamed_claims["profile_claims"]
+    assert data["profile_relations"] == streamed_claims["profile_relations"]
+    evidence_paths = [
+        path
+        for claim in streamed_claims["profile_claims"]
+        for candidate in claim["candidate_pool"]
+        for path in candidate["evidence_paths"]
+    ]
+    assert evidence_paths
+    assert {path["provenance"] for path in evidence_paths} <= {
+        "direct_disclosure",
+        "combined_inference",
+        "unclassified",
+    }
+    restored_paths = [
+        path
+        for claim in data["profile_claims"]
+        for candidate in claim["candidate_pool"]
+        for path in candidate["evidence_paths"]
+    ]
+    assert restored_paths == evidence_paths
     assert data["profile_claim_suggestions"] == streamed_claims["profile_claim_suggestions"]
     assert data["external_profile_results"] == streamed_claims["external_profile_results"]
     assert data["external_lookup_status"] == streamed_claims["external_lookup_status"]
 
-    # 同じブラウザでもログインし直すと別セッション。前の結果には入れない。
     _login(client)
     assert client.get("/api/diagnosis").status_code == 404
+
+
+def test_completed_diagnosis_restore_recalculates_candidate_snapshot_after_deletion(
+    client: TestClient,
+) -> None:
+    _login(client)
+    result = client.post("/api/diagnose", json={"public_web_lookup_consent": True})
+    assert result.status_code == 200
+    original = client.get("/api/diagnosis").json()
+    session_id = client.cookies.get("tkb_session")
+    assert isinstance(session_id, str)
+    suggested = original["profile_claim_suggestions"]
+    candidate_post_ids = [
+        reference["post_id"]
+        for claim in original["profile_claims"]
+        for candidate in claim["candidate_pool"]
+        for path in candidate["evidence_paths"]
+        for reference in path["evidence"]
+        if reference["post_id"] is not None
+    ]
+    deleted_post_id = (suggested or candidate_post_ids)[0]
+    client.app.state.sessions.mark_deleted(session_id, [deleted_post_id])  # type: ignore[attr-defined]
+
+    restored = client.get("/api/diagnosis")
+    assert restored.status_code == 200
+    data = restored.json()
+    assert data["deleted"] == [deleted_post_id]
+    assert data["posts"] == original["posts"]
+    assert data["clues"] == original["clues"]
+    assert all(
+        reference["post_id"] != deleted_post_id
+        for claim in data["profile_claims"]
+        for candidate in claim["candidate_pool"]
+        for path in candidate["evidence_paths"]
+        for reference in path["evidence"]
+    )
+    assert all(
+        reference["post_id"] != deleted_post_id
+        for relation in data["profile_relations"]
+        for path in relation["evidence_paths"]
+        for reference in path["evidence"]
+    )
+    assert deleted_post_id not in data["profile_claim_suggestions"]
+    assert deleted_post_id not in data["plan"]["delete"]
+    assert all(
+        data["clues"][index]["post_id"] != deleted_post_id
+        for conclusion in data["conclusions"]
+        for index in conclusion["clue_indices"]
+    )
 
 
 def test_mock_diagnose_streams_posts_clues_conclusions_plan_then_done(client: TestClient) -> None:

@@ -7,6 +7,7 @@ import { messages } from "@/lib/messages";
 import type { Clue } from "@/types/clue";
 import type { RiskyPost, Simulation } from "@/types/diagnose";
 import type { Post } from "@/types/post";
+import type { ProfileCandidateSet } from "@/types/profile";
 
 import { RiskyPosts, inviteComposeUrl } from "./RiskyPosts";
 
@@ -70,6 +71,63 @@ describe("RiskyPosts", () => {
     const item = screen.getByRole("listitem");
     expect(item).toHaveTextContent(t.breaksNothing);
     expect(item).toHaveTextContent(t.directClues(messages.clues.typeLabels.face));
+  });
+
+  it("keeps name_text as a direct clue but ignores legacy R8 name breakage in simulation and escape labels", async () => {
+    const name: Clue = {
+      post_id: ADDRESS.post_id, image_index: null, type: "name_text", value: "内藤大貴",
+      region: null, confidence: 0.9, source: "text",
+    };
+    const legacyNameOnly = { post_id: ADDRESS.post_id, broken: ["full_name"] };
+    const legacySimulation: Simulation = {
+      delete: [ADDRESS.post_id], broken: ["full_name"], after: [],
+    };
+    vi.mocked(simulate).mockResolvedValue(legacySimulation);
+    render(<RiskyPosts posts={[ADDRESS]} risky={[legacyNameOnly]} clues={[name]} clueCount={1} onSimulated={vi.fn()} />);
+
+    const item = screen.getByRole("listitem");
+    expect(item).toHaveTextContent(t.breaksNothing);
+    expect(item).toHaveTextContent(t.directClues(messages.clues.typeLabels.name_text));
+    expect(item).not.toHaveTextContent(t.breaks(messages.board.attributeLabels.full_name));
+
+    fireEvent.click(screen.getByRole("button", { name: t.simulate }));
+
+    expect(await screen.findByText(t.result(1, 0))).toBeInTheDocument();
+    expect(screen.getByText(t.safe)).toBeInTheDocument();
+    expect(within(screen.getByRole("status")).queryByText(messages.board.attributeLabels.full_name)).not.toBeInTheDocument();
+  });
+
+  it("does not report escape while a profile candidate still has a surviving evidence path", async () => {
+    const name: Clue = {
+      post_id: ADDRESS.post_id, image_index: null, type: "name_text", value: "内藤大貴",
+      region: null, confidence: 0.9, source: "text",
+    };
+    const ownerEvidence = { post_id: null, clue_index: null, required: true, source: "profile_text" as const, excerpt: "本名は内藤大貴" };
+    const assessment = {
+      minimal_scope: "bluesky" as const, offline_subtype: null, psychological_resistance: null, persona_context: null,
+      inference_ease: null, inference_ease_basis: null, harm_severity: null, harm_scenario: null,
+      harm_prerequisites: [], harm_status: "unknown" as const,
+    };
+    const candidate = {
+      rank: 1, value: "内藤大貴", confidence: 0.9, status: "found" as const,
+      evidence: [ownerEvidence],
+      evidence_paths: [{ evidence: [ownerEvidence], confidence: 0.9, provenance: "direct_disclosure" as const }],
+      assessment, observed_at: null, counter_evidence: [],
+    };
+    const claim: ProfileCandidateSet = {
+      attribute: "full_name", status: "candidate", candidates: [candidate], candidate_pool: [candidate],
+      reason: null, conflicting_evidence: [],
+    };
+    vi.mocked(simulate).mockResolvedValue({ delete: [ADDRESS.post_id], broken: ["full_name"], after: [] });
+    render(<RiskyPosts posts={[ADDRESS]} risky={[{ post_id: ADDRESS.post_id, broken: ["full_name"] }]} clues={[name]} clueCount={1} profileClaims={[claim]} onSimulated={vi.fn()} />);
+
+    const item = screen.getByRole("listitem");
+    expect(item).toHaveTextContent(t.directClues(messages.clues.typeLabels.name_text));
+    expect(item).not.toHaveTextContent(t.breaks(messages.board.attributeLabels.full_name));
+    fireEvent.click(screen.getByRole("button", { name: t.simulate }));
+
+    expect(await screen.findByText(t.result(1, 0))).toBeInTheDocument();
+    expect(screen.queryByText(t.safe)).not.toBeInTheDocument();
   });
 
   it("simulates the selected posts and reports that the user got away", async () => {

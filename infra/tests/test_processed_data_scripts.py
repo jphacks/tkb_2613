@@ -10,6 +10,10 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.skipif(
+    os.name == "nt", reason="deployment shell scripts require POSIX paths"
+)
+
 BASH = shutil.which("bash") or "/bin/bash"
 
 INFRA = Path(__file__).resolve().parents[1]

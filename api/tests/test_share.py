@@ -1,6 +1,7 @@
 """明示的な閲覧リンクだけが、別ブラウザや API 再起動後に読める。"""
 
 import logging
+import os
 import stat
 from pathlib import Path
 
@@ -46,7 +47,8 @@ def test_result_link_requires_the_owners_finished_diagnosis_and_is_read_only(
         assert response.status_code == 200
         token = response.json()["token"]
         assert len(token) >= 32
-        assert stat.S_IMODE(settings.share_db_path.stat().st_mode) == 0o600
+        if os.name == "posix":
+            assert stat.S_IMODE(settings.share_db_path.stat().st_mode) == 0o600
 
     # API プロセスが作り直されても、リンクを知る人はログインなしで閲覧できる。
     with _client(settings) as viewer:

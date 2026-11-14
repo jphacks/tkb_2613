@@ -4,6 +4,7 @@
 """
 
 import re
+import unicodedata
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Annotated, Self
@@ -36,12 +37,23 @@ class PostImage(BaseModel):
     alt: str
     width: PositiveInt
     height: PositiveInt
+    # ローカルモック画像の表示用。実モードの画像取得には使わない。
+    mock_asset: str | None = Field(default=None, exclude_if=lambda value: value is None)
 
     @field_validator("url")
     @classmethod
     def _check_cdn(cls, value: str) -> str:
         if not value.startswith(BSKY_CDN_PREFIX):
             raise ValueError(f"画像の URL は {BSKY_CDN_PREFIX} で始まること")
+        return value
+
+    @field_validator("mock_asset")
+    @classmethod
+    def _check_mock_asset(cls, value: str | None) -> str | None:
+        if value is not None and (
+            not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", value) or value in {".", ".."}
+        ):
+            raise ValueError("mock_asset は安全なファイル名であること")
         return value
 
 
@@ -73,6 +85,7 @@ class ClueType(StrEnum):
     POSTAL_CODE = "postal_code"
     PHONE = "phone"
     PLATE = "plate"
+    VEHICLE_MODEL = "vehicle_model"
     UNIFORM = "uniform"
     FACE = "face"
     KEY = "key"
@@ -253,7 +266,7 @@ PROFILE_ATTRIBUTE_CATALOG: dict[ProfileAttribute, ProfileAttributeMetadata] = {
         "自宅の最寄り駅", ProfileCategory.HOME_AND_LOCATION
     ),
     ProfileAttribute.REGULAR_STATION: ProfileAttributeMetadata(
-        "日常的に利用する駅", ProfileCategory.HOME_AND_LOCATION
+        "投稿時点の通勤利用駅候補", ProfileCategory.HOME_AND_LOCATION
     ),
     ProfileAttribute.REGULAR_LINE: ProfileAttributeMetadata(
         "日常的に利用する路線", ProfileCategory.HOME_AND_LOCATION
@@ -510,6 +523,12 @@ class ProfileEvidence(BaseModel):
         return self
 
 
+class EvidencePathProvenance(StrEnum):
+    DIRECT_DISCLOSURE = "direct_disclosure"
+    COMBINED_INFERENCE = "combined_inference"
+    UNCLASSIFIED = "unclassified"
+
+
 class ProfileEvidencePath(BaseModel):
     """One complete conjunction of evidence; paths are alternatives to one another."""
 
@@ -517,6 +536,94 @@ class ProfileEvidencePath(BaseModel):
 
     evidence: list[ProfileEvidence] = Field(min_length=2)
     confidence: float = Field(ge=0.0, le=1.0)
+    # How the candidate value follows from this complete evidence path. A single
+    # candidate may have both direct and derived alternative paths.
+    provenance: EvidencePathProvenance = EvidencePathProvenance.UNCLASSIFIED
+
+
+class ProfileRelationKind(StrEnum):
+    HOME_NEAREST_IS_COMMUTE_ORIGIN = "home_nearest_is_commute_origin"
+    COMMUTE_DESTINATION_IS_EMPLOYER = "commute_destination_is_employer"
+    COMMUTE_DESTINATION_IS_SCHOOL = "commute_destination_is_school"
+
+
+class ProfileRelationEndpointKind(StrEnum):
+    PROFILE_CANDIDATE = "profile_candidate"
+    COMMUTE_DESTINATION = "commute_destination"
+
+
+class ProfileRelationEndpoint(BaseModel):
+    """A candidate endpoint or a directly stated commute destination."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: ProfileRelationEndpointKind
+    value: str = Field(min_length=1)
+    attribute: ProfileAttribute | None = None
+
+    @model_validator(mode="after")
+    def _check_attribute(self) -> Self:
+        if self.kind is ProfileRelationEndpointKind.PROFILE_CANDIDATE and self.attribute is None:
+            raise ValueError("profile candidate relation endpoint requires attribute")
+        if (
+            self.kind is ProfileRelationEndpointKind.COMMUTE_DESTINATION
+            and self.attribute is not None
+        ):
+            raise ValueError("commute destination relation endpoint has no profile attribute")
+        return self
+
+
+class ProfileRelation(BaseModel):
+    """Evidence-backed link between existing candidates and an explicit commute relation."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: ProfileRelationKind
+    left: ProfileRelationEndpoint
+    right: ProfileRelationEndpoint
+    evidence_paths: list[ProfileEvidencePath] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _check_endpoints(self) -> Self:
+        endpoints = (self.left, self.right)
+        candidates = [
+            endpoint
+            for endpoint in endpoints
+            if endpoint.kind is ProfileRelationEndpointKind.PROFILE_CANDIDATE
+        ]
+        destinations = [
+            endpoint
+            for endpoint in endpoints
+            if endpoint.kind is ProfileRelationEndpointKind.COMMUTE_DESTINATION
+        ]
+        if self.kind is ProfileRelationKind.HOME_NEAREST_IS_COMMUTE_ORIGIN:
+            if len(candidates) != 2 or destinations:
+                raise ValueError("home-to-commute relation requires two candidate endpoints")
+            attrs = {endpoint.attribute for endpoint in candidates}
+            values = {endpoint.value for endpoint in candidates}
+            if (
+                attrs != {ProfileAttribute.HOME_NEAREST_STATION, ProfileAttribute.REGULAR_STATION}
+                or len(values) != 1
+            ):
+                raise ValueError("home-to-commute relation requires the same station candidate")
+        else:
+            expected = (
+                ProfileAttribute.EMPLOYER_NAME
+                if self.kind is ProfileRelationKind.COMMUTE_DESTINATION_IS_EMPLOYER
+                else ProfileAttribute.SCHOOL
+            )
+            if len(candidates) != 1 or len(destinations) != 1:
+                raise ValueError(
+                    "commute destination relation requires one destination and one candidate"
+                )
+            if (
+                candidates[0].attribute is not expected
+                or candidates[0].value != destinations[0].value
+            ):
+                raise ValueError(
+                    "commute destination must exactly match the linked affiliation candidate"
+                )
+        return self
 
 
 class EvidenceScope(StrEnum):
@@ -600,4 +707,136 @@ class ProfileItem(BaseModel):
                 raise ValueError("unknown の value は null にすること")
         elif self.value is None or not self.value.strip():
             raise ValueError("found / weak の value は空でない文字列にすること")
+        return self
+
+
+class ProfileCandidate(BaseModel):
+    """One grounded value candidate within a profile attribute."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    rank: PositiveInt
+    value: str = Field(min_length=1)
+    confidence: float = Field(ge=0.0, le=1.0)
+    status: ProfileStatus
+    evidence: list[ProfileEvidence]
+    evidence_paths: list[ProfileEvidencePath] = Field(default_factory=list)
+    assessment: ClaimAssessment = Field(default_factory=ClaimAssessment)
+    observed_at: AwareDatetime | None = None
+    counter_evidence: list[ProfileEvidence] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _check_status(self) -> Self:
+        if self.status is ProfileStatus.UNKNOWN:
+            raise ValueError("profile candidates must have found or weak status")
+        return self
+
+
+class ProfileCandidateSetStatus(StrEnum):
+    CANDIDATE = "candidate"
+    AMBIGUOUS = "ambiguous"
+    UNKNOWN = "unknown"
+    CONFLICT = "conflict"
+
+
+class ProfileCandidateSet(BaseModel):
+    """Bounded candidate values for one attribute; never an ungrounded guess list."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    attribute: ProfileAttribute
+    status: ProfileCandidateSetStatus
+    candidates: list[ProfileCandidate] = Field(max_length=3)
+    candidate_pool: list[ProfileCandidate] = Field(default_factory=list)
+    conflicting_evidence: list[ProfileEvidence] = Field(default_factory=list)
+    reason: str | None = None
+
+    @model_validator(mode="after")
+    def _check_candidates(self) -> Self:
+        if any(not candidate.evidence_paths for candidate in self.candidates):
+            raise ValueError("profile candidates require at least one complete evidence path")
+        if self.attribute is ProfileAttribute.REALTIME_LOCATION:
+            if any(candidate.observed_at is None for candidate in self.candidate_pool):
+                raise ValueError("realtime location candidates require observed_at")
+        elif any(candidate.observed_at is not None for candidate in self.candidate_pool):
+            raise ValueError("observed_at is only valid for realtime_location candidates")
+        normalized = [
+            unicodedata.normalize("NFKC", c.value).lower().strip() for c in self.candidates
+        ]
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("profile candidate values must be distinct")
+        pool_normalized = [
+            unicodedata.normalize("NFKC", c.value).lower().strip() for c in self.candidate_pool
+        ]
+        if len(pool_normalized) != len(set(pool_normalized)):
+            raise ValueError("profile candidate pool values must be distinct")
+        if [candidate.rank for candidate in self.candidate_pool] != list(
+            range(1, len(self.candidate_pool) + 1)
+        ):
+            raise ValueError("candidate pool ranks must be contiguous and start at one")
+        ranked_pool = sorted(
+            self.candidate_pool,
+            key=lambda candidate: (
+                -candidate.confidence,
+                unicodedata.normalize("NFKC", candidate.value).lower().strip(),
+            ),
+        )
+        if self.candidate_pool != ranked_pool:
+            raise ValueError("candidate pool must be sorted by confidence then normalized value")
+        expected_display = []
+        if self.candidate_pool:
+            strongest = self.candidate_pool[0]
+            if strongest.status is ProfileStatus.WEAK:
+                expected_display = [
+                    candidate
+                    for candidate in self.candidate_pool
+                    if candidate.status is ProfileStatus.WEAK
+                ][:3]
+            else:
+                expected_display = [
+                    candidate
+                    for candidate in self.candidate_pool
+                    if candidate.status is strongest.status
+                    and strongest.confidence - candidate.confidence <= 0.15
+                ][:3]
+        if self.candidates != expected_display:
+            raise ValueError(
+                "display candidates must be the top three candidates in the "
+                "leading grade/score band"
+            )
+        count = len(self.candidates)
+        if self.status is ProfileCandidateSetStatus.CONFLICT and not self.conflicting_evidence:
+            raise ValueError("conflict status requires contradictory evidence")
+        if count == 0 and self.candidate_pool:
+            raise ValueError("unknown/conflict set cannot have a candidate pool")
+        if count and not self.candidate_pool:
+            raise ValueError("candidate set requires the full eligible candidate pool")
+        if count == 0:
+            if self.status not in {
+                ProfileCandidateSetStatus.UNKNOWN,
+                ProfileCandidateSetStatus.CONFLICT,
+            }:
+                raise ValueError("empty candidate set must be unknown or conflict")
+            if not self.reason:
+                raise ValueError("empty candidate set requires a reason")
+            return self
+        if self.status is ProfileCandidateSetStatus.CANDIDATE and count != 1:
+            raise ValueError("candidate set must contain exactly one candidate")
+        if self.status is ProfileCandidateSetStatus.AMBIGUOUS and not 2 <= count <= 3:
+            raise ValueError("ambiguous candidate set must contain two or three candidates")
+        if self.status not in {
+            ProfileCandidateSetStatus.CANDIDATE,
+            ProfileCandidateSetStatus.AMBIGUOUS,
+        }:
+            raise ValueError("unknown or conflict candidate set cannot expose candidate values")
+        if count > 1:
+            grades = {candidate.status for candidate in self.candidates}
+            confidences = [candidate.confidence for candidate in self.candidates]
+            if len(grades) != 1 or (
+                next(iter(grades)) is ProfileStatus.FOUND
+                and max(confidences) - min(confidences) > 0.15
+            ):
+                raise ValueError(
+                    "ambiguous candidates must share a grade; found candidates must be within 0.15"
+                )
         return self
