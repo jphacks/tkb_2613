@@ -60,6 +60,7 @@ const ATTRIBUTE_LABELS: Readonly<Record<string, string>> = {
   long_term_home_absence: "家を空ける時期",
   frequent_shop: "よく行く店",
   workplace: "勤務先・バイト先",
+  home_walk_area: "家のまわりの範囲",
 };
 
 export const messages = {
@@ -259,6 +260,21 @@ export const messages = {
     cluesFound: "見つかった手がかり",
     cluesUnit: "個",
     inferred: "推定",
+  },
+  /** f1 絞り込みの演出。1都3県 → 生活圏 → 番地 */
+  narrowing: {
+    heading: "ここまで、しぼれる",
+    /** 読み上げ用の要約 */
+    summary: (steps: readonly string[]) => `絞り込み：${steps.join("、")}`,
+    region: (label: string) => `${label}のすべての世帯`,
+    walk: (station: string, radius: number, minutes: number) => `${station}から半径${radius}m（徒歩${minutes}分）`,
+    block: "番地",
+    households: (n: string) => `約${n}世帯`,
+    oneBlock: "1区画",
+    /** 1都3県の世帯数は10万世帯単位で切り捨てる */
+    manHouseholds: (man: string) => `約${man}万世帯`,
+    note: "マスは国勢調査の500mメッシュ（濃さは世帯数）。範囲にかかるメッシュは、重なる面積の割合で数えています。番地の印の位置は模式です。",
+    sourcesLabel: "出典",
   },
   /** 結果の先頭に出す、消す投稿の要約と、いまどの段階か */
   plan: {

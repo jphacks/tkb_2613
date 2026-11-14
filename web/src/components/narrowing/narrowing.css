@@ -1,0 +1,126 @@
+/* f1 絞り込みの演出（NarrowingStages）。
+   ここに書く見た目は「最後の状態」。動きはすべて animation の from 側に書き、fill-mode: both で
+   始まるまでは from の状態にしておく。動きを減らす設定では globals.css が animation を止めるので、
+   最後の状態（生活圏の地図、番地の印、すべての段）だけが見える。
+   遅れは calc(var(--stage-pace, 1) * …) で渡すので、発表モードでは間が伸びる */
+
+/* 画面に入るまでは、どの動きも最初の場面で止めておく（NarrowingStages が narrowing-playing を付ける） */
+.narrowing:not(.narrowing-playing) * {
+  animation-play-state: paused;
+}
+
+.narrowing-layer {
+  position: absolute;
+  inset: 0;
+}
+
+/* 1都3県の全体図：生活圏の印へ寄りながら消える */
+.narrowing-region {
+  opacity: 0;
+  animation: narrowing-region-out 0.8s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.narrowing-region-outline {
+  fill: none;
+  stroke: var(--ink);
+  stroke-width: 1.5px;
+  stroke-dasharray: 4 3;
+}
+
+/* 生活圏の地図：小さく遠くから寄ってくる */
+.narrowing-local {
+  animation: narrowing-local-in 0.8s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.narrowing-mesh {
+  fill: var(--ink);
+  stroke: var(--paper);
+  stroke-width: 1px;
+}
+
+.narrowing-circle {
+  fill: none;
+  stroke: var(--seeker);
+  stroke-width: 2.5px;
+  stroke-dasharray: 6 4;
+}
+
+/* 番地の印：押されるように出る */
+.narrowing-mark {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: narrowing-mark-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.narrowing-row {
+  animation: narrowing-row-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* 次の段に移った数：線で消して薄くする */
+.narrowing-past {
+  position: relative;
+  display: inline-block;
+  color: color-mix(in oklch, var(--ink) 45%, transparent);
+  animation: narrowing-dim 0.4s ease-out both;
+}
+
+.narrowing-strike {
+  position: absolute;
+  top: 50%;
+  left: -0.1em;
+  right: -0.1em;
+  height: 0.08em;
+  background: var(--seeker);
+  transform-origin: left center;
+  animation: narrowing-strike-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* 発表モード：後ろの席から読めるよう、数をさらに大きくする（根の文字も大きいので、画面の幅で上限を決める） */
+html.stage .narrowing-count {
+  font-size: clamp(1.6rem, 4.2vw, 3.25rem);
+  line-height: 1.1;
+}
+
+@keyframes narrowing-region-out {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(8);
+  }
+}
+
+@keyframes narrowing-local-in {
+  from {
+    opacity: 0;
+    transform: scale(0.15);
+  }
+}
+
+@keyframes narrowing-mark-in {
+  from {
+    opacity: 0;
+    transform: scale(3);
+  }
+}
+
+@keyframes narrowing-row-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.5rem);
+  }
+}
+
+@keyframes narrowing-dim {
+  from {
+    color: var(--ink);
+  }
+}
+
+@keyframes narrowing-strike-in {
+  from {
+    transform: scaleX(0);
+  }
+}

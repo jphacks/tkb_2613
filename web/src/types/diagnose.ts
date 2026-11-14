@@ -13,6 +13,7 @@
  * plan の after（消したあとの結論）の clue_indices も、conclusions イベントの clues での番号。
  */
 
+import { isNarrowing, type Narrowing } from "./narrowing";
 import { type Clue, isClue } from "./clue";
 import { isPost, type Post } from "./post";
 import { isExternalProfileResult, isProfileCandidateSetList, isProfileRelationList, isWebFact, type ExternalLookupStatus, type ExternalProfileResult, type ProfileCandidateSet, type ProfileRelation, type WebFact } from "./profile";
@@ -129,6 +130,8 @@ export interface DiagnosisSnapshot {
    */
   readonly deleted?: readonly string[];
   readonly conclusions: readonly Conclusion[];
+  /** f1 絞り込みの演出のデータ。推定の段がなければ null（古い応答では省略） */
+  readonly narrowing?: Narrowing | null;
   readonly photo_place_results?: readonly PhotoPlaceResult[];
   readonly plan: Simulation & { readonly posts: readonly RiskyPost[] };
   readonly profile_claims?: readonly ProfileCandidateSet[];
@@ -155,6 +158,8 @@ export type DiagnoseEvent =
       readonly event: "conclusions";
       readonly clues: readonly Clue[];
       readonly conclusions: readonly Conclusion[];
+      /** f1 絞り込みの演出のデータ。形が違うときは落とす（演出だけなので診断は止めない） */
+      readonly narrowing?: Narrowing | null;
       readonly photo_place_results?: readonly PhotoPlaceResult[];
       readonly profile_claims?: readonly ProfileCandidateSet[];
       readonly profile_claims_error?: boolean;
@@ -339,6 +344,7 @@ export function isDiagnosisSnapshot(value: unknown): value is DiagnosisSnapshot 
     conclusionsEvent = toDiagnoseEvent("conclusions", JSON.stringify({
       clues: value.clues,
       conclusions: value.conclusions,
+      ...(Object.hasOwn(value, "narrowing") ? { narrowing: value.narrowing } : {}),
       ...(Object.hasOwn(value, "photo_place_results") ? { photo_place_results: value.photo_place_results } : {}),
       ...(Object.hasOwn(value, "profile_claims") ? { profile_claims: value.profile_claims } : {}),
       ...(Object.hasOwn(value, "profile_relations") ? { profile_relations: value.profile_relations } : {}),
@@ -444,6 +450,7 @@ export function toDiagnoseEvent(
         event,
         clues: value.clues,
         conclusions: conclusions as Conclusion[],
+        ...(Object.hasOwn(value, "narrowing") ? { narrowing: isNarrowing(value.narrowing) ? value.narrowing : null } : {}),
         ...(hasPhotoPlaceResults ? { photo_place_results: photoPlaceResults as readonly PhotoPlaceResult[] } : {}),
         ...(hasProfileClaims ? { profile_claims: safeProfileClaims } : {}),
         ...(profileClaimsError ? { profile_claims_error: true } : {}),

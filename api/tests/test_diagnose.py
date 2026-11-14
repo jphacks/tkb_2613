@@ -95,6 +95,9 @@ def test_completed_diagnosis_can_be_read_again_only_in_its_session(client: TestC
     assert len(data["clues"]) > 0
     assert data["deleted"] == []
     assert data["conclusions"] == _events(result.text)[-3][1]["conclusions"]
+    # f1 絞り込みの演出のデータも、配信したものと同じ（表がなければ null）
+    assert "narrowing" in data
+    assert data["narrowing"] == _events(result.text)[-3][1]["narrowing"]
     assert data["plan"] == _events(result.text)[-2][1]
     streamed_claims = _events(result.text)[-3][1]
     assert data["photo_place_results"] == streamed_claims["photo_place_results"]

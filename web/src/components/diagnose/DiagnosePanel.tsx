@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { ConclusionBoard } from "@/components/conclusion-board/ConclusionBoard";
 import { DiagnoseLoading } from "@/components/diagnose-loading/DiagnoseLoading";
+import { NarrowingStages } from "@/components/narrowing/NarrowingStages";
 import { PostCard, type PostClues } from "@/components/post-list/PostCard";
 import { PlanSummary } from "@/components/plan-summary/PlanSummary";
 import { Reveal } from "@/components/reveal/Reveal";
@@ -14,6 +15,7 @@ import { ApiError, diagnose, getDiagnosis, getFeatures } from "@/lib/api";
 import { messages } from "@/lib/messages";
 import type { Clue } from "@/types/clue";
 import { isProfileSimulationAfter, type PhotoPlaceResult, type RiskyPost, type Simulation } from "@/types/diagnose";
+import { visibleNarrowing, type Narrowing } from "@/types/narrowing";
 import type { Post } from "@/types/post";
 import { profileClaimsAfterDeletion, type ExternalLookupStatus, type ExternalProfileResult, type ProfileCandidateSet, type ProfileRelation, type WebFact } from "@/types/profile";
 
@@ -38,6 +40,7 @@ type Phase =
 
 interface Result {
   clues: readonly Clue[];
+  narrowing?: Narrowing | null;
   photoPlaceResults?: readonly PhotoPlaceResult[];
   profileClaims?: readonly ProfileCandidateSet[];
   profileClaimsError?: boolean;
@@ -126,6 +129,7 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
         ])));
         setResult({
           clues: snapshot.clues,
+          narrowing: snapshot.narrowing ?? null,
           photoPlaceResults: snapshot.photo_place_results ?? [],
           profileClaims: snapshot.profile_claims ?? [],
           profileClaimsError: false,
@@ -193,6 +197,7 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
           case "conclusions":
             setResult({
               clues: event.clues,
+              narrowing: event.narrowing ?? null,
               photoPlaceResults: event.photo_place_results ?? [],
               profileClaims: event.profile_claims ?? [],
               profileClaimsError: event.profile_claims_error ?? false,
@@ -295,6 +300,8 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
       </h2>
       {!busy && result && (
         <Reveal posts={livePosts} clues={result.clues} conclusions={[]} profileClaims={visibleProfileClaims} excludedPostIds={excluded}>
+          {/* 身元カードのすぐあとに、1都3県から家の区画までの絞り込みを出す */}
+          <NarrowingStages narrowing={visibleNarrowing(result.narrowing, excluded)} />
           {risky && <PlanSummary risky={risky.filter((post) => !excluded.has(post.post_id))} targetId={RISKY_HEADING_ID} />}
         </Reveal>
       )}

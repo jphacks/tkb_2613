@@ -39,6 +39,7 @@ from tkb_engine.cross_post import (
     simulate_profile_candidate_sets,
 )
 from tkb_engine.gazetteer import Gazetteer, Knowledge
+from tkb_engine.narrowing import narrowing
 from tkb_engine.photo_place import infer_photo_places
 from tkb_engine.planner import Simulation, plan, simulate
 from tkb_engine.rules import Conclusion, infer
@@ -180,6 +181,22 @@ def _remaining(
 
 def _renumbered(conclusions: Sequence[Conclusion], kept: Sequence[int]) -> list[dict[str, Any]]:
     return [{**asdict(c), "clue_indices": [kept[i] for i in c.clue_indices]} for c in conclusions]
+
+
+def narrowing_json(
+    clues: Sequence[Clue],
+    posts: Sequence[Post],
+    gazetteer: Gazetteer,
+    excluded: Sequence[str] = (),
+) -> dict[str, Any] | None:
+    """f1 絞り込みの演出のデータ（tkb_engine.narrowing）。消した投稿（excluded）を除く。"""
+    remaining_clues, remaining_posts = _remaining(clues, posts, excluded)
+    return narrowing(
+        remaining_clues,
+        remaining_posts,
+        infer(remaining_clues, remaining_posts, gazetteer),
+        gazetteer,
+    )
 
 
 def conclusions_json(
@@ -455,6 +472,7 @@ async def diagnose_events(
         {
             "clues": [c.model_dump(mode="json") for c in all_clues],
             "conclusions": [asdict(c) for c in conclusions],
+            "narrowing": narrowing(all_clues, list(posts), conclusions, gazetteer),
             "photo_place_results": [item.model_dump(mode="json") for item in photo_place_results],
             "profile_claims": [item.model_dump(mode="json") for item in profile_claims],
             "profile_relations": [item.model_dump(mode="json") for item in profile_relations],

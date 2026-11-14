@@ -62,6 +62,7 @@ from tkb_api.pipeline import (
     fetch_single_image,
     load_gazetteer,
     mock_extractions,
+    narrowing_json,
     plan_claims_json,
     real_extractions,
 )
@@ -411,6 +412,7 @@ def read_diagnosis(
         ],
         "deleted": list(deleted),
         "conclusions": conclusions_json(clues, posts, gazetteer, deleted),
+        "narrowing": narrowing_json(clues, posts, gazetteer, deleted),
         "plan": plan_claims_json(
             profile_claims,
             remaining_clues,

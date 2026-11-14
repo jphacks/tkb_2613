@@ -4,7 +4,7 @@
 モデル・Bluesky・セッションには接続せず、Cookie も読まない（MOCK_MODE=0 でも同じ）。
 削除の API はない。
 
-  GET  /api/demo/diagnosis  → {"demo": true, "posts", "clues", "conclusions",
+  GET  /api/demo/diagnosis  → {"demo": true, "posts", "clues", "conclusions", "narrowing",
                               "profile_claims", "profile_relations",
                               "profile_claim_suggestions", "plan"}
   POST /api/demo/simulate   {"delete": [投稿ID]} → {"delete", "broken", "after"}
@@ -28,6 +28,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from tkb_api.config import Settings, get_settings
 from tkb_api.pipeline import (
     conclusions_json,
+    narrowing_json,
     plan_claims_json,
     simulate_claims_json,
 )
@@ -93,6 +94,7 @@ def _render_diagnosis(
         "posts": [post.model_dump(mode="json") for post in posts],
         "clues": [clue.model_dump(mode="json") for clue in clues],
         "conclusions": conclusions_json(clues, posts, gazetteer),
+        "narrowing": narrowing_json(clues, posts, gazetteer),
         "profile_claims": [item.model_dump(mode="json") for item in profile_claims],
         "profile_relations": [item.model_dump(mode="json") for item in profile_relations],
         "profile_claim_suggestions": list(plan["delete"]),
