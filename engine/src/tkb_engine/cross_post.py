@@ -1107,6 +1107,9 @@ _RULE_CONCLUSION_MAPPING: dict[tuple[str, str], tuple[ProfileAttribute, float]] 
     ("X3", "long_term_home_absence"): (ProfileAttribute.ANNOUNCED_LONG_ABSENCE, 0.58),
     ("X4", "frequent_shop"): (ProfileAttribute.FREQUENT_SHOP, 0.56),
     ("X5", "workplace"): (ProfileAttribute.EMPLOYER_NAME, 0.56),
+    ("BP1", "full_name"): (ProfileAttribute.FULL_NAME, 0.62),
+    ("BP1", "long_term_home_absence"): (ProfileAttribute.ANNOUNCED_LONG_ABSENCE, 0.60),
+    ("BP2", "long_term_home_absence"): (ProfileAttribute.ANNOUNCED_LONG_ABSENCE, 0.62),
 }
 
 
@@ -1180,9 +1183,13 @@ def infer_rule_and_link_claims(
     posts: Sequence[Post],
     clues: Sequence[Clue],
     gazetteer: Gazetteer | None = None,
+    *,
+    rule_conclusions: Sequence[Conclusion] | None = None,
 ) -> list[ProfileItem]:
-    """Convert RulesR (R1..R12) and RulesX (X2..X5) conclusions into ProfileItem candidates."""
-    conclusions = infer(list(clues), list(posts), gazetteer or Gazetteer())
+    """Convert RulesR (R1..R12), RulesX (X2..X5) and BP1/BP2 conclusions into candidates."""
+    conclusions = list(rule_conclusions) if rule_conclusions is not None else infer(
+        list(clues), list(posts), gazetteer or Gazetteer()
+    )
     grouped_paths: dict[tuple[ProfileAttribute, str], list[ProfileEvidencePath]] = {}
     for conclusion in conclusions:
         mapped = _RULE_CONCLUSION_MAPPING.get((conclusion.rule, conclusion.attribute))
@@ -1231,6 +1238,7 @@ def infer_owner_claims_with_web(
     diagnosis_at: datetime | None = None,
     include_heuristic_rules: bool = False,
     photo_place_results: Sequence[PhotoPlaceResult] = (),
+    rule_conclusions: Sequence[Conclusion] | None = None,
 ) -> list[ProfileItem]:
     """Combine direct and Web-backed paths; reject conflicting employer names."""
     claims = infer_owner_claims(
@@ -1243,6 +1251,7 @@ def infer_owner_claims_with_web(
         diagnosis_at=diagnosis_at,
         include_heuristic_rules=include_heuristic_rules,
         photo_place_results=photo_place_results,
+        rule_conclusions=rule_conclusions,
     )
     registry_claim = (
         infer_registry_employer_claim(posts, owner_profile_text, gazetteer)
@@ -1299,6 +1308,7 @@ def infer_owner_candidate_sets_with_web(
     diagnosis_at: datetime | None = None,
     include_heuristic_rules: bool = True,
     photo_place_results: Sequence[PhotoPlaceResult] = (),
+    rule_conclusions: Sequence[Conclusion] | None = None,
 ) -> list[ProfileCandidateSet]:
     """Public multi-candidate entry point; returns one set for each supported catalog item."""
     claims = infer_owner_claims_with_web(
@@ -1312,6 +1322,7 @@ def infer_owner_candidate_sets_with_web(
         diagnosis_at=diagnosis_at,
         include_heuristic_rules=include_heuristic_rules,
         photo_place_results=photo_place_results,
+        rule_conclusions=rule_conclusions,
     )
     return evaluate_profile_candidates(claims, posts, clues=clues)
 
@@ -1330,6 +1341,7 @@ def infer_owner_profile_relations(
     *,
     clues: Sequence[Clue] = (),
     gazetteer: Gazetteer | None = None,
+    rule_conclusions: Sequence[Conclusion] | None = None,
 ) -> list[ProfileRelation]:
     """Create scoreless links from explicit owner wording, independent paths, and RulesX X1."""
     by_attribute = {claim.attribute: claim for claim in profile_claims}
@@ -1469,14 +1481,16 @@ def infer_owner_profile_relations(
                         )
                     )
     if clues:
-        rule_conclusions = infer(list(clues), list(posts), gazetteer or Gazetteer())
+        conclusions = list(rule_conclusions) if rule_conclusions is not None else infer(
+            list(clues), list(posts), gazetteer or Gazetteer()
+        )
         school_set = by_attribute.get(ProfileAttribute.SCHOOL)
         if school_set is not None and school_set.candidates:
             candidate_by_norm = {
                 unicodedata.normalize("NFKC", candidate.value).strip(): candidate
                 for candidate in school_set.candidates
             }
-            for conclusion in rule_conclusions:
+            for conclusion in conclusions:
                 if conclusion.rule != "X1" or conclusion.attribute != "home_school_commute":
                     continue
                 x1_match = re.fullmatch(
@@ -1573,6 +1587,7 @@ def infer_owner_claims(
     diagnosis_at: datetime | None = None,
     include_heuristic_rules: bool = False,
     photo_place_results: Sequence[PhotoPlaceResult] = (),
+    rule_conclusions: Sequence[Conclusion] | None = None,
 ) -> list[ProfileItem]:
     """Infer only limited claims with explicit owner/context evidence.
 
@@ -1724,7 +1739,11 @@ def infer_owner_claims(
         claims.extend(infer_child_school_claims(posts, clues, gazetteer))
         claims = add_school_district_residence(claims, gazetteer)
     if include_heuristic_rules:
-        claims.extend(infer_rule_and_link_claims(posts, clues, gazetteer))
+        claims.extend(
+            infer_rule_and_link_claims(
+                posts, clues, gazetteer, rule_conclusions=rule_conclusions
+            )
+        )
     return claims
 
 

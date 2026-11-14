@@ -119,3 +119,32 @@ def test_read_codes_returns_nothing_for_a_plain_photo() -> None:
     img.save(buf, "JPEG")
 
     assert read_codes(buf.getvalue(), "p1", 0) == []
+
+
+# 架空の人物・予約番号の搭乗券（BCBP）。予約番号 QZ7X9K と任意項目（航空券番号など）を含む
+BCBP_SAMPLE = (
+    "M1KAKURE/HARUKI       EQZ7X9K HNDHIJNH 0681 305Y023A0012 11B>5180  W0305BNH 2A205123456"
+)
+
+
+@pytest.mark.parametrize(
+    ("fmt", "name"),
+    [
+        (zxingcpp.BarcodeFormat.PDF417, "PDF417"),
+        (zxingcpp.BarcodeFormat.Aztec, "Aztec"),
+        (zxingcpp.BarcodeFormat.QRCode, "QRCode"),
+    ],
+)
+def test_read_codes_hides_the_pnr_of_a_boarding_pass(
+    fmt: zxingcpp.BarcodeFormat, name: str
+) -> None:
+    img = Image.new("L", (900, 500), 255)
+    code = zxingcpp.create_barcode(BCBP_SAMPLE, fmt)
+    img.paste(Image.fromarray(code.to_image(scale=3)), (30, 30))
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+
+    values = [c.value for c in read_codes(buf.getvalue(), "p1", 0)]
+
+    assert values == [f"{name}: M1KAKURE/HARUKI       E*******HNDHIJNH 0681 305Y023A0012 100"]
+    assert not any("QZ7X9K" in v or "W0305" in v for v in values)

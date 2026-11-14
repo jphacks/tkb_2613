@@ -5,6 +5,8 @@
 
 - zxing-cpp：QRコード・宅配伝票（NW-7 など）・JAN など、ふつうのバーコード。
   宅配伝票のバーコードの中身は追跡番号だけで、住所は入っていない
+- 搭乗券（PDF417・Aztec・QR に載った IATA の BCBP）：予約番号を「*」に伏せ、任意項目を落として
+  から手がかりにする（tkb_common.bcbp.mask_code_value）。手がかりの値は API の応答に載るため
 - カスタマバーコード（日本郵便）：郵便物の宛名の近くにある、高さの違う4種類の棒が並んだもの。
   郵便番号7桁と住所表示番号（番地・号・部屋番号など）が入っている。zxing-cpp は読めないので、
   ここで棒の形を測って読む
@@ -21,6 +23,7 @@ from numpy.typing import NDArray
 from PIL import Image, ImageOps
 from scipy import ndimage
 
+from tkb_common.bcbp import mask_code_value
 from tkb_common.schemas import Clue, ClueSource, ClueType, Region
 
 # 読めたバーコードの確からしさ。zxing-cpp もカスタマバーコードも検査の数字で確かめている
@@ -87,7 +90,8 @@ def _zxing_clue(
     xs = [p.top_left.x, p.top_right.x, p.bottom_left.x, p.bottom_right.x]
     ys = [p.top_left.y, p.top_right.y, p.bottom_left.y, p.bottom_right.y]
     box = (min(xs), min(ys), max(xs), max(ys))
-    value = f"{result.format.name}: {result.text}"
+    # 搭乗券なら予約番号を伏せる。それ以外の中身はそのまま
+    value = mask_code_value(f"{result.format.name}: {result.text}")
     return _clue(post_id, image_index, value, box, size)
 
 
