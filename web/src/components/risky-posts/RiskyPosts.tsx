@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { EscapeStamps, type BrokenInference } from "@/components/escape-stamps/EscapeStamps";
 import { ApiError, deletePosts, simulate } from "@/lib/api";
 import { attributeLabel, messages } from "@/lib/messages";
 import { isLikelyNameText } from "@/lib/reveal";
@@ -45,6 +46,16 @@ function excerpt(text: string): string {
 
 function supportedCount(claims: readonly ProfileCandidateSet[]): number {
   return claims.filter((claimSet) => claimSet.candidates.length > 0).length;
+}
+
+function brokenProfileInferences(claims: readonly ProfileCandidateSet[], lost: readonly string[]): BrokenInference[] {
+  return lost.map((attribute) => {
+    const candidates = claims.find((c) => c.attribute === attribute)?.candidates ?? [];
+    return {
+      label: attributeLabel(attribute),
+      value: candidates.map((c) => c.value).join(" / "),
+    };
+  });
 }
 
 /**
@@ -162,6 +173,9 @@ export function RiskyPosts({ posts, risky, clues = [], clueCount, profileClaims 
   const counts = shown !== null && profileClaims.length > 0
     ? { before: supportedCount(profileClaims), after: supportedCount(afterProfileClaims) }
     : null;
+  const brokenItems = shown !== null && counts !== null && counts.after < counts.before
+    ? brokenProfileInferences(profileClaims, shown.broken)
+    : [];
 
   return (
     <section aria-labelledby="risky-heading" aria-busy={pending} className="max-w-2xl space-y-4">
@@ -169,7 +183,17 @@ export function RiskyPosts({ posts, risky, clues = [], clueCount, profileClaims 
         {t.heading}
       </h3>
       <p className="text-ink/80">{t.lead}</p>
-      {counts && <CountChange before={counts.before} after={counts.after} />}
+      {/* 減ったときは、崩れた推定に判子を押して数を1つずつ減らす。減らなかったときは今までどおり N → M だけ */}
+      {counts && shown && counts.after < counts.before && brokenItems.length > 0 ? (
+        <EscapeStamps
+          key={`${deletion ? "deleted" : "simulated"}:${shown.delete.join(",")}`}
+          before={counts.before}
+          after={counts.after}
+          broken={brokenItems}
+        />
+      ) : (
+        counts && <CountChange before={counts.before} after={counts.after} />
+      )}
 
       <ol aria-label={t.listLabel} className="space-y-3">
         {risky.map((r) => {

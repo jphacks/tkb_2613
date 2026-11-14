@@ -270,4 +270,30 @@ describe("ConclusionBoard", () => {
     expect(screen.queryByText("宛名・名札などの姓と名")).not.toBeInTheDocument();
     expect(within(screen.getByRole("list", { name: messages.board.conclusionsLabel })).queryAllByRole("listitem")).toHaveLength(0);
   });
+
+  it("draws red strings inside a candidate when its evidence paths start from different posts", () => {
+    const busPost = { post_id: CLUE.post_id, text: "家の前のバス停から毎朝バスに乗る。", created_at: "2026-10-20T08:31:00+09:00", images: [] };
+    const shelterPost = { post_id: "at://did:plc:test/app.bsky.feed.post/shelter", text: "近所の小学校が避難所になっている。", created_at: "2026-10-21T08:31:00+09:00", images: [] };
+    const fromPost = (post_id: string) => ({ post_id, clue_index: null, required: true, source: "post_text" as const });
+    const assessment = {
+      minimal_scope: "bluesky" as const, offline_subtype: null, psychological_resistance: null, persona_context: null,
+      inference_ease: null, inference_ease_basis: null, harm_severity: null, harm_scenario: null,
+      harm_prerequisites: [], harm_status: "unknown" as const,
+    };
+    const candidate = {
+      rank: 1, value: "文京区", confidence: 0.65, status: "weak" as const,
+      evidence: [fromPost(busPost.post_id), fromPost(shelterPost.post_id)],
+      evidence_paths: [
+        { evidence: [fromPost(busPost.post_id)], confidence: 0.6, provenance: "combined_inference" as const },
+        { evidence: [fromPost(shelterPost.post_id)], confidence: 0.6, provenance: "combined_inference" as const },
+      ], assessment, observed_at: null, counter_evidence: [],
+    };
+    const areaSet: ProfileCandidateSet = {
+      attribute: "residential_area", status: "candidate", candidates: [candidate], candidate_pool: [candidate], reason: null, conflicting_evidence: [],
+    };
+    render(<ConclusionBoard clues={[]} conclusions={[]} profileClaims={[areaSet]} posts={[busPost, shelterPost]} />);
+
+    const candidates = screen.getByRole("list", { name: /の候補$/ });
+    expect(within(candidates).getByRole("figure", { name: "別々の 2 つの道筋が、同じ答え「文京区」を指す" })).toBeInTheDocument();
+  });
 });

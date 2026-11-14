@@ -2,6 +2,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError, deletePosts, simulate } from "@/lib/api";
+import { ESCAPED_MESSAGE } from "@/components/escape-stamps/EscapeStamps";
 import { attributeLabel, messages } from "@/lib/messages";
 import type { Clue } from "@/types/clue";
 import type { RiskyPost, Simulation } from "@/types/diagnose";
@@ -265,7 +266,45 @@ describe("RiskyPosts", () => {
     // 同じ項目（よく使う駅）の候補が2つあっても1項目と数える：3 → 1
     const figure = await screen.findByRole("figure", { name: t.countLabel(3, 1) });
     expect(figure).toHaveTextContent(t.countHeading);
-    expect(figure).toHaveTextContent("3→1");
+    // 減ったので、崩れた推定に「不明」の判子を押し、数を 1 つずつ減らし、最後に「もう、見つからない」
+    const rows = within(figure).getAllByRole("listitem");
+    expect(rows.map((r) => r.textContent)).toEqual([
+      expect.stringContaining("根津"),
+      expect.stringContaining("青空株式会社"),
+    ]);
+    for (const row of rows) expect(within(row).getByText("不明")).toBeInTheDocument();
+    expect(within(figure).getByText(ESCAPED_MESSAGE)).toBeInTheDocument();
+  });
+
+  it("keeps the plain counts without stamps when nothing was lost", async () => {
+    const assessment = {
+      minimal_scope: "bluesky" as const, offline_subtype: null, psychological_resistance: null, persona_context: null,
+      inference_ease: null, inference_ease_basis: null, harm_severity: null, harm_scenario: null,
+      harm_prerequisites: [], harm_status: "unknown" as const,
+    };
+    const ev = [
+      { post_id: GYM.post_id, clue_index: null, required: true, source: "post_text" as const, excerpt: "根拠1" },
+      { post_id: ADDRESS.post_id, clue_index: null, required: true, source: "post_text" as const, excerpt: "根拠2" },
+    ];
+    const candidate = {
+      rank: 1, value: "毎週火曜", confidence: 0.7, status: "weak" as const,
+      evidence: ev, evidence_paths: [{ evidence: ev, confidence: 0.7, provenance: "direct_disclosure" as const }],
+      assessment, observed_at: null, counter_evidence: [],
+    };
+    const before = PROFILE_DIAGNOSED_ATTRIBUTES.map((attribute) =>
+      attribute === "routine"
+        ? { attribute, status: "candidate" as const, candidates: [candidate], candidate_pool: [candidate], reason: null, conflicting_evidence: [] }
+        : { attribute, status: "unknown" as const, candidates: [], candidate_pool: [], reason: "no_grounded_rule", conflicting_evidence: [] },
+    );
+    vi.mocked(simulate).mockResolvedValue({ ...ALL_BROKEN, broken: [], after: before });
+    render(<RiskyPosts posts={[GYM, ADDRESS]} risky={RISKY} clueCount={20} onSimulated={vi.fn()} profileClaims={before} />);
+
+    fireEvent.click(screen.getByRole("button", { name: t.simulate }));
+
+    const figure = await screen.findByRole("figure", { name: t.countLabel(1, 1) });
+    expect(figure).toHaveTextContent("1→1");
+    expect(within(figure).queryByText("不明")).not.toBeInTheDocument();
+    expect(screen.queryByText(ESCAPED_MESSAGE)).not.toBeInTheDocument();
   });
 
   it("keeps showing the counts after deleting for real", async () => {

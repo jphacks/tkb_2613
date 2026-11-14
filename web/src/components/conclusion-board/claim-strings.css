@@ -1,0 +1,50 @@
+/* プロフィールの推定の赤い糸（ClaimStrings）：道筋の投稿から答えへ、1 本ずつ糸が伸び、最後に答えの箱が弾む。
+   止まった状態（動きを減らす設定の人に見せる状態）は「張り終わった糸と答え」にし、動きは backwards で始める。
+   画面に入るまでは止めておき（in-view が付くまで）、その間は糸のない状態に見える。遅れは style で渡す。
+   横に伸ばした SVG でも線の太さを保つため non-scaling-stroke にしている。このとき pathLength で長さを 1 に
+   そろえると点線の長さが画面上の長さと合わず糸が途中で切れるので、点線は画面のピクセルで十分に長く取る */
+.claim-string {
+  fill: none;
+  stroke: var(--seeker);
+  stroke-width: 2;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+  filter: drop-shadow(0 1px 1px oklch(0% 0 0 / 0.6));
+  stroke-dasharray: 2000;
+  stroke-dashoffset: 0;
+  animation: claim-string 0.5s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+}
+
+@keyframes claim-string {
+  from {
+    stroke-dashoffset: 2000;
+  }
+}
+
+.claim-answer {
+  box-shadow: 0 0 14px oklch(60% 0.23 27 / 0.5);
+  animation: claim-answer 0.6s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+}
+
+/* 弾む：小さく現れて少し行き過ぎ、戻って止まる */
+@keyframes claim-answer {
+  0% {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  55% {
+    opacity: 1;
+    transform: scale(1.12);
+  }
+  80% {
+    transform: scale(0.97);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.claim-strings:not(.in-view) .claim-string,
+.claim-strings:not(.in-view) .claim-answer {
+  animation-play-state: paused;
+}
