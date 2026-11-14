@@ -7,8 +7,10 @@ import { ConclusionBoard } from "@/components/conclusion-board/ConclusionBoard";
 import { EscapeStamps, brokenInferences, countAttributes, lostAttributes } from "@/components/escape-stamps/EscapeStamps";
 import { PostCard } from "@/components/post-list/PostCard";
 import { Reveal } from "@/components/reveal/Reveal";
+import { ThreadsDiagnosing } from "@/components/threads/ThreadsDiagnosing";
 import { THREADS_TEXT, ThreadsError, type ThreadsErrorKey, type ThreadsLang } from "@/lib/threads-i18n";
 import { checkThreadsPublicText } from "@/lib/threads-public-check";
+import { useThreadsDiagnosis } from "@/lib/useThreadsDiagnosis";
 import { useThreadsLang } from "@/lib/useThreadsLang";
 import { isDiagnosisSnapshot, isThreadsSimulation, type Conclusion, type DiagnosisSnapshot, type RiskyPost, type ThreadsSimulation } from "@/types/diagnose";
 import { isPost, type Post } from "@/types/post";
@@ -86,6 +88,8 @@ async function call(path: string, method: "GET" | "POST" | "DELETE" = "GET", bod
     if (response.status === 504) throw new ThreadsError("timeout");
     if (response.status === 503 && path === "diagnose") throw new ThreadsError("modelUnavailable");
     if (response.status === 429 || response.status === 503) throw new ThreadsError("busy");
+    // 同じセッションで診断（または投稿の取得）が進んでいる。二重に始めない
+    if (response.status === 409 && (path === "diagnose" || path === "posts")) throw new ThreadsError("diagnosing");
     if (response.status === 403) throw new ThreadsError("forbidden");
     if (response.status === 401) throw new ThreadsError("loginAgain");
     throw new ThreadsError("failed");
@@ -186,6 +190,10 @@ export default function ThreadsPage() {
   const [publicCheckDone, setPublicCheckDone] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ThreadsErrorKey | null>(null);
+  const { diagnosing, start: startDiagnosis, resume: resumeDiagnosis } = useThreadsDiagnosis(call, requireDiagnosis, {
+    onResult: (result) => { setOriginal(result); setView(result); },
+    onError: setError,
+  });
   const t = THREADS_TEXT[lang];
 
   useEffect(() => {
@@ -216,11 +224,14 @@ export default function ThreadsPage() {
         try {
           const restored = requireDiagnosis(await call("diagnosis"));
           if (active) { setOriginal(restored); setView(restored); }
-        } catch { /* 診断前なら結果はない。 */ }
+        } catch {
+          // 結果がなければ、再読み込みの前に始めた診断が続いていないか確かめる
+          if (active) void resumeDiagnosis();
+        }
       } catch { /* 未ログイン時の 401 は通常状態。 */ }
     })();
     return () => { active = false; };
-  }, []);
+  }, [resumeDiagnosis]);
 
   async function perform(action: () => Promise<void>) {
     setBusy(true);
@@ -308,12 +319,12 @@ export default function ThreadsPage() {
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-sm bg-paper-deep p-4">
           <p className="[overflow-wrap:anywhere]"><span className="mr-2 inline-block bg-ink px-2 py-0.5 font-bold text-paper">Threads</span>
             {session.mock ? session.username : `@${session.username}`}</p>
-          <button type="button" disabled={busy} className="text-sm underline" onClick={() => void perform(async () => {
+          <button type="button" disabled={busy || diagnosing !== null} className="text-sm underline disabled:opacity-50" onClick={() => void perform(async () => {
             await call("session", "DELETE");
             setSession(null); setOriginal(null); setView(null); setSelected([]); setPreview(null); setFetchedPosts(null); setPublicCheckDone(false);
           })}>{t.logout}</button>
         </div>
-        {!original && <button type="button" disabled={busy}
+        {!original && !diagnosing && <button type="button" disabled={busy}
           className="rounded-sm border border-ink px-5 py-3 font-bold disabled:opacity-50"
           onClick={() => void perform(async () => {
             const data = await call("posts");
@@ -326,9 +337,20 @@ export default function ThreadsPage() {
             setPublicCheckDone(false);
           })}>{t.reviewPosts}</button>}
         {busy && <p role="status" className="text-sm text-ink/70">{t.loading}</p>}
+        {diagnosing && <ThreadsDiagnosing t={t} posts={fetchedPosts ?? []} progress={diagnosing.progress}
+          startedAt={diagnosing.startedAt} status={diagnosing.resumed ? t.diagnosingResumed : t.diagnosing} />}
         {!original && fetchedPosts && <section aria-label={t.postsAria} className="space-y-4">
           <p className="text-sm text-ink/70">{config?.image_diagnosis_enabled
             ? t.postsFetchedWithImages(fetchedPosts.length) : t.postsFetched(fetchedPosts.length)}</p>
+          {/* 診断の開始は、長い投稿一覧より前に置く（スマホでも最初の画面に入る） */}
+          {!diagnosing && <section aria-labelledby="threads-ai-heading"
+            className="space-y-3 rounded-sm border border-ink/25 bg-paper-deep p-4 shadow-[4px_4px_0_oklch(5%_0.03_265)] sm:p-5">
+            <h2 id="threads-ai-heading" className="font-bold">{t.aiSummary}</h2>
+            <p className="text-sm text-ink/70">{config?.image_diagnosis_enabled ? t.aiNoteWithImages : t.aiNote}</p>
+            <button type="button" disabled={busy}
+              className="w-full rounded-sm bg-seeker px-6 py-3 font-bold text-paper disabled:opacity-50 sm:w-auto"
+              onClick={() => { setError(null); void startDiagnosis(); }}>{t.aiButton}</button>
+          </section>}
           <ol className="space-y-5">{fetchedPosts.map((post) => <li key={post.post_id}>
             {post.images.length > 0 && <p className="mb-2 text-xs font-bold text-seeker">{t.imageDiagnosis}</p>}
             <PostCard post={post} locale={lang} />
@@ -359,16 +381,6 @@ export default function ThreadsPage() {
             </div>}
           </section>
         </section>}
-        {!original && fetchedPosts && <details className="rounded-sm border border-ink/20 p-4">
-          <summary className="cursor-pointer font-bold">{t.aiSummary}</summary>
-          <p className="mt-3 text-sm text-ink/70">{config?.image_diagnosis_enabled ? t.aiNoteWithImages : t.aiNote}</p>
-          <button type="button" disabled={busy}
-            className="mt-3 rounded-sm bg-seeker px-6 py-3 font-bold text-paper disabled:opacity-50"
-            onClick={() => void perform(async () => {
-              const result = requireDiagnosis(await call("diagnose", "POST"));
-              setOriginal(result); setView(result);
-            })}>{busy ? t.aiBusy : t.aiButton}</button>
-        </details>}
       </section>}
 
       {error && <p role="alert" className="mt-6 border-l-4 border-seeker p-3">{t.errors[error]}</p>}

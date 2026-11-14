@@ -17,7 +17,11 @@ export type ThreadsErrorKey =
   | "timeout" | "network" | "modelUnavailable" | "busy" | "forbidden" | "loginAgain" | "failed"
   | "diagnosisUnreadable" | "configUnreadable" | "connectFailed" | "sessionUnreadable"
   | "postsUnreadable" | "authorizeUnverified" | "simulationUnreadable"
-  | "authDenied" | "authState" | "authFailed";
+  | "authDenied" | "authState" | "authFailed" | "diagnosing";
+
+/** サーバーが返す診断の段階（GET /api/threads/progress の stage）。実際に行った順に並べる */
+export const THREADS_DIAGNOSE_STAGES = ["checking_model", "fetching", "reading", "inferring"] as const;
+export type ThreadsDiagnoseStage = (typeof THREADS_DIAGNOSE_STAGES)[number];
 
 export class ThreadsError extends Error {
   constructor(readonly key: ThreadsErrorKey) {
@@ -71,7 +75,14 @@ export interface ThreadsText {
   readonly aiNote: string;
   readonly aiNoteWithImages: string;
   readonly aiButton: string;
-  readonly aiBusy: string;
+  readonly diagnosing: string;
+  readonly diagnosingResumed: string;
+  readonly stagesLabel: string;
+  readonly stageLabels: Readonly<Record<ThreadsDiagnoseStage, string>>;
+  readonly stageDone: string;
+  readonly stageCurrent: string;
+  readonly postsRead: (read: number, total: number) => string;
+  readonly elapsedLive: (clock: string) => string;
   readonly resultFull: string;
   readonly resultRe: string;
   readonly resultCount: (posts: number, clues: number, conclusions: number) => string;
@@ -142,7 +153,19 @@ const ja: ThreadsText = {
   aiNote: "この機能はMeta審査の操作には不要です。チーム管理の本文モデルが停止中は利用できません。上のセルフチェックとは別機能です。",
   aiNoteWithImages: "画像付き投稿は本文・投稿時刻・画像1枚目をチーム管理のモデルで診断します。モデル停止中は利用できません。上のセルフチェックとは別機能です。",
   aiButton: "AI診断を試す",
-  aiBusy: "AI診断中…",
+  diagnosing: "AI診断中です。このページを再読み込みしても、診断は続きます。",
+  diagnosingResumed: "前に始めたAI診断が続いています。終わると結果を表示します。",
+  stagesLabel: "診断の段階",
+  stageLabels: {
+    checking_model: "AIモデルに接続",
+    fetching: "投稿を取得",
+    reading: "本文・画像を解析",
+    inferring: "推理結果を生成",
+  },
+  stageDone: "完了",
+  stageCurrent: "実行中",
+  postsRead: (read, total) => `${read} / ${total} 件`,
+  elapsedLive: (clock) => `経過 ${clock}`,
   resultFull: "診断結果",
   resultRe: "仮除外後の再診断",
   resultCount: (posts, clues, conclusions) => `投稿 ${posts} 件・手がかり ${clues} 件・推定 ${conclusions} 件`,
@@ -164,6 +187,7 @@ const ja: ThreadsText = {
     network: "通信に失敗しました。接続を確認して再度お試しください。",
     modelUnavailable: "AI診断モデルは現在利用できません。本人投稿の確認と公開情報セルフチェックは引き続き利用できます。",
     busy: "Threads APIが混雑しています。時間を置いてください。",
+    diagnosing: "すでにAI診断中です。終わるまでお待ちください。",
     forbidden: "この操作は現在利用できません。Threadsの設定を確認してください。",
     loginAgain: "Threadsにログインし直してください。",
     failed: "操作に失敗しました。再度お試しください。",
@@ -231,7 +255,19 @@ const en: ThreadsText = {
   aiNote: "This feature is not needed to review the app. It is unavailable while the team-managed text model is stopped. It is separate from the self-check above.",
   aiNoteWithImages: "Image posts are diagnosed using the text, timestamp, and first image on the team-managed model. It is unavailable while the model is stopped and is separate from the self-check above.",
   aiButton: "Try the AI diagnosis",
-  aiBusy: "AI diagnosis in progress…",
+  diagnosing: "The AI diagnosis is running. It continues even if you reload this page.",
+  diagnosingResumed: "An AI diagnosis you started earlier is still running. Results appear when it finishes.",
+  stagesLabel: "Diagnosis steps",
+  stageLabels: {
+    checking_model: "Connect to the AI model",
+    fetching: "Fetch posts",
+    reading: "Analyze text and images",
+    inferring: "Build the inference results",
+  },
+  stageDone: "done",
+  stageCurrent: "in progress",
+  postsRead: (read, total) => `${read} / ${total} posts`,
+  elapsedLive: (clock) => `Elapsed ${clock}`,
   resultFull: "Diagnosis result",
   resultRe: "Re-diagnosis after provisional exclusion",
   resultCount: (posts, clues, conclusions) => `${posts} posts · ${clues} clues · ${conclusions} inferences`,
@@ -253,6 +289,7 @@ const en: ThreadsText = {
     network: "The connection failed. Please check your network and try again.",
     modelUnavailable: "The AI diagnosis model is currently unavailable. Reviewing your posts and the public-information self-check remain available.",
     busy: "The Threads API is busy. Please wait a moment.",
+    diagnosing: "An AI diagnosis is already running. Please wait until it finishes.",
     forbidden: "This action is currently unavailable. Please check your Threads settings.",
     loginAgain: "Please log in with Threads again.",
     failed: "The action failed. Please try again.",

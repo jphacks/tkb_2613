@@ -83,6 +83,10 @@ class PendingAuth:
     expires_at: float
 
 
+DiagnoseStage = Literal["checking_model", "fetching", "reading", "inferring"]
+DiagnoseFailure = Literal["model_unavailable", "failed"]
+
+
 @dataclass
 class ThreadsSession:
     token: str | None
@@ -97,6 +101,16 @@ class ThreadsSession:
     busy: bool = False
     fetched: bool = False
     demo_backend: Literal["preset", "vlm"] = "preset"
+    # 診断の進み具合（GET /api/threads/progress）。診断中だけ stage が入る。
+    # 数は実際に読み終えた投稿だけを数え、見込みの割合は持たない
+    stage: DiagnoseStage | None = None
+    started_at: float | None = None
+    posts_total: int | None = None
+    posts_read: int = 0
+    read_post_ids: list[str] = field(default_factory=list)
+    stages: list[DiagnoseStage] = field(default_factory=list)
+    # 直前の診断が失敗した理由（固定のコード）。再読み込み後の画面に出すため
+    last_error: DiagnoseFailure | None = None
 
 
 class ThreadsSessionStore:
@@ -446,6 +460,39 @@ async def diagnosis(request: Request) -> dict[str, Any]:
     return current.snapshot
 
 
+@router.get("/progress")
+async def progress(request: Request) -> dict[str, Any]:
+    """診断の進み具合。再読み込みや 409 のあとに、画面が診断中の表示へ戻るために使う。
+
+    投稿の取得（GET /posts）だけの処理中は診断ではないので idle と返す。
+    """
+    current = _session(request)
+    running = current.busy and current.stage is not None
+    if running:
+        state = "running"
+    elif current.snapshot is not None:
+        state = "done"
+    elif current.last_error is not None:
+        state = "failed"
+    else:
+        state = "idle"
+    elapsed_ms = (
+        round((time.monotonic() - current.started_at) * 1000)
+        if running and current.started_at is not None
+        else None
+    )
+    return {
+        "state": state,
+        "stage": current.stage if running else None,
+        "elapsed_ms": elapsed_ms,
+        "posts_total": current.posts_total if running else None,
+        "posts_read": current.posts_read if running else 0,
+        "read_post_ids": list(current.read_post_ids) if running else [],
+        "stages": list(current.stages) if running else [],
+        "error": current.last_error if state == "failed" else None,
+    }
+
+
 async def _own_posts(current: ThreadsSession, settings: Settings) -> list[Post]:
     if current.token is not None:
         _require_live(settings)
@@ -637,68 +684,109 @@ async def diagnose(request: Request) -> dict[str, Any]:
         if current.busy:
             raise HTTPException(status.HTTP_409_CONFLICT, "診断中です")
         current.busy = True
-    try:
-        if current.token is None:
-            if not settings.threads_mock_mode:
-                raise HTTPException(status.HTTP_403_FORBIDDEN, "モック診断は無効です")
-            posts, preset_clues = _mock_data()
-            if current.demo_backend == "vlm":
-                extractor = await _reachable_text_extractor(settings)
-                extractions = real_extractions(extractor, posts)
-            else:
-                extractions = _replayed(_preset_extractions(posts, preset_clues))
+        # このセッションで実際に行う段階だけを並べる。
+        # モックは投稿を取りに行かず、固定の手がかりはモデルも使わない
+        if current.token is not None:
+            current.stages = ["checking_model", "fetching", "reading", "inferring"]
+        elif current.demo_backend == "vlm":
+            current.stages = ["checking_model", "reading", "inferring"]
         else:
-            _require_live(settings)
-            extractor = await _reachable_text_extractor(settings)
-            posts = await _own_posts(current, settings)
-            extractions = (
-                extract_posts(
-                    extractor,
-                    posts,
-                    fetch_threads_images,
-                    image_fetch_fallback_to_text=True,
-                )
-                if settings.threads_image_diagnosis
-                else real_extractions(extractor, posts)
-            )
-        gazetteer = _cached_gazetteer(settings.gazetteer_dir)
-        started = time.monotonic()
-        extracted = [extraction async for extraction in extractions]
-        # 読み取りに失敗した投稿は全体を止めずに外し、post_errors で知らせる（X と同じ形）。
-        # 理由は固定の文言で、本文や例外の中身は入れない
-        failed = {e.post_id for e in extracted if e.error is not None}
-        post_errors = [
-            {"post_id": post.post_id, "error": POST_ERROR_MESSAGE}
-            for post in posts
-            if post.post_id in failed
-        ]
-        if posts and len(failed) == len(posts):
-            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "投稿を読み取れませんでした")
-        posts = [post for post in posts if post.post_id not in failed]
-        events = await asyncio.to_thread(
-            _infer_events, posts, [e for e in extracted if e.post_id not in failed], gazetteer
+            current.stages = ["reading", "inferring"]
+        current.stage = current.stages[0]
+        current.started_at = time.monotonic()
+        current.posts_total = None
+        current.posts_read = 0
+        current.read_post_ids = []
+        current.last_error = None
+    try:
+        return await _run_diagnosis(current, settings)
+    except HTTPException as exc:
+        current.last_error = (
+            "model_unavailable"
+            if exc.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+            else "failed"
         )
-        results = {name: data for name, data in events if name in {"conclusions", "plan"}}
-        conclusion = results["conclusions"]
-        current.posts = posts
-        current.clues = [Clue.model_validate(item) for item in conclusion["clues"]]
-        current.profile_claims = _threads_profile_items(conclusion["profile_claims"])
-        current.profile_claim_suggestions = list(conclusion["profile_claim_suggestions"])
-        current.snapshot = {
-            "posts": [post.model_dump(mode="json") for post in posts],
-            "clues": conclusion["clues"],
-            "conclusions": conclusion["conclusions"],
-            "plan": results["plan"],
-            "profile_claims": [claim.model_dump(mode="json") for claim in current.profile_claims],
-            "profile_claim_suggestions": current.profile_claim_suggestions,
-            "post_errors": post_errors,
-            "elapsed_ms": round((time.monotonic() - started) * 1000),
-            "mock": current.token is None,
-        }
-        return current.snapshot
+        raise
+    except Exception:
+        current.last_error = "failed"
+        raise
     finally:
         with _store(request).lock:
             current.busy = False
+            current.stage = None
+            current.started_at = None
+            current.stages = []
+            current.read_post_ids = []
+
+
+async def _run_diagnosis(current: ThreadsSession, settings: Settings) -> dict[str, Any]:
+    """手がかりの取り出しと推理。進むたびに current.stage と posts_read を更新する。"""
+    if current.token is None:
+        if not settings.threads_mock_mode:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "モック診断は無効です")
+        posts, preset_clues = _mock_data()
+        if current.demo_backend == "vlm":
+            extractor = await _reachable_text_extractor(settings)
+            extractions = real_extractions(extractor, posts)
+        else:
+            extractions = _replayed(_preset_extractions(posts, preset_clues))
+    else:
+        _require_live(settings)
+        extractor = await _reachable_text_extractor(settings)
+        current.stage = "fetching"
+        posts = await _own_posts(current, settings)
+        extractions = (
+            extract_posts(
+                extractor,
+                posts,
+                fetch_threads_images,
+                image_fetch_fallback_to_text=True,
+            )
+            if settings.threads_image_diagnosis
+            else real_extractions(extractor, posts)
+        )
+    gazetteer = _cached_gazetteer(settings.gazetteer_dir)
+    current.stage = "reading"
+    current.posts_total = len(posts)
+    started = time.monotonic()
+    extracted: list[PostExtraction] = []
+    async for extraction in extractions:
+        extracted.append(extraction)
+        current.read_post_ids.append(extraction.post_id)
+        current.posts_read = len(extracted)
+    # 読み取りに失敗した投稿は全体を止めずに外し、post_errors で知らせる（X と同じ形）。
+    # 理由は固定の文言で、本文や例外の中身は入れない
+    failed = {e.post_id for e in extracted if e.error is not None}
+    post_errors = [
+        {"post_id": post.post_id, "error": POST_ERROR_MESSAGE}
+        for post in posts
+        if post.post_id in failed
+    ]
+    if posts and len(failed) == len(posts):
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "投稿を読み取れませんでした")
+    posts = [post for post in posts if post.post_id not in failed]
+    current.stage = "inferring"
+    events = await asyncio.to_thread(
+        _infer_events, posts, [e for e in extracted if e.post_id not in failed], gazetteer
+    )
+    results = {name: data for name, data in events if name in {"conclusions", "plan"}}
+    conclusion = results["conclusions"]
+    current.posts = posts
+    current.clues = [Clue.model_validate(item) for item in conclusion["clues"]]
+    current.profile_claims = _threads_profile_items(conclusion["profile_claims"])
+    current.profile_claim_suggestions = list(conclusion["profile_claim_suggestions"])
+    current.snapshot = {
+        "posts": [post.model_dump(mode="json") for post in posts],
+        "clues": conclusion["clues"],
+        "conclusions": conclusion["conclusions"],
+        "plan": results["plan"],
+        "profile_claims": [claim.model_dump(mode="json") for claim in current.profile_claims],
+        "profile_claim_suggestions": current.profile_claim_suggestions,
+        "post_errors": post_errors,
+        "elapsed_ms": round((time.monotonic() - started) * 1000),
+        "mock": current.token is None,
+    }
+    return current.snapshot
 
 
 def _selected(body: SimulateRequest, current: ThreadsSession) -> None:
