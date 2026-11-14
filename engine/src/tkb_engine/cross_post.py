@@ -17,6 +17,7 @@ from tkb_common.schemas import (
     EvidenceSource,
     PhotoPlaceGranularity,
     PhotoPlaceLookupStatus,
+    PhotoPlaceRelation,
     PhotoPlaceResult,
     PhotoPlaceStatus,
     PhotoPlaceType,
@@ -1673,7 +1674,10 @@ def _photo_home_area_facts(
         ):
             continue
         candidate = result.candidates[0]
-        if candidate.place_type not in {PhotoPlaceType.FACILITY, PhotoPlaceType.LANDMARK}:
+        if (
+            candidate.place_type not in {PhotoPlaceType.FACILITY, PhotoPlaceType.LANDMARK}
+            or candidate.photo_relation is not PhotoPlaceRelation.VISIBLE_IN_FRAME
+        ):
             continue
         home_match = _photo_home_place_match(photo_post.text, candidate.label)
         if home_match is None or _is_negated_claim(photo_post.text, home_match.end()):

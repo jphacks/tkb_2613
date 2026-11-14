@@ -539,6 +539,21 @@ def test_photo_place_residence_needs_home_context_and_independent_local_post() -
             [photo, area_post], [photo_clue, area_clue], photo_place_results=[web_searched]
         )
     )
+    camera_location = result.model_copy(
+        update={
+            "candidates": [
+                result.candidates[0].model_copy(
+                    update={"photo_relation": PhotoPlaceRelation.CAMERA_AT}
+                )
+            ]
+        }
+    )
+    assert all(
+        item.attribute is not ProfileAttribute.RESIDENTIAL_AREA
+        for item in infer_owner_claims(
+            [photo, area_post], [photo_clue, area_clue], photo_place_results=[camera_location]
+        )
+    )
     assert claim.status is ProfileStatus.WEAK
     assert claim.confidence <= 0.65
     path = claim.evidence_paths[0]
