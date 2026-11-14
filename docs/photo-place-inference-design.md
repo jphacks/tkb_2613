@@ -126,6 +126,10 @@ Mapillaryの地理付き街路画像 | 候補を絞った地域の視点画像�
 6. すべての候補とclaimが `post_id/image_index`・clue index・source IDへたどれ、SSEの参照切れ/不正列挙値を画面が拒否する。
 7. 未校正のスコアを確率や「正確さ%」として表示しない。遅延・検索数・地域別カバレッジを記録し、ユーザー投稿データは記録しない。
 
+小さなロジック評価は `python eval/photo_place_evaluation.py` で実行する。`eval/fixtures/photo_place_synthetic.json` の架空POIと文章Clueを一時SQLite索引へ入れ、実際の `infer_photo_places` とcross-post候補生成を呼ぶ。写真bytes・公開地点画像・全国POI本体は使わない。評価器は画像fixtureを拒否し、ケースごとの独立注釈 `truth_kind` / `expected_place_ids` を予測結果と照合する。候補被覆率は識別可能な正解ケースのうち何らかのPOIが返った割合、正解候補率は同じ識別可能正解ケースを分母に正解 `place_id` が含まれた割合。unknown適合率は予測unknownのうち正解が曖昧またはunknownだった割合。曖昧GT単一断定率は曖昧正解ケースを分母に、単一candidateを返した割合。禁止位置claimは明示的にclaimを許可しないケースでの `residential_area` / `realtime_location` candidate件数と該当ケース率。削除経路脱落率は、陽性baselineからfixtureで指定した投稿を一件ずつ削除して全推論をやり直したチェックのうちclaimが消えた割合。分母ゼロ時は `null` とする。
+
+このsynthetic結果は実在地点の候補被覆、行政階層誤差、写真検出/OCR/VLM精度、別角度照合、実地理索引の地域カバレッジを測らない。これらの実測は出典・ライセンス確認済みの索引と許諾済み評価画像が別途用意された後に別トラックで行う。手作りfixtureの成功率を本番精度として報告しない。
+
 ## 9. 段階的実装計画
 
 1. **データ/権利棚卸し**: `data-prep/SOURCES.md` を基準に各地理データ、画像サービスの利用・キャッシュ・加工条件を確認する。全国の利用可能範囲と欠落地域を記録する。未確認のものは取り込まない。
@@ -157,4 +161,5 @@ Mapillaryの地理付き街路画像 | 候補を絞った地域の視点画像�
 - **独立性と関係推論**: `photo_place_results` 自体はprofile claimではない。唯一の現行接続は `residential_area` への保守的な別推論で、ローカルlicensed POIの一意候補、同じ投稿本文の「自宅/家/うちの近くの候補名」、候補と画像Clue名の正規化一致、粗い `area_label`、別投稿の同地域 `PLACE_TEXT` と近隣/日常等の明示文脈をすべて要求する。`WEB_SEARCHED`候補、単なる地域名言及、引用/旅行/訪問/否定、曖昧候補は使わず、confidenceは最大0.65でstatusはweak。根拠経路に写真側・独立投稿側の両方を含め、除外・削除時は既存candidate-pool再評価で経路を落とす。表示する写真候補は削除投稿から除く。撮影地点/現在地推定は行わない。
 - **Brave Place Search（実装済み）**: `api/src/tkb_api/photo_place_web.py` のtransport注入可能クライアント。診断ごとの `photo_place_web_lookup_consent` のみで起動し、既存ハンドル検索同意とは独立。最大3クエリ、画像OCR/VLM `shop/landmark/station_sign` の名称のみを送る。結果title完全一致と `postal_address.country=JP` を要求し、`source_url` は公開HTTPS検査後に表示。Brave短期ID/snippet/thumbnailは保持しない。mock・キーなしは通信しない。有料APIの実呼び出しは行っていない。
 - **未実装**: 別角度を含む参照画像/視点照合、`camera_nearby` / `camera_at`の成立ルール、Braveなど外部候補の公式/公的な独立検証。POI本体は取得していない。
+- **Synthetic評価ハーネス**: `eval/photo_place_evaluation.py` は架空POI/文章Clueの小fixtureを実推論器に通し、候補被覆・正解POI候補率・unknown適合・曖昧単一断定・禁止位置claim・一件削除後の経路脱落を集計する。画像や公開地理データの実カバレッジを表すものではない。
 - データ供給源の参照条件と任意取込手順は [`data-prep/SOURCES.md`](../data-prep/SOURCES.md)。API/SSE形は [`docs/api-sse-contract.md`](api-sse-contract.md)。テスト結果は実行環境での確認後に作業報告へ記録する。
