@@ -530,9 +530,7 @@ def test_photo_place_residence_needs_home_context_and_independent_local_post() -
                 [photo, area_post], [photo_clue, area_clue], photo_place_results=[checked]
             )
         )
-    web_searched = result.model_copy(
-        update={"lookup_status": PhotoPlaceLookupStatus.WEB_SEARCHED}
-    )
+    web_searched = result.model_copy(update={"lookup_status": PhotoPlaceLookupStatus.WEB_SEARCHED})
     assert all(
         item.attribute is not ProfileAttribute.RESIDENTIAL_AREA
         for item in infer_owner_claims(
@@ -583,9 +581,7 @@ def test_photo_place_residence_rejects_result_alone_and_plain_area_mention() -> 
     mention = post("mention", "\u6587\u4eac\u533a\u3067\u30e9\u30f3\u30c1")
     area_clue = typed_clue(mention, "\u6587\u4eac\u533a", ClueType.PLACE_TEXT)
     assert (
-        infer_owner_claims(
-            [photo, mention], [photo_clue, area_clue], photo_place_results=[result]
-        )
+        infer_owner_claims([photo, mention], [photo_clue, area_clue], photo_place_results=[result])
         == []
     )
 

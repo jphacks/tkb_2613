@@ -11,6 +11,7 @@ from tkb_api.config import Settings
 from tkb_api.routes.diagnose import get_gazetteer
 from tkb_data_prep import national_gazetteer, stations
 from tkb_data_prep.config import ALL_PREFECTURE_CODES, Paths
+from tkb_data_prep.errors import DataPrepError
 from tkb_data_prep.mesh import code_1km
 from tkb_engine.gazetteer import Gazetteer, Knowledge
 
@@ -89,7 +90,7 @@ def test_feature_reader_yields_incrementally_and_rejects_bad_json() -> None:
     source = StringIO(json.dumps({"type": "FeatureCollection", "features": features}))
     assert len(list(national_gazetteer._iter_features(source))) == 2
 
-    with pytest.raises(national_gazetteer.DataPrepError, match="feature"):
+    with pytest.raises(DataPrepError, match="feature"):
         list(national_gazetteer._iter_features(StringIO('{"features":[{"bad":]')))
 
 
@@ -100,6 +101,6 @@ def test_national_build_refuses_to_overwrite_existing_output(tmp_path: Path) -> 
     sentinel = paths.national_out_dir / "postal.parquet"
     sentinel.write_bytes(b"keep")
 
-    with pytest.raises(national_gazetteer.DataPrepError, match="上書きしません"):
+    with pytest.raises(DataPrepError, match="上書きしません"):
         national_gazetteer.build(paths)
     assert sentinel.read_bytes() == b"keep"

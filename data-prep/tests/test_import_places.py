@@ -64,7 +64,7 @@ def _feature(
     }
 
 
-def test_stream_import_indexes_only_licensed_japan_records(tmp_path) -> None:
+def test_stream_import_indexes_only_licensed_japan_records(tmp_path: Path) -> None:
     source = tmp_path / "places.geojsonl"
     features = [
         _feature("licensed", country="JP", license_name="CC-BY-4.0"),
@@ -169,7 +169,7 @@ def test_trusted_source_url_mapping_accepts_public_https() -> None:
     }
 
 
-def test_import_indexes_explicit_space_dot_width_and_kana_variants(tmp_path) -> None:
+def test_import_indexes_explicit_space_dot_width_and_kana_variants(tmp_path: Path) -> None:
     feature = _feature("variants", country="JP", license_name="CC-BY-4.0")
     properties = feature["properties"]
     assert isinstance(properties, dict)
@@ -190,7 +190,7 @@ def test_import_indexes_explicit_space_dot_width_and_kana_variants(tmp_path) -> 
     assert set(place_name_keys("東京･文化館")) <= keys
 
 
-def test_country_missing_requires_explicit_bounded_input_flag(tmp_path) -> None:
+def test_country_missing_requires_explicit_bounded_input_flag(tmp_path: Path) -> None:
     source = tmp_path / "places.geojsonl"
     source.write_text(
         json.dumps(_feature("no-country", country=None, license_name="CC-BY-4.0")), encoding="utf-8"
@@ -247,7 +247,7 @@ def test_country_missing_requires_explicit_bounded_input_flag(tmp_path) -> None:
     )
 
 
-def test_japan_bounds_are_inclusive_and_reject_outside_coordinates(tmp_path) -> None:
+def test_japan_bounds_are_inclusive_and_reject_outside_coordinates(tmp_path: Path) -> None:
     source = tmp_path / "bounds.geojsonl"
     coordinates = [
         (122, 20),
@@ -276,7 +276,7 @@ def test_japan_bounds_are_inclusive_and_reject_outside_coordinates(tmp_path) -> 
     )
 
 
-def test_requires_mesh_table_and_fails_closed_before_creating_index(tmp_path) -> None:
+def test_requires_mesh_table_and_fails_closed_before_creating_index(tmp_path: Path) -> None:
     source = tmp_path / "places.geojsonl"
     source.write_text("", encoding="utf-8")
     output = tmp_path / "places.sqlite3"
@@ -293,7 +293,7 @@ def test_requires_mesh_table_and_fails_closed_before_creating_index(tmp_path) ->
     assert not output.exists()
 
 
-def test_mesh_membership_rejects_foreign_points_and_keeps_remote_islands(tmp_path) -> None:
+def test_mesh_membership_rejects_foreign_points_and_keeps_remote_islands(tmp_path: Path) -> None:
     coordinates = {
         "okinawa": (127.68, 26.21),
         "yonaguni": (123.01, 24.46),
@@ -333,7 +333,7 @@ def test_mesh_membership_rejects_foreign_points_and_keeps_remote_islands(tmp_pat
     assert ids == {f"places:{name}" for name in list(coordinates)[:4]}
 
 
-def test_coordinates_in_same_mesh_share_cell_membership(tmp_path) -> None:
+def test_coordinates_in_same_mesh_share_cell_membership(tmp_path: Path) -> None:
     # Mesh membership is cell-level, not a point-in-polygon determination.
     first = (139.82, 35.55)
     second = (139.825, 35.55)
@@ -359,7 +359,7 @@ def test_coordinates_in_same_mesh_share_cell_membership(tmp_path) -> None:
     )
 
 
-def test_import_refuses_overwrite(tmp_path) -> None:
+def test_import_refuses_overwrite(tmp_path: Path) -> None:
     source = tmp_path / "places.geojsonl"
     source.write_text("", encoding="utf-8")
     output = tmp_path / "places.sqlite3"
@@ -371,7 +371,9 @@ def test_import_refuses_overwrite(tmp_path) -> None:
         )
 
 
-def test_geoparquet_batches_filter_country_private_address_and_unknown_license(tmp_path) -> None:
+def test_geoparquet_batches_filter_country_private_address_and_unknown_license(
+    tmp_path: Path,
+) -> None:
     source = tmp_path / "places.parquet"
     rows = []
     for place_id, theme, kind, country, category, license_name in [
@@ -441,7 +443,7 @@ def test_geoparquet_batches_filter_country_private_address_and_unknown_license(t
     assert "個人住所相当の番地情報" not in json.dumps(stored, ensure_ascii=False)
 
 
-def test_area_label_uses_only_unambiguous_japan_locality(tmp_path) -> None:
+def test_area_label_uses_only_unambiguous_japan_locality(tmp_path: Path) -> None:
     source = tmp_path / "places.geojsonl"
     feature = _feature("area", country="JP", license_name="CC0-1.0")
     properties = feature["properties"]
@@ -460,7 +462,7 @@ def test_area_label_uses_only_unambiguous_japan_locality(tmp_path) -> None:
     assert "freeform" not in stored
 
 
-def test_geoparquet_requires_partition_columns_and_refuses_overwrite(tmp_path) -> None:
+def test_geoparquet_requires_partition_columns_and_refuses_overwrite(tmp_path: Path) -> None:
     mesh_index = _mesh_index(tmp_path)
     malformed = tmp_path / "missing-partitions.parquet"
     pq.write_table(pa.table({"id": ["x"]}), malformed)
@@ -518,7 +520,9 @@ def test_interrupted_import_keeps_incomplete_schema_version(tmp_path: Path) -> N
         assert db.execute("SELECT count(*) FROM poi_place").fetchone()[0] == 1
 
 
-def test_cli_default_and_help_use_api_gazetteer_directory(monkeypatch, capsys) -> None:
+def test_cli_default_and_help_use_api_gazetteer_directory(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     assert Path("data/processed/places.sqlite3") == DEFAULT_OUTPUT
     assert Path("data/processed/national/muni_mesh.parquet") == DEFAULT_MESH_INDEX
     monkeypatch.setattr(sys, "argv", ["tkb_data_prep.import_places", "--help"])

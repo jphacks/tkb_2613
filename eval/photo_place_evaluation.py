@@ -101,9 +101,7 @@ def _run_case(case: dict[str, Any], gazetteer: Gazetteer) -> dict[str, Any]:
         "candidate_sets": sets,
         "status": photo_results[0].status.value if photo_results else "unknown",
         "place_ids": sorted(
-            candidate.place_id
-            for result in photo_results
-            for candidate in result.candidates
+            candidate.place_id for result in photo_results for candidate in result.candidates
         ),
         "location_claims": bool(residential.candidates or realtime.candidates),
         "location_claim_count": len(residential.candidates) + len(realtime.candidates),
