@@ -5,7 +5,7 @@ api は住まいの推定を出さずに今までどおり動く。
 """
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
@@ -63,6 +63,15 @@ class Towns:
 
 
 @dataclass(frozen=True)
+class Shelter:
+    """避難所（国土地理院）。位置は層4・層7の計算だけに使い、画面には出さない。"""
+
+    name: str
+    lat: float
+    lon: float
+
+
+@dataclass(frozen=True)
 class ScoringTables:
     # 500m メッシュごと
     age: FloatArray  # (メッシュ, 20) 5歳階級別人口
@@ -83,6 +92,7 @@ class ScoringTables:
     bus_walk: Walk
     school_name: list[str]
     school_city: list[str]
+    shelters: list[Shelter] = field(default_factory=list)
 
     @property
     def size(self) -> int:
@@ -158,7 +168,24 @@ def _load(paths: dict[str, Path]) -> ScoringTables:
         bus_walk=_walk(pq.read_table(paths["bus_walk"]), _rows(paths["bus_stops"])),
         school_name=[str(v) for v in schools.column("name").to_pylist()],
         school_city=[str(v) for v in schools.column("city").to_pylist()],
+        shelters=_shelters(paths["age_500m"].parent / "shelters.parquet"),
     )
+
+
+def _shelters(path: Path) -> list[Shelter]:
+    """避難所の表（data-prep の shelters.parquet）。なければ空。"""
+    if not path.is_file():
+        return []
+    table = pq.read_table(path, columns=["name", "lat", "lon"])
+    return [
+        Shelter(str(n), float(a), float(b))
+        for n, a, b in zip(
+            table.column("name").to_pylist(),
+            table.column("lat").to_pylist(),
+            table.column("lon").to_pylist(),
+            strict=True,
+        )
+    ]
 
 
 def _rows(path: Path) -> int:
