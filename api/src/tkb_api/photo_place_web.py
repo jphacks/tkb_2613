@@ -41,6 +41,11 @@ _SENSITIVE_OR_UNCLEAR = re.compile(
     r"(?:電話|住所|郵便|〒|番地|丁目|号))",
     re.IGNORECASE,
 )
+# 店名・地標名ではなく文章に見えるもの（助詞「を」「へ」や述語の語尾）は送らない。
+# 名前を取りこぼしても Brave を呼ばないだけで安全側に倒れる。
+_SENTENCE_LIKE = re.compile(
+    r"[をへ]|(?:ました|ません|ます|です|でした|だった|ている|ていた|てる|てきた|行った|来た)\Z"
+)
 
 
 def _query(value: str) -> str | None:
@@ -48,6 +53,8 @@ def _query(value: str) -> str | None:
     if not 2 <= len(normalized) <= 50:
         return None
     if not _SAFE_QUERY_CHARACTERS.fullmatch(normalized) or _SENSITIVE_OR_UNCLEAR.search(normalized):
+        return None
+    if _SENTENCE_LIKE.search(normalized):
         return None
     if "x" in normalized.casefold():
         return None
