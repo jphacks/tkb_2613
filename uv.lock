@@ -947,12 +947,14 @@ name = "tkb-engine"
 version = "0.0.0"
 source = { editable = "engine" }
 dependencies = [
+    { name = "numpy" },
     { name = "pyarrow" },
     { name = "tkb-common" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "numpy", specifier = ">=2.0" },
     { name = "pyarrow", specifier = ">=18.0" },
     { name = "tkb-common", editable = "common" },
 ]
