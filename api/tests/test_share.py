@@ -1,6 +1,7 @@
 """明示的な閲覧リンクだけが、別ブラウザや API 再起動後に読める。"""
 
 import logging
+import os
 import stat
 from pathlib import Path
 
@@ -10,7 +11,9 @@ from fastapi.testclient import TestClient
 from tkb_api.config import Settings, get_settings
 from tkb_api.main import create_app
 from tkb_api.routes.diagnose import get_gazetteer
+from tkb_api.routes.share import _candidate_snapshot
 from tkb_api.shares import ShareStore
+from tkb_common.schemas import PROFILE_DIAGNOSED_ATTRIBUTES
 from tkb_engine.gazetteer import Gazetteer
 
 # ブラウザは POST・DELETE に Origin を付ける（元に戻せない操作は Origin を確かめる）
@@ -46,7 +49,8 @@ def test_result_link_requires_the_owners_finished_diagnosis_and_is_read_only(
         assert response.status_code == 200
         token = response.json()["token"]
         assert len(token) >= 32
-        assert stat.S_IMODE(settings.share_db_path.stat().st_mode) == 0o600
+        if os.name == "posix":
+            assert stat.S_IMODE(settings.share_db_path.stat().st_mode) == 0o600
 
     # API プロセスが作り直されても、リンクを知る人はログインなしで閲覧できる。
     with _client(settings) as viewer:
@@ -54,11 +58,98 @@ def test_result_link_requires_the_owners_finished_diagnosis_and_is_read_only(
         assert shared.status_code == 200
         assert shared.headers["cache-control"] == "no-store, no-transform"
         assert shared.json()["posts"]
-        assert shared.json()["conclusions"]
+        assert "conclusions" not in shared.json()
+        assert len(shared.json()["profile_claims"]) == len(PROFILE_DIAGNOSED_ATTRIBUTES)
         assert shared.json()["plan"]["posts"]
         assert viewer.post("/api/delete", json={"delete": []}).status_code == 401
         assert viewer.post("/api/simulate", json={"delete": []}).status_code == 401
         assert viewer.post("/api/shared-result", json={"token": "y" * 43}).status_code == 404
+
+
+def test_old_candidate_share_drops_redundant_conclusions_without_recomputing() -> None:
+    legacy_conclusion = {
+        "rule": "W1",
+        "attribute": "home_walk_area",
+        "value": "根津駅から徒歩4分",
+        "clue_indices": [1],
+        "note": "legacy saved value",
+    }
+    payload = {
+        "posts": [],
+        "clues": [],
+        "profile_claims": [
+            {
+                "attribute": "home_nearest_station",
+                "status": "unknown",
+                "candidates": [],
+                "candidate_pool": [],
+                "conflicting_evidence": [],
+                "reason": "no_grounded_rule",
+            }
+        ],
+        "conclusions": [legacy_conclusion],
+        "plan": {
+            "delete": [],
+            "broken": [],
+            "before": [legacy_conclusion],
+            "after": [legacy_conclusion],
+            "posts": [],
+        },
+    }
+
+    result = _candidate_snapshot(payload)
+
+    assert "conclusions" not in result
+    assert result["profile_claims"] == payload["profile_claims"]
+    assert result["plan"] == payload["plan"]
+
+
+def test_legacy_shared_links_are_returned_unchanged_until_expiry(tmp_path: Path) -> None:
+    settings = _mock_settings(tmp_path / "legacy.sqlite3", share_enabled=True)
+    legacy = {
+        "posts": [],
+        "clues": [],
+        "conclusions": [
+            {
+                "rule": "R3",
+                "attribute": "routine",
+                "value": "毎週火曜",
+                "clue_indices": [],
+                "note": "",
+            }
+        ],
+        "plan": {
+            "delete": [],
+            "broken": ["routine"],
+            "before": [
+                {
+                    "rule": "R3",
+                    "attribute": "routine",
+                    "value": "火曜の夜勤",
+                    "clue_indices": [],
+                    "note": "保存済み",
+                }
+            ],
+            "after": [
+                {
+                    "rule": "R3",
+                    "attribute": "routine",
+                    "value": "火曜の夜勤",
+                    "clue_indices": [],
+                    "note": "保存済み",
+                }
+            ],
+            "posts": [],
+        },
+    }
+    with _client(settings) as client:
+        store: ShareStore = client.app.state.shares  # type: ignore[attr-defined]
+        token = store.create(legacy, "did:plc:legacy")
+        response = client.post("/api/shared-result", json={"token": token})
+        assert response.status_code == 200
+        assert response.json() == legacy
+        # Reading does not rewrite or expire the saved snapshot.
+        assert store.get(token) == legacy
 
 
 def test_result_link_expires(tmp_path: Path) -> None:
@@ -94,6 +185,8 @@ def test_features_tell_the_screen_whether_result_links_are_on(tmp_path: Path) ->
                 "share_enabled": enabled,
                 "auth_mode": "app_password",
                 "public_web_lookup_available": True,  # 既定はモック
+                "photo_place_web_lookup_available": False,
+                "commons_reference_lookup_available": False,  # 既定off・モックでは使わない
             }
             assert res.headers["cache-control"] == "no-store, no-transform"
 

@@ -1,0 +1,193 @@
+{
+  "evaluation_kind": "synthetic_no_images",
+  "annotation_kind": "manual",
+  "places": [
+    {
+      "place_id": "fixture:green-hall",
+      "label": "架空青葉館",
+      "aliases": [],
+      "area_label": "架空市",
+      "basic_category": "cultural",
+      "sources": [{
+        "source_id": "fixture:source-green",
+        "provider": "synthetic fixture",
+        "dataset": "fictional POI",
+        "license_id": "CC-BY-4.0",
+        "record_id": "green-hall",
+        "attribution": "synthetic test data"
+      }]
+    },
+    {
+      "place_id": "fixture:blue-hall",
+      "label": "架空文化館",
+      "aliases": [],
+      "area_label": "架空市",
+      "basic_category": "cultural",
+      "sources": [{
+        "source_id": "fixture:source-blue",
+        "provider": "synthetic fixture",
+        "dataset": "fictional POI",
+        "license_id": "CC-BY-4.0",
+        "record_id": "blue-hall",
+        "attribution": "synthetic test data"
+      }]
+    },
+    {
+      "place_id": "fixture:red-hall",
+      "label": "架空文化館",
+      "aliases": [],
+      "area_label": "架空町",
+      "basic_category": "cultural",
+      "sources": [{
+        "source_id": "fixture:source-red",
+        "provider": "synthetic fixture",
+        "dataset": "fictional POI",
+        "license_id": "CC-BY-4.0",
+        "record_id": "red-hall",
+        "attribution": "synthetic test data"
+      }]
+    }
+  ],
+  "cases": [
+    {
+      "id": "identified-home-area-with-independent-post",
+      "truth_kind": "identifiable",
+      "expected_place_ids": ["fixture:green-hall"],
+      "forbid_location_claim": false,
+      "delete_posts": [
+        "at://did:plc:synthetic/app.bsky.feed.post/green-photo",
+        "at://did:plc:synthetic/app.bsky.feed.post/green-area"
+      ],
+      "posts": [
+        {"post_id":"at://did:plc:synthetic/app.bsky.feed.post/green-photo","text":"自宅近くの架空青葉館で撮った","created_at":"2026-11-01T12:00:00+09:00","images":[{"index":0,"url":"https://cdn.bsky.app/local-placeholder/green","alt":"","width":100,"height":100}]},
+        {"post_id":"at://did:plc:synthetic/app.bsky.feed.post/green-area","text":"架空市から帰宅。今日も普段どおり","created_at":"2026-11-02T12:00:00+09:00","images":[]}
+      ],
+      "clues": [
+        {"post_id":"at://did:plc:synthetic/app.bsky.feed.post/green-photo","image_index":0,"type":"shop","value":"架空青葉館","region":[1,1,20,20],"confidence":0.9,"source":"vlm"},
+        {"post_id":"at://did:plc:synthetic/app.bsky.feed.post/green-area","image_index":null,"type":"place_text","value":"架空市","region":null,"confidence":0.9,"source":"text"}
+      ]
+    },
+    {
+      "id": "same-name-ambiguous-branches",
+      "truth_kind": "ambiguous",
+      "expected_place_ids": ["fixture:blue-hall", "fixture:red-hall"],
+      "forbid_location_claim": true,
+      "posts": [
+        {"post_id":"at://did:plc:synthetic/app.bsky.feed.post/two-branches-photo","text":"自宅近くの架空文化館","created_at":"2026-11-01T12:00:00+09:00","images":[{"index":0,"url":"https://cdn.bsky.app/local-placeholder/branches","alt":"","width":100,"height":100}]},
+        {"post_id":"at://did:plc:synthetic/app.bsky.feed.post/two-branches-area","text":"普段は架空市から帰宅する","created_at":"2026-11-02T12:00:00+09:00","images":[]}
+      ],
+      "clues": [
+        {"post_id":"at://did:plc:synthetic/app.bsky.feed.post/two-branches-photo","image_index":0,"type":"landmark","value":"架空文化館","region":[1,1,20,20],"confidence":0.9,"source":"vlm"},
+        {"post_id":"at://did:plc:synthetic/app.bsky.feed.post/two-branches-area","image_index":null,"type":"place_text","value":"架空市","region":null,"confidence":0.9,"source":"text"}
+      ]
+    },
+    {
+      "id": "place-candidate-alone-is-not-residence",
+      "truth_kind": "identifiable",
+      "expected_place_ids": ["fixture:green-hall"],
+      "forbid_location_claim": true,
+      "posts": [
+        {"post_id":"at://did:plc:synthetic/app.bsky.feed.post/photo-only","text":"自宅近くの架空青葉館","created_at":"2026-11-01T12:00:00+09:00","images":[{"index":0,"url":"https://cdn.bsky.app/local-placeholder/alone","alt":"","width":100,"height":100}]}
+      ],
+      "clues": [
+        {"post_id":"at://did:plc:synthetic/app.bsky.feed.post/photo-only","image_index":0,"type":"shop","value":"架空青葉館","region":[1,1,20,20],"confidence":0.9,"source":"vlm"}
+      ]
+    },
+    {
+      "id": "quoted-travel-context-does-not-link-home",
+      "truth_kind": "identifiable",
+      "expected_place_ids": ["fixture:green-hall"],
+      "forbid_location_claim": true,
+      "posts": [
+        {"post_id":"at://did:plc:synthetic/app.bsky.feed.post/travel-photo","text":"旅行で来た。『自宅近くの架空青葉館』らしい","created_at":"2026-11-01T12:00:00+09:00","images":[{"index":0,"url":"https://cdn.bsky.app/local-placeholder/travel","alt":"","width":100,"height":100}]},
+        {"post_id":"at://did:plc:synthetic/app.bsky.feed.post/travel-area","text":"架空市は旅行先として有名","created_at":"2026-11-02T12:00:00+09:00","images":[]}
+      ],
+      "clues": [
+        {"post_id":"at://did:plc:synthetic/app.bsky.feed.post/travel-photo","image_index":0,"type":"shop","value":"架空青葉館","region":[1,1,20,20],"confidence":0.9,"source":"vlm"},
+        {"post_id":"at://did:plc:synthetic/app.bsky.feed.post/travel-area","image_index":null,"type":"place_text","value":"架空市","region":null,"confidence":0.9,"source":"text"}
+      ]
+    },
+    {
+      "id": "area-mention-without-owner-context",
+      "truth_kind": "identifiable",
+      "expected_place_ids": ["fixture:green-hall"],
+      "forbid_location_claim": true,
+      "posts": [
+        {"post_id":"at://did:plc:synthetic/app.bsky.feed.post/mention-photo","text":"自宅近くの架空青葉館","created_at":"2026-11-01T12:00:00+09:00","images":[{"index":0,"url":"https://cdn.bsky.app/local-placeholder/mention","alt":"","width":100,"height":100}]},
+        {"post_id":"at://did:plc:synthetic/app.bsky.feed.post/mention-area","text":"架空市に行った","created_at":"2026-11-02T12:00:00+09:00","images":[]}
+      ],
+      "clues": [
+        {"post_id":"at://did:plc:synthetic/app.bsky.feed.post/mention-photo","image_index":0,"type":"shop","value":"架空青葉館","region":[1,1,20,20],"confidence":0.9,"source":"vlm"},
+        {"post_id":"at://did:plc:synthetic/app.bsky.feed.post/mention-area","image_index":null,"type":"place_text","value":"架空市","region":null,"confidence":0.9,"source":"text"}
+      ]
+    },
+    {
+      "id": "quoted-home-context-is-not-owner-evidence",
+      "truth_kind": "identifiable",
+      "expected_place_ids": ["fixture:green-hall"],
+      "forbid_location_claim": true,
+      "posts": [
+        {"post_id":"at://did:plc:synthetic/app.bsky.feed.post/quote-photo","text":"友人が『自宅近くの架空青葉館』と言っていた","created_at":"2026-11-01T12:00:00+09:00","images":[{"index":0,"url":"https://cdn.bsky.app/local-placeholder/quote","alt":"","width":100,"height":100}]},
+        {"post_id":"at://did:plc:synthetic/app.bsky.feed.post/quote-area","text":"普段は架空市から帰宅する","created_at":"2026-11-02T12:00:00+09:00","images":[]}
+      ],
+      "clues": [
+        {"post_id":"at://did:plc:synthetic/app.bsky.feed.post/quote-photo","image_index":0,"type":"shop","value":"架空青葉館","region":[1,1,20,20],"confidence":0.9,"source":"vlm"},
+        {"post_id":"at://did:plc:synthetic/app.bsky.feed.post/quote-area","image_index":null,"type":"place_text","value":"架空市","region":null,"confidence":0.9,"source":"text"}
+      ]
+    },
+    {
+      "id": "travel-context-is-not-home-evidence",
+      "truth_kind": "identifiable",
+      "expected_place_ids": ["fixture:green-hall"],
+      "forbid_location_claim": true,
+      "posts": [
+        {"post_id":"at://did:plc:synthetic/app.bsky.feed.post/trip-photo","text":"旅行で自宅近くの架空青葉館へ来た","created_at":"2026-11-01T12:00:00+09:00","images":[{"index":0,"url":"https://cdn.bsky.app/local-placeholder/trip","alt":"","width":100,"height":100}]},
+        {"post_id":"at://did:plc:synthetic/app.bsky.feed.post/trip-area","text":"普段は架空市から帰宅する","created_at":"2026-11-02T12:00:00+09:00","images":[]}
+      ],
+      "clues": [
+        {"post_id":"at://did:plc:synthetic/app.bsky.feed.post/trip-photo","image_index":0,"type":"shop","value":"架空青葉館","region":[1,1,20,20],"confidence":0.9,"source":"vlm"},
+        {"post_id":"at://did:plc:synthetic/app.bsky.feed.post/trip-area","image_index":null,"type":"place_text","value":"架空市","region":null,"confidence":0.9,"source":"text"}
+      ]
+    },
+    {
+      "id": "visit-context-is-not-home-evidence",
+      "truth_kind": "identifiable",
+      "expected_place_ids": ["fixture:green-hall"],
+      "forbid_location_claim": true,
+      "posts": [
+        {"post_id":"at://did:plc:synthetic/app.bsky.feed.post/visit-photo","text":"架空市を訪問。自宅近くの架空青葉館にも寄った","created_at":"2026-11-01T12:00:00+09:00","images":[{"index":0,"url":"https://cdn.bsky.app/local-placeholder/visit","alt":"","width":100,"height":100}]},
+        {"post_id":"at://did:plc:synthetic/app.bsky.feed.post/visit-area","text":"普段は架空市から帰宅する","created_at":"2026-11-02T12:00:00+09:00","images":[]}
+      ],
+      "clues": [
+        {"post_id":"at://did:plc:synthetic/app.bsky.feed.post/visit-photo","image_index":0,"type":"shop","value":"架空青葉館","region":[1,1,20,20],"confidence":0.9,"source":"vlm"},
+        {"post_id":"at://did:plc:synthetic/app.bsky.feed.post/visit-area","image_index":null,"type":"place_text","value":"架空市","region":null,"confidence":0.9,"source":"text"}
+      ]
+    },
+    {
+      "id": "negated-home-link-is-not-evidence",
+      "truth_kind": "identifiable",
+      "expected_place_ids": ["fixture:green-hall"],
+      "forbid_location_claim": true,
+      "posts": [
+        {"post_id":"at://did:plc:synthetic/app.bsky.feed.post/denial-photo","text":"自宅近くの架空青葉館ではない","created_at":"2026-11-01T12:00:00+09:00","images":[{"index":0,"url":"https://cdn.bsky.app/local-placeholder/denial","alt":"","width":100,"height":100}]},
+        {"post_id":"at://did:plc:synthetic/app.bsky.feed.post/denial-area","text":"普段は架空市から帰宅する","created_at":"2026-11-02T12:00:00+09:00","images":[]}
+      ],
+      "clues": [
+        {"post_id":"at://did:plc:synthetic/app.bsky.feed.post/denial-photo","image_index":0,"type":"shop","value":"架空青葉館","region":[1,1,20,20],"confidence":0.9,"source":"vlm"},
+        {"post_id":"at://did:plc:synthetic/app.bsky.feed.post/denial-area","image_index":null,"type":"place_text","value":"架空市","region":null,"confidence":0.9,"source":"text"}
+      ]
+    },
+    {
+      "id": "unknown-place-name-not-in-index",
+      "truth_kind": "unknown",
+      "expected_place_ids": [],
+      "forbid_location_claim": true,
+      "posts": [
+        {"post_id":"at://did:plc:synthetic/app.bsky.feed.post/no-match-photo","text":"広場を散歩した","created_at":"2026-11-01T12:00:00+09:00","images":[{"index":0,"url":"https://cdn.bsky.app/local-placeholder/no-match","alt":"","width":100,"height":100}]}
+      ],
+      "clues": [
+        {"post_id":"at://did:plc:synthetic/app.bsky.feed.post/no-match-photo","image_index":0,"type":"landmark","value":"索引にない架空塔","region":[1,1,20,20],"confidence":0.9,"source":"vlm"}
+      ]
+    }
+  ]
+}

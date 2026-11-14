@@ -1,0 +1,36 @@
+/* 証拠のカードの本文：手がかりの言葉を黒い帯で隠し、カードが叩きつけられたあとに帯が右から左へ縮んで消え、
+   言葉が赤くなる。止まった状態（動きを減らす設定の人に見せる状態）は「帯なし・赤い言葉」にし、
+   動きは backwards で「帯あり・地の色」から始める。遅れは style で渡す */
+.redaction {
+  position: relative;
+  display: inline-block;
+}
+
+.redaction-word {
+  color: var(--seeker);
+  font-weight: 700;
+  animation: redaction-word 0.6s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+}
+
+@keyframes redaction-word {
+  from {
+    color: var(--ink);
+  }
+}
+
+.redaction-bar {
+  position: absolute;
+  inset: -0.1em -0.15em;
+  background: oklch(6% 0.02 265);
+  box-shadow: 0 0 0 1px oklch(0% 0 0 / 0.6);
+  transform: scaleX(0);
+  transform-origin: left center;
+  pointer-events: none;
+  animation: redaction-bar 0.6s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+}
+
+@keyframes redaction-bar {
+  from {
+    transform: scaleX(1);
+  }
+}

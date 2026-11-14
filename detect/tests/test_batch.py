@@ -169,6 +169,31 @@ async def test_fetch_failure_is_reported_for_that_post_only() -> None:
 
 
 @pytest.mark.anyio
+async def test_optional_fetch_failure_fallback_still_extracts_the_text() -> None:
+    post = _post(1, n_images=1)
+
+    async def fetch(_post: Post) -> list[bytes]:
+        raise OSError("signed image URL must not be returned")
+
+    extractor = FakeExtractor()
+    results = [
+        result
+        async for result in extract_posts(
+            extractor,
+            [post],
+            fetch,
+            concurrency=1,
+            image_fetch_fallback_to_text=True,
+        )
+    ]
+
+    assert results[0].error is None
+    assert results[0].clues == [_clue(post)]
+    assert extractor.received_images[post.post_id] == []
+    assert len(post.images) == 1  # セッション内のプレビュー情報は変更しない
+
+
+@pytest.mark.anyio
 async def test_passes_fetched_images_and_skips_fetch_without_images() -> None:
     with_images, text_only = _post(0, n_images=2), _post(1)
     calls: list[str] = []

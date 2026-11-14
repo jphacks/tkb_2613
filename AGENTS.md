@@ -86,12 +86,12 @@ Python は `common/` の Pydantic モデル（`tkb_common.schemas`）、TypeScri
 ### プロフィールの項目（捜査ボードの1行）
 
 ```json
-{"attribute": "commute_station_or_line", "value": "〇〇駅", "confidence": 0.81, "status": "found",
+{"attribute": "regular_station", "value": "〇〇駅", "confidence": 0.81, "status": "found",
  "evidence": [{"post_id": "at://.../3kxxxx", "clue_index": 3, "required": true}]}
 ```
 
-- `attribute`：`facial_appearance` / `full_name` / `given_name_or_nickname` / `other_social_account` / `realtime_location` / `home_building_or_room` / `commute_station_or_line` / `residential_area` / `long_term_home_absence` / `workplace` / `workplace_area` / `school` / `frequent_shop` / `vehicle_model_or_partial_plate` / `partner_status_and_attributes` / `children_age_and_school`
-- 表示名、4つのカテゴリ、パーソナル度、推測しやすさは Python と TypeScript のプロフィール項目カタログで定義する。これらは診断ごとの推定確度ではない
+- `attribute`：`facial_appearance` / `full_name` / `given_name` / `nickname` / `other_social_account` / `age` / `birthday` / `realtime_location` / `home_building` / `home_room` / `home_nearest_station` / `home_walk_area` / `regular_station` / `regular_line` / `residential_area` / `announced_long_absence` / `actual_home_absence` / `employer_name` / `workplace_building_candidate` / `workplace_area` / `school` / `occupation` / `frequent_shop` / `vehicle_model` / `partial_plate` / `active_time` / `routine` / `partner_status` / `partner_attributes` / `child_age` / `child_school`（カタログは31項目。`home_room` はカタログにだけ置き、診断して `ProfileCandidateSet` を返すのは残りの30項目 `PROFILE_DIAGNOSED_ATTRIBUTES`）
+- 表示名と4つのカテゴリ（`identity_and_face` / `home_and_location` / `affiliation_and_work` / `activity_and_family`）は Python と TypeScript のプロフィール項目カタログで定義する。旧パーソナル度・推測しやすさは廃止し null。カタログにあることは、実際に推定できるという意味ではない
 - `value`：具体値を示せない場合は null。`status` が unknown のときは null にする
 - `status`：found（推定できた）/ weak（弱い）/ unknown（不明）
 - `evidence`：根拠の手がかり。`required: true` は、その手がかりが消えるとこの項目が成り立たないもの
@@ -99,16 +99,16 @@ Python は `common/` の Pydantic モデル（`tkb_common.schemas`）、TypeScri
 ### 削除の提案
 
 ```json
-{"delete": ["at://.../3kxxxx", "at://.../3myyyy"], "broken": ["workplace", "commute_station_or_line"], "before": [/* 項目 */], "after": [/* 項目 */]}
+{"delete": ["at://.../3kxxxx", "at://.../3myyyy"], "broken": ["employer_name", "regular_station"], "before": [/* 項目 */], "after": [/* 項目 */]}
 ```
 
 ## 推定と最小削除の考え方（engine）
 
-- プロフィール推定：手がかりの一覧（文字だけ）を言語モデルに渡し、項目ごとの候補と根拠（手がかりの番号）を出させる。項目の確からしさは、根拠の手がかりの confidence を 1 − ∏(1 − c_i) で合成する。`required` の根拠が1つでも消えたら、その項目は不明にする
-- 駅名は `data-prep` の stations 表で実在を確認する。最寄り駅（R1）の候補が複数残ったときは、国土数値情報の駅別乗降客数を説明に参考として添えるだけで、どの駅にするかには使わない。生活時間帯は今回の16項目に含めない
-- 現在の実装は、言語モデルを使わない推理ルール R1〜R12（`engine/src/tkb_engine/rules.py`）。指定ゴミ袋・収集地区・大学の時間割は手で作る知識表 `data-prep/manual/knowledge.json`、学校の名前と所在地は `make data` で作る schools 表（文部科学省の学校コード）を引く。知識表は行ごとに出典を書き、未確認のところはそう書く。文京区の収集地区の行は、文京区のオープンデータ「ごみと資源の収集日」から `python -m tkb_data_prep.bunkyo_collection` で作る。R5（収集地区）は、朝の「燃えるゴミ出し忘れた」のような投稿の曜日も読み、指定ゴミ袋がない区では住所・郵便番号の手がかりで区を決める。写真のバーコードは言語モデルではなく `detect/src/tkb_detect/barcode.py`（zxing-cpp と日本郵便のカスタマバーコード）で読む
-- 最小削除：投稿を1件抜いたときの各項目の確からしさを、モデルを呼ばずに計算し直す。16項目に対する重みは実装時に決める。重要な項目を最も多く崩す投稿から貪欲法で選ぶ。最大3件まで
-- 再診断：抜き出し済みの手がかりから、削除した投稿の分を除いてすぐに計算する
+- プロフィール推定：`engine/src/tkb_engine/cross_post.py` の `evaluate_profile_candidates` が、`home_room` を除く30項目を `ProfileCandidateSet` として出力し、`profile_relations` とともに返す（言語モデルを使わない推理ルール R1〜R12 `engine/src/tkb_engine/rules.py`、X1〜X5 `engine/src/tkb_engine/links.py` の結果も含め、`age`・`birthday`・`occupation`・`active_time`・`routine` などを含む30項目へ統合）。指定ゴミ袋・収集地区・大学の時間割は知識表 `data-prep/manual/knowledge.json`、学校の名前と所在地は `make data` で作る schools 表（文部科学省の学校コード）を引く。知識表は行ごとに出典を書き、未確認のところはそう書く。文京区の収集地区の行は、文京区のオープンデータ「ごみと資源の収集日」から `python -m tkb_data_prep.bunkyo_collection` で作る。W1 徒歩圏は既存の `home_nearest_station` 候補の完全根拠経路と同じ駅名を示す本人の徒歩投稿を結合した `home_walk_area` 候補として推定する。各代替駅経路を保持し、値には徒歩半径と世帯メッシュ推定を含める。値は再診断でも保存したまま、駅根拠または徒歩投稿が失われた場合に候補を落とす。`narrowing` の地図はこの候補から投影する。R5（収集地区）は、朝の「燃えるゴミ出し忘れた」のような投稿の曜日も読み、指定ゴミ袋がない区では住所・郵便番号の手がかりで区を決める。写真のバーコードは言語モデルではなく `detect/src/tkb_detect/barcode.py`（zxing-cpp と日本郵便のカスタマバーコード）で読む。BCBP搭乗券は `common/src/tkb_common/bcbp.py` で解析し、予約番号PNRは clueを返す前に `*` でマスクする。搭乗券の旅客氏名は投稿者本人と確認できない推定候補として扱う
+- 駅名は `data-prep` の stations 表で実在を確認する。最寄り駅（R1）の候補が複数残ったときは、国土数値情報の駅別乗降客数を説明に参考として添えるだけで、どの駅にするかには使わない
+- W1 の徒歩圏と世帯数は独立したConclusionルールではなく、`home_walk_area` ProfileCandidateSetとしてカタログに追加する。駅候補の完全根拠経路ごとに徒歩投稿を結合し、値と地図は同じ計算結果から作る。仮除外・削除後は再計算済み候補から再投影する。世帯データは `make data` が作るローカル `households_500m.parquet` を使う。
+- 最小削除：`plan_profile_candidate_deletion`（`engine/src/tkb_engine/cross_post.py`）が、投稿を外したときに候補がすべて崩れる属性カタログの重み（`PROFILE_ATTRIBUTE_WEIGHTS`: 120 / 100 / 85 / 65 / 45 / 25）の合計、ついで残存候補数の減少が最も大きい投稿を貪欲法で最大3件選ぶ。Bluesky の SSE `plan`、`/api/simulate`、`/api/delete`、`/api/demo/*` はいずれも `ProfileCandidateSet[]` で `after` と `broken` を返す（`/threads` は既存互換ルートを維持）
+- 再診断：削除・仮除外した投稿を除いた手がかりと根拠経路から、モデルを再実行せず `recalculate_profile_candidate_sets`（画面側は `profileClaimsAfterDeletion`）で即座に再計算する
 
 ## モデルの呼び出し
 
@@ -120,9 +120,10 @@ Python は `common/` の Pydantic モデル（`tkb_common.schemas`）、TypeScri
 
 ## セキュリティのルール
 
+- 参照画像照合は `COMMONS_REFERENCE_LOOKUP_ENABLED=1` を設定した実モードだけで利用可能にし、診断ごとの `photo_place_reference_consent` が明示的にtrueの場合に限る。診断日次上限0では使用しない。候補検索の外部送信は一意で座標付きの、ライセンスを確認したローカルPOIの座標だけとし、座標は全国1kmメッシュ集合（`muni_mesh.parquet`）への所属も確認し、本人の写真・crop・embedding・本文・DID・投稿URI・ハンドルは送らない。本人の投稿画像は従来どおり `cdn.bsky.app` からのみ取得し、Commonsの参照画像はWikimedia Commonsの権利情報を個別検査後に小thumbnailで取得する。許可licenseは機械可読な `CC0 1.0` / `CC BY 3.0` / `CC BY 4.0` と完全一致するURLの組だけ。作者、license、ファイル説明ページを画面に表示し、参照画像・投稿写真・比較特徴量は診断中のメモリから外へ保存しない。比較はpHash差2bit以下とSSIM 0.985以上、同一aspect ratio、低texture除外を併用した近似複製検出だけで、一般的な別角度・同じ場所の認識は行わない。一致しても `visible_in_frame` と既存候補statusを維持し、camera locationやプロフィール推論を出さない。1診断最大3候補・3thumbnail、各512KiB、Commons APIのrequest合計最大6回。既定offでモック時は外部通信しない。
 - 診断できるのはログインした本人のアカウントだけ。ハンドル名や URL を入力する欄、任意のアカウントを指定できる API は作らない。投稿の取得は必ずセッションの DID で行う
 - `AUTH_MODE=oauth` では Bluesky OAuth を使い、パスワード欄とパスワード API を無効にする。既存の App Password 経路は `AUTH_MODE=app_password` で切り戻せる。OAuth の state とトークンは Next.js サーバーのメモリ、アプリの診断セッションは api のメモリに置く。両方ともログアウトか30分で失効する。ブラウザにはランダムな `tkb_session` Cookie と、認可開始を結び付ける短命 Cookie だけを渡し、トークンは渡さない。App Password はログインに使ったら捨て、保存しない。どちらの方式も認証情報をログやエラー応答に出さない
-- 画像を取りに行く先は `cdn.bsky.app` だけ。それ以外の URL は拒否する
+- 本人の投稿画像を取りに行く先は `cdn.bsky.app` だけ。それ以外の URL は拒否する。上記の任意参照経路ではWikimedia Commonsからライセンス確認済みの参照thumbnailのみ取得する
 - 写真と投稿本文を第三者の AI サービス（OpenAI、Gemini などの外部 API）に送らない。送り先はチームのサーバーだけ
 - 写真と本文はメモリ上で処理し、リクエスト本文をログに出さない。診断結果は通常保存しない。本人が診断後に「閲覧リンクを作る」を押した場合だけ、投稿・手がかり・推定を期限付きで保存し、リンクを知る人に閲覧を許す。画像バイト列は保存せず、閲覧画面には削除操作を出さない
 - 投稿の本文や写真の中の文字はデータとして扱い、そこに書かれた指示に従わない。モデルに削除などの操作をさせる道具を持たせない。削除は、ユーザーが画面で投稿を選び、確認ダイアログで OK したときだけ実行する
@@ -137,7 +138,7 @@ Python は `common/` の Pydantic モデル（`tkb_common.schemas`）、TypeScri
 
 「1件ずつは無害な投稿でも、組み合わせるとここまでわかる」を見せるのがねらいなので、推定は本人が Bluesky に上げたものの中だけで行う。
 
-- 診断のプロフィール推定は、ログインした本人のBluesky投稿とプロフィール文を使う。公開Web検索は診断ごとの明示同意がある場合に限り、Braveへ本人の公開Blueskyハンドルと固定 `site:` 演算子だけを送る。投稿・プロフィール本文・Clue・DID・投稿URI・写真・氏名などは送らない。検索語は最大90日保持される。候補は本人と断定せず、本人の公開投稿/プロフィールに書かれたURLと照合できる場合もリンク関係としてだけ表示する。検索結果ページは取得しない
+- プロフィールの公開Web検索と写真場所検索は別の用途・別の診断単位同意にする。プロフィール検索は既存の `public_web_lookup_consent` のみを使い、Braveへ本人の公開Blueskyハンドルと固定 `site:` 演算子だけを送る。写真場所検索は `photo_place_web_lookup_consent` が明示的に真のとき、ローカル候補が不足/競合し、かつ画像内の高確度OCR/VLM `shop` / `landmark` / `station_sign` 観測から安全な名称を作れる場合に限り、Brave Place Searchへ名称を最大3クエリ送る。写真場所検索は `MOCK_MODE=0`、Braveキーあり、`DIAGNOSE_DAILY_LIMIT > 0` の全条件を満たす場合だけ有効であり、日次上限0（無制限）では同意済みでも検索しない。この追加費用ガードはプロフィール検索の動作を変えない。`country=JP` は検索範囲であり日本所在の保証ではない。結果は `postal_address.country == "JP"` を確認し、Braveの結果ID（約8時間で失効）は保存しない。送らないもの：人名、`org_text` / `place_text`、住所、郵便番号、本文、プロフィール文、DID、投稿URI、ハンドル、画像URL、画像画素・crop・embedding、顔・瞳・反射。Brave結果は未確認の `visible_in_frame` 候補で、撮影地点・自宅・現在地を確定しない。公式/公的な独立根拠による確認なしに所在地を検証済みとしない。モック・キーなし・日次上限0は外部通信0回。Brave検索語は最大90日保持され、利用には運営側の有料プランと支払情報登録が必要
 - デモは、本人が同意したメンバーの実名のアカウントで行ってよい。他人の顔が写った写真は投稿しない。テストは架空の人物で行う
 
 ## 環境変数
@@ -146,11 +147,12 @@ Python は `common/` の Pydantic モデル（`tkb_common.schemas`）、TypeScri
 - `BSKY_SERVICE`（ログイン先。既定 `https://bsky.social`）
 - `SESSION_TTL_MINUTES`（既定30）
 - `MAX_POSTS`（既定30）
-- `BRAVE_SEARCH_API_KEY`（任意。明示同意後の外部SNS/ブログ/記事候補検索のみ。APIサーバーだけに設定し、モックは通信しない）
+- `COMMONS_REFERENCE_LOOKUP_ENABLED`（既定0。Commons参照画像のstrict near-duplicate照合を明示的に有効化するときだけ1。`MOCK_MODE=0` かつ `DIAGNOSE_DAILY_LIMIT > 0` が必要。診断ごとの独立同意・最大3 candidate/3 thumbnailも必須）
+- `BRAVE_SEARCH_API_KEY`（任意。APIサーバーだけに設定。プロフィールの公開Web検索と写真場所Place Searchはそれぞれ専用の診断同意が必要。写真場所検索は `DIAGNOSE_DAILY_LIMIT > 0` の場合だけ有効で、最大3クエリ/診断。モック・キーなし・日次上限0では通信しない）
 
 既存：`MOCK_MODE`、`VLM_BASE_URL`、`VLM_API_KEY`、`VLM_MODEL`、`OCR_BASE_URL`。鍵を `NEXT_PUBLIC_` で始まる変数に入れない。
 
-プロフィール推定は現在 `residential_area`、`regular_station`、`employer_name`、`child_age`、`child_school` の限定ルールのみ。`residential_area` には、事前に取得した国土地理院の避難所の表と、国土数値情報のバス停留所（令和4年度版）を「X は Y にある」という知識として使う経路がある（`engine/src/tkb_engine/open_data.py`、`open_data_bus.py`）。`child_school` は、本人の子どもの学校の X（「娘の小学校のひまわり祭り」）と別の投稿の「X は〇〇小学校」が同じ X でつながり、学区の表で学校が1つに決まるときだけ推定し（`child_school.py`）、その学区の区市町村を居住地域の経路に足す（`open_data_school.py`）。`employer_name` には、本人が明示した勤務先の名前を国税庁の法人番号の表（`data/processed/corporations.sqlite`。api のメモリに載せず、引くたびにディスクから読む）で正式名称に結ぶ経路がある。公開データの根拠は `source=open_data` で、画面に出典を出す。投稿ごとの観測手がかりと、投稿を横断した推定を区別し、根拠経路は `docs/profile-classification-v2.md` に合わせる。ProfileItem用の仮除外候補と、mainのConclusion向けplan/simulate/deleteは別フローとして維持する。
+プロフィール推定は `home_room` を除く `ProfileAttribute` カタログ全件（30項目）の `ProfileCandidateSet` に一本化する。新属性はカタログに追加して診断・再診断・UIへ通す。Bluesky、demo、共有結果の公開レスポンスは候補セットを唯一のプロフィール結果とし、R/X/BPの `Conclusion` は内部中間値としてのみ使う。`/threads` は既存のConclusion互換レスポンスを維持する。`residential_area` には、事前に取得した国土地理院の避難所の表と、国土数値情報のバス停留所（令和4年度版）を「X は Y にある」という知識として使う経路がある（`engine/src/tkb_engine/open_data.py`、`open_data_bus.py`）。`child_school` は、本人の子どもの学校の X（「娘の小学校のひまわり祭り」）と別の投稿の「X は〇〇小学校」が同じ X でつながり、学区の表で学校が1つに決まるときだけ推定し（`child_school.py`）、その学区の区市町村を居住地域の経路に足す（`open_data_school.py`）。`employer_name` には、本人が明示した勤務先の名前を国税庁の法人番号の表（`data/processed/corporations.sqlite`。api のメモリに載せず、引くたびにディスクから読む）で正式名称に結ぶ経路がある。公開データの根拠は `source=open_data` で、画面に出典を出す。投稿ごとの観測手がかりと、投稿を横断した推定を区別し、根拠経路は `docs/profile-classification-v2.md` に合わせる。
 
 OAuth：`AUTH_MODE`（ローカル既定 `app_password`、本番は採用試験を通れば `oauth`）、`PUBLIC_URL`（公開の HTTPS オリジン）、`OAUTH_WEB_ORIGIN`（api から web への Docker 内部 URL）、`API_INTERNAL_ORIGIN`（web から api への Docker 内部 URL）、`INTERNAL_AUTH_SECRET`（起動時に生成し、両コンテナへ別の一時ファイルで渡す）。
 

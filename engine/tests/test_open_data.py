@@ -12,10 +12,15 @@ from tkb_common.schemas import (
     ClueType,
     Post,
     ProfileAttribute,
+    ProfileCandidateSetStatus,
     ProfileItem,
     ProfileStatus,
 )
-from tkb_engine.cross_post import infer_owner_claims, recalculate_after_deletion
+from tkb_engine.cross_post import (
+    evaluate_profile_candidates,
+    infer_owner_claims,
+    recalculate_after_deletion,
+)
 from tkb_engine.gazetteer import Gazetteer, shelter_name_variants
 
 
@@ -162,17 +167,21 @@ def test_deleting_either_post_breaks_the_claim() -> None:
     assert recalculate_after_deletion(claim, {seen.post_id}) is None
 
 
-def test_a_conflicting_residential_value_drops_the_claim() -> None:
+def test_a_conflicting_residential_value_remains_ambiguous() -> None:
     anchor = post("a", "自宅近くの根津小学校が避難所")
     seen = post("b", "根津小学校の運動会")
     street = post("c", "自宅近くの青葉商店街")
     other = post("d", "青葉商店街は台東区")
-    claims = infer_owner_claims(
-        [anchor, seen, street, other],
-        [clue(seen, "根津小学校"), clue(other, "台東区")],
-        gazetteer=GAZ,
+    posts = [anchor, seen, street, other]
+    clues = [clue(seen, "根津小学校"), clue(other, "台東区")]
+    claims = infer_owner_claims(posts, clues, gazetteer=GAZ)
+    candidate_set = next(
+        item
+        for item in evaluate_profile_candidates(claims, posts, clues=clues)
+        if item.attribute is ProfileAttribute.RESIDENTIAL_AREA
     )
-    assert residence(claims) is None
+    assert candidate_set.status is ProfileCandidateSetStatus.AMBIGUOUS
+    assert {candidate.value for candidate in candidate_set.candidates} == {"文京区", "台東区"}
 
 
 def test_load_reads_the_shelter_table_only_when_it_exists(tmp_path: Path) -> None:

@@ -17,7 +17,7 @@ from tkb_data_prep.errors import DataPrepError
 from tkb_data_prep.io import read_csv, write_parquet
 
 MUNI_CODE = re.compile(r"\d{5}")
-MESH_1KM = re.compile(r"\d{8}")
+MESH_1KM = re.compile(r"\d{8}\*?")
 
 SCHEMA = pa.schema(
     [
@@ -40,8 +40,11 @@ class MuniMesh:
         return self.muni_code[:2]
 
 
-def parse(rows: Iterable[list[str]], source: str) -> list[MuniMesh]:
-    """見出し行を飛ばし、1都3県の行だけを重複なしで返す。"""
+def parse(
+    rows: Iterable[list[str]], source: str, pref_codes: Iterable[str] | None = None
+) -> list[MuniMesh]:
+    """見出し行を飛ばし、指定した都道府県コードを重複なしで返す。"""
+    allowed = set(PREFECTURES if pref_codes is None else pref_codes)
     seen: dict[MuniMesh, None] = {}
     for line_no, row in enumerate(rows, start=1):
         if line_no == 1 and not MUNI_CODE.fullmatch(row[0].strip()):
@@ -51,7 +54,7 @@ def parse(rows: Iterable[list[str]], source: str) -> list[MuniMesh]:
         code, name, mesh = (cell.strip() for cell in row[:3])
         if not MUNI_CODE.fullmatch(code) or not MESH_1KM.fullmatch(mesh):
             raise DataPrepError(f"{source}:{line_no}: コードの形式が想定外です: {row}")
-        if code[:2] in PREFECTURES:
+        if code[:2] in allowed:
             seen[MuniMesh(code, name, mesh)] = None
     return list(seen)
 

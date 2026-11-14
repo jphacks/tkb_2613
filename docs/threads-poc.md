@@ -14,6 +14,16 @@ uv run python -m tkb_api.threads_poc
 
 Threads の現在の公式資料：[Meta の API コレクション](https://www.postman.com/meta/threads/collection/dht3nzz/threads-api)、[本人投稿の取得](https://www.postman.com/meta/threads/request/34203612-fea6c131-986c-4bf0-9908-fa38a77fa2d2)。
 
+## 画像診断の件数検証
+
+`THREADS_ACCESS_TOKEN` を環境変数に設定し、モデルに届く場所（本番ならアプリ EC2 の api コンテナ）で実行する。
+
+```sh
+docker exec -e THREADS_ACCESS_TOKEN tkb_2613-api-1 python -m tkb_api.threads_verify --limit 3 --mode both
+```
+
+同じ投稿を「画像なし」「画像あり」の順に処理し、投稿数・手がかり数（画像由来／本文由来）・抽出失敗数だけを出す。`--limit` は 1〜10（既定3）。投稿本文、画像、画像URL、トークン、手がかりの値、投稿IDは出さない。モデルに接続できないときは終了コード 2。`THREADS_IMAGE_DIAGNOSIS` の設定には依存しない。
+
 ## 次の段階
 
 OAuth を追加するなら、Threads アプリ固有の ID・secret、HTTPS コールバック、`state` 検証、短命の開始Cookie、トークン更新・失効、本人セッションと Bluesky セッションの分離、Threads 用の読み取り専用 UI・API、レート制限と運用テストが必要。Threads の削除操作を画面に出さないことも確認する。

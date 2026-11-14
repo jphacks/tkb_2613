@@ -13,9 +13,11 @@ from tkb_common.schemas import (
     ClueType,
     Post,
     ProfileAttribute,
+    ProfileCandidateSetStatus,
     ProfileItem,
 )
 from tkb_engine.cross_post import (
+    evaluate_profile_candidates,
     infer_owner_claims,
     plan_profile_claim_deletion,
     recalculate_after_deletion,
@@ -159,10 +161,21 @@ def test_school_not_in_the_table_or_no_table_is_not_inferred() -> None:
     assert school([RELATION, VALUE], [VALUE_CLUE], Gazetteer()) is None
 
 
-def test_two_schools_for_the_same_bridge_are_dropped() -> None:
+def test_two_schools_for_the_same_bridge_remain_ambiguous() -> None:
     other = post("c", "ひまわり祭りはだるまさん小学校のだよ")
     clues = [VALUE_CLUE, org(other, "だるまさん小学校")]
-    assert school([RELATION, VALUE, other], clues) is None
+    posts = [RELATION, VALUE, other]
+    claims = infer_owner_claims(posts, clues, gazetteer=GAZ)
+    candidate_set = next(
+        item
+        for item in evaluate_profile_candidates(claims, posts, clues=clues)
+        if item.attribute is ProfileAttribute.CHILD_SCHOOL
+    )
+    assert candidate_set.status is ProfileCandidateSetStatus.AMBIGUOUS
+    assert {candidate.value for candidate in candidate_set.candidates} == {
+        "かくれんぼ小学校",
+        "だるまさん小学校",
+    }
 
 
 def test_deleting_the_relation_or_school_post_breaks_both_paths() -> None:

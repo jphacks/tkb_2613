@@ -14,6 +14,7 @@ from tkb_api.origin import same_origin
 from tkb_api.routes.diagnose import get_gazetteer, read_diagnosis
 from tkb_api.routes.session import current_session, current_session_id, get_session_store
 from tkb_api.shares import ShareStore
+from tkb_common.schemas import PROFILE_DIAGNOSED_ATTRIBUTES, ProfileCandidateSet
 from tkb_engine.gazetteer import Gazetteer
 
 router = APIRouter(prefix="/api")
@@ -72,4 +73,24 @@ def read_shared_result(
         raise HTTPException(
             status.HTTP_404_NOT_FOUND, "共有リンクが見つからないか、期限が切れました"
         )
-    return payload
+    return _candidate_snapshot(payload)
+
+
+def _candidate_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
+    """Drop legacy conclusions when a saved link already contains candidate sets."""
+    try:
+        claims = [
+            ProfileCandidateSet.model_validate(item) for item in payload.get("profile_claims", [])
+        ]
+    except (TypeError, ValueError):
+        return payload
+    attributes = [claim.attribute for claim in claims]
+    if (
+        not claims
+        or len(attributes) != len(set(attributes))
+        or any(attribute not in PROFILE_DIAGNOSED_ATTRIBUTES for attribute in attributes)
+    ):
+        return payload
+    result = dict(payload)
+    result.pop("conclusions", None)
+    return result
