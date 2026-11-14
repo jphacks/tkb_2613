@@ -21,6 +21,7 @@ from typing import Any
 import pyarrow.parquet as pq
 
 from tkb_common.corporate_name import normalize_corporate_name
+from tkb_common.place_names import PLACE_INDEX_SCHEMA_VERSION, place_name_keys
 from tkb_common.schemas import Clue, ClueType
 
 DATA_DIR = Path(__file__).resolve().parents[3] / "data" / "processed"
@@ -177,22 +178,41 @@ class Gazetteer:
         )
 
     def places_named(self, value: str) -> list[dict[str, Any]]:
-        """Look up exact NFKC-normalized aliases in the optional local index."""
+        """Look up exact, conservatively normalized aliases in the optional index."""
         if self.places_path is None:
             return []
-        name_key = _normalized_place_name(value)
-        if not name_key:
+        name_keys = place_name_keys(value)
+        if not name_keys or not self.places_index_compatible:
             return []
         uri = f"{self.places_path.resolve().as_uri()}?mode=ro&immutable=1"
+        records: dict[str, str] = {}
         with closing(sqlite3.connect(uri, uri=True)) as db:
-            rows = db.execute(
-                "SELECT p.record_json FROM poi_alias AS a "
-                "JOIN poi_place AS p USING(place_id) WHERE a.name_key = ? "
-                "AND p.license_verified = 1 "
-                "ORDER BY a.place_id LIMIT ?",
-                (name_key, MAX_PLACE_NAME_MATCHES + 1),
-            ).fetchall()
-        return [json.loads(row[0]) for row in rows]
+            for name_key in name_keys:
+                rows = db.execute(
+                    "SELECT p.place_id, p.record_json FROM poi_alias AS a "
+                    "JOIN poi_place AS p USING(place_id) WHERE a.name_key = ? "
+                    "AND p.license_verified = 1 ORDER BY p.place_id LIMIT ?",
+                    (name_key, MAX_PLACE_NAME_MATCHES + 1),
+                ).fetchall()
+                for place_id, record_json in rows:
+                    records.setdefault(place_id, record_json)
+        return [
+            json.loads(record_json)
+            for _, record_json in sorted(records.items())[: MAX_PLACE_NAME_MATCHES + 1]
+        ]
+
+    @property
+    def places_index_compatible(self) -> bool:
+        """Whether the configured SQLite index uses the current shared key schema."""
+        if self.places_path is None:
+            return False
+        uri = f"{self.places_path.resolve().as_uri()}?mode=ro&immutable=1"
+        try:
+            with closing(sqlite3.connect(uri, uri=True)) as db:
+                row = db.execute("PRAGMA user_version").fetchone()
+        except (OSError, sqlite3.Error):
+            return False
+        return bool(row is not None and row[0] == PLACE_INDEX_SCHEMA_VERSION)
 
     def city_munis(self, city: str) -> set[str]:
         """市区町村名（「八王子市」など）の区市町村コード。"""
@@ -502,8 +522,3 @@ def _town(town: str) -> str:
 def _line(line_name: str) -> str:
     """「9号線千代田線」のような番号つきの正式名を、ふだんの呼び名（「千代田線」）にする。"""
     return re.sub(r"^\d+号線", "", line_name)
-
-
-def _normalized_place_name(value: str) -> str:
-    normalized = unicodedata.normalize("NFKC", value).casefold()
-    return "".join(character for character in normalized if character.isalnum())

@@ -58,6 +58,23 @@ def infer_photo_places(
                 status = PhotoPlaceStatus.AMBIGUOUS
             else:
                 status, reasons = PhotoPlaceStatus.UNKNOWN, ["insufficient_local_evidence"]
+                if (
+                    gazetteer.places_path is not None
+                    and not gazetteer.places_index_compatible
+                    and any(
+                        clue.type
+                        in {
+                            ClueType.SHOP,
+                            ClueType.LANDMARK,
+                            ClueType.ORG_TEXT,
+                            ClueType.PLACE_TEXT,
+                        }
+                        and clue.source in {ClueSource.OCR, ClueSource.VLM}
+                        and clue.confidence >= POI_CLUE_MIN
+                        for _, clue in image_clues
+                    )
+                ):
+                    reasons = ["poi_index_schema_mismatch"]
             types = {candidate.place_type for candidate in candidates}
             granularity = (
                 _granularity(next(iter(types)))

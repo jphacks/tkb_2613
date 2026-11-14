@@ -5,17 +5,13 @@ from __future__ import annotations
 import argparse
 import json
 import sqlite3
-import unicodedata
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
+from tkb_common.place_names import PLACE_INDEX_SCHEMA_VERSION, place_name_keys
+
 DEFAULT_OUTPUT = Path("data/processed/places.sqlite3")
-
-
-def _normalized(value: str) -> str:
-    value = unicodedata.normalize("NFKC", value).casefold()
-    return "".join(character for character in value if character.isalnum())
 
 
 def _features(path: Path) -> Iterator[dict[str, Any]]:
@@ -125,6 +121,7 @@ def import_geojsonl(
         raise FileExistsError(f"refusing to overwrite existing index: {output_path}")
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(output_path) as db:
+        db.execute(f"PRAGMA user_version = {PLACE_INDEX_SCHEMA_VERSION}")
         db.executescript(
             """
             CREATE TABLE poi_place (
@@ -218,7 +215,11 @@ def import_geojsonl(
             if license_verified:
                 db.executemany(
                     "INSERT OR IGNORE INTO poi_alias(name_key, place_id) VALUES (?, ?)",
-                    ((key, place_id) for name in (label, *aliases) if (key := _normalized(name))),
+                    (
+                        (key, place_id)
+                        for name in (label, *aliases)
+                        for key in place_name_keys(name)
+                    ),
                 )
             count += 1
             if count % batch_size == 0:

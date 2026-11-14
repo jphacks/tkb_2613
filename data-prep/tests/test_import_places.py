@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from tkb_common.place_names import PLACE_INDEX_SCHEMA_VERSION, place_name_keys
 from tkb_data_prep.import_places import DEFAULT_OUTPUT, import_geojsonl, main
 
 
@@ -44,6 +45,7 @@ def test_stream_import_indexes_only_licensed_japan_records(tmp_path) -> None:
 
     assert import_geojsonl(source, output, provider="Provider", dataset="places", version="r1") == 2
     with sqlite3.connect(output) as db:
+        assert db.execute("PRAGMA user_version").fetchone() == (PLACE_INDEX_SCHEMA_VERSION,)
         matches = db.execute(
             "SELECT place_id FROM poi_alias WHERE name_key = ? ORDER BY place_id",
             ("ちゅうおう",),
@@ -55,6 +57,24 @@ def test_stream_import_indexes_only_licensed_japan_records(tmp_path) -> None:
         )
     assert matches == [("places:licensed",)]
     assert stored["sources"][0]["license_id"] is None
+
+
+def test_import_indexes_explicit_space_dot_width_and_kana_variants(tmp_path) -> None:
+    feature = _feature("variants", country="JP", license_name="CC-BY-4.0")
+    properties = feature["properties"]
+    assert isinstance(properties, dict)
+    properties["names"] = {"primary": "東京・文化 館"}
+    source = tmp_path / "places.geojsonl"
+    source.write_text(json.dumps(feature), encoding="utf-8")
+    output = tmp_path / "places.sqlite3"
+
+    import_geojsonl(source, output, provider="Provider", dataset="places")
+
+    with sqlite3.connect(output) as db:
+        keys = {row[0] for row in db.execute("SELECT name_key FROM poi_alias")}
+    assert set(place_name_keys("東京・文化 館")) <= keys
+    assert set(place_name_keys("東京 文化館")) <= keys
+    assert set(place_name_keys("東京･文化館")) <= keys
 
 
 def test_country_missing_requires_explicit_bounded_input_flag(tmp_path) -> None:

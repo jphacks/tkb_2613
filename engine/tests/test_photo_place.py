@@ -1,7 +1,9 @@
 import json
 import sqlite3
 from pathlib import Path
+from typing import Any
 
+from tkb_common.place_names import PLACE_INDEX_SCHEMA_VERSION, place_name_keys
 from tkb_common.schemas import Clue, ClueSource, ClueType, PhotoPlaceRelation, Post
 from tkb_engine.gazetteer import Gazetteer
 from tkb_engine.photo_place import infer_photo_places
@@ -36,8 +38,14 @@ def _clue(kind: ClueType, text: str) -> Clue:
     )
 
 
-def _poi_index(path: Path, records: list[dict[str, object]]) -> None:
+def _poi_index(
+    path: Path,
+    records: list[dict[str, Any]],
+    *,
+    schema_version: int = PLACE_INDEX_SCHEMA_VERSION,
+) -> None:
     with sqlite3.connect(path) as db:
+        db.execute(f"PRAGMA user_version = {schema_version}")
         db.executescript(
             "CREATE TABLE poi_place (place_id TEXT PRIMARY KEY, "
             "license_verified INTEGER NOT NULL, record_json TEXT NOT NULL);"
@@ -52,7 +60,11 @@ def _poi_index(path: Path, records: list[dict[str, object]]) -> None:
                 "INSERT INTO poi_place VALUES (?, ?, ?)",
                 (record["place_id"], int(licensed), json.dumps(record, ensure_ascii=False)),
             )
-            db.execute("INSERT INTO poi_alias VALUES (?, ?)", ("中央文化会館", record["place_id"]))
+            names = [record.get("label", "中央文化会館"), *record.get("aliases", ["中央文化会館"])]
+            db.executemany(
+                "INSERT OR IGNORE INTO poi_alias VALUES (?, ?)",
+                ((key, record["place_id"]) for name in names for key in place_name_keys(str(name))),
+            )
 
 
 def test_optional_poi_index_emits_visible_candidate_with_source_and_no_score(
@@ -151,6 +163,88 @@ def test_unlicensed_poi_record_is_not_a_search_candidate(tmp_path: Path) -> None
         [POST], [_clue(ClueType.SHOP, "中央文化会館")], Gazetteer(places_path=index)
     )
     assert result.status.value == "unknown"
+
+
+def test_place_lookup_accepts_kana_and_spacing_variants_but_not_kanji_readings(
+    tmp_path: Path,
+) -> None:
+    index = tmp_path / "places.sqlite3"
+    _poi_index(
+        index,
+        [
+            {
+                "place_id": "places:variant",
+                "label": "東京・文化 館",
+                "aliases": [],
+                "sources": [
+                    {
+                        "source_id": "fixture:variant",
+                        "provider": "fixture",
+                        "dataset": "places",
+                        "license_id": "CC-BY-4.0",
+                        "record_id": "variant",
+                        "version": None,
+                        "attribution": None,
+                    }
+                ],
+            }
+        ],
+    )
+    gazetteer = Gazetteer(places_path=index)
+
+    assert [row["place_id"] for row in gazetteer.places_named("東京 文化館")] == ["places:variant"]
+    assert [row["place_id"] for row in gazetteer.places_named("東京･文化館")] == ["places:variant"]
+    assert gazetteer.places_named("とうきょう文化館") == []
+
+
+def test_normalization_collision_stays_ambiguous(tmp_path: Path) -> None:
+    index = tmp_path / "places.sqlite3"
+    records = []
+    for place_id, label in (
+        ("places:dot", "中央・文化会館"),
+        ("places:plain", "中央文化会館"),
+    ):
+        records.append(
+            {
+                "place_id": place_id,
+                "label": label,
+                "aliases": [],
+                "sources": [
+                    {
+                        "source_id": f"fixture:{place_id}",
+                        "provider": "fixture",
+                        "dataset": "places",
+                        "license_id": "CC-BY-4.0",
+                        "record_id": place_id,
+                        "version": None,
+                        "attribution": None,
+                    }
+                ],
+            }
+        )
+    _poi_index(index, records)
+
+    [result] = infer_photo_places(
+        [POST], [_clue(ClueType.SHOP, "中央・文化会館")], Gazetteer(places_path=index)
+    )
+
+    assert result.status.value == "ambiguous"
+    assert {candidate.place_id for candidate in result.candidates} == {
+        "places:dot",
+        "places:plain",
+    }
+
+
+def test_old_place_index_schema_returns_unknown_with_reason(tmp_path: Path) -> None:
+    index = tmp_path / "places.sqlite3"
+    _poi_index(index, [], schema_version=PLACE_INDEX_SCHEMA_VERSION - 1)
+
+    [result] = infer_photo_places(
+        [POST], [_clue(ClueType.SHOP, "中央文化会館")], Gazetteer(places_path=index)
+    )
+
+    assert result.status.value == "unknown"
+    assert result.reason_codes == ["poi_index_schema_mismatch"]
 
 
 def test_too_many_same_name_pois_are_bounded_and_explicitly_ambiguous(tmp_path: Path) -> None:
