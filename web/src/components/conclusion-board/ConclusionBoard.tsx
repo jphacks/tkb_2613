@@ -7,6 +7,7 @@ import type { Clue } from "@/types/clue";
 import type { Conclusion } from "@/types/diagnose";
 import { openDataCitations, profileRelationsAfterDeletion, PROFILE_ATTRIBUTE_CATALOG, type ExternalLookupStatus, type ExternalProfileResult, type ProfileCandidateSet, type ProfileEvidence, type ProfileEvidencePath, type ProfileRelation, type WebFact } from "@/types/profile";
 import type { Post } from "@/types/post";
+import { ClaimStrings } from "./ClaimStrings";
 import { ProfileClaimWhatIf } from "./ProfileClaimWhatIf";
 import { ReasoningChain } from "./ReasoningChain";
 
@@ -295,6 +296,8 @@ export function ConclusionBoard({
                       {openDataCitations(candidate).map((citation) => (
                         <p key={citation} className="mt-1 text-xs text-ink/70">{citation}</p>
                       ))}
+                      {/* 根拠の道筋が2つ以上あるときだけ、道筋ごとの投稿から答えへ赤い糸を張る */}
+                      <ClaimStrings claim={candidate} posts={posts} />
                       <ul aria-label="値の根拠経路" className="mt-1 flex flex-wrap gap-2 text-xs">
                         {provenanceLabels(candidate).map((label) => <li key={label} className="rounded border border-ink/25 px-2 py-0.5">{label}</li>)}
                       </ul>
