@@ -17,8 +17,8 @@ from tkb_common.schemas import (
 POST_ID = "at://did:plc:xxxx/app.bsky.feed.post/3kxxxx"
 
 
-def test_profile_catalog_has_all_25_candidate_ids_and_metadata() -> None:
-    assert len(ProfileAttribute) == 25
+def test_profile_catalog_has_all_30_candidate_ids_and_metadata() -> None:
+    assert len(ProfileAttribute) == 30
     assert set(PROFILE_ATTRIBUTE_CATALOG) == set(ProfileAttribute)
     assert len(PROFILE_CATEGORY_LABELS) == 4
     assert all(item.label for item in PROFILE_ATTRIBUTE_CATALOG.values())
@@ -32,6 +32,8 @@ def test_profile_catalog_has_all_25_candidate_ids_and_metadata() -> None:
         "given_name": "下の名前",
         "nickname": "呼ばれている名前",
         "other_social_account": "別SNSのアカウント / 本垢",
+        "age": "年齢・年代",
+        "birthday": "誕生日",
         "realtime_location": "リアルタイムの現在地",
         "home_building": "自宅の建物候補",
         "home_room": "自宅の部屋・階・位置",
@@ -45,9 +47,12 @@ def test_profile_catalog_has_all_25_candidate_ids_and_metadata() -> None:
         "workplace_building_candidate": "勤務先建物候補",
         "workplace_area": "勤務先エリア（オフィス街）",
         "school": "通学先（大学・キャンパス・学校）",
+        "occupation": "職種・属性",
         "frequent_shop": "行きつけの店（ジム・美容院・カフェ）",
         "vehicle_model": "自家用車の車種",
         "partial_plate": "ナンバーの一部",
+        "active_time": "主な活動時間帯",
+        "routine": "定期行動・習慣",
         "partner_status": "配偶者・交際相手の有無",
         "partner_attributes": "配偶者・交際相手の属性",
         "child_age": "子どもの年齢",

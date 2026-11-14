@@ -153,18 +153,25 @@ async def test_events_keep_failed_posts_and_index_conclusions_into_all_clues() -
     assert events[1][1]["error"] == "写真を取得できませんでした"
     result = events[3][1]
     assert result["clues"] == [clue.model_dump(mode="json")]
-    assert len(result["profile_claims"]) == 24
+    assert len(result["profile_claims"]) == 29
     assert result["profile_relations"] == []
+    claims_by_attr = {claim["attribute"]: claim for claim in result["profile_claims"]}
+    assert claims_by_attr["routine"]["status"] == "candidate"
+    assert claims_by_attr["routine"]["candidates"][0]["value"] == "毎週火曜（毎週火曜はジム）"
     assert all(
         claim["status"] == "unknown" and claim["candidates"] == []
-        for claim in result["profile_claims"]
+        for attr, claim in claims_by_attr.items()
+        if attr != "routine"
     )
-    assert "home_room" not in {claim["attribute"] for claim in result["profile_claims"]}
-    assert result["profile_claim_suggestions"] == []
+    assert "home_room" not in claims_by_attr
+    assert result["profile_claim_suggestions"] == [post.post_id]
     assert saved_result["clues"] == [clue]
-    assert len(saved_result["profile_claims"]) == 24
+    assert len(saved_result["profile_claims"]) == 29
     assert saved_result["profile_relations"] == []
-    assert all(claim.status == "unknown" for claim in saved_result["profile_claims"])
+    assert all(
+        (claim.status == "candidate" if claim.attribute == "routine" else claim.status == "unknown")
+        for claim in saved_result["profile_claims"]
+    )
     routine = next(c for c in result["conclusions"] if c["attribute"] == "routine")
     assert routine["clue_indices"] == [0]
     assert set(routine) == {"rule", "attribute", "value", "clue_indices", "note", "confidence"}

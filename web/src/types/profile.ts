@@ -34,6 +34,16 @@ export const PROFILE_ATTRIBUTE_CATALOG = {
     category: "identity_and_face",
     personalLevel: null, guessability: null,
   },
+  age: {
+    label: "年齢・年代",
+    category: "identity_and_face",
+    personalLevel: null, guessability: null,
+  },
+  birthday: {
+    label: "誕生日",
+    category: "identity_and_face",
+    personalLevel: null, guessability: null,
+  },
   realtime_location: {
     label: "リアルタイムの現在地",
     category: "home_and_location",
@@ -63,6 +73,11 @@ export const PROFILE_ATTRIBUTE_CATALOG = {
     category: "affiliation_and_work",
     personalLevel: null, guessability: null,
   },
+  occupation: {
+    label: "職種・属性",
+    category: "affiliation_and_work",
+    personalLevel: null, guessability: null,
+  },
   frequent_shop: {
     label: "行きつけの店（ジム・美容院・カフェ）",
     category: "activity_and_family",
@@ -70,6 +85,8 @@ export const PROFILE_ATTRIBUTE_CATALOG = {
   },
   vehicle_model: { label: "自家用車の車種", category: "activity_and_family", personalLevel: null, guessability: null },
   partial_plate: { label: "ナンバーの一部", category: "activity_and_family", personalLevel: null, guessability: null },
+  active_time: { label: "主な活動時間帯", category: "activity_and_family", personalLevel: null, guessability: null },
+  routine: { label: "定期行動・習慣", category: "activity_and_family", personalLevel: null, guessability: null },
   partner_status: { label: "配偶者・交際相手の有無", category: "activity_and_family", personalLevel: null, guessability: null },
   partner_attributes: { label: "配偶者・交際相手の属性", category: "activity_and_family", personalLevel: null, guessability: null },
   child_age: { label: "子どもの年齢", category: "activity_and_family", personalLevel: null, guessability: null },

@@ -72,7 +72,7 @@ describe("toDiagnoseEvent", () => {
     });
   });
 
-  it("reads all 24 candidate sets, including attributes that remain unknown", () => {
+  it("reads all 29 candidate sets, including attributes that remain unknown", () => {
     const profile_claims = PROFILE_DIAGNOSED_ATTRIBUTES.map((attribute) => ({
       attribute,
       status: "unknown",

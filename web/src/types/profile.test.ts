@@ -3,17 +3,19 @@ import { describe, expect, it } from "vitest";
 import { PROFILE_ATTRIBUTE_CATALOG, PROFILE_CATEGORIES, PROFILE_DIAGNOSED_ATTRIBUTES, isExternalProfileResult, isProfileCandidateSet, isProfileCandidateSetList, isProfileItem, isProfileRelationList, isWebFact, profileCandidateAfterDeletion, profileClaimAfterDeletion, profileRelationsAfterDeletion, type ClaimAssessment, type ProfileAttribute, type ProfileCandidate, type ProfileCandidateSet, type ProfileEvidence, type ProfileItem, type ProfileRelation } from "./profile";
 
 describe("profile metadata catalog", () => {
-  it("contains the 25 candidate IDs and labels with unrated legacy fields", () => {
+  it("contains the 30 candidate IDs and labels with unrated legacy fields", () => {
     const expected: Record<ProfileAttribute, string> = {
       facial_appearance: "顔貌（自撮り・他撮り・反射）", full_name: "本名（フルネーム）",
       given_name: "下の名前", nickname: "呼ばれている名前", other_social_account: "別SNSのアカウント / 本垢",
+      age: "年齢・年代", birthday: "誕生日",
       realtime_location: "リアルタイムの現在地", home_building: "自宅の建物候補", home_room: "自宅の部屋・階・位置",
       home_nearest_station: "自宅の最寄り駅", regular_station: "投稿時点の通勤利用駅候補", regular_line: "日常的に利用する路線",
       residential_area: "居住エリア（市区町村・町域）", announced_long_absence: "予告された長期不在",
       actual_home_absence: "実際の自宅不在", employer_name: "雇用主名の推定",
       workplace_building_candidate: "勤務先建物候補", workplace_area: "勤務先エリア（オフィス街）",
-      school: "通学先（大学・キャンパス・学校）", frequent_shop: "行きつけの店（ジム・美容院・カフェ）",
-      vehicle_model: "自家用車の車種", partial_plate: "ナンバーの一部", partner_status: "配偶者・交際相手の有無",
+      school: "通学先（大学・キャンパス・学校）", occupation: "職種・属性", frequent_shop: "行きつけの店（ジム・美容院・カフェ）",
+      vehicle_model: "自家用車の車種", partial_plate: "ナンバーの一部", active_time: "主な活動時間帯", routine: "定期行動・習慣",
+      partner_status: "配偶者・交際相手の有無",
       partner_attributes: "配偶者・交際相手の属性", child_age: "子どもの年齢", child_school: "子どもの通園・通学先",
     };
     expect(Object.keys(PROFILE_ATTRIBUTE_CATALOG).sort()).toEqual(Object.keys(expected).sort());
@@ -260,11 +262,11 @@ describe("profile candidate sets", () => {
     expect(isProfileCandidateSet(set("school", [candidate("架空大学", 0.65, "weak", "2026-11-12T10:00:00+09:00")]))).toBe(false);
   });
 
-  it("requires a complete 24-attribute diagnosis set, excluding home_room", () => {
+  it("requires a complete 29-attribute diagnosis set, excluding home_room", () => {
     const sets: ProfileCandidateSet[] = PROFILE_DIAGNOSED_ATTRIBUTES.map((attribute) => ({
       attribute, status: "unknown", candidates: [], candidate_pool: [], reason: "no_grounded_rule", conflicting_evidence: [],
     }));
-    expect(sets).toHaveLength(24);
+    expect(sets).toHaveLength(29);
     expect(isProfileCandidateSetList(sets)).toBe(true);
     expect(isProfileCandidateSetList([...sets, { attribute: "home_room", status: "unknown", candidates: [], candidate_pool: [], reason: "excluded", conflicting_evidence: [] }])).toBe(false);
   });

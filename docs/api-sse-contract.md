@@ -33,7 +33,7 @@ OAuth 時の投稿取得は、セッション DID に限定して公開 AppView 
 | `DELETE /api/session` | `tkb_session` Cookie | 204、Cookie削除 | セッションがなくても204。 |
 | `POST /api/detect` | 画像バイナリをリクエスト本文に直接送信。許可Content-Type: JPEG/PNG/WebP/HEIC/HEIF | モック時200 `{"clues":[…]}` | 空本文400、未対応形式415、20MiB超413。`MOCK_MODE=0` は現状501「検出はまだ実装されていません」。このルートはログイン必須ではない。 |
 | `POST /api/diagnose` | `tkb_session` Cookie。任意JSON `{"public_web_lookup_consent":boolean}`（既定false） | `text/event-stream` | Cookieなし・無効は401。始められないときはストリームを始めずに理由のコードつきで断る（下の「理由のコードつきのエラー」）。成功時は以下のSSE順序。投稿/手がかり/診断結果はディスクやログに保存しない。投稿・手がかり・限定プロフィール推定・検索候補はログアウトまたは期限切れまでセッションのメモリだけに置き、次の診断開始時に置き換える。 |
-| `GET /api/diagnosis` | `tkb_session` Cookie | 200 `{"posts":[Post],"clues":[Clue],"deleted":[post_id],"conclusions":[Conclusion],"plan":Plan,"profile_claims":[ProfileCandidateSet;24],"profile_relations":[ProfileRelation],"profile_claim_suggestions":[post_id],"web_facts":[WebFact],"external_profile_results":[ExternalProfileResult],…}` | 同じセッションで完了済みの直近結果をモデル再解析なしで画面に復元する。Cookieなし・無効は401、結果がなければ404。結果はセッションとともに消える。 |
+| `GET /api/diagnosis` | `tkb_session` Cookie | 200 `{"posts":[Post],"clues":[Clue],"deleted":[post_id],"conclusions":[Conclusion],"plan":Plan,"profile_claims":[ProfileCandidateSet;29],"profile_relations":[ProfileRelation],"profile_claim_suggestions":[post_id],"web_facts":[WebFact],"external_profile_results":[ExternalProfileResult],…}` | 同じセッションで完了済みの直近結果をモデル再解析なしで画面に復元する。Cookieなし・無効は401、結果がなければ404。結果はセッションとともに消える。 |
 | `GET /api/features` | なし | 200 `{"share_enabled":true,"auth_mode":"app_password","public_web_lookup_available":false}` | 認証不要。`auth_mode` は `oauth` または `app_password`。`share_enabled` は設定 `SHARE_ENABLED`（既定1）、`public_web_lookup_available` は公開Web検索に必要な設定が揃っているかを示す。 |
 | `POST /api/result-link` | `tkb_session` Cookie | 200 `{"token":"…"}` | 本人が画面で選んだとき、完了済みの結果を2時間の閲覧用スナップショットとして保存する。結果がなければ404。ランダムなトークンを URL のフラグメントに置き、アクセスログに記録しない。`SHARE_ENABLED=0` なら404 `share_disabled`（何も保存しない）。 |
 | `DELETE /api/result-link` | `tkb_session` Cookie、JSON `{"token":"…"}` | 204 | 作成者の DID と一致するリンクだけを無効化する。別人のリンクは消せない。 |
@@ -44,7 +44,7 @@ OAuth 時の投稿取得は、セッション DID に限定して公開 AppView 
 
 バリデーションエラーは422で `{"detail":[{"loc":[…],"msg":"…","type":"…"}]}` を返す。送信値そのものは詳細に含めない。その他のエラー形式は FastAPI のHTTPエラー応答に従う。
 
-`GET /api/diagnosis` は、診断時の `posts` と `clues` を保持したまま、実際に消せた投稿IDを `deleted` に返す。投稿・手がかりの元配列順と `clue_indices` は変えない。`conclusions`、`plan`、24件のプロフィール候補セット、関係、候補投稿IDは `deleted` を反映して返す。プロフィール候補セットは保存済みの全 `candidate_pool` と残存する投稿・手がかりから、推論器や外部APIを再実行せず再評価する。診断開始時刻 `diagnosis_at` はセッション内の診断状態に保持し、現在地など時間で鮮度が変わる候補はその時刻で評価する。削除済みIDは候補提案から除く。フロントエンドは削除済み投稿を一覧・画像表示・削除候補・表示中のプラン要約から除外し、仮除外中も候補と根拠から除く。診断結果はセッションTTL（既定30分）、ログアウト、次の診断開始で破棄される。
+`GET /api/diagnosis` は、診断時の `posts` と `clues` を保持したまま、実際に消せた投稿IDを `deleted` に返す。投稿・手がかりの元配列順と `clue_indices` は変えない。`conclusions`、`plan`、29件のプロフィール候補セット、関係、候補投稿IDは `deleted` を反映して返す。プロフィール候補セットは保存済みの全 `candidate_pool` と残存する投稿・手がかりから、推論器や外部APIを再実行せず再評価する。診断開始時刻 `diagnosis_at` はセッション内の診断状態に保持し、現在地など時間で鮮度が変わる候補はその時刻で評価する。削除済みIDは候補提案から除く。フロントエンドは削除済み投稿を一覧・画像表示・削除候補・表示中のプラン要約から除外し、仮除外中も候補と根拠から除く。診断結果はセッションTTL（既定30分）、ログアウト、次の診断開始で破棄される。
 
 ### 理由のコードつきのエラー
 
@@ -91,7 +91,7 @@ SSEブロックは `event: <name>\ndata: <JSON>\n\n`。JSONはUTF-8で送られ�
 | --- | --- | --- | --- |
 | 1 | `post` | `{"post": Post}` | 診断対象投稿をすべて取得した後、投稿一覧の順に全件送信。各投稿を送るたび手がかり抽出を待つわけではない。 |
 | 2 | `clues` | `{"post_id":"…","clues":[Clue,…],"error":string|null}` | 抽出処理が完了した投稿ごと。抽出処理の完了順。成功時は `error:null`。投稿単位の抽出失敗時は空の `clues` とエラー文字列を送る。 |
-| 3 | `conclusions` | `{"clues":[全Clue,…],"conclusions":[Conclusion,…],"profile_claims":[ProfileCandidateSet;24],"profile_relations":[ProfileRelation,…],"profile_claim_suggestions":[post_id,…],"web_facts":[WebFact,…],"web_lookup_status":status,"external_profile_results":[ExternalProfileResult,…],"external_lookup_status":status,"owner_profile_text":string,"self_report_clues":[Clue,…]}` | 全投稿の抽出処理の後に1回。`profile_claims` は対象24項目それぞれの候補集合（`home_room` は対象外）。`profile_relations` はスコアを持たない関係と、その関係全体を支える根拠経路。片側候補の全経路が消えた場合、または根拠投稿が削除された場合は表示から除く。`profile_claim_suggestions` は候補プール全体の根拠経路から選んだ最大3件。既存 `plan` イベントも続けて送る。 |
+| 3 | `conclusions` | `{"clues":[全Clue,…],"conclusions":[Conclusion,…],"profile_claims":[ProfileCandidateSet;29],"profile_relations":[ProfileRelation,…],"profile_claim_suggestions":[post_id,…],"web_facts":[WebFact,…],"web_lookup_status":status,"external_profile_results":[ExternalProfileResult,…],"external_lookup_status":status,"owner_profile_text":string,"self_report_clues":[Clue,…]}` | 全投稿の抽出処理の後に1回。`profile_claims` は対象29項目それぞれの候補集合（`home_room` は対象外で、RulesR R1〜R12 と RulesX X2〜X5 の候補も `combined_inference` 経路として統合）。`profile_relations` はスコアを持たない関係（RulesX X1 の通学関係を含む）と、その関係全体を支える根拠経路。片側候補の全経路が消えた場合、または根拠投稿が削除された場合は表示から除く。`profile_claim_suggestions` は候補プール全体の根拠経路から選んだ最大3件。既存 `plan` イベントも続けて送る。 |
 | 4 | `plan` | Simulation ＋ `"posts":[{"post_id","broken"},…]` | 推理の後に1回。`delete` は名前・生年月日・住まいなどの推定と、顔・名前・住所など直接写った手がかりを重みづけし、効果の大きい投稿から最大3件選ぶ（`tkb_engine.planner.plan`）。根拠だけ減って推定も重要な直接手がかりも残る候補は外す。`posts` は各投稿だけを消したときに崩れる項目で、顔の写真だけを消す候補などでは空になりうる。候補がなければ `delete` は空。 |
 | 5 | `done` | `{"posts_seen":number}` | 正常完了時に1回。 |
 
@@ -105,12 +105,12 @@ SSEブロックは `event: <name>\ndata: <JSON>\n\n`。JSONはUTF-8で送られ�
 
 ### プロフィール推定と公開Web検索
 
-- `profile_claims` は `home_room` を除く対象24属性を各1件ずつ返す。未推定属性も `unknown` または `conflict` として含め、候補のない属性を省略しない。形式は `{"attribute":ProfileAttribute,"status":"candidate"|"ambiguous"|"unknown"|"conflict","candidates":[ProfileCandidate,…],"candidate_pool":[ProfileCandidate,…],"reason":string|null,"conflicting_evidence":[ProfileEvidence,…]}`。`unknown` / `conflict` は `candidates` と `candidate_pool` が空で理由あり、`candidate` は表示候補1件、`ambiguous` は表示候補2〜3件。候補値は NFKC + trim + lowercase 後に重複させない。明示的な否定や矛盾の根拠は `conflicting_evidence` に入れ、候補値自体は作らない。
+- `profile_claims` は `home_room` を除く対象29属性（従来の24属性＋`age` / `birthday` / `occupation` / `active_time` / `routine`）を各1件ずつ返す。未推定属性も `unknown` または `conflict` として含め、候補のない属性を省略しない。形式は `{"attribute":ProfileAttribute,"status":"candidate"|"ambiguous"|"unknown"|"conflict","candidates":[ProfileCandidate,…],"candidate_pool":[ProfileCandidate,…],"reason":string|null,"conflicting_evidence":[ProfileEvidence,…]}`。`unknown` / `conflict` は `candidates` と `candidate_pool` が空で理由あり、`candidate` は表示候補1件、`ambiguous` は表示候補2〜3件。候補値は NFKC + trim + lowercase 後に重複させない。明示的な否定や矛盾の根拠は `conflicting_evidence` に入れ、候補値自体は作らない。
 - `profile_relations` は、本人投稿中の明示関係と、別投稿で型付き手がかりにより独立して観測された既存候補だけを結ぶ無得点の表示情報。駅名が一致しただけで住居・勤務先・学校の候補を作らない。新しい `regular_station` 経路は別の本人投稿にある型付き自宅最寄り駅観測と、定期的な「自宅最寄りから通勤」文をAND根拠として持つ。両投稿の時刻は有効な時差付き日時で、間隔90日以内、移動・転居等の文脈がない場合のみ作る。値は「投稿時点の通勤利用駅候補」であり、現在の利用を保証しない。候補値から別候補値を導かず、同じ投稿・根拠の重複を独立証拠として数えない。
 - 関係の形は `{"kind":ProfileRelationKind,"left":ProfileRelationEndpoint,"right":ProfileRelationEndpoint,"evidence_paths":[ProfileEvidencePath,…]}`。端点は候補なら `{"kind":"profile_candidate","attribute":ProfileAttribute,"value":string}`、明示された通勤・通学先なら `{"kind":"commute_destination","value":string}`。候補の削除後に端点のどちらか、または関係を支えるAND根拠経路が残らなければ、関係を表示しない。
 - `ProfileCandidate` は `{"rank":number,"value":string,"confidence":number,"status":"found"|"weak","evidence":[ProfileEvidence,…],"evidence_paths":[ProfileEvidencePath,…],"assessment":ClaimAssessment,"observed_at":string|null,"counter_evidence":[ProfileEvidence,…]}`。confidence は校正済み確率ではなく順位付けのスコア。`candidate_pool` は根拠経路を持つ値を順位順に全て含み、rank は1始まりで連続する。表示前に根拠経路と観測品質の必須条件を満たす。最上位候補が `weak` なら、スコア差にかかわらず順位上位の `weak` 候補を最大3件表示する。最上位が `found` なら、スコアが最上位から0.15以内の同じ `found` 候補を最大3件表示する。その他は `candidate_pool` に残すが `candidates` には表示しない。`ambiguous` は2件以上の表示候補がある場合に使う。
 - `ProfileEvidencePath` は `{"evidence":[ProfileEvidence,…],"confidence":number,"provenance":"direct_disclosure"|"combined_inference"|"unclassified"}`。これは候補値を支える完全な代替経路ごとの出所分類。`direct_disclosure` はその経路が候補値そのものを直接公開する場合、`combined_inference` は別々の情報を結びつけて候補値を導く場合、`unclassified` は分類できない既存・移行経路を表す。未指定の旧経路は安全側で `unclassified` とする。関係だけを本人が申告した手がかりは、対象値を別の観測と結びつける `combined_inference` 経路の根拠になりうる。削除後も `direct_disclosure` または `unclassified` 経路が残る `found` 候補は `found` を保つ。残る経路がすべて `combined_inference` の場合は `weak` に下げる。
-- 候補は根拠経路がある値だけを含む。メイン結果は候補のある項目だけ表示し、24属性すべてのセットはAPIと内部型に保持する。値は候補カード1つだけ表示し、同じ値に直接公開と組合せ推定の両方の経路があれば、カード内に両方の出所ラベルを付ける。画面の直接公開ラベルは `自分で直接公開`、組合せ推定は `投稿の組み合わせから推定` とし、組合せ経路に公開Webの根拠がある場合は `投稿と公開Webから推定` とする。根拠経路が `unclassified` の場合は推定と表示しない。候補を正解と断定せず、値はログイン中の本人にそのまま表示する。
+- 候補は根拠経路がある値だけを含む。メイン結果は候補のある項目だけ表示し、29属性すべてのセットはAPIと内部型に保持する。値は候補カード1つだけ表示し、同じ値に直接公開と組合せ推定の両方の経路があれば、カード内に両方の出所ラベルを付ける。画面の直接公開ラベルは `自分で直接公開`、組合せ推定は `投稿の組み合わせから推定` とし、組合せ経路に公開Webの根拠がある場合は `投稿と公開Webから推定` とする。根拠経路が `unclassified` の場合は推定と表示しない。候補を正解と断定せず、値はログイン中の本人にそのまま表示する。
 - `realtime_location` 候補には、根拠投稿の時刻を timezone-aware ISO 8601 の `observed_at` として必須で返す。診断時に投稿時刻が未来、欠落、または15分を超えて古い場合は候補にせず `unknown` にする。画面表示後に15分を超えた場合も、現在地を示す文言を外し、投稿時点の情報として表示する。
 - 仮除外は `candidate_pool` 全体の根拠経路を除外投稿に合わせて再評価する。画面は再評価後の上位3件だけを表示し、全根拠候補数・表示候補数・候補順位の変化を示す。これは新しい投稿や根拠を使った推理の再実行ではない。
 - `profile_claim_suggestions` は診断済み投稿の組合せを最大3件まで調べ、confidence 0.5以上の完全経路がすべて失われる候補値を再評価する。候補が一つも残らなくなる属性数、失われる候補値数、投稿数の少なさ、診断順の順に選ぶ。値の順位変更だけでは属性が崩れたと数えない。これは `plan` / `/api/simulate` の `Conclusion` と直接画像手がかり向けプランとは別の候補根拠モデルで、提案自体は実削除しない。
@@ -132,7 +132,7 @@ SSEブロックは `event: <name>\ndata: <JSON>\n\n`。JSONはUTF-8で送られ�
 
 ## まだ実装されていない目標機能
 
-- （旧目標・現行契約ではない）16項目プロフィールの `found/weak/unknown` 共通出力。現行は `home_room` を除く24項目の候補セットを返し、候補スコアと根拠を含む。
+- （旧目標・現行契約ではない）16項目プロフィールの `found/weak/unknown` 共通出力。現行は `home_room` を除く29項目の候補セットを返し、候補スコアと根拠を含む。
 - （旧目標・現行契約ではない）16項目プロフィールでの削除候補・仮除外。候補セット用の削除提案と仮除外再評価は実装済みで、試作 `Conclusion` 向け `plan` と `/api/simulate` は引き続き別に存在する。
 - Blueskyログイン時以外の本番画像/本文抽出の統合完了確認。独立detectエンドポイントはモックのみで、本番は501。
 - SSEの全体失敗イベント、途中切断後の再開・再送プロトコル。
