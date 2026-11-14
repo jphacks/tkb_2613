@@ -103,8 +103,10 @@ def test_completed_diagnosis_can_be_read_again_only_in_its_session(client: TestC
     assert len(data["clues"]) > 0
     assert data["deleted"] == []
     assert "conclusions" not in data
-    assert data["plan"] == _events(result.text)[-2][1]
-    streamed_claims = _events(result.text)[-3][1]
+    streamed = dict(_events(result.text))
+    assert data["plan"] == streamed["plan"]
+    assert data["residence"] == streamed["residence"]["residence"]
+    streamed_claims = streamed["conclusions"]
     assert "conclusions" not in streamed_claims
     assert data["photo_place_results"] == streamed_claims["photo_place_results"]
     assert {(entry["post_id"], entry["image_index"]) for entry in data["photo_place_results"]} == {
@@ -205,6 +207,7 @@ def test_mock_diagnose_streams_posts_clues_conclusions_plan_then_done(client: Te
     assert names == ["post"] * DEMO_POST_COUNT + ["clues"] * DEMO_POST_COUNT + [
         "conclusions",
         "plan",
+        "residence",
         "done",
     ]
     assert [data for name, data in events if name == "post"] == [{"post": p} for p in posts]
@@ -217,7 +220,7 @@ def test_mock_diagnose_streams_posts_clues_conclusions_plan_then_done(client: Te
 
     # 推理の根拠の番号は、conclusions の clues の並びでの番号
     # The legacy event name is retained, but its public payload contains candidate sets only.
-    _, result = events[-3]
+    _, result = events[-4]
     assert "conclusions" not in result
     assert len(result["profile_claims"]) == len(PROFILE_DIAGNOSED_ATTRIBUTES)
     assert {claim["attribute"] for claim in result["profile_claims"]} >= {
@@ -299,7 +302,14 @@ def test_real_diagnose_extracts_clues_from_the_session_accounts_own_posts() -> N
     assert calls == [(REAL_CLIENT, REAL_DID, 5)]
     assert extractor.seen == [(post.post_id, 0)]
     events = _events(res.text)
-    assert [name for name, _ in events] == ["post", "clues", "conclusions", "plan", "done"]
+    assert [name for name, _ in events] == [
+        "post",
+        "clues",
+        "conclusions",
+        "plan",
+        "residence",
+        "done",
+    ]
     assert events[1][1]["post_id"] == post.post_id
     assert events[1][1]["clues"][0]["value"] == post.text
     assert events[2][1]["clues"] == events[1][1]["clues"]
@@ -355,6 +365,7 @@ def test_oauth_diagnose_accepts_a_session_without_a_password_client() -> None:
         "clues",
         "conclusions",
         "plan",
+        "residence",
         "done",
     ]
 

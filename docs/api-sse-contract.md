@@ -33,7 +33,7 @@ OAuth 時の投稿取得は、セッション DID に限定して公開 AppView 
 | `DELETE /api/session` | `tkb_session` Cookie | 204、Cookie削除 | セッションがなくても204。 |
 | `POST /api/detect` | 画像バイナリをリクエスト本文に直接送信。許可Content-Type: JPEG/PNG/WebP/HEIC/HEIF | モック時200 `{"clues":[…]}` | 空本文400、未対応形式415、20MiB超413。`MOCK_MODE=0` は現状501「検出はまだ実装されていません」。このルートはログイン必須ではない。 |
 | `POST /api/diagnose` | `tkb_session` Cookie。任意JSON `{"public_web_lookup_consent":boolean,"photo_place_web_lookup_consent":boolean,"photo_place_reference_consent":boolean}`（3つとも既定false） | `text/event-stream` | Cookieなし・無効は401。3つの同意は別用途で相互に代替しない。Commonsへ送る前に日本国内の座標と全国1kmメッシュ所属、ローカルPOIの名称一致、非住居カテゴリ、source licenseを再検査する。始められないときはストリームを始めずに理由のコードつきで断る（下の「理由のコードつきのエラー」）。成功時は以下のSSE順序。投稿/手がかり/診断結果はディスクやログに保存しない。投稿・手がかり・限定プロフィール推定・検索候補はログアウトまたは期限切れまでセッションのメモリだけに置き、次の診断開始時に置き換える。 |
-| `GET /api/diagnosis` | `tkb_session` Cookie | 200 `{"posts":[Post],"clues":[Clue],"deleted":[post_id],"photo_place_results":[PhotoPlaceResult],"plan":Plan,"profile_claims":[ProfileCandidateSet[]],"narrowing":Narrowing|null,"profile_relations":[ProfileRelation],"profile_claim_suggestions":[post_id],"web_facts":[WebFact],"external_profile_results":[ExternalProfileResult],…}` | 同じセッションで完了済みの直近結果をモデル再解析なしで画面に復元する。公開レスポンスに旧 `conclusions` は含めない。`narrowing` は候補カタログから導く表示専用情報で、候補の状態・確度・根拠経路を変えない。削除後は残存投稿と再計算済み候補から更新する。Cookieなし・無効は401、結果がなければ404。結果はセッションとともに消える。写真場所結果は診断時に得た観測で、投稿を消した場合は表示から除く。 |
+| `GET /api/diagnosis` | `tkb_session` Cookie | 200 `{"posts":[Post],"clues":[Clue],"deleted":[post_id],"photo_place_results":[PhotoPlaceResult],"plan":Plan,"profile_claims":[ProfileCandidateSet[]],"narrowing":Narrowing|null,"residence":ResidenceEstimate|null,"profile_relations":[ProfileRelation],"profile_claim_suggestions":[post_id],"web_facts":[WebFact],"external_profile_results":[ExternalProfileResult],…}` | 同じセッションで完了済みの直近結果をモデル再解析なしで画面に復元する。公開レスポンスに旧 `conclusions` は含めない。`narrowing` は候補カタログから導く表示専用情報で、候補の状態・確度・根拠経路を変えない。削除後は残存投稿と再計算済み候補から更新する。Cookieなし・無効は401、結果がなければ404。結果はセッションとともに消える。写真場所結果は診断時に得た観測で、投稿を消した場合は表示から除く。 |
 | `GET /api/features` | なし | 200 `{"share_enabled":true,"auth_mode":"app_password","public_web_lookup_available":false,"photo_place_web_lookup_available":false,"commons_reference_lookup_available":false}` | 認証不要。`auth_mode` は `oauth` または `app_password`。`share_enabled` は設定 `SHARE_ENABLED`（既定1）。公開Web検索フラグはそれぞれ独立。Brave写真場所検索は `MOCK_MODE=0`、Braveキーあり、かつ `DIAGNOSE_DAILY_LIMIT > 0` の場合のみtrue。Commons参照照合は `COMMONS_REFERENCE_LOOKUP_ENABLED=1`、実モード、有限の日次診断上限と、共通resolverで選ばれる読み取り可能・対応schema versionの`places.sqlite3`と選択ディレクトリの`muni_mesh.parquet`をすべて満たす場合のみtrue。resolverは選択ディレクトリを優先し、`data/processed/national`の場合だけ`data/processed/places.sqlite3`へfallbackする。 |
 | `POST /api/result-link` | `tkb_session` Cookie | 200 `{"token":"…"}` | 本人が画面で選んだとき、完了済みの結果を2時間の閲覧用スナップショットとして保存する。結果がなければ404。ランダムなトークンを URL のフラグメントに置き、アクセスログに記録しない。`SHARE_ENABLED=0` なら404 `share_disabled`（何も保存しない）。 |
 | `DELETE /api/result-link` | `tkb_session` Cookie、JSON `{"token":"…"}` | 204 | 作成者の DID と一致するリンクだけを無効化する。別人のリンクは消せない。 |
@@ -80,6 +80,7 @@ Pythonの正は `common/src/tkb_common/schemas.py`、画面側の対応型は `w
 - `Clue.type` に `local_item`（写真・本文）、`notice`（写真のみ）、`vehicle_model`（写真・本文の観測）がある。`vehicle_model` は車種名・ロゴなどの観測で、推定には本人の自家用車だと示す本文と車種の文字一致を別途必要とする。写真の `code` は画像処理で解読し、`source=ocr` として返す。モデルが推測したバーコードの中身は住所の区画の根拠にしない。 BCBP（搭乗券バーコード）は `common/src/tkb_common/bcbp.py` で解析し、予約番号PNRは clueを返す前に `*` でマスクする。
 - **DetectResponse**: `{"clues":[Clue,…]}`。
 - **Simulation**: `{"delete":[投稿ID],"broken":[attribute],"after":[ProfileCandidateSet[]]}`（Threads `/api/threads/simulate` は互換のため `after:[Conclusion]`）。`delete` の投稿を消したとして候補カタログセットを再評価した結果。`broken` は、消す前に候補（`candidates` 非空）があり、消したあと候補が1つもなくなる `ProfileAttribute`（順位変更だけなら入れない）。Python は `tkb_api.pipeline.simulate_claims_json`（互換用 `simulation_json` は Threads 等向け）、TypeScript は `web/src/types/diagnose.ts` の `Simulation`。
+- Bluesky の Simulation（`POST /api/simulate`・`POST /api/delete`・`POST /api/demo/simulate`）には、`narrowing` と同じく表示用の付属品として `"residence": ResidenceEstimate | null`（`delete` の投稿と、もう消した投稿を除いて計算し直した住まいの推定）が付く。`plan` イベントには付かない。
 - **Deletion**: Simulation ＋ `"failed":[投稿ID]` ＋ `"bluesky_busy":boolean`。`delete` は実際に消せた投稿だけで、`broken`・`after` はそれを除いて候補カタログセットを再評価した結果。`failed` は消せなかった投稿。TypeScript は `web/src/types/diagnose.ts` の `Deletion`。
 - **内部ルール中間値 `Conclusion`**: engine のR/X/BP推理とThreads互換レスポンス向けの型。BlueskyのSSEと診断snapshotでは公開せず、カタログに登録された各 `ProfileCandidateSet` を唯一のプロフィール結果とする。Threads route は旧形式を必要とするため独立した互換処理を持つ。R1〜R12、X1〜X5、BP1/BP2が生成し、搭乗券BP1の氏名は旅客名であって投稿者本人と未確認のため、本人名の確定値ではなく推定候補として表示する。
 - 投稿時刻から R2 の行動時間・R3 の定期外出を出すには、投稿が3日以上に分かれている必要がある。R12 が投稿日を誕生日に使う際も同様。ただし年齢が明記された誕生日投稿では、その投稿の日を使う。デモを同日にまとめて投稿しただけで毎週の習慣を推定しない。
@@ -94,7 +95,8 @@ SSEブロックは `event: <name>\ndata: <JSON>\n\n`。JSONはUTF-8で送られ�
 | 2 | `clues` | `{"post_id":"…","clues":[Clue,…],"error":string|null}` | 抽出処理が完了した投稿ごと。抽出処理の完了順。成功時は `error:null`。投稿単位の抽出失敗時は空の `clues` とエラー文字列を送る。 |
 | 3 | `conclusions` | `{"clues":[全Clue,…],"photo_place_results":[PhotoPlaceResult,…],"profile_claims":[ProfileCandidateSet[]],"narrowing":Narrowing|null,"profile_relations":[ProfileRelation,…],"profile_claim_suggestions":[post_id,…],"web_facts":[WebFact,…],"web_lookup_status":status,"external_profile_results":[ExternalProfileResult,…],"external_lookup_status":status,"owner_profile_text":string,"self_report_clues":[Clue,…]}` | 旧SSEイベント名を transport compatibility のため維持するが、`conclusions` 値は返さない。全投稿の抽出後に1回送信し、Bluesky/demoの公開結果はカタログに登録された各 `ProfileCandidateSet` を唯一のプロフィール結果とする。`photo_place_results` は画像単位の観測候補。ローカル候補がunknown/ambiguousのとき、専用同意済み・安全なClueがある場合だけBrave Place Search補完を行う。検索語は画像内のregionを持つ高確度OCR/VLM `shop` / `landmark` / `station_sign` の名称に限定し、診断全体で最大3クエリ。`country=JP`は検索範囲指定にすぎず、採用結果の `postal_address.country` が `JP` のときだけ候補に使う。タイトルは送信した名称と正規化後に完全一致するものだけ採用する。送信値は名称のみで、写真・crop・embedding・本文・人名・住所・郵便番号・DID・投稿URI・ハンドルは送らない。外部候補は未確認で、公式/公的な独立根拠がない限り所在地を断定しない。Braveの一時ID・画像thumbnail/snippetは保存しない。写真内に対象物が見える意味の `visible_in_frame` だけを生成し、写真撮影地点・本人の位置を直接主張しない。PhotoPlaceResult単独からprofile claimを作らない。`profile_claims`の`residential_area`は、local-onlyの許諾済みPOI候補と候補名に係る本人の明示的家周辺文脈、別投稿の独立した同地域根拠がそろった場合だけ別の弱い推論経路で作る。`WEB_SEARCHED`候補、引用/旅行/訪問/否定、単なる地域名言及、曖昧候補は根拠にしない。`profile_relations` はスコアを持たない関係（RulesX X1 の通学関係を含む）と、その関係全体を支える根拠経路。片側候補の全経路が消えた場合、または根拠投稿が削除された場合は表示から除く。`profile_claim_suggestions` は候補プール全体の根拠経路から選んだ最大3件。既存 `plan` イベントも続けて送る。
 | 4 | `plan` | Simulation ＋ `"posts":[{"post_id","broken"},…]` | 推理の後に1回。`delete` はカタログ属性の `ProfileCandidateSet` について、`PROFILE_ATTRIBUTE_WEIGHTS` に従い属性が丸ごと崩れる重み合計・失われる候補数・投稿数の少なさ・診断順で最大3件選ぶ（`plan_claims_json` / `plan_profile_candidate_deletion`）。`posts` は各投稿だけを消したときに崩れる `ProfileAttribute` で、組み合わせで初めて崩れる候補などでは空になりうる。候補がなければ `delete` は空。 |
-| 5 | `done` | `{"posts_seen":number}` | 正常完了時に1回。 |
+| 5 | `residence` | `{"residence": ResidenceEstimate \| null}` | `plan` の後に1回。住まいの推定（点数の地図、下の「住まいの推定」）。表がない・場所の手がかりがないときは null。 |
+| 6 | `done` | `{"posts_seen":number}` | 正常完了時に1回。 |
 
 ### 失敗・切断の現状
 
@@ -119,6 +121,28 @@ SSEブロックは `event: <name>\ndata: <JSON>\n\n`。JSONはUTF-8で送られ�
 - `profile_claim_suggestions` は診断済み投稿の組合せを最大3件まで調べ、confidence 0.5以上の完全経路がすべて失われる候補値を再評価する。属性の重み合計（`PROFILE_ATTRIBUTE_WEIGHTS`）・失われる候補値数・投稿数の少なさ・診断順の順に選ぶ。値の順位変更だけでは属性が崩れたと数えない。Bluesky 診断の `plan` / `/api/simulate` / `/api/delete` および `/api/demo/*` と同じ候補カタログベースを用いる。
 - 公開Web検索は `public_web_lookup_consent` の診断単位同意がある場合だけ行い、本人の公開Blueskyハンドルと固定 `site:` 演算子のみ送る。写真場所検索は別の `photo_place_web_lookup_consent` が必要で、検索語は安全検査を通った画像内OCR/VLMの施設/地標/駅名に限る。外部検索は候補不足・競合のときだけで、最大3クエリ/診断・5結果/クエリ。写真場所検索は `MOCK_MODE=0` かつBraveキーありの場合に有効で、`DIAGNOSE_DAILY_LIMIT` には依存しない（2026-11-14 に診断回数の制限を外したため）。BraveキーはAPIプロセスだけへ渡し、Composeではリポジトリ直下の `.env` をwebコンテナに渡さない。名前・文字列はログ・DB・キャッシュに保存せず、外部結果も診断のセッションメモリ内だけに置く。Brave APIの応答IDは約8時間で失効するため保存しない。`country=JP`で検索範囲を指定し、応答の郵便住所国もJPであることを確認する。検索結果名がqueryに完全一致しないものは採用しない。写真・crop・embedding・本文・プロフィール文・人名・住所・郵便番号・DID・投稿URI・ハンドルはPlace Searchへ送らない。両検索語はBraveで最大90日保持される。Braveの有料プランと支払情報が必要なため運営側が費用を負担する。1診断あたり最大3クエリで、1日の総数はアプリでは制限しない。費用の歯止めはBrave側の支出上限で行う。モックとキー未設定時は外部通信を行わない。
 - `external_profile_results` は検索候補と、本人プロフィール/投稿に記載されたURLと照合した候補を返す。これは公開URL上のリンク関係を示すだけで、実世界の本人確認や記事の執筆者確認を意味しない。検索結果本文の取得はしない。`MOCK_MODE=1` は固定fixtureのみで外部通信しない。
+
+## 住まいの推定（点数の地図）
+
+設計は `inference-model-spec.md`、計画は `scoring-impl-plan.md`。既存の推理（R1〜R12、X1〜X5、29項目）とは別の結論として足す。Python の正は `common/src/tkb_common/residence.py`（`ResidenceEstimate`）、TypeScript は `web/src/types/residence.ts`。
+
+- 表（data-prep の `scoring_*.parquet`。国勢調査の年齢別人口・小地域境界と、OpenStreetMap から計算した道のり）がなければ `null`。api は表なしで今までどおり動く
+- 返すところ：SSE の `residence` イベント、`GET /api/diagnosis` と `GET /api/demo/diagnosis` の `residence`、`POST /api/simulate`・`POST /api/delete`・`POST /api/demo/simulate` の `residence`。消した投稿・仮に除いた投稿を除いて計算する。閲覧リンク（`POST /api/shared-result`）には含めない
+- 計算はモデルを呼ばず、手元の表だけで行う（外部への通信はない）。1回 1 秒ほど
+
+| 項目 | 内容 |
+| --- | --- |
+| `age_class` | 年齢がわかれば「20〜24歳」など。null なら総人口で数える |
+| `region` | 本計算（層7を掛けない）の 8割の範囲：`people`（範囲に住む人数）、`cells`（100m マスの数）、一番濃いマスの `city`・`town`・`station`・`station_walk_minutes`、`same_birthday`（層8：同じ年齢・同じ誕生日の計算上の人数。年齢と誕生日がそろったときだけ） |
+| `geoprofile` | 層7（よく行く場所、Rossmo の CGT）を掛けた結果。`region`、使った場所 `places`、外した「もう1つの拠点」`other_bases`、緩衝地帯 `buffer_m`。場所が2つ未満なら null |
+| `map` | 一番濃いマスのまわり（東西南北 1.5km まで）のマス：`lat`・`lon`（中心）、`p`（本計算の確率）、`p_geo`（層7を掛けた確率）、`geo`（層7だけの点数、最大 1）、`in_region`。`labels` は駅と町丁目の名前と位置（少しだけ）。`cell_lat`・`cell_lon` はマスの大きさ（度） |
+| `steps` | 投稿を1件ずつ重ねたとき（投稿の時刻の順）の 8割の範囲の人数。最初の行は投稿なし（`post_id: null`） |
+| `influence` | その投稿だけを外したときの人数（`people_without`）と増え方（`delta`）。`delta` の大きい順で、先頭が「消すべき1件」。`contradiction: true` は外すと狭まる（ほかと矛盾している可能性） |
+| `evidence` | 推定に使った投稿 ID と、根拠の層（`layer`：0 年齢、1 徒歩N分、2 路線、3 バス停、4 避難所、5 町名の一部、6 ゴミの日、7 よく行く場所、8 誕生日）、読んだ値、本文の抜き出し、表で重みが決まったか（`applied`）、写真の手がかりの番号（`clue_indices`、診断の `clues` での番号） |
+| `assumptions` | 使った仮定の一覧（設計書 4章）。画面で開けるようにする |
+| `sources` | 出典（e-Stat、© OpenStreetMap contributors）。画面に必ず出す |
+
+本人との関係が書かれた投稿だけを使う。本文のシグナルは本文の文字列そのもの、写真の町名は OCR と VLM の両方が同じ文字を読んだときだけ。画面では「確定」「特定した」と言わず、「一番濃いのはここ」「8割の範囲は約○人」のように相対的に言う。
 
 ## 担当境界とデータ受け渡し
 

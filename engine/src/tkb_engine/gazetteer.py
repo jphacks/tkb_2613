@@ -24,6 +24,8 @@ from jismesh.utils import to_meshcode
 from tkb_common.corporate_name import normalize_corporate_name
 from tkb_common.place_names import PLACE_INDEX_SCHEMA_VERSION, place_name_keys
 from tkb_common.schemas import Clue, ClueType
+from tkb_engine.scoring import tables as scoring_tables
+from tkb_engine.scoring.tables import ScoringTables
 
 DATA_DIR = Path(__file__).resolve().parents[3] / "data" / "processed"
 MAX_PLACE_NAME_MATCHES = 50
@@ -165,6 +167,8 @@ class Gazetteer:
     corporations_path: Path | None = None
     # 任意POIのSQLite名称索引。データ全件はメモリへ読み込まず、名称一致時だけ行を引く。
     places_path: Path | None = None
+    # 住まいの推定（点数の地図）の表（data-prep の scoring_*.parquet）。なければ None
+    scoring: ScoringTables | None = None
 
     def __post_init__(self) -> None:
         if self.jp_meshes is None:
@@ -211,6 +215,7 @@ class Gazetteer:
                 else None
             ),
             places_path=resolve_places_index_path(data_dir),
+            scoring=scoring_tables.load(data_dir),
         )
 
     def places_named(self, value: str) -> list[dict[str, Any]]:

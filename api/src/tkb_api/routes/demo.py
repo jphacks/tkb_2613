@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from tkb_api.config import Settings, get_settings
 from tkb_api.pipeline import (
     plan_claims_json,
+    residence_json,
     simulate_claims_json,
 )
 from tkb_api.routes.diagnose import get_gazetteer
@@ -98,6 +99,7 @@ def _render_diagnosis(
         "profile_relations": [item.model_dump(mode="json") for item in profile_relations],
         "profile_claim_suggestions": list(plan["delete"]),
         "plan": plan,
+        "residence": residence_json(clues, posts, gazetteer),
     }
     # FastAPI の JSONResponse と同じ書き出し方
     body = json.dumps(doc, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode()

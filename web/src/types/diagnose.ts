@@ -9,6 +9,7 @@
 import { type Clue, isClue } from "./clue";
 import { isPost, type Post } from "./post";
 import { isNarrowing, type Narrowing } from "./narrowing";
+import { isResidenceOrNull, type ResidenceEstimate } from "./residence";
 import { isExternalProfileResult, isProfileCandidateSet, isProfileCandidateSetList, isProfileRelationList, isWebFact, type ExternalLookupStatus, type ExternalProfileResult, type ProfileCandidateSet, type ProfileRelation, type WebFact } from "./profile";
 
 /** 推理ルールが出した結論 1 つ（engine の Conclusion） */
@@ -49,6 +50,11 @@ export interface Simulation {
   readonly after: readonly ProfileCandidateSet[];
   /** Optional display-only narrowing projected from surviving profile candidates. */
   readonly narrowing?: Narrowing | null;
+  /**
+   * 消したあとの住まいの推定（点数の地図）。表示用の付属品で、POST /api/simulate・/api/delete・
+   * /api/demo/simulate だけが返す。使う前に isResidenceEstimate で確かめる
+   */
+  readonly residence?: ResidenceEstimate | null;
 }
 
 export function isProfileSimulationAfter(
@@ -130,6 +136,8 @@ export interface DiagnosisSnapshot {
   readonly plan: Simulation & { readonly posts: readonly RiskyPost[] };
   readonly profile_claims: readonly ProfileCandidateSet[];
   readonly narrowing?: Narrowing | null;
+  /** 住まいの推定（点数の地図）。表示用の付属品。使う前に isResidenceEstimate で確かめる */
+  readonly residence?: ResidenceEstimate | null;
   readonly profile_relations?: readonly ProfileRelation[];
   readonly profile_claim_suggestions?: readonly string[];
   readonly web_facts?: readonly WebFact[];
@@ -210,9 +218,10 @@ export type DiagnoseEvent =
       readonly event: "plan";
       readonly posts: readonly RiskyPost[];
     } & Simulation)
+  | { readonly event: "residence"; readonly residence: ResidenceEstimate | null }
   | { readonly event: "done"; readonly posts_seen: number };
 
-const KNOWN_EVENTS = ["post", "clues", "conclusions", "plan", "done"] as const;
+const KNOWN_EVENTS = ["post", "clues", "conclusions", "plan", "residence", "done"] as const;
 
 export class InvalidDiagnoseEventError extends Error {
   constructor(readonly event: string) {
@@ -517,6 +526,9 @@ export function toDiagnoseEvent(
         posts: posts as RiskyPost[],
       };
     }
+  }
+  if (event === "residence" && isRecord(value) && isResidenceOrNull(value.residence)) {
+    return { event, residence: value.residence };
   }
   if (
     event === "done" &&

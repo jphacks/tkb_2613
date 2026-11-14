@@ -305,7 +305,14 @@ async def test_threads_post_flows_through_existing_extraction_and_inference() ->
             [post], real_extractions(FakeExtractor.__new__(FakeExtractor), [post]), Gazetteer()
         )
     ]
-    assert [name for name, _ in events] == ["post", "clues", "conclusions", "plan", "done"]
+    assert [name for name, _ in events] == [
+        "post",
+        "clues",
+        "conclusions",
+        "plan",
+        "residence",
+        "done",
+    ]
     # 本体の診断は Conclusion ではなく30項目の候補セットを流す（/threads は route 側で互換変換）。
     claims = {item["attribute"]: item for item in events[2][1]["profile_claims"]}
     assert claims["routine"]["status"] != "unknown"
