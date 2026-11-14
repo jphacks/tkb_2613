@@ -10,11 +10,24 @@ from shapely.geometry import Point
 
 from tkb_common.place_names import PLACE_INDEX_SCHEMA_VERSION, place_name_keys
 from tkb_data_prep.import_places import (
+    DEFAULT_MESH_INDEX,
     DEFAULT_OUTPUT,
+    MeshIndexError,
     import_geojsonl,
     import_geoparquet,
     main,
 )
+from tkb_data_prep.mesh import code_1km
+
+
+def _mesh_index(
+    tmp_path: Path,
+    coordinates: tuple[tuple[float, float], ...] = ((139.0, 35.0),),
+) -> Path:
+    path = tmp_path / "muni_mesh.parquet"
+    codes = sorted({code_1km(latitude, longitude) for longitude, latitude in coordinates})
+    pq.write_table(pa.table({"mesh_1km": codes}), path)
+    return path
 
 
 def _feature(
@@ -62,8 +75,19 @@ def test_stream_import_indexes_only_licensed_japan_records(tmp_path) -> None:
     features.append(mixed)
     source.write_text("\n".join(json.dumps(feature) for feature in features), encoding="utf-8")
     output = tmp_path / "places.sqlite3"
+    mesh_index = _mesh_index(tmp_path)
 
-    assert import_geojsonl(source, output, provider="Provider", dataset="places", version="r1") == 2
+    assert (
+        import_geojsonl(
+            source,
+            output,
+            mesh_index_path=mesh_index,
+            provider="Provider",
+            dataset="places",
+            version="r1",
+        )
+        == 2
+    )
     with sqlite3.connect(output) as db:
         assert db.execute("PRAGMA user_version").fetchone() == (PLACE_INDEX_SCHEMA_VERSION,)
         matches = db.execute(
@@ -87,8 +111,11 @@ def test_import_indexes_explicit_space_dot_width_and_kana_variants(tmp_path) -> 
     source = tmp_path / "places.geojsonl"
     source.write_text(json.dumps(feature), encoding="utf-8")
     output = tmp_path / "places.sqlite3"
+    mesh_index = _mesh_index(tmp_path)
 
-    import_geojsonl(source, output, provider="Provider", dataset="places")
+    import_geojsonl(
+        source, output, mesh_index_path=mesh_index, provider="Provider", dataset="places"
+    )
 
     with sqlite3.connect(output) as db:
         keys = {row[0] for row in db.execute("SELECT name_key FROM poi_alias")}
@@ -104,12 +131,23 @@ def test_country_missing_requires_explicit_bounded_input_flag(tmp_path) -> None:
     )
     default_output = tmp_path / "default.sqlite3"
     bounded_output = tmp_path / "bounded.sqlite3"
+    mesh_index = _mesh_index(tmp_path)
 
-    assert import_geojsonl(source, default_output, provider="Provider", dataset="places") == 0
+    assert (
+        import_geojsonl(
+            source,
+            default_output,
+            mesh_index_path=mesh_index,
+            provider="Provider",
+            dataset="places",
+        )
+        == 0
+    )
     assert (
         import_geojsonl(
             source,
             bounded_output,
+            mesh_index_path=mesh_index,
             provider="Provider",
             dataset="places",
             allow_country_missing=True,
@@ -134,6 +172,7 @@ def test_country_missing_requires_explicit_bounded_input_flag(tmp_path) -> None:
         import_geojsonl(
             outside_source,
             outside_output,
+            mesh_index_path=mesh_index,
             provider="Provider",
             dataset="places",
             allow_country_missing=True,
@@ -158,7 +197,100 @@ def test_japan_bounds_are_inclusive_and_reject_outside_coordinates(tmp_path) -> 
     ]
     source.write_text("\n".join(json.dumps(feature) for feature in features), encoding="utf-8")
     output = tmp_path / "bounds.sqlite3"
-    assert import_geojsonl(source, output, provider="Provider", dataset="places") == 2
+    mesh_index = _mesh_index(tmp_path, tuple(coordinates[:2]))
+    assert (
+        import_geojsonl(
+            source,
+            output,
+            mesh_index_path=mesh_index,
+            provider="Provider",
+            dataset="places",
+        )
+        == 2
+    )
+
+
+def test_requires_mesh_table_and_fails_closed_before_creating_index(tmp_path) -> None:
+    source = tmp_path / "places.geojsonl"
+    source.write_text("", encoding="utf-8")
+    output = tmp_path / "places.sqlite3"
+    missing_mesh = tmp_path / "missing-muni-mesh.parquet"
+
+    with pytest.raises(MeshIndexError, match="run `make data-national-gazetteer`"):
+        import_geojsonl(
+            source,
+            output,
+            mesh_index_path=missing_mesh,
+            provider="Provider",
+            dataset="places",
+        )
+    assert not output.exists()
+
+
+def test_mesh_membership_rejects_foreign_points_and_keeps_remote_islands(tmp_path) -> None:
+    coordinates = {
+        "okinawa": (127.68, 26.21),
+        "yonaguni": (123.01, 24.46),
+        "ogasawara": (142.19, 27.09),
+        "minamitorishima": (153.98, 24.29),
+        "126e34n": (126.0, 34.0),
+        "seoul": (126.98, 37.57),
+        "busan": (129.08, 35.18),
+        "jeju": (126.53, 33.50),
+    }
+    source = tmp_path / "places.geojsonl"
+    features = [
+        _feature(
+            name,
+            country="JP",
+            license_name="CC-BY-4.0",
+            coordinates=point,
+        )
+        for name, point in coordinates.items()
+    ]
+    source.write_text("\n".join(json.dumps(feature) for feature in features), encoding="utf-8")
+    mesh_index = _mesh_index(tmp_path, tuple(coordinates[name] for name in list(coordinates)[:4]))
+    output = tmp_path / "places.sqlite3"
+
+    assert (
+        import_geojsonl(
+            source,
+            output,
+            mesh_index_path=mesh_index,
+            provider="Provider",
+            dataset="places",
+        )
+        == 4
+    )
+    with sqlite3.connect(output) as db:
+        ids = {row[0] for row in db.execute("SELECT place_id FROM poi_place")}
+    assert ids == {f"places:{name}" for name in list(coordinates)[:4]}
+
+
+def test_coordinates_in_same_mesh_share_cell_membership(tmp_path) -> None:
+    # Mesh membership is cell-level, not a point-in-polygon determination.
+    first = (139.82, 35.55)
+    second = (139.825, 35.55)
+    assert code_1km(first[1], first[0]) == code_1km(second[1], second[0])
+    source = tmp_path / "same-mesh.geojsonl"
+    features = [
+        _feature("first", country="JP", license_name="CC-BY-4.0", coordinates=first),
+        _feature("second", country="JP", license_name="CC-BY-4.0", coordinates=second),
+    ]
+    source.write_text("\n".join(json.dumps(feature) for feature in features), encoding="utf-8")
+    mesh_index = _mesh_index(tmp_path, (first,))
+    output = tmp_path / "same-mesh.sqlite3"
+
+    assert (
+        import_geojsonl(
+            source,
+            output,
+            mesh_index_path=mesh_index,
+            provider="Provider",
+            dataset="places",
+        )
+        == 2
+    )
 
 
 def test_import_refuses_overwrite(tmp_path) -> None:
@@ -166,8 +298,11 @@ def test_import_refuses_overwrite(tmp_path) -> None:
     source.write_text("", encoding="utf-8")
     output = tmp_path / "places.sqlite3"
     output.touch()
+    mesh_index = _mesh_index(tmp_path)
     with pytest.raises(FileExistsError):
-        import_geojsonl(source, output, provider="Provider", dataset="places")
+        import_geojsonl(
+            source, output, mesh_index_path=mesh_index, provider="Provider", dataset="places"
+        )
 
 
 def test_geoparquet_batches_filter_country_private_address_and_unknown_license(tmp_path) -> None:
@@ -178,6 +313,7 @@ def test_geoparquet_batches_filter_country_private_address_and_unknown_license(t
         ("jp-unlicensed", "places", "place", "JP", "cultural", None),
         ("us", "places", "place", "US", "cultural", "CC0-1.0"),
         ("far-jp", "places", "place", "JP", "cultural", "CC0-1.0"),
+        ("foreign-cell", "places", "place", "JP", "cultural", "CC0-1.0"),
         ("mixed", "places", "place", "JP", "cultural", "CC0-1.0"),
         ("address", "addresses", "address", "JP", "cultural", "CC0-1.0"),
         ("private", "places", "place", "JP", "private_residence", "CC0-1.0"),
@@ -197,7 +333,10 @@ def test_geoparquet_batches_filter_country_private_address_and_unknown_license(t
             ]
         elif place_id == "mixed":
             properties["addresses"] = [{"country": "JP"}, {"country": "US"}]
-        coordinates = Point(155 if place_id == "far-jp" else 139, 35).wkb
+        coordinates = Point(
+            155 if place_id == "far-jp" else 126 if place_id == "foreign-cell" else 139,
+            35 if place_id != "foreign-cell" else 34,
+        ).wkb
         rows.append(
             {
                 "id": place_id,
@@ -209,9 +348,15 @@ def test_geoparquet_batches_filter_country_private_address_and_unknown_license(t
         )
     pq.write_table(pa.Table.from_pylist(rows), source)
     output = tmp_path / "places.sqlite3"
+    mesh_index = _mesh_index(tmp_path)
 
     assert import_geoparquet(
-        source, output, provider="Overture Maps", dataset="places", batch_size=2
+        source,
+        output,
+        mesh_index_path=mesh_index,
+        provider="Overture Maps",
+        dataset="places",
+        batch_size=2,
     ) == 2
     with sqlite3.connect(output) as db:
         ids = {row[0] for row in db.execute("SELECT place_id FROM poi_place")}
@@ -240,7 +385,9 @@ def test_area_label_uses_only_unambiguous_japan_locality(tmp_path) -> None:
     ]
     source.write_text(json.dumps(feature), encoding="utf-8")
     output = tmp_path / "area.sqlite3"
-    import_geojsonl(source, output, provider="P", dataset="places")
+    import_geojsonl(
+        source, output, mesh_index_path=_mesh_index(tmp_path), provider="P", dataset="places"
+    )
     with sqlite3.connect(output) as db:
         stored = json.loads(db.execute("SELECT record_json FROM poi_place").fetchone()[0])
     assert stored["area_label"] == "世田谷区"
@@ -248,10 +395,17 @@ def test_area_label_uses_only_unambiguous_japan_locality(tmp_path) -> None:
 
 
 def test_geoparquet_requires_partition_columns_and_refuses_overwrite(tmp_path) -> None:
+    mesh_index = _mesh_index(tmp_path)
     malformed = tmp_path / "missing-partitions.parquet"
     pq.write_table(pa.table({"id": ["x"]}), malformed)
     with pytest.raises(ValueError, match="theme, type"):
-        import_geoparquet(malformed, tmp_path / "out.sqlite3", provider="P", dataset="D")
+        import_geoparquet(
+            malformed,
+            tmp_path / "out.sqlite3",
+            mesh_index_path=mesh_index,
+            provider="P",
+            dataset="D",
+        )
 
     valid = tmp_path / "valid.parquet"
     pq.write_table(
@@ -273,12 +427,15 @@ def test_geoparquet_requires_partition_columns_and_refuses_overwrite(tmp_path) -
     output = tmp_path / "exists.sqlite3"
     output.write_bytes(b"keep")
     with pytest.raises(FileExistsError):
-        import_geoparquet(valid, output, provider="P", dataset="D")
+        import_geoparquet(
+            valid, output, mesh_index_path=mesh_index, provider="P", dataset="D"
+        )
     assert output.read_bytes() == b"keep"
 
 
 def test_cli_default_and_help_use_api_gazetteer_directory(monkeypatch, capsys) -> None:
     assert Path("data/processed/places.sqlite3") == DEFAULT_OUTPUT
+    assert Path("data/processed/national/muni_mesh.parquet") == DEFAULT_MESH_INDEX
     monkeypatch.setattr(sys, "argv", ["tkb_data_prep.import_places", "--help"])
 
     with pytest.raises(SystemExit) as result:
@@ -287,4 +444,6 @@ def test_cli_default_and_help_use_api_gazetteer_directory(monkeypatch, capsys) -
     assert result.value.code == 0
     help_text = capsys.readouterr().out.replace("\\", "/")
     assert "data/processed/places.sqlite3" in help_text
+    assert "data/processed/national/muni_mesh.parquet" in help_text
+    assert "--mesh-index" in help_text
     assert "engine/data/processed" not in help_text

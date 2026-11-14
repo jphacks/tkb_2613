@@ -41,12 +41,13 @@ data-prep で使う公開データ。データ本体はリポジトリに含め�
 
 ## 任意POI索引の取込
 
-全国POIのダウンロードやクラウド件数照会は実行しない。データ本体もコミットしない。Overture Placesは全国規模のGeoParquetで、取得/地域別抽出は[公式getting-dataガイド](https://docs.overturemaps.org/getting-data/)に従い、実行前に対象release・取得量・空き容量を確認する。次のアダプタは、利用者が別途準備したローカルGeoParquetをPyArrowのbatch iteratorで処理し、GeoJSONL中間ファイルを作らず既存SQLite索引へ書く。ファイルには `theme` と `type` の列を残し、値がそれぞれ `places` / `place` の行だけを対象にする。したがって住所テーマの点は取り込まれない。ジオメトリはWKB Pointに限定し、住所の国コードはJPのみ受け付ける。JP以外または複数国が含まれるレコードは拒否する。国コード欠落を許可する `--allow-country-missing` は、すべての行に日本の保守的境界（経度122〜154度、緯度20〜46度、境界を含む）を適用し、範囲外を拒否する。[公式Place schema](https://docs.overturemaps.org/schema/reference/places/place/)の `addresses[].locality` から、日本語の市区町村接尾辞で明示された一意の値だけを粗い `area_label` として保存する（Address schema上の `locality` は市町村または近隣地区を含み得るため、該当形式でない・複数値が競合する場合はnull）。`freeform`・番地・郵便番号等は保存しない。明示的な私有住居カテゴリ（`home`, `house`, `private_house`, `private_residence`, `residence`, `residential_building`, `residential`, `apartment`, `apartments`, `dwelling`）も除外する。
+全国POIのダウンロードやクラウド件数照会は実行しない。データ本体もコミットしない。Overture Placesは全国規模のGeoParquetで、取得/地域別抽出は[公式getting-dataガイド](https://docs.overturemaps.org/getting-data/)に従い、実行前に対象release・取得量・空き容量を確認する。次のアダプタは、利用者が別途準備したローカルGeoParquetをPyArrowのbatch iteratorで処理し、GeoJSONL中間ファイルを作らず既存SQLite索引へ書く。ファイルには `theme` と `type` の列を残し、値がそれぞれ `places` / `place` の行だけを対象にする。したがって住所テーマの点は取り込まれない。ジオメトリはWKB Pointに限定し、住所の国コードはJPのみ受け付ける。JP以外または複数国が含まれるレコードは拒否する。国コード欠落を許可する `--allow-country-missing` は、すべての行に日本の保守的境界（経度122〜154度、緯度20〜46度、境界を含む）を適用し、範囲外を拒否する。さらに必須の `muni_mesh.parquet` を一度ロードし、既存の `jismesh` 変換で得る1km三次mesh codeが全国の市区町村mesh一覧に含まれることを要求する。既定pathは `data/processed/national/muni_mesh.parquet` で、存在しない場合はfail closed。出力を使う前に `make data-national-gazetteer` で作成するか `--mesh-index` で別の全国mesh表を指定する。この判定は行政区域ポリゴンとの正確な点内判定ではなく1km cell membershipであり、海岸沿いでは自治体と海が同じcellに入る場合がある。つまりbboxとmesh gateは遠方の国外点を除外する保守的な候補filterで、海岸線境界を証明しない。[公式Place schema](https://docs.overturemaps.org/schema/reference/places/place/)の `addresses[].locality` から、日本語の市区町村接尾辞で明示された一意の値だけを粗い `area_label` として保存する（Address schema上の `locality` は市町村または近隣地区を含み得るため、該当形式でない・複数値が競合する場合はnull）。`freeform`・番地・郵便番号等は保存しない。明示的な私有住居カテゴリ（`home`, `house`, `private_house`, `private_residence`, `residence`, `residential_building`, `residential`, `apartment`, `apartments`, `dwelling`）も除外する。
 
 ```powershell
 uv run --project data-prep python -m tkb_data_prep.import_places `
   --input C:\data\places-japan.geojsonl `
   --output data\processed\places.sqlite3 `
+  --mesh-index data\processed\national\muni_mesh.parquet `
   --provider "Overture Maps" --dataset "places" --version "取得したrelease ID" `
   --source-license-map C:\data\verified-source-licenses.json
 ```
@@ -57,11 +58,12 @@ uv run --project data-prep python -m tkb_data_prep.import_places `
 uv run --project data-prep python -m tkb_data_prep.import_places `
   --input C:\data\places-japan.parquet --input-format geoparquet `
   --output data\processed\national\places.sqlite3 `
+  --mesh-index data\processed\national\muni_mesh.parquet `
   --provider "Overture Maps" --dataset "places" --version "取得したrelease ID" `
   --source-license-map C:\data\verified-source-licenses.json
 ```
 
-`--source-license-map` は、元条件を人が確認した後で `sources[].dataset` ごとにSPDX IDを与えるJSON object。レコード自身の `sources[].license` を優先し、nullのままで確認済みmappingがないレコードは索引DBには provenance とともに保存するが、検索可能なaliasは作らない。住所国はJPのみ許可し、複数国または非JPの住所がある行を除外する。住所国が欠落する入力は、地理的に日本へ切り出したことを確認して `--allow-country-missing` を指定しても、経度122〜154度・緯度20〜46度の境界内にある点だけを取り込む。変換はSQLiteにバッチで書き込み、既存DBを上書きしない。各名前検索は最大50候補に制限し、上限超過は曖昧として表示する。
+`--source-license-map` は、元条件を人が確認した後で `sources[].dataset` ごとにSPDX IDを与えるJSON object。レコード自身の `sources[].license` を優先し、nullのままで確認済みmappingがないレコードは索引DBには provenance とともに保存するが、検索可能なaliasは作らない。住所国はJPのみ許可し、複数国または非JPの住所がある行を除外する。住所国が欠落する入力は、地理的に日本へ切り出したことを確認して `--allow-country-missing` を指定しても、経度122〜154度・緯度20〜46度の境界内かつ全国mesh表の1km codeに所属する点だけを取り込む。POI索引schema versionを3へ上げたため、旧versionの索引は実行時に拒否される。POI本体を再生成するには同じ手順でSQLite索引を新規出力する（既存出力は上書きしない）。変換はSQLiteにバッチで書き込み、既存DBを上書きしない。各名前検索は最大50候補に制限し、上限超過は曖昧として表示する。
 
 取込POIの名称完全一致は未確認候補に過ぎず、Overtureが記載する重複・junk・属性欠落などの品質課題もある。名称だけで所在地を検証済みと表示しない。POI indexはテキスト/座標で、全国の参照画像DBとは別物。参照画像照合を追加する場合は候補周辺の許諾画像だけを個別取得し、別途sourceとライセンスを記録する。
 

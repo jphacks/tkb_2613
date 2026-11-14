@@ -14,9 +14,36 @@ from shapely import wkb
 from shapely.errors import GEOSException
 
 from tkb_common.place_names import PLACE_INDEX_SCHEMA_VERSION, place_name_keys
+from tkb_data_prep.mesh import code_1km
 
 DEFAULT_OUTPUT = Path("data/processed/places.sqlite3")
+DEFAULT_MESH_INDEX = Path("data/processed/national/muni_mesh.parquet")
 _JP_BOUNDS = {"longitude": (122.0, 154.0), "latitude": (20.0, 46.0)}
+
+
+class MeshIndexError(ValueError):
+    """The nationwide municipality mesh table is missing or invalid."""
+
+
+def _load_mesh_membership(path: Path) -> frozenset[str]:
+    if not path.is_file():
+        raise MeshIndexError(
+            f"required JP mesh index is missing: {path}; "
+            "run `make data-national-gazetteer` or pass --mesh-index"
+        )
+    parquet = pq.ParquetFile(path)
+    if "mesh_1km" not in parquet.schema_arrow.names:
+        raise MeshIndexError(f"JP mesh index has no mesh_1km column: {path}")
+    codes = {
+        value.strip().removesuffix("*")
+        for value in parquet.read(columns=["mesh_1km"])["mesh_1km"].to_pylist()
+        if isinstance(value, str)
+        and len(value.strip().removesuffix("*")) == 8
+        and value.strip().removesuffix("*").isdigit()
+    }
+    if not codes:
+        raise MeshIndexError(f"JP mesh index contains no valid 1km mesh codes: {path}")
+    return frozenset(codes)
 
 
 def _features(path: Path) -> Iterator[dict[str, Any]]:
@@ -203,6 +230,7 @@ def _source_records(
 def _import_features(
     features: Iterator[dict[str, Any]],
     output_path: Path,
+    allowed_meshes: frozenset[str],
     *,
     provider: str,
     dataset: str,
@@ -278,6 +306,8 @@ def _import_features(
                 and _JP_BOUNDS["latitude"][0] <= latitude <= _JP_BOUNDS["latitude"][1]
             ):
                 continue
+            if code_1km(latitude, longitude) not in allowed_meshes:
+                continue
             raw_id = feature.get("id") or properties.get("id")
             if not isinstance(raw_id, str) or not raw_id.strip():
                 continue
@@ -339,6 +369,7 @@ def import_geojsonl(
     input_path: Path,
     output_path: Path,
     *,
+    mesh_index_path: Path = DEFAULT_MESH_INDEX,
     provider: str,
     dataset: str,
     version: str | None = None,
@@ -349,9 +380,11 @@ def import_geojsonl(
     batch_size: int = 1000,
 ) -> int:
     """Import local GeoJSONL using the shared bounded SQLite writer."""
+    allowed_meshes = _load_mesh_membership(mesh_index_path)
     return _import_features(
         _features(input_path),
         output_path,
+        allowed_meshes,
         provider=provider,
         dataset=dataset,
         version=version,
@@ -367,6 +400,7 @@ def import_geoparquet(
     input_path: Path,
     output_path: Path,
     *,
+    mesh_index_path: Path = DEFAULT_MESH_INDEX,
     provider: str,
     dataset: str,
     version: str | None = None,
@@ -379,10 +413,12 @@ def import_geoparquet(
     """Import prepared Overture Places GeoParquet without a GeoJSONL copy."""
     if batch_size < 1:
         raise ValueError("batch_size must be positive")
+    allowed_meshes = _load_mesh_membership(mesh_index_path)
     features = _geoparquet_features(input_path, batch_size=batch_size)
     return _import_features(
         features,
         output_path,
+        allowed_meshes,
         provider=provider,
         dataset=dataset,
         version=version,
@@ -408,6 +444,12 @@ def main() -> None:
         type=Path,
         default=DEFAULT_OUTPUT,
         help=f"API既定gazetteerのSQLite索引 ({DEFAULT_OUTPUT})",
+    )
+    parser.add_argument(
+        "--mesh-index",
+        type=Path,
+        default=DEFAULT_MESH_INDEX,
+        help=f"required national muni_mesh.parquet ({DEFAULT_MESH_INDEX})",
     )
     parser.add_argument("--provider", required=True)
     parser.add_argument("--dataset", required=True)
@@ -435,17 +477,21 @@ def main() -> None:
     ):
         parser.error("--source-license-map must be a JSON object of dataset name to SPDX ID")
     importer = import_geoparquet if args.input_format == "geoparquet" else import_geojsonl
-    count = importer(
-        args.input,
-        args.output,
-        provider=args.provider,
-        dataset=args.dataset,
-        version=args.version,
-        license_map=license_map,
-        attribution=args.attribution,
-        country=args.country,
-        allow_country_missing=args.allow_country_missing,
-    )
+    try:
+        count = importer(
+            args.input,
+            args.output,
+            mesh_index_path=args.mesh_index,
+            provider=args.provider,
+            dataset=args.dataset,
+            version=args.version,
+            license_map=license_map,
+            attribution=args.attribution,
+            country=args.country,
+            allow_country_missing=args.allow_country_missing,
+        )
+    except MeshIndexError as error:
+        parser.error(str(error))
     print(f"Imported {count} POI records")
 
 

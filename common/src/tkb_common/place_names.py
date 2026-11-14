@@ -6,7 +6,8 @@ import unicodedata
 
 # Bump this when key generation or the SQLite alias layout changes. Existing indexes
 # with another PRAGMA user_version are intentionally ignored until regenerated.
-PLACE_INDEX_SCHEMA_VERSION = 2
+# Version 3 invalidates indexes built before the JP mesh-membership gate.
+PLACE_INDEX_SCHEMA_VERSION = 3
 _MIDDLE_DOTS = frozenset({"・", "･", "·"})
 
 
