@@ -5,6 +5,15 @@ from tkb_common.schemas import (
     ClueSource,
     ClueType,
     EvidencePathProvenance,
+    PhotoPlaceCandidate,
+    PhotoPlaceEvidence,
+    PhotoPlaceGranularity,
+    PhotoPlaceLookupStatus,
+    PhotoPlaceRelation,
+    PhotoPlaceResult,
+    PhotoPlaceSource,
+    PhotoPlaceStatus,
+    PhotoPlaceType,
     Post,
     PostImage,
     ProfileAttribute,
@@ -70,6 +79,37 @@ def profile_clue(value: str, kind: ClueType) -> Clue:
         region=None,
         confidence=0.9,
         source=ClueSource.PROFILE_TEXT,
+    )
+
+
+def photo_area_result(
+    p: Post, clue_index: int, *, area: str = "\u6587\u4eac\u533a"
+) -> PhotoPlaceResult:
+    return PhotoPlaceResult(
+        post_id=p.post_id,
+        image_index=0,
+        status=PhotoPlaceStatus.CANDIDATE,
+        granularity=PhotoPlaceGranularity.FACILITY,
+        lookup_status=PhotoPlaceLookupStatus.LOCAL_ONLY,
+        candidates=[
+            PhotoPlaceCandidate(
+                place_id="poi:blue-market",
+                label="\u9752\u8449\u5e02\u5834",
+                place_type=PhotoPlaceType.LANDMARK,
+                photo_relation=PhotoPlaceRelation.VISIBLE_IN_FRAME,
+                area_label=area,
+                evidence=[PhotoPlaceEvidence(kind="clue", clue_index=clue_index)],
+                source_ids=["local:poi:blue-market"],
+                sources=[
+                    PhotoPlaceSource(
+                        source_id="local:poi",
+                        provider="local",
+                        dataset="licensed-poi",
+                        license_id="CC-BY-4.0",
+                    )
+                ],
+            )
+        ],
     )
 
 
@@ -443,6 +483,126 @@ def test_residence_claim_survives_rejected_employer_possessive_pattern() -> None
         ],
     )
     assert {item.attribute for item in claims} == {ProfileAttribute.RESIDENTIAL_AREA}
+
+
+def test_photo_place_residence_needs_home_context_and_independent_local_post() -> None:
+    photo = post("photo-home", "\u81ea\u5b85\u306e\u8fd1\u304f\u306e \u9752\u8449\u5e02\u5834")
+    area_post = post(
+        "area-local", "\u6587\u4eac\u533a\u304c\u8fd1\u6240\u3067\u6bce\u65e5\u901a\u308b"
+    )
+    photo_clue = Clue(
+        post_id=photo.post_id,
+        image_index=0,
+        type=ClueType.LANDMARK,
+        value="\u9752\u8449 \u5e02\u5834",
+        region=None,
+        confidence=0.9,
+        source=ClueSource.VLM,
+    )
+    area_clue = typed_clue(area_post, "\u6587\u4eac\u533a", ClueType.PLACE_TEXT)
+    result = photo_area_result(photo, 0)
+    claim = next(
+        item
+        for item in infer_owner_claims(
+            [photo, area_post], [photo_clue, area_clue], photo_place_results=[result]
+        )
+        if item.attribute is ProfileAttribute.RESIDENTIAL_AREA
+    )
+    assert claim.value == "\u6587\u4eac\u533a"
+    assert claim.status is ProfileStatus.WEAK
+    assert claim.confidence <= 0.65
+    path = claim.evidence_paths[0]
+    assert {ref.post_id for ref in path.evidence if ref.post_id} == {
+        photo.post_id,
+        area_post.post_id,
+    }
+    assert any(ref.post_id == photo.post_id and ref.clue_index == 0 for ref in path.evidence)
+    assert recalculate_after_deletion(claim, {photo.post_id}) is None
+    assert recalculate_after_deletion(claim, {area_post.post_id}) is None
+
+
+def test_photo_place_residence_rejects_result_alone_and_plain_area_mention() -> None:
+    photo = post("photo-only", "\u81ea\u5b85\u8fd1\u304f\u306e\u9752\u8449\u5e02\u5834")
+    photo_clue = Clue(
+        post_id=photo.post_id,
+        image_index=0,
+        type=ClueType.LANDMARK,
+        value="\u9752\u8449\u5e02\u5834",
+        region=None,
+        confidence=0.9,
+        source=ClueSource.VLM,
+    )
+    result = photo_area_result(photo, 0)
+    assert infer_owner_claims([photo], [photo_clue], photo_place_results=[result]) == []
+
+    mention = post("mention", "\u6587\u4eac\u533a\u3067\u30e9\u30f3\u30c1")
+    area_clue = typed_clue(mention, "\u6587\u4eac\u533a", ClueType.PLACE_TEXT)
+    assert (
+        infer_owner_claims(
+            [photo, mention], [photo_clue, area_clue], photo_place_results=[result]
+        )
+        == []
+    )
+
+    unrelated = post("unrelated-home", "\u81ea\u5b85\u8fd1\u304f\u306e\u5225\u306e\u770b\u677f")
+    unrelated_clue = photo_clue.model_copy(update={"post_id": unrelated.post_id})
+    unrelated_result = photo_area_result(unrelated, 0)
+    wrong_candidate = unrelated_result.model_copy(
+        update={
+            "candidates": [
+                unrelated_result.candidates[0].model_copy(
+                    update={"label": "\u5225\u306e\u770b\u677f"}
+                )
+            ]
+        }
+    )
+    local = post(
+        "unrelated-area", "\u6587\u4eac\u533a\u304c\u8fd1\u6240\u3067\u6bce\u65e5\u901a\u308b"
+    )
+    local_clue = typed_clue(local, "\u6587\u4eac\u533a", ClueType.PLACE_TEXT)
+    assert (
+        infer_owner_claims(
+            [unrelated, local],
+            [unrelated_clue, local_clue],
+            photo_place_results=[wrong_candidate],
+        )
+        == []
+    )
+    assert (
+        infer_owner_claims(
+            [unrelated, local],
+            [unrelated_clue, local_clue],
+            photo_place_results=[unrelated_result],
+        )
+        == []
+    )
+
+
+def test_photo_place_residence_rejects_trip_quote_and_negated_home_context() -> None:
+    for key, text in (
+        ("trip-photo", "\u65c5\u884cで\u81ea\u5b85\u8fd1\u304f\u306e\u9752\u8449\u5e02\u5834"),
+        ("quote-photo", "\u300e\u81ea\u5b85\u8fd1\u304f\u306e\u9752\u8449\u5e02\u5834\u300f"),
+        (
+            "deny-photo",
+            "\u81ea\u5b85\u8fd1\u304f\u306e\u9752\u8449\u5e02\u5834\u3067\u306f\u306a\u3044",
+        ),
+    ):
+        photo = post(key, text)
+        area_post = post(
+            f"{key}-area", "\u6587\u4eac\u533a\u304c\u8fd1\u6240\u3067\u6bce\u65e5\u901a\u308b"
+        )
+        photo_clue = Clue(
+            post_id=photo.post_id,
+            image_index=0,
+            type=ClueType.LANDMARK,
+            value="\u9752\u8449\u5e02\u5834",
+            region=None,
+            confidence=0.9,
+            source=ClueSource.VLM,
+        )
+        clues = [photo_clue, typed_clue(area_post, "\u6587\u4eac\u533a", ClueType.PLACE_TEXT)]
+        result = photo_area_result(photo, 0)
+        assert infer_owner_claims([photo, area_post], clues, photo_place_results=[result]) == []
 
 
 def test_profile_text_owner_anchor_uses_two_posts_and_has_profile_evidence() -> None:

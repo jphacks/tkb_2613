@@ -6,6 +6,7 @@ from collections.abc import Collection, Mapping, Sequence
 from datetime import UTC, date, datetime, timedelta, timezone
 from itertools import combinations
 
+from tkb_common.place_names import place_name_keys
 from tkb_common.schemas import (
     ClaimAssessment,
     Clue,
@@ -14,6 +15,11 @@ from tkb_common.schemas import (
     EvidencePathProvenance,
     EvidenceScope,
     EvidenceSource,
+    PhotoPlaceGranularity,
+    PhotoPlaceLookupStatus,
+    PhotoPlaceResult,
+    PhotoPlaceStatus,
+    PhotoPlaceType,
     Post,
     ProfileAttribute,
     ProfileCandidate,
@@ -1459,6 +1465,7 @@ def infer_owner_claims(
     diagnosis_date: date | None = None,
     diagnosis_at: datetime | None = None,
     include_heuristic_rules: bool = False,
+    photo_place_results: Sequence[PhotoPlaceResult] = (),
 ) -> list[ProfileItem]:
     """Infer only limited claims with explicit owner/context evidence.
 
@@ -1583,6 +1590,10 @@ def infer_owner_claims(
                             )
                         )
 
+    # A photo may contribute a coarse area only when the same post explicitly places
+    # the owner's home nearby, and a separate post independently anchors that area.
+    facts.extend(_photo_home_area_facts(posts, clues, photo_place_results))
+
     if gazetteer is not None:
         facts.extend(shelter_home_facts(posts, clues, owner_profile_text, gazetteer))
         facts.extend(bus_stop_home_facts(posts, clues, owner_profile_text, gazetteer))
@@ -1608,6 +1619,156 @@ def infer_owner_claims(
     if include_heuristic_rules:
         claims.extend(infer_rule_and_link_claims(posts, clues, gazetteer))
     return claims
+
+
+_PHOTO_HOME_PREFIX = re.compile(
+    r"(?:\u81ea\u5b85|\u5bb6|\u3046\u3061|\u81ea\u5206\u306e\u5bb6)(?:\u306e)?"
+    r"(?:\u8fd1\u304f|\u8fd1\u6240|\u305d\u3070)(?:\u306b\u3042\u308b|\u306e|\u306b|\u3067)?\s*"
+)
+
+
+def _photo_home_place_match(text: str, label: str) -> re.Match[str] | None:
+    if not label.strip():
+        return None
+    pattern = re.compile(rf"{_PHOTO_HOME_PREFIX.pattern}{re.escape(label.strip())}")
+    return pattern.search(text)
+
+
+_PHOTO_AREA_OWNER_CONTEXT_RE = re.compile(
+    r"(?:\u8fd1\u6240|\u5730\u5143|\u5e30\u5b85|\u5e30\u308a|\u6700\u5bc4\u308a|"
+    r"\u901a\u52e4|\u6bce\u65e5|\u666e\u6bb5|\u4f4f\u3093)"
+)
+_PHOTO_AREA_EXCLUDED_RE = re.compile(
+    r"\u65c5\u884c|\u89b3\u5149|\u51fa\u5f35|\u8a2a\u554f|\u898b\u5b66|"
+    r"\u904a\u3073\u306b|\u4e00\u6642\u7684|\u5f15\u7528|\u30ea\u30dd\u30b9\u30c8|RT"
+)
+
+
+def _photo_home_area_facts(
+    posts: Sequence[Post],
+    clues: Sequence[Clue],
+    results: Sequence[PhotoPlaceResult],
+) -> list[CrossPostFact]:
+    posts_by_id = {post.post_id: post for post in posts}
+    facts: list[CrossPostFact] = []
+    for result in results:
+        photo_post = posts_by_id.get(result.post_id)
+        if (
+            photo_post is None
+            or result.status is not PhotoPlaceStatus.CANDIDATE
+            or result.granularity is not PhotoPlaceGranularity.FACILITY
+            or result.lookup_status is not PhotoPlaceLookupStatus.LOCAL_ONLY
+            or _forbidden_context(photo_post.text)
+            or _has_quoted_or_fiction_context(photo_post.text)
+            or _PHOTO_AREA_EXCLUDED_RE.search(photo_post.text)
+        ):
+            continue
+        candidate = result.candidates[0]
+        if candidate.place_type not in {PhotoPlaceType.FACILITY, PhotoPlaceType.LANDMARK}:
+            continue
+        home_match = _photo_home_place_match(photo_post.text, candidate.label)
+        if home_match is None or _is_negated_claim(photo_post.text, home_match.end()):
+            continue
+        area = (candidate.area_label or "").strip()
+        if (
+            not area
+            or not candidate.sources
+            or any(not source.license_id for source in candidate.sources)
+        ):
+            continue
+        image_refs: list[ProfileEvidence] = []
+        candidate_name_keys = set(place_name_keys(candidate.label))
+        for evidence in candidate.evidence:
+            if evidence.clue_index is None or evidence.clue_index >= len(clues):
+                continue
+            clue = clues[evidence.clue_index]
+            if clue.post_id != result.post_id or clue.image_index != result.image_index:
+                continue
+            if not candidate_name_keys.intersection(place_name_keys(clue.value)):
+                continue
+            image_refs.append(
+                ProfileEvidence(
+                    post_id=result.post_id,
+                    clue_index=evidence.clue_index,
+                    required=True,
+                    source=EvidenceSource.CLUE,
+                )
+            )
+        if not image_refs:
+            continue
+        bridge_id = f"home:photo:{_normalize_bridge(candidate.place_id)}"
+        facts.append(
+            CrossPostFact(
+                result.post_id,
+                None,
+                FactRole.OWNER_RELATION,
+                candidate.label,
+                0.65,
+                bridge_id,
+                True,
+                context=photo_post.text,
+                excerpt=home_match.group(0),
+                related_evidence=(
+                    ProfileEvidence(
+                        post_id=result.post_id,
+                        clue_index=None,
+                        required=True,
+                        source=EvidenceSource.POST_TEXT,
+                        excerpt=home_match.group(0),
+                    ),
+                    *image_refs,
+                ),
+            )
+        )
+
+        for supporting_post in posts:
+            if (
+                supporting_post.post_id == result.post_id
+                or _forbidden_context(supporting_post.text)
+                or _has_quoted_or_fiction_context(supporting_post.text)
+                or _PHOTO_AREA_EXCLUDED_RE.search(supporting_post.text)
+            ):
+                continue
+            area_match = re.search(re.escape(area), supporting_post.text, re.IGNORECASE)
+            if not area_match or not _photo_area_has_owner_context(
+                supporting_post.text, area_match
+            ):
+                continue
+            if _is_negated_claim(supporting_post.text, area_match.end()):
+                continue
+            typed = _matching_text_clue(clues, supporting_post.post_id, area, ClueType.PLACE_TEXT)
+            if typed is None:
+                continue
+            clue_index, clue = typed
+            facts.append(
+                CrossPostFact(
+                    supporting_post.post_id,
+                    clue_index,
+                    FactRole.SPECIFIC_VALUE,
+                    area,
+                    min(0.65, clue.confidence),
+                    bridge_id,
+                    context=supporting_post.text,
+                    excerpt=area_match.group(0),
+                    related_evidence=(
+                        ProfileEvidence(
+                            post_id=supporting_post.post_id,
+                            clue_index=None,
+                            required=True,
+                            source=EvidenceSource.POST_TEXT,
+                            excerpt=area_match.group(0),
+                        ),
+                    ),
+                )
+            )
+    return facts
+
+
+def _photo_area_has_owner_context(text: str, area_match: re.Match[str]) -> bool:
+    start = max(0, area_match.start() - 24)
+    end = min(len(text), area_match.end() + 24)
+    local_context = text[start:end]
+    return bool(_PHOTO_AREA_OWNER_CONTEXT_RE.search(local_context))
 
 
 HOME_ORIGIN_TEXT_RE = re.compile(
