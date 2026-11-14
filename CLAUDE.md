@@ -137,7 +137,7 @@ Python は `common/` の Pydantic モデル（`tkb_common.schemas`）、TypeScri
 
 「1件ずつは無害な投稿でも、組み合わせるとここまでわかる」を見せるのがねらいなので、推定は本人が Bluesky に上げたものの中だけで行う。
 
-- 診断のプロフィール推定は、ログインした本人のBluesky投稿とプロフィール文を使う。公開Web検索は診断ごとの明示同意がある場合に限り、Braveへ本人の公開Blueskyハンドルと固定 `site:` 演算子だけを送る。投稿・プロフィール本文・Clue・DID・投稿URI・写真・氏名などは送らない。検索語は最大90日保持される。候補は本人と断定せず、本人の公開投稿/プロフィールに書かれたURLと照合できる場合もリンク関係としてだけ表示する。検索結果ページは取得しない
+- プロフィールの公開Web検索と写真場所検索は別の用途・別の診断単位同意にする。プロフィール検索は既存の `public_web_lookup_consent` のみを使い、Braveへ本人の公開Blueskyハンドルと固定 `site:` 演算子だけを送る。写真場所検索は `photo_place_web_lookup_consent` が明示的に真のとき、ローカル候補が不足/競合し、かつ画像内の高確度OCR/VLM `shop` / `landmark` / `station_sign` 観測から安全な名称を作れる場合に限り、Brave Place Searchへ名称を最大3クエリ送る。写真場所検索は `MOCK_MODE=0`、Braveキーあり、`DIAGNOSE_DAILY_LIMIT > 0` の全条件を満たす場合だけ有効であり、日次上限0（無制限）では同意済みでも検索しない。この追加費用ガードはプロフィール検索の動作を変えない。`country=JP` は検索範囲であり日本所在の保証ではない。結果は `postal_address.country == "JP"` を確認し、Braveの結果ID（約8時間で失効）は保存しない。送らないもの：人名、`org_text` / `place_text`、住所、郵便番号、本文、プロフィール文、DID、投稿URI、ハンドル、画像URL、画像画素・crop・embedding、顔・瞳・反射。Brave結果は未確認の `visible_in_frame` 候補で、撮影地点・自宅・現在地を確定しない。公式/公的な独立根拠による確認なしに所在地を検証済みとしない。モック・キーなし・日次上限0は外部通信0回。Brave検索語は最大90日保持され、利用には運営側の有料プランと支払情報登録が必要
 - デモは、本人が同意したメンバーの実名のアカウントで行ってよい。他人の顔が写った写真は投稿しない。テストは架空の人物で行う
 
 ## 環境変数
@@ -146,7 +146,7 @@ Python は `common/` の Pydantic モデル（`tkb_common.schemas`）、TypeScri
 - `BSKY_SERVICE`（ログイン先。既定 `https://bsky.social`）
 - `SESSION_TTL_MINUTES`（既定30）
 - `MAX_POSTS`（既定30）
-- `BRAVE_SEARCH_API_KEY`（任意。明示同意後の外部SNS/ブログ/記事候補検索のみ。APIサーバーだけに設定し、モックは通信しない）
+- `BRAVE_SEARCH_API_KEY`（任意。APIサーバーだけに設定。プロフィールの公開Web検索と写真場所Place Searchはそれぞれ専用の診断同意が必要。写真場所検索は `DIAGNOSE_DAILY_LIMIT > 0` の場合だけ有効で、最大3クエリ/診断。モック・キーなし・日次上限0では通信しない）
 
 既存：`MOCK_MODE`、`VLM_BASE_URL`、`VLM_API_KEY`、`VLM_MODEL`、`OCR_BASE_URL`。鍵を `NEXT_PUBLIC_` で始まる変数に入れない。
 

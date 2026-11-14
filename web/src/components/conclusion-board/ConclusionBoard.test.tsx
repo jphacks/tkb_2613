@@ -45,6 +45,36 @@ afterEach(() => {
 });
 
 describe("ConclusionBoard", () => {
+  it("shows per-image place candidates with clue/source and never turns them into location claims", () => {
+    const photoClue: Clue = {
+      ...CLUE, post_id: "post-photo", image_index: 0, type: "shop", value: "公園", source: "ocr", region: [1, 2, 30, 40],
+    };
+    render(<ConclusionBoard
+      clues={[photoClue]}
+      conclusions={[]}
+      posts={[{ post_id: "post-photo", text: "", created_at: "2026-11-01T00:00:00Z", images: [{ index: 0, url: "https://cdn.bsky.app/img/feed_fullsize/demo", alt: "入口の看板", width: 20, height: 20 }] }]}
+      photoPlaceResults={[{
+        post_id: "post-photo", image_index: 0, status: "candidate", granularity: "facility", reason_codes: [], lookup_status: "local_only",
+        candidates: [{
+          place_id: "places:poi-1", label: "公園", place_type: "facility", photo_relation: "visible_in_frame",
+          area_label: null, score: 0.92, source_ids: ["provider:poi-1"],
+          evidence: [{ kind: "clue", clue_index: 0, reference_id: null }],
+          sources: [{ source_id: "provider:poi-1", provider: "Provider", dataset: "places", license_id: "CC-BY-4.0", record_id: "poi-1", version: "v1", attribution: "Provider attribution" }],
+        }],
+      }, {
+        post_id: "post-photo", image_index: 1, status: "unknown", granularity: "unknown", candidates: [], reason_codes: ["insufficient_local_evidence"], lookup_status: "local_only",
+      }]}
+    />);
+
+    expect(screen.getByText(/写真ごとの場所候補/)).toBeInTheDocument();
+    expect(screen.getAllByText(/写真内に見える/)).toHaveLength(2);
+    expect(screen.getByText(/撮影地点・家の場所・居住地を示しません/)).toBeInTheDocument();
+    expect(screen.getByText(/Provider \/ places · license CC-BY-4.0/)).toBeInTheDocument();
+    expect(screen.getByText(/手がかり 0: 公園 \(ocr\)/)).toBeInTheDocument();
+    expect(screen.getByText(/写真 2 枚目 · 不明/)).toBeInTheDocument();
+    expect(screen.queryByText(/92%/)).not.toBeInTheDocument();
+  });
+
   it("pins each clue used as evidence once and ties a red string to every conclusion it supports", () => {
     const clues: Clue[] = [CLUE, { ...CLUE, type: "routine_text", value: "毎朝 8 時の電車" }];
     const conclusions: Conclusion[] = [

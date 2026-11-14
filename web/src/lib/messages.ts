@@ -131,6 +131,10 @@ export const messages = {
     publicWebConsentLabel: "公開Webで外部SNS・ブログ・記事の候補を検索する（この診断のみ）",
     publicWebConsentNote:
       "同意すると、実モードではログイン中の公開BlueskyハンドルだけをBraveへ送ります。検索の費用は運営が負担します。あなたに料金が請求されることはなく、支払情報の登録も要りません。検索語は最大90日保持されます。投稿文・プロフィール文・写真は送りません。候補だけでは同一人物と判断しません。モックモードは固定の架空結果を使い、外部通信しません。",
+    photoPlaceWebConsentLabel: "写真の施設名・地標名・駅名をBraveで照合する（この診断のみ）",
+    photoPlaceWebConsentNote:
+      "専用の同意がある場合だけ、ローカル候補が不足または競合する画像から、OCR/VLMが読んだ施設名・地標名・駅名を最大3件検索します。検索語の例は「○○駅」「△△美術館」です。診断前は画像を解析していないため、実際の検索語を事前には表示できません。送信するのはこれらの名称だけです。人名、住所、郵便番号、本文、投稿ID、顔・映り込み、写真・切り抜き・画像特徴量は送りません。結果は未確認候補で、撮影地点・自宅・現在地を確定しません。Braveの検索語は最大90日保持され、利用には運営側の有料プランと支払情報登録が必要です。モックまたはAPIキー未設定では検索せず、モックは外部通信しません。",
+    photoPlaceWebConsentUnavailable: "写真場所検索は現在利用できません。APIキーがない場合や診断日次上限が0（無制限）の場合は外部検索を無効にし、結果はローカル候補だけで表示します。",
     deletedBadge: "削除済み",
     postsLabel: "読んだ投稿",
     /** 結果が出たあと、読んだ投稿の一覧を折りたたむときの見出し */
@@ -185,6 +189,27 @@ export const messages = {
     attributeLabels: ATTRIBUTE_LABELS,
     reasons: (count: number) => `根拠（${count} 件）`,
     reasonsLabel: "根拠の手がかり",
+    photoPlaces: {
+      heading: "写真ごとの場所候補",
+      explanation: "「写真内に見える」は対象が画像に写るという意味で、カメラの撮影地点・家の場所・居住地を示しません。POI名の一致は所在地の確認ではなく、索引にも重複や誤登録があり得ます。",
+      none: "場所候補は不明です（手がかり不足、または任意のローカルPOI索引がありません）。",
+      candidate: "候補（未確認）",
+      ambiguous: "複数候補（曖昧）",
+      unknown: "不明",
+      unavailable: "検索不可",
+      externalNotice: "Braveの検索結果は名称検索で見つかった未確認候補です。施設の同一性や、写真の撮影位置・自宅との関係は確認していません。",
+      externalSource: "Braveの検索結果を見る（未確認）",
+      image: (index: number) => `写真 ${index} 枚目`,
+      visible: "写真内に見える",
+      clue: (index: number, value: string, source: string) => `手がかり ${index}: ${value} (${source})`,
+      reference: (id: string) => `参照: ${id}`,
+      source: "POI出典",
+      noSource: "出典・ライセンス情報は未登録",
+      license: (provider: string, dataset: string, license: string | null, record: string | null, version: string | null) =>
+        `${provider} / ${dataset} · license ${license ?? "不明"}${record ? ` · ${record}` : ""}${version ? ` · ${version}` : ""}`,
+      reason: "候補が競合するか、手がかり・ローカルデータが足りません。",
+      tooManyMatches: "候補数が表示上限に達しました。一部を省略しており、全候補ではありません。ここから特定しません。",
+    },
     /** 推理の連鎖（この投稿 → この手がかり → この推定） */
     chain: {
       summary: "推理の流れをたどる",

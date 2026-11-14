@@ -24,6 +24,7 @@ from tkb_common.schemas import (
     Clue,
     ExternalLookupStatus,
     ExternalProfileResult,
+    PhotoPlaceResult,
     Post,
     WebFact,
 )
@@ -35,6 +36,7 @@ from tkb_engine.cross_post import (
     plan_profile_candidate_deletion,
 )
 from tkb_engine.gazetteer import Gazetteer, Knowledge
+from tkb_engine.photo_place import infer_photo_places
 from tkb_engine.planner import Simulation, plan, simulate
 from tkb_engine.rules import Conclusion, infer
 
@@ -241,6 +243,10 @@ async def diagnose_events(
     external_profile_results: Sequence[ExternalProfileResult] = (),
     external_lookup_status: ExternalLookupStatus = ExternalLookupStatus.NOT_REQUESTED,
     external_lookup: Callable[[], Awaitable[ExternalLookupResult]] | None = None,
+    photo_place_lookup: Callable[
+        [Sequence[PhotoPlaceResult], Sequence[Clue]], Awaitable[list[PhotoPlaceResult]]
+    ]
+    | None = None,
     diagnosis_date: date | None = None,
     diagnosis_at: datetime | None = None,
 ) -> AsyncIterator[Event]:
@@ -291,6 +297,19 @@ async def diagnose_events(
     # 推理と危ない投稿の選び方は CPU を使うので、別のスレッドで行う
     # （診断中も、ほかの人の応答と SSE の keep-alive を止めない）
     conclusions = await asyncio.to_thread(infer, all_clues, list(posts), gazetteer)
+    photo_place_results = await asyncio.to_thread(
+        infer_photo_places, list(posts), all_clues, gazetteer
+    )
+    if photo_place_lookup is not None:
+        try:
+            photo_place_results = await photo_place_lookup(photo_place_results, all_clues)
+        except Exception:
+            # External failure must not stop local inference or leak query values.
+            from tkb_api.photo_place_web import mark_photo_place_lookup_unavailable
+
+            photo_place_results = mark_photo_place_lookup_unavailable(
+                photo_place_results, all_clues, "photo_place_search_unavailable"
+            )
     self_report_clues = (
         await owner_profile_analyzer(owner_profile_text)
         if owner_profile_text and owner_profile_analyzer
@@ -315,6 +334,7 @@ async def diagnose_events(
         {
             "clues": [c.model_dump(mode="json") for c in all_clues],
             "conclusions": [asdict(c) for c in conclusions],
+            "photo_place_results": [item.model_dump(mode="json") for item in photo_place_results],
             "profile_claims": [item.model_dump(mode="json") for item in profile_claims],
             "profile_relations": [item.model_dump(mode="json") for item in profile_relations],
             "profile_claim_suggestions": profile_claim_suggestions,
@@ -334,6 +354,7 @@ async def diagnose_events(
         on_result(
             {
                 "clues": all_clues,
+                "photo_place_results": photo_place_results,
                 "profile_claims": profile_claims,
                 "profile_relations": profile_relations,
                 "profile_claim_suggestions": profile_claim_suggestions,

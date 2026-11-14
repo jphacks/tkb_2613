@@ -72,6 +72,32 @@ describe("toDiagnoseEvent", () => {
     });
   });
 
+  it("validates per-image place candidates, clue references, and source licenses", () => {
+    const photoClue = { ...CLUE, image_index: 0, type: "shop", source: "ocr", region: [1, 1, 5, 5] };
+    const result = {
+      post_id: POST.post_id, image_index: 0, status: "candidate", granularity: "facility",
+      candidates: [{
+        place_id: "places:one", label: "架空の施設", place_type: "facility", photo_relation: "visible_in_frame",
+        area_label: null, score: 0.91, evidence: [{ kind: "clue", clue_index: 0, reference_id: null }],
+        source_ids: ["source:one"], sources: [{
+          source_id: "source:one", provider: "fixture", dataset: "places", license_id: "CC-BY-4.0",
+          record_id: "one", version: "v1", attribution: null,
+        }],
+      }],
+      reason_codes: [], lookup_status: "local_only",
+    };
+    expect(toDiagnoseEvent("conclusions", JSON.stringify({ clues: [photoClue], conclusions: [], photo_place_results: [result] })))
+      .toMatchObject({ event: "conclusions", photo_place_results: [result] });
+    expect(() => toDiagnoseEvent("conclusions", JSON.stringify({
+      clues: [photoClue], conclusions: [], photo_place_results: [{ ...result, candidates: [{
+        ...result.candidates[0], evidence: [{ kind: "clue", clue_index: 4, reference_id: null }],
+      }] }],
+    }))).toThrow(InvalidDiagnoseEventError);
+    expect(() => toDiagnoseEvent("conclusions", JSON.stringify({
+      clues: [photoClue], conclusions: [], photo_place_results: [{ ...result, status: "ambiguous" }],
+    }))).toThrow(InvalidDiagnoseEventError);
+  });
+
   it("reads all 29 candidate sets, including attributes that remain unknown", () => {
     const profile_claims = PROFILE_DIAGNOSED_ATTRIBUTES.map((attribute) => ({
       attribute,

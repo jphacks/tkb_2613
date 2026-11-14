@@ -163,6 +163,15 @@ class Settings(BaseSettings):
         """
         return self.mock_mode or bool(self.brave_search_api_key.get_secret_value().strip())
 
+    @property
+    def photo_place_web_lookup_available(self) -> bool:
+        """Enable paid photo-place search only with a finite positive daily diagnosis cap."""
+        return (
+            not self.mock_mode
+            and self.diagnose_daily_limit > 0
+            and bool(self.brave_search_api_key.get_secret_value().strip())
+        )
+
 
 @lru_cache
 def get_settings() -> Settings:

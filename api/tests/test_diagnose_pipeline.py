@@ -1,3 +1,5 @@
+import json
+import sqlite3
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
@@ -177,6 +179,119 @@ async def test_events_keep_failed_posts_and_index_conclusions_into_all_clues() -
     assert set(routine) == {"rule", "attribute", "value", "clue_indices", "note", "confidence"}
     # 根拠は確からしさ 0.9 の手がかり1件だけなので、合成しても 0.9
     assert routine["confidence"] == 0.9
+
+
+@pytest.mark.anyio
+async def test_conclusions_event_returns_photo_unknown_without_changing_profile_candidates() -> (
+    None
+):
+    post = _post(1)
+    saved: dict[str, Any] = {}
+    events = [
+        event
+        async for event in diagnose_events(
+            [post],
+            _stream([PostExtraction(post_id=post.post_id, clues=[])]),
+            Gazetteer(),
+            on_result=saved.update,
+        )
+    ]
+    result = next(data for name, data in events if name == "conclusions")
+    [photo_result] = result["photo_place_results"]
+    assert photo_result["post_id"] == post.post_id
+    assert photo_result["image_index"] == 0
+    assert photo_result["status"] == "unknown"
+    assert saved["photo_place_results"][0].status.value == "unknown"
+    assert all(not claim.candidates for claim in saved["profile_claims"])
+
+
+@pytest.mark.anyio
+async def test_photo_place_candidate_does_not_become_a_profile_location_claim(
+    tmp_path: Path,
+) -> None:
+    post = _post(1)
+    clue = Clue(
+        post_id=post.post_id,
+        image_index=0,
+        type=ClueType.SHOP,
+        value="架空施設",
+        region=(1, 1, 9, 9),
+        confidence=0.95,
+        source=ClueSource.OCR,
+    )
+    index = tmp_path / "places.sqlite3"
+    record = {
+        "place_id": "fixture:place",
+        "label": "架空施設",
+        "sources": [
+            {
+                "source_id": "fixture:record",
+                "provider": "fixture",
+                "dataset": "places",
+                "license_id": "CC-BY-4.0",
+                "record_id": "record",
+                "version": "v1",
+                "attribution": "fixture",
+            }
+        ],
+    }
+    with sqlite3.connect(index) as db:
+        db.executescript(
+            """
+            CREATE TABLE poi_place (
+                place_id TEXT PRIMARY KEY,
+                license_verified INTEGER NOT NULL,
+                record_json TEXT NOT NULL
+            );
+            CREATE TABLE poi_alias (
+                name_key TEXT NOT NULL,
+                place_id TEXT NOT NULL,
+                PRIMARY KEY(name_key, place_id)
+            );
+            CREATE INDEX poi_alias_name_idx ON poi_alias(name_key);
+            """
+        )
+        db.execute(
+            "INSERT INTO poi_place VALUES (?, 1, ?)",
+            (record["place_id"], json.dumps(record, ensure_ascii=False)),
+        )
+        db.execute("INSERT INTO poi_alias VALUES (?, ?)", ("架空施設", record["place_id"]))
+    saved: dict[str, Any] = {}
+
+    events = [
+        event
+        async for event in diagnose_events(
+            [post],
+            _stream([PostExtraction(post_id=post.post_id, clues=[clue])]),
+            Gazetteer(places_path=index),
+            on_result=saved.update,
+        )
+    ]
+    conclusions = next(data for name, data in events if name == "conclusions")
+    assert conclusions["photo_place_results"][0]["status"] == "candidate"
+    assert all(not claim.candidate_pool for claim in saved["profile_claims"])
+
+
+@pytest.mark.anyio
+async def test_conclusions_event_returns_photo_unknown_without_creating_profile_claims() -> None:
+    post = _post(1)
+    saved: dict[str, Any] = {}
+    events = [
+        event
+        async for event in diagnose_events(
+            [post],
+            _stream([PostExtraction(post_id=post.post_id, clues=[])]),
+            Gazetteer(),
+            on_result=saved.update,
+        )
+    ]
+    result = next(data for name, data in events if name == "conclusions")
+    [photo_result] = result["photo_place_results"]
+    assert photo_result["post_id"] == post.post_id
+    assert photo_result["image_index"] == 0
+    assert photo_result["status"] == "unknown"
+    assert saved["photo_place_results"][0].status.value == "unknown"
+    assert all(not claim.candidates for claim in saved["profile_claims"])
 
 
 @pytest.mark.anyio

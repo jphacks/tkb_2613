@@ -26,6 +26,7 @@ from tkb_common.schemas import (
     Clue,
     ExternalLookupStatus,
     ExternalProfileResult,
+    PhotoPlaceResult,
     Post,
     PostImage,
     ProfileCandidateSet,
@@ -223,6 +224,7 @@ class Diagnosis:
 
     posts: tuple[Post, ...]
     clues: tuple[Clue, ...]
+    photo_place_results: tuple[PhotoPlaceResult, ...] = ()
     profile_claims: tuple[ProfileCandidateSet, ...] = ()
     profile_relations: tuple[ProfileRelation, ...] = ()
     profile_claim_suggestions: tuple[str, ...] = ()
