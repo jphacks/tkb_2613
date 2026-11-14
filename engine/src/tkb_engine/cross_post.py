@@ -17,6 +17,7 @@ from tkb_common.schemas import (
     EvidencePathProvenance,
     EvidenceScope,
     EvidenceSource,
+    PhotoPlaceCandidate,
     PhotoPlaceGranularity,
     PhotoPlaceLookupStatus,
     PhotoPlaceRelation,
@@ -1801,7 +1802,7 @@ def infer_owner_claims(
 
     # A photo may contribute a coarse area only when the same post explicitly places
     # the owner's home nearby, and a separate post independently anchors that area.
-    facts.extend(_photo_home_area_facts(posts, clues, photo_place_results))
+    facts.extend(_photo_home_area_facts(posts, clues, photo_place_results, gazetteer))
 
     if gazetteer is not None:
         facts.extend(shelter_home_facts(posts, clues, owner_profile_text, gazetteer))
@@ -1855,140 +1856,395 @@ _PHOTO_AREA_EXCLUDED_RE = re.compile(
 )
 
 
+_PHOTO_AREA_STATION_USE_RE = re.compile(
+    r"電車|乗る|乗って|乗り|降り|使う|使って|利用|通勤|通学|最寄り|ホーム|改札"
+)
+
+
+def _photo_result_usable(
+    result: PhotoPlaceResult, photo_post: Post, status: PhotoPlaceStatus
+) -> bool:
+    """Result-level and post-level guards shared by every photo place anchor."""
+    return not (
+        not result.candidates
+        or result.status is not status
+        or result.granularity is not PhotoPlaceGranularity.FACILITY
+        or result.lookup_status
+        not in {
+            PhotoPlaceLookupStatus.LOCAL_ONLY,
+            PhotoPlaceLookupStatus.REFERENCE_CHECKED,
+            PhotoPlaceLookupStatus.UNAVAILABLE,
+            PhotoPlaceLookupStatus.WEB_SEARCHED,
+        }
+        or _forbidden_context(photo_post.text)
+        or _has_quoted_or_fiction_context(photo_post.text)
+        or _PHOTO_AREA_EXCLUDED_RE.search(photo_post.text)
+    )
+
+
+def _is_brave_candidate(candidate: PhotoPlaceCandidate) -> bool:
+    return candidate.place_id.startswith("brave-place:") and all(
+        source.provider == "Brave Search Place Search" for source in candidate.sources
+    )
+
+
+def _accepted_candidate(
+    result: PhotoPlaceResult, candidate: PhotoPlaceCandidate, clues: Sequence[Clue]
+) -> tuple[str, list[ProfileEvidence]] | None:
+    """Per-candidate acceptance: type, relation, municipality, licence, same-image clues."""
+    if (
+        candidate.place_type not in {PhotoPlaceType.FACILITY, PhotoPlaceType.LANDMARK}
+        or candidate.photo_relation is not PhotoPlaceRelation.VISIBLE_IN_FRAME
+    ):
+        return None
+    area = (candidate.area_label or "").strip()
+    if not area or not candidate.sources or any(not s.license_id for s in candidate.sources):
+        return None
+    image_refs: list[ProfileEvidence] = []
+    candidate_name_keys = set(place_name_keys(candidate.label))
+    for evidence in candidate.evidence:
+        if evidence.clue_index is None or evidence.clue_index >= len(clues):
+            continue
+        clue = clues[evidence.clue_index]
+        if clue.post_id != result.post_id or clue.image_index != result.image_index:
+            continue
+        if not candidate_name_keys.intersection(place_name_keys(clue.value)):
+            continue
+        image_refs.append(
+            ProfileEvidence(
+                post_id=result.post_id,
+                clue_index=evidence.clue_index,
+                required=True,
+                source=EvidenceSource.CLUE,
+            )
+        )
+    if not image_refs:
+        return None
+    return area, image_refs
+
+
+def _accepted_photo_place(
+    result: PhotoPlaceResult,
+    photo_post: Post,
+    clues: Sequence[Clue],
+) -> tuple[PhotoPlaceCandidate, str, list[ProfileEvidence]] | None:
+    """Shared acceptance for a photo place result usable as area evidence.
+
+    Returns the candidate, its municipality label and the same-image clue evidence.
+    """
+    if not _photo_result_usable(result, photo_post, PhotoPlaceStatus.CANDIDATE):
+        return None
+    candidate = result.candidates[0]
+    # Brave results are unverified. Treat one as weak evidence only when exactly one
+    # Brave-derived candidate remains and its municipality is available.
+    if result.lookup_status is PhotoPlaceLookupStatus.WEB_SEARCHED and (
+        len(result.candidates) != 1 or not _is_brave_candidate(candidate)
+    ):
+        return None
+    accepted = _accepted_candidate(result, candidate, clues)
+    if accepted is None:
+        return None
+    return candidate, accepted[0], accepted[1]
+
+
+def _accepted_ambiguous_places(
+    result: PhotoPlaceResult, photo_post: Post, clues: Sequence[Clue]
+) -> list[tuple[PhotoPlaceCandidate, str, list[ProfileEvidence]]]:
+    """Brave-only AMBIGUOUS result whose every candidate passes the per-candidate checks."""
+    if (
+        not _photo_result_usable(result, photo_post, PhotoPlaceStatus.AMBIGUOUS)
+        or result.lookup_status is not PhotoPlaceLookupStatus.WEB_SEARCHED
+        or len(result.candidates) < 2
+        or not all(_is_brave_candidate(c) and c.sources for c in result.candidates)
+    ):
+        return []
+    accepted: list[tuple[PhotoPlaceCandidate, str, list[ProfileEvidence]]] = []
+    for candidate in result.candidates:
+        item = _accepted_candidate(result, candidate, clues)
+        if item is None:
+            return []
+        accepted.append((candidate, item[0], item[1]))
+    return accepted
+
+
+def _supporting_post_area_fact(
+    supporting_post: Post,
+    clue_index: int,
+    confidence: float,
+    area: str,
+    bridge_id: str,
+    excerpt: str | None,
+    extra_evidence: Sequence[ProfileEvidence] = (),
+) -> CrossPostFact:
+    related: list[ProfileEvidence] = list(extra_evidence)
+    if excerpt:
+        related.append(
+            ProfileEvidence(
+                post_id=supporting_post.post_id,
+                clue_index=None,
+                required=True,
+                source=EvidenceSource.POST_TEXT,
+                excerpt=excerpt,
+            )
+        )
+    return CrossPostFact(
+        supporting_post.post_id,
+        clue_index,
+        FactRole.SPECIFIC_VALUE,
+        area,
+        min(0.65, confidence),
+        bridge_id,
+        context=supporting_post.text,
+        excerpt=excerpt or "",
+        related_evidence=tuple(related),
+    )
+
+
+@dataclass(frozen=True)
+class _AreaAnchor:
+    """A municipality named by a separate post, with the clue that supports it."""
+
+    area: str
+    clue_index: int
+    confidence: float
+    excerpt: str | None
+
+
+def _anchor_fact(post_: Post, anchor: _AreaAnchor, bridge_id: str) -> CrossPostFact:
+    return _supporting_post_area_fact(
+        post_, anchor.clue_index, anchor.confidence, anchor.area, bridge_id, anchor.excerpt
+    )
+
+
+def _direct_area_anchor(
+    supporting_post: Post, clues: Sequence[Clue], area: str
+) -> _AreaAnchor | None:
+    area_match = re.search(re.escape(area), supporting_post.text, re.IGNORECASE)
+    if not area_match or not _photo_area_has_owner_context(supporting_post.text, area_match):
+        return None
+    if _is_negated_claim(supporting_post.text, area_match.end()):
+        return None
+    typed = _matching_text_clue(clues, supporting_post.post_id, area, ClueType.PLACE_TEXT)
+    if typed is None:
+        return None
+    clue_index, clue = typed
+    return _AreaAnchor(area, clue_index, clue.confidence, area_match.group(0))
+
+
+def _station_area_anchors(
+    supporting_post: Post, clues: Sequence[Clue], gazetteer: Gazetteer
+) -> list[_AreaAnchor]:
+    """(A) Stations on a photographed sign, or named in text with a living context."""
+    anchors: list[_AreaAnchor] = []
+    for index, clue in enumerate(clues):
+        if clue.post_id != supporting_post.post_id:
+            continue
+        if (
+            clue.type is ClueType.STATION_SIGN
+            and clue.image_index is not None
+            and clue.source in {ClueSource.OCR, ClueSource.VLM}
+        ):
+            anchors.extend(
+                _AreaAnchor(city, index, clue.confidence, None)
+                for city in sorted(gazetteer.station_cities(clue.value))
+            )
+        elif clue.type is ClueType.PLACE_TEXT and clue.source is ClueSource.TEXT:
+            name = clue.value.strip().removesuffix("駅")
+            cities = gazetteer.station_cities(name) if name else set()
+            if not cities:
+                continue
+            text = supporting_post.text
+            match = re.search(re.escape(name) + "駅?", text)
+            if match is None or _is_negated_claim(text, match.end()):
+                continue
+            window = text[max(0, match.start() - 24) : min(len(text), match.end() + 24)]
+            if not (
+                _PHOTO_AREA_OWNER_CONTEXT_RE.search(window)
+                or _PHOTO_AREA_STATION_USE_RE.search(window)
+            ):
+                continue
+            anchors.extend(
+                _AreaAnchor(city, index, clue.confidence, match.group(0)) for city in sorted(cities)
+            )
+    return anchors
+
+
+def _postal_area_anchors(
+    supporting_post: Post, clues: Sequence[Clue], gazetteer: Gazetteer
+) -> list[_AreaAnchor]:
+    """(B) A postal code or address resolving to a small set of municipalities."""
+    anchors: list[_AreaAnchor] = []
+    for index, clue in enumerate(clues):
+        if clue.post_id != supporting_post.post_id or clue.type not in {
+            ClueType.POSTAL_CODE,
+            ClueType.ADDRESS_TEXT,
+        }:
+            continue
+        muni_codes, _ = gazetteer.area(clue)
+        cities = gazetteer.muni_cities(muni_codes)
+        if 1 <= len(cities) <= 10:
+            anchors.extend(
+                _AreaAnchor(city, index, clue.confidence, None) for city in sorted(cities)
+            )
+    return anchors
+
+
+def _indirect_area_anchors(
+    supporting_post: Post, clues: Sequence[Clue], gazetteer: Gazetteer | None
+) -> list[_AreaAnchor]:
+    if gazetteer is None:
+        return []
+    return [
+        *_station_area_anchors(supporting_post, clues, gazetteer),
+        *_postal_area_anchors(supporting_post, clues, gazetteer),
+    ]
+
+
+def _anchor_for_area(
+    supporting_post: Post,
+    clues: Sequence[Clue],
+    indirect: Sequence[_AreaAnchor],
+    area: str,
+) -> _AreaAnchor | None:
+    direct = _direct_area_anchor(supporting_post, clues, area)
+    if direct is not None:
+        return direct
+    return next((a for a in indirect if a.area == area), None)
+
+
+def _other_photo_place_area_fact(
+    supporting_post: Post,
+    clues: Sequence[Clue],
+    results: Sequence[PhotoPlaceResult],
+    area: str,
+    bridge_id: str,
+    anchor_place_id: str,
+) -> CrossPostFact | None:
+    """(C) A different place photographed in a separate post, in the same municipality."""
+    for other in results:
+        if other.post_id != supporting_post.post_id:
+            continue
+        accepted = _accepted_photo_place(other, supporting_post, clues)
+        if accepted is None:
+            continue
+        other_candidate, other_area, refs = accepted
+        if other_area != area or other_candidate.place_id == anchor_place_id:
+            continue
+        indexes = [ref.clue_index for ref in refs if ref.clue_index is not None]
+        return _supporting_post_area_fact(
+            supporting_post,
+            indexes[0],
+            min(clues[i].confidence for i in indexes),
+            area,
+            bridge_id,
+            None,
+            extra_evidence=refs[1:],
+        )
+    return None
+
+
+def _home_owner_fact(
+    photo_post: Post,
+    candidate: PhotoPlaceCandidate,
+    home_match: re.Match[str],
+    image_refs: Sequence[ProfileEvidence],
+    bridge_id: str,
+) -> CrossPostFact:
+    return CrossPostFact(
+        photo_post.post_id,
+        None,
+        FactRole.OWNER_RELATION,
+        candidate.label,
+        0.65,
+        bridge_id,
+        True,
+        context=photo_post.text,
+        excerpt=home_match.group(0),
+        related_evidence=(
+            ProfileEvidence(
+                post_id=photo_post.post_id,
+                clue_index=None,
+                required=True,
+                source=EvidenceSource.POST_TEXT,
+                excerpt=home_match.group(0),
+            ),
+            *image_refs,
+        ),
+    )
+
+
 def _photo_home_area_facts(
     posts: Sequence[Post],
     clues: Sequence[Clue],
     results: Sequence[PhotoPlaceResult],
+    gazetteer: Gazetteer | None = None,
 ) -> list[CrossPostFact]:
     posts_by_id = {post.post_id: post for post in posts}
     facts: list[CrossPostFact] = []
+
+    def usable_supporting(photo_post: Post) -> list[Post]:
+        return [
+            p
+            for p in posts
+            if p.post_id != photo_post.post_id
+            and not _forbidden_context(p.text)
+            and not _has_quoted_or_fiction_context(p.text)
+            and not _PHOTO_AREA_EXCLUDED_RE.search(p.text)
+        ]
+
     for result in results:
         photo_post = posts_by_id.get(result.post_id)
-        if (
-            photo_post is None
-            or result.status is not PhotoPlaceStatus.CANDIDATE
-            or result.granularity is not PhotoPlaceGranularity.FACILITY
-            or result.lookup_status
-            not in {
-                PhotoPlaceLookupStatus.LOCAL_ONLY,
-                PhotoPlaceLookupStatus.REFERENCE_CHECKED,
-                PhotoPlaceLookupStatus.UNAVAILABLE,
-                PhotoPlaceLookupStatus.WEB_SEARCHED,
-            }
-            or _forbidden_context(photo_post.text)
-            or _has_quoted_or_fiction_context(photo_post.text)
-            or _PHOTO_AREA_EXCLUDED_RE.search(photo_post.text)
-        ):
+        if photo_post is None:
             continue
-        candidate = result.candidates[0]
-        if (
-            candidate.place_type not in {PhotoPlaceType.FACILITY, PhotoPlaceType.LANDMARK}
-            or candidate.photo_relation is not PhotoPlaceRelation.VISIBLE_IN_FRAME
-        ):
-            continue
-        # Brave results are unverified. Treat one as weak evidence only when exactly one
-        # Brave-derived candidate remains and its municipality is available.
-        if result.lookup_status is PhotoPlaceLookupStatus.WEB_SEARCHED and (
-            len(result.candidates) != 1
-            or not candidate.place_id.startswith("brave-place:")
-            or any(source.provider != "Brave Search Place Search" for source in candidate.sources)
-        ):
-            continue
-        home_match = _photo_home_place_match(photo_post.text, candidate.label)
-        if home_match is None or _is_negated_claim(photo_post.text, home_match.end()):
-            continue
-        area = (candidate.area_label or "").strip()
-        if (
-            not area
-            or not candidate.sources
-            or any(not source.license_id for source in candidate.sources)
-        ):
-            continue
-        image_refs: list[ProfileEvidence] = []
-        candidate_name_keys = set(place_name_keys(candidate.label))
-        for evidence in candidate.evidence:
-            if evidence.clue_index is None or evidence.clue_index >= len(clues):
+        accepted = _accepted_photo_place(result, photo_post, clues)
+        if accepted is not None:
+            candidate, area, image_refs = accepted
+            home_match = _photo_home_place_match(photo_post.text, candidate.label)
+            if home_match is None or _is_negated_claim(photo_post.text, home_match.end()):
                 continue
-            clue = clues[evidence.clue_index]
-            if clue.post_id != result.post_id or clue.image_index != result.image_index:
-                continue
-            if not candidate_name_keys.intersection(place_name_keys(clue.value)):
-                continue
-            image_refs.append(
-                ProfileEvidence(
-                    post_id=result.post_id,
-                    clue_index=evidence.clue_index,
-                    required=True,
-                    source=EvidenceSource.CLUE,
-                )
-            )
-        if not image_refs:
-            continue
-        bridge_id = f"home:photo:{_normalize_bridge(candidate.place_id)}"
-        facts.append(
-            CrossPostFact(
-                result.post_id,
-                None,
-                FactRole.OWNER_RELATION,
-                candidate.label,
-                0.65,
-                bridge_id,
-                True,
-                context=photo_post.text,
-                excerpt=home_match.group(0),
-                related_evidence=(
-                    ProfileEvidence(
-                        post_id=result.post_id,
-                        clue_index=None,
-                        required=True,
-                        source=EvidenceSource.POST_TEXT,
-                        excerpt=home_match.group(0),
-                    ),
-                    *image_refs,
-                ),
-            )
-        )
-
-        for supporting_post in posts:
-            if (
-                supporting_post.post_id == result.post_id
-                or _forbidden_context(supporting_post.text)
-                or _has_quoted_or_fiction_context(supporting_post.text)
-                or _PHOTO_AREA_EXCLUDED_RE.search(supporting_post.text)
-            ):
-                continue
-            area_match = re.search(re.escape(area), supporting_post.text, re.IGNORECASE)
-            if not area_match or not _photo_area_has_owner_context(
-                supporting_post.text, area_match
-            ):
-                continue
-            if _is_negated_claim(supporting_post.text, area_match.end()):
-                continue
-            typed = _matching_text_clue(clues, supporting_post.post_id, area, ClueType.PLACE_TEXT)
-            if typed is None:
-                continue
-            clue_index, clue = typed
-            facts.append(
-                CrossPostFact(
-                    supporting_post.post_id,
-                    clue_index,
-                    FactRole.SPECIFIC_VALUE,
+            bridge_id = f"home:photo:{_normalize_bridge(candidate.place_id)}"
+            facts.append(_home_owner_fact(photo_post, candidate, home_match, image_refs, bridge_id))
+            for supporting_post in usable_supporting(photo_post):
+                anchor = _anchor_for_area(
+                    supporting_post,
+                    clues,
+                    _indirect_area_anchors(supporting_post, clues, gazetteer),
                     area,
-                    min(0.65, clue.confidence),
-                    bridge_id,
-                    context=supporting_post.text,
-                    excerpt=area_match.group(0),
-                    related_evidence=(
-                        ProfileEvidence(
-                            post_id=supporting_post.post_id,
-                            clue_index=None,
-                            required=True,
-                            source=EvidenceSource.POST_TEXT,
-                            excerpt=area_match.group(0),
-                        ),
-                    ),
                 )
-            )
+                fact = (
+                    _anchor_fact(supporting_post, anchor, bridge_id)
+                    if anchor is not None
+                    else _other_photo_place_area_fact(
+                        supporting_post, clues, results, area, bridge_id, candidate.place_id
+                    )
+                )
+                if fact is not None:
+                    facts.append(fact)
+            continue
+
+        # Brave AMBIGUOUS: a separate post may narrow the candidates to exactly one
+        # municipality. Another photographed place never narrows them.
+        targets = []
+        for candidate, area, image_refs in _accepted_ambiguous_places(result, photo_post, clues):
+            home_match = _photo_home_place_match(photo_post.text, candidate.label)
+            if home_match is not None and not _is_negated_claim(photo_post.text, home_match.end()):
+                targets.append((candidate, area, image_refs, home_match))
+        if not targets:
+            continue
+        for supporting_post in usable_supporting(photo_post):
+            indirect = _indirect_area_anchors(supporting_post, clues, gazetteer)
+            matched = [
+                (target, anchor)
+                for target in targets
+                if (anchor := _anchor_for_area(supporting_post, clues, indirect, target[1]))
+                is not None
+            ]
+            if len(matched) != 1:
+                continue
+            (candidate, _, image_refs, home_match), anchor = matched[0]
+            bridge_id = f"home:photo:{_normalize_bridge(candidate.place_id)}"
+            facts.append(_home_owner_fact(photo_post, candidate, home_match, image_refs, bridge_id))
+            facts.append(_anchor_fact(supporting_post, anchor, bridge_id))
     return facts
 
 
