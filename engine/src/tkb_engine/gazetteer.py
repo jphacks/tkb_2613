@@ -158,7 +158,7 @@ class Gazetteer:
     # 推定の結果には使わず、候補の説明に参考として添えるだけ
     ridership: dict[str, int] = field(default_factory=dict)
     ridership_year: int = 0
-    # Census household totals by 500m mesh, used only for the narrowing display.
+    # Census household totals by 500m mesh, used for home_walk_area values and map display.
     households: dict[str, int] = field(default_factory=dict)
     # 法人番号の公表データの SQLite（data-prep の corporations.sqlite）。行はメモリに載せず、
     # 引くたびに読み取り専用で開く。なければ None
