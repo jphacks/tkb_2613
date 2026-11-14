@@ -74,7 +74,8 @@ async function call(path: string, method: "GET" | "POST" | "DELETE" = "GET", bod
       method,
       credentials: "same-origin",
       cache: "no-store",
-      signal: AbortSignal.timeout(path === "diagnose" ? 2_100_000 : 20_000),
+      // 診断は時間がかかっても待ち続ける（時間切れで止めない）
+      signal: path === "diagnose" ? undefined : AbortSignal.timeout(20_000),
       headers: body === undefined ? undefined : { "Content-Type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body),
     });

@@ -101,9 +101,9 @@ class Settings(BaseSettings):
 
     # --- 乱用対策と公開時間帯（docs/aws-migration.md の 5章）。0 の上限は「制限しない」 ---
     # 1アカウント（DID）1日（日本時間）の診断回数
-    diagnose_daily_limit: int = Field(default=3, ge=0)
+    diagnose_daily_limit: int = Field(default=0, ge=0)
     # 同時に診断できる数。空きがなければ待たずに 503 を返す
-    max_concurrent_diagnoses: int = Field(default=2, ge=0)
+    max_concurrent_diagnoses: int = Field(default=0, ge=0)
     # 混雑で断るときに Retry-After で伝える秒数
     diagnose_busy_retry_after_seconds: int = Field(default=30, ge=1)
     # 診断の枠を返し損ねても、この秒数たてば空いたものとして扱う（診断の最長時間より長くする）
@@ -112,7 +112,7 @@ class Settings(BaseSettings):
     # 空なら制限しない（ローカル開発用）
     public_windows: list[PublicWindow] = []
     # 診断を始める前に、モデルのサーバーが応答するかを確かめる待ち時間（秒）
-    model_probe_timeout_seconds: float = Field(default=3, gt=0)
+    model_probe_timeout_seconds: float = Field(default=30, gt=0)
 
     # X 専用。X の用途承認と有料 API の予算承認を得るまでは実接続しない。
     threads_app_id: str = ""
@@ -139,8 +139,8 @@ class Settings(BaseSettings):
     x_mock_mode: bool = True
     x_max_posts: int = Field(default=5, ge=1, le=30)
     # X API で1日（UTC）に読んでよいリソース数の上限。超えたら X を呼ばずに断る。
-    # 既定は本人確認1件と投稿5件の2回分。0 なら実取得をすべて断る
-    x_daily_resource_limit: int = Field(default=12, ge=0, le=10000)
+    # 0 なら制限しない（既定）。歯止めは X Developer Console の支出上限にする
+    x_daily_resource_limit: int = Field(default=0, ge=0, le=10000)
     # X の結果の出し方。aggregate は地名・駅名などを値ごとに数える今の表示、
     # highlight は本文中の地名・駅名に色を付けるだけで、値ごとに数えない
     x_info_view: Literal["aggregate", "highlight"] = "aggregate"
@@ -204,19 +204,14 @@ class Settings(BaseSettings):
 
     @property
     def photo_place_web_lookup_available(self) -> bool:
-        """Enable paid photo-place search only with a finite positive daily diagnosis cap."""
-        return (
-            not self.mock_mode
-            and self.diagnose_daily_limit > 0
-            and bool(self.brave_search_api_key.get_secret_value().strip())
-        )
+        """Enable paid photo-place search in live mode when a Brave key is configured."""
+        return not self.mock_mode and bool(self.brave_search_api_key.get_secret_value().strip())
 
     @property
     def commons_reference_lookup_available(self) -> bool:
-        """Require explicit live opt-in, a finite cap, and a compatible local POI index."""
+        """Require explicit live opt-in and a compatible local POI index."""
         return (
             not self.mock_mode
-            and self.diagnose_daily_limit > 0
             and self.commons_reference_lookup_enabled
             and _has_compatible_place_index(self.gazetteer_dir)
         )

@@ -49,7 +49,8 @@ logger = logging.getLogger(__name__)
 BSKY_CDN_HOST = urlparse(BSKY_CDN_PREFIX).hostname
 # Bluesky の写真は 1MB 前後。大きすぎるものは読まない
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
-IMAGE_FETCH_TIMEOUT_S = 20.0
+# 写真の取得の待ち時間は制限しない。つながらないときだけ早めに諦める
+IMAGE_FETCH_TIMEOUT = httpx.Timeout(None, connect=10.0)
 IMAGE_FETCH_ATTEMPTS = 3
 
 Event = tuple[str, dict[str, Any]]
@@ -62,7 +63,7 @@ class ImageFetchError(Exception):
 async def fetch_images(post: Post) -> list[bytes]:
     """投稿の写真を post.images の順に取ってくる。取りに行くのは cdn.bsky.app だけ。"""
     images = []
-    async with httpx.AsyncClient(timeout=IMAGE_FETCH_TIMEOUT_S, follow_redirects=False) as client:
+    async with httpx.AsyncClient(timeout=IMAGE_FETCH_TIMEOUT, follow_redirects=False) as client:
         for image in post.images:
             url = _checked_image_url(image.url)
             images.append(await _download(client, url))
@@ -77,7 +78,7 @@ async def fetch_single_image(
     if image is None:
         raise ImageFetchError("写真が見つかりません")
     url = _checked_image_url(image.url)
-    async with httpx.AsyncClient(timeout=IMAGE_FETCH_TIMEOUT_S, follow_redirects=False) as client:
+    async with httpx.AsyncClient(timeout=IMAGE_FETCH_TIMEOUT, follow_redirects=False) as client:
         return await _download(client, url, max_bytes=max_bytes)
 
 
