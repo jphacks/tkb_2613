@@ -25,7 +25,7 @@ import asyncio
 import json
 import logging
 import time
-from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Sequence
 from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
@@ -39,6 +39,7 @@ from starlette.background import BackgroundTask
 
 from tkb_api import bluesky
 from tkb_api.bluesky import BlueskySession, Diagnosis, PostsFetcher, SessionStore
+from tkb_api.commons_reference import search_commons_references
 from tkb_api.config import Settings, get_settings
 from tkb_api.errors import BLUESKY_BUSY_MESSAGE, refusal
 from tkb_api.limits import (
@@ -51,9 +52,14 @@ from tkb_api.limits import (
     availability,
     next_jst_midnight,
 )
+from tkb_api.photo_place_web import (
+    mark_photo_place_lookup_unavailable,
+    search_photo_places,
+)
 from tkb_api.pipeline import (
     conclusions_json,
     diagnose_events,
+    fetch_single_image,
     load_gazetteer,
     mock_extractions,
     plan_json,
@@ -69,6 +75,7 @@ from tkb_common.schemas import (
     Clue,
     ExternalLookupStatus,
     ExternalProfileResult,
+    PhotoPlaceResult,
     Post,
     WebFact,
 )
@@ -227,12 +234,20 @@ def get_fetch_posts() -> PostsFetcher:
 
 ProfileTextFetcher = Callable[[Any, str], Awaitable[str]]
 ExternalProfileSearcher = Callable[[str], Awaitable[ExternalLookupResult]]
+PhotoPlaceSearcher = Callable[
+    [Sequence[PhotoPlaceResult], Sequence[Clue]], Awaitable[list[PhotoPlaceResult]]
+]
+PhotoPlaceReferenceSearcher = Callable[
+    [Sequence[PhotoPlaceResult], Sequence[Clue], Sequence[Post]], Awaitable[list[PhotoPlaceResult]]
+]
 
 
 class DiagnoseRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     public_web_lookup_consent: StrictBool = False
+    photo_place_web_lookup_consent: StrictBool = False
+    photo_place_reference_consent: StrictBool = False
 
 
 def get_fetch_profile_text() -> ProfileTextFetcher:
@@ -244,6 +259,17 @@ def get_external_profile_searcher(
 ) -> ExternalProfileSearcher:
     async def search(handle: str) -> ExternalLookupResult:
         return await search_external_profiles(handle, settings.brave_search_api_key)
+
+    return search
+
+
+def get_photo_place_searcher(
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> PhotoPlaceSearcher:
+    async def search(
+        results: Sequence[PhotoPlaceResult], clues: Sequence[Clue]
+    ) -> list[PhotoPlaceResult]:
+        return await search_photo_places(results, clues, settings.brave_search_api_key)
 
     return search
 
@@ -378,6 +404,11 @@ def read_diagnosis(
     return {
         "posts": [post.model_dump(mode="json") for post in posts],
         "clues": [clue.model_dump(mode="json") for clue in clues],
+        "photo_place_results": [
+            item.model_dump(mode="json")
+            for item in diagnosis.photo_place_results
+            if item.post_id not in deleted_ids
+        ],
         "deleted": list(deleted),
         "conclusions": conclusions_json(clues, posts, gazetteer, deleted),
         "plan": plan_json(clues, posts, gazetteer, deleted),
@@ -461,6 +492,7 @@ async def diagnose(
     extractor_factory: Annotated[ExtractorFactory, Depends(get_extractor_factory)],
     gazetteer: Annotated[Gazetteer, Depends(get_gazetteer)],
     external_searcher: Annotated[ExternalProfileSearcher, Depends(get_external_profile_searcher)],
+    photo_place_searcher: Annotated[PhotoPlaceSearcher, Depends(get_photo_place_searcher)],
     store: Annotated[SessionStore, Depends(get_session_store)],
     session_id: Annotated[str, Depends(current_session_id)],
     limiter: Annotated[DiagnoseLimiter, Depends(get_diagnose_limiter)],
@@ -468,6 +500,12 @@ async def diagnose(
     payload: Annotated[DiagnoseRequest | None, Body()] = None,
 ) -> StreamingResponse:
     public_web_lookup_consent = payload.public_web_lookup_consent if payload is not None else False
+    photo_place_web_lookup_consent = (
+        payload.photo_place_web_lookup_consent if payload is not None else False
+    )
+    photo_place_reference_consent = (
+        payload.photo_place_reference_consent if payload is not None else False
+    )
     now = clock()
     _ensure_open(settings, now)
     lease = _acquire(limiter, settings, session_id, session.did, now)
@@ -535,6 +573,40 @@ async def diagnose(
         elif public_web_lookup_consent:
             external_lookup_status = ExternalLookupStatus.UNAVAILABLE
 
+    photo_place_lookup: PhotoPlaceSearcher | None = None
+    if photo_place_web_lookup_consent:
+        if settings.photo_place_web_lookup_available:
+            photo_place_lookup = photo_place_searcher
+        else:
+            reason = (
+                "mock_external_lookup_disabled" if settings.mock_mode else "missing_brave_api_key"
+            )
+            if not settings.mock_mode and settings.diagnose_daily_limit <= 0:
+                reason = "photo_place_daily_limit_disabled"
+
+            async def unavailable_photo_place_lookup(
+                results: Sequence[PhotoPlaceResult], clues: Sequence[Clue]
+            ) -> list[PhotoPlaceResult]:
+                return mark_photo_place_lookup_unavailable(results, clues, reason)
+
+            photo_place_lookup = unavailable_photo_place_lookup
+
+    photo_place_reference_lookup: PhotoPlaceReferenceSearcher | None = None
+    if photo_place_reference_consent and settings.commons_reference_lookup_available:
+
+        async def lookup_commons_references(
+            results: Sequence[PhotoPlaceResult], clues: Sequence[Clue], posts: Sequence[Post]
+        ) -> list[PhotoPlaceResult]:
+            return await search_commons_references(
+                results,
+                clues,
+                posts,
+                gazetteer,
+                fetch_single_image,
+            )
+
+        photo_place_reference_lookup = lookup_commons_references
+
     profile_result: dict[str, Any] = {}
     diagnosis_at = datetime.now(UTC)
 
@@ -547,6 +619,7 @@ async def diagnose(
             Diagnosis(
                 posts=tuple(posts),
                 clues=tuple(clues),
+                photo_place_results=tuple(profile_result.get("photo_place_results", ())),
                 profile_claims=tuple(profile_result.get("profile_claims", ())),
                 profile_relations=tuple(profile_result.get("profile_relations", ())),
                 profile_claim_suggestions=tuple(
@@ -579,6 +652,8 @@ async def diagnose(
         external_profile_results=external_profile_results,
         external_lookup_status=external_lookup_status,
         external_lookup=external_lookup,
+        photo_place_lookup=photo_place_lookup,
+        photo_place_reference_lookup=photo_place_reference_lookup,
     )
     return _sse_response(_with_keep_alive(_stream(stream), settings.sse_keepalive_seconds), lease)
 

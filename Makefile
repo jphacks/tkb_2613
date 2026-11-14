@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help setup dev dev-api dev-web up down test lint secrets data
+.PHONY: help setup dev dev-api dev-web up down test lint secrets data data-national-gazetteer
 
 # compose の変数（WEB_BIND など）もリポジトリ直下の .env から読む。.env がなければ既定値
 COMPOSE = docker compose $(if $(wildcard .env),--env-file .env,) -f infra/docker-compose.yml
@@ -40,3 +40,6 @@ secrets: ## gitleaks で秘密情報を検査
 data: ## 公開データの取得と変換（data/processed/ に Parquet で出力）
 	data-prep/fetch.sh
 	uv run python -m tkb_data_prep
+
+data-national-gazetteer: ## 全国の駅・郵便番号・市区町村メッシュだけを取得・生成
+	uv run --project data-prep python -m tkb_data_prep.national_gazetteer --download

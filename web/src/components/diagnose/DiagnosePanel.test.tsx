@@ -526,3 +526,80 @@ describe("DiagnosePanel public web lookup consent", () => {
     expect(vi.mocked(diagnose).mock.calls[0][0]).toMatchObject({ publicWebLookupConsent: true });
   });
 });
+
+describe("DiagnosePanel photo place search consent", () => {
+  afterEach(() => {
+    vi.mocked(getFeatures).mockReset();
+    vi.mocked(getFeatures).mockResolvedValue({ share_enabled: false, auth_mode: "app_password" });
+  });
+
+  it("shows the separate privacy notice and sends only the separate per-run consent", async () => {
+    vi.mocked(getFeatures).mockResolvedValue({
+      share_enabled: false,
+      public_web_lookup_available: false,
+      photo_place_web_lookup_available: true,
+      commons_reference_lookup_available: true,
+    });
+    vi.mocked(diagnose).mockImplementation(async function* () {});
+    const start = await renderLoggedIn();
+    const checkbox = await screen.findByRole("checkbox", {
+      name: new RegExp(d.photoPlaceWebConsentLabel.slice(0, 8)),
+    });
+
+    expect(checkbox).not.toBeChecked();
+    expect(d.photoPlaceWebConsentNote).toContain("最大3件");
+    expect(d.photoPlaceWebConsentNote).toContain("最大90日保持");
+    expect(d.photoPlaceWebConsentNote).toContain("切り抜き・画像特徴量は送りません");
+    fireEvent.click(checkbox);
+    fireEvent.click(start);
+    await vi.waitFor(() => expect(diagnose).toHaveBeenCalled());
+    expect(vi.mocked(diagnose).mock.calls[0][0]).toMatchObject({
+      publicWebLookupConsent: false,
+      photoPlaceWebLookupConsent: true,
+      photoPlaceReferenceConsent: false,
+    });
+  });
+
+  it("shows a different per-run Commons consent and sends only that consent", async () => {
+    vi.mocked(getFeatures).mockResolvedValue({
+      share_enabled: false,
+      photo_place_web_lookup_available: false,
+      commons_reference_lookup_available: true,
+    });
+    vi.mocked(diagnose).mockImplementation(async function* () {});
+    const start = await renderLoggedIn();
+    const checkbox = await screen.findByRole("checkbox", {
+      name: new RegExp(d.photoPlaceReferenceConsentLabel.slice(0, 8)),
+    });
+
+    expect(checkbox).not.toBeChecked();
+    expect(d.photoPlaceReferenceConsentNote).toContain("候補座標はCommonsへ送られます");
+    expect(d.photoPlaceReferenceConsentNote).toContain("特徴量");
+    fireEvent.click(checkbox);
+    fireEvent.click(start);
+    await vi.waitFor(() => expect(diagnose).toHaveBeenCalled());
+    expect(vi.mocked(diagnose).mock.calls[0][0]).toMatchObject({
+      photoPlaceWebLookupConsent: false,
+      photoPlaceReferenceConsent: true,
+    });
+  });
+
+  it("disables photo place consent when mock mode or the Brave key is unavailable", async () => {
+    vi.mocked(getFeatures).mockResolvedValue({
+      share_enabled: false,
+      photo_place_web_lookup_available: false,
+    });
+    await renderLoggedIn();
+    const checkbox = await screen.findByRole("checkbox", {
+      name: new RegExp(d.photoPlaceWebConsentLabel.slice(0, 8)),
+    });
+    expect(checkbox).toBeDisabled();
+    expect(screen.getByText(d.photoPlaceWebConsentUnavailable)).toBeInTheDocument();
+
+    const commonsCheckbox = screen.getByRole("checkbox", {
+      name: new RegExp(d.photoPlaceReferenceConsentLabel.slice(0, 8)),
+    });
+    expect(commonsCheckbox).toBeDisabled();
+    expect(screen.getByText(d.photoPlaceReferenceConsentUnavailable)).toBeInTheDocument();
+  });
+});

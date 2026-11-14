@@ -5,6 +5,18 @@
 - 写真本体はコミットしない（`photos/` に置く。`.gitignore` 済み）
 - 正解表は写真のファイル名と、手がかりの形式（`type` / `value` / `region`）で書く
 
+## 写真場所のsynthetic評価
+
+`photo_place_evaluation.py` は `fixtures/photo_place_synthetic.json` の架空地点と文章Clueを一時SQLite索引に入れ、実際の写真場所・cross-post推論関数を実行する。写真bytesや公開地点画像を収集せず、fixtureは画像を含まない。
+
+```bash
+uv run python eval/photo_place_evaluation.py
+```
+
+識別可能正解ケースを分母に、任意candidateの返却率と正解POI IDの含有率を別々に出す。unknown適合率は予測unknownを分母に正解が曖昧/unknownだった割合、曖昧単一断定率は曖昧GTケースを分母にcandidateを返した割合。禁止位置claim件数と率はfixtureで禁止を明示したケースだけを対象にする。削除経路脱落率は陽性baselineの写真投稿または支援投稿を一件ずつ消して、推論全体を再実行した結果から計算する。JSON出力は分母を含む。
+
+この評価は実在地域のデータ被覆、画像の検出精度、撮影場所の地理誤差を測らない。synthetic値を実地理・実画像のカバレッジや製品精度として扱わない。実索引の地域別評価は、出典と利用条件を確認したデータが別途準備された後に行う。
+
 ## try_detect.py
 
 手元の画像と本文から手がかりを取り出して表示する（試し用）。接続先はルートの `.env` から読む。

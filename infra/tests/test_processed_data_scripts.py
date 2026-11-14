@@ -177,3 +177,46 @@ def test_install_rejects_unexpected_members(env: dict[str, str], tmp_path: Path)
     assert done.returncode != 0
     assert not (tmp_path / "app" / "x.parquet").exists()
     assert not (Path(env["TKB_APP_DIR"]) / "data" / "processed").exists()
+
+
+@pytest.mark.parametrize("where", ["top", "national"])
+def test_upload_and_install_carry_the_optional_place_index_at_the_top(
+    env: dict[str, str], where: str
+) -> None:
+    src = Path(env["TKB_PROCESSED_DIR"])
+    index_dir = src if where == "top" else src / "national"
+    index_dir.mkdir(exist_ok=True)
+    (index_dir / "places.sqlite3").write_bytes(b"poi index")
+
+    done = run([str(UPLOAD), "tkb-bucket"], env)
+
+    assert done.returncode == 0, done.stderr
+    assert "写真場所のPOI索引：入れました" in done.stdout
+    with tarfile.open(Path(env["FAKE_S3"]) / "uploaded.tar.gz") as tar:
+        assert sorted(tar.getnames()) == sorted([*TABLES, "places.sqlite3", "MANIFEST.sha256"])
+
+    installed = run([str(INSTALL), uploaded_sha(env)], env, stdin=URL + "\n")
+
+    assert installed.returncode == 0, installed.stderr
+    dest = Path(env["TKB_APP_DIR"]) / "data" / "processed"
+    assert (dest / "places.sqlite3").read_bytes() == b"poi index"
+    assert oct((dest / "places.sqlite3").stat().st_mode)[-3:] == "644"
+
+
+def test_upload_without_place_index_says_so(env: dict[str, str]) -> None:
+    done = run([str(UPLOAD), "tkb-bucket"], env)
+
+    assert done.returncode == 0, done.stderr
+    assert "写真場所のPOI索引：なし" in done.stdout
+
+
+def test_install_rejects_other_sqlite3_names(env: dict[str, str], tmp_path: Path) -> None:
+    other = tmp_path / "other.sqlite3"
+    other.write_text("x")
+    with tarfile.open(Path(env["FAKE_S3"]) / "uploaded.tar.gz", "w:gz") as tar:
+        tar.add(other, arcname="other.sqlite3")
+
+    done = run([str(INSTALL), uploaded_sha(env)], env, stdin=URL + "\n")
+
+    assert done.returncode != 0
+    assert not (Path(env["TKB_APP_DIR"]) / "data" / "processed").exists()

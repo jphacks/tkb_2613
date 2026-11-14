@@ -7,6 +7,16 @@
 - 例外として、手作りの小さな表 `manual/area_codes.csv` だけはコミットする
 - 出典と利用条件は [SOURCES.md](SOURCES.md)
 
+全国の駅名・郵便番号・市区町村メッシュの小さな表は、関東限定の `make data` とは別に生成できます。
+
+```bash
+make data-national-gazetteer
+```
+
+このコマンドは日本郵便の全国郵便番号、総務省統計局の都道府県別メッシュCSV（`01.csv`〜`47.csv`）、国土数値情報の全国鉄道データだけを取得し、`data/processed/national/` に `postal.parquet`、`muni_mesh.parquet`、`stations.parquet` を出力します。e-Stat、学校、バス停、法人番号などは取得・処理しません。取得済みファイルや出力があれば上書きせず停止します。入力は各ファイルおよび合計サイズ、駅GeoJSONの展開後サイズにも上限を設けています。出力を診断APIで使う場合は `.env` の `GAZETTEER_DIR=data/processed/national` を設定してください。`MOCK_MODE` の値に関係なく同じ設定が使われます。
+
+出力は `Gazetteer.load(data/processed/national)` と互換です。全国メッシュ表には、政府統計が付ける北方領土・竹島の `*` 注記をそのまま保持する行があります。
+
 ## 手順
 
 ### 1. e-Stat の地域メッシュ統計を置く（初回だけ、ブラウザで）
@@ -44,6 +54,10 @@ make data
 2. `python -m tkb_data_prep` が `data/processed/` に表を書き出し、最後に件数を表示する
 
 e-Stat の zip がないときは、置き場所を案内して止まる。
+
+### 任意: ローカルPOI名索引
+
+施設・地標候補の表示に使う全国POI本体は自動取得しない。必要な場合だけ、ライセンスと出典を確認したGeoJSONLをSQLiteへ流し込む。手順、Overture Placesの現在のschema/利用条件、country filter、dataset別license mappingは [SOURCES.md の任意POI索引](SOURCES.md#任意poi索引の取込) を参照。
 
 2026-10-23 に実行したときの件数（妥当かを確かめるときの目安）：
 

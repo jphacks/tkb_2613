@@ -14,7 +14,7 @@ import { ApiError, diagnose, getDiagnosis, getFeatures } from "@/lib/api";
 import { messages } from "@/lib/messages";
 import { validNameConclusions } from "@/lib/reveal";
 import type { Clue } from "@/types/clue";
-import type { Conclusion, RiskyPost, Simulation } from "@/types/diagnose";
+import type { Conclusion, PhotoPlaceResult, RiskyPost, Simulation } from "@/types/diagnose";
 import type { Post } from "@/types/post";
 import { profileClaimsAfterDeletion, type ExternalLookupStatus, type ExternalProfileResult, type ProfileCandidateSet, type ProfileRelation, type WebFact } from "@/types/profile";
 
@@ -39,6 +39,7 @@ type Phase =
 
 interface Result {
   clues: readonly Clue[];
+  photoPlaceResults?: readonly PhotoPlaceResult[];
   conclusions: readonly Conclusion[];
   profileClaims?: readonly ProfileCandidateSet[];
   profileRelations?: readonly ProfileRelation[];
@@ -84,6 +85,10 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
   const [deleted, setDeleted] = useState<ReadonlySet<string>>(new Set());
   const [publicWebLookupConsent, setPublicWebLookupConsent] = useState(false);
   const [publicWebLookupAvailable, setPublicWebLookupAvailable] = useState(false);
+  const [photoPlaceWebLookupConsent, setPhotoPlaceWebLookupConsent] = useState(false);
+  const [photoPlaceWebLookupAvailable, setPhotoPlaceWebLookupAvailable] = useState(false);
+  const [photoPlaceReferenceConsent, setPhotoPlaceReferenceConsent] = useState(false);
+  const [photoPlaceReferenceAvailable, setPhotoPlaceReferenceAvailable] = useState(false);
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   const controller = useRef<AbortController | null>(null);
   const restoreController = useRef<AbortController | null>(null);
@@ -98,6 +103,8 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
     const current = new AbortController();
     getFeatures({ signal: current.signal }).then((features) => {
       if (!current.signal.aborted) setPublicWebLookupAvailable(features.public_web_lookup_available === true);
+      if (!current.signal.aborted) setPhotoPlaceWebLookupAvailable(features.photo_place_web_lookup_available === true);
+      if (!current.signal.aborted) setPhotoPlaceReferenceAvailable(features.commons_reference_lookup_available === true);
     });
     return () => current.abort();
   }, []);
@@ -120,6 +127,7 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
         ])));
         setResult({
           clues: snapshot.clues,
+          photoPlaceResults: snapshot.photo_place_results ?? [],
           conclusions: validNameConclusions(snapshot.conclusions),
           profileClaims: snapshot.profile_claims ?? [],
           profileRelations: snapshot.profile_relations ?? [],
@@ -150,7 +158,11 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
 
   async function start() {
     const consentForThisRun = publicWebLookupConsent;
+    const photoPlaceConsentForThisRun = photoPlaceWebLookupConsent;
+    const photoPlaceReferenceConsentForThisRun = photoPlaceReferenceConsent;
     setPublicWebLookupConsent(false);
+    setPhotoPlaceWebLookupConsent(false);
+    setPhotoPlaceReferenceConsent(false);
     restoreController.current?.abort();
     controller.current?.abort();
     const current = new AbortController();
@@ -164,7 +176,12 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
     onRevealedChange?.(false);
     setPhase({ kind: "connecting" });
     try {
-      for await (const event of diagnose({ signal: current.signal, publicWebLookupConsent: consentForThisRun })) {
+      for await (const event of diagnose({
+        signal: current.signal,
+        publicWebLookupConsent: consentForThisRun,
+        photoPlaceWebLookupConsent: photoPlaceConsentForThisRun,
+        photoPlaceReferenceConsent: photoPlaceReferenceConsentForThisRun,
+      })) {
         switch (event.event) {
           case "post":
             setPosts((prev) => [...prev, event.post]);
@@ -177,6 +194,7 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
           case "conclusions":
             setResult({
               clues: event.clues,
+              photoPlaceResults: event.photo_place_results ?? [],
               conclusions: validNameConclusions(event.conclusions),
               profileClaims: event.profile_claims ?? [],
               profileRelations: event.profile_relations ?? [],
@@ -231,6 +249,14 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
           <input type="checkbox" checked={publicWebLookupConsent} onChange={(event) => setPublicWebLookupConsent(event.currentTarget.checked)} disabled={busy} className="mt-1 size-4 shrink-0 accent-seeker" />
           <span><span className="block font-bold">公開Webで外部SNS・ブログ・記事の候補を検索する（この診断のみ）</span><span className="mt-1 block text-xs text-ink/70">同意すると、実モードではログイン中の公開BlueskyハンドルだけをBraveへ送ります。検索語は最大90日保持され、利用には有料プランと支払情報の登録が必要です。投稿文・プロフィール文・写真は送りません。候補だけでは同一人物と判断しません。モックモードは固定の架空結果を使い、外部通信しません。</span></span>
         </label>}
+        <label className="mb-4 flex max-w-2xl items-start gap-3 rounded-sm border border-ink/20 px-4 py-3 text-sm">
+          <input type="checkbox" checked={photoPlaceWebLookupConsent} onChange={(event) => setPhotoPlaceWebLookupConsent(event.currentTarget.checked)} disabled={busy || !photoPlaceWebLookupAvailable} className="mt-1 size-4 shrink-0 accent-seeker" />
+          <span><span className="block font-bold">{t.photoPlaceWebConsentLabel}</span><span className="mt-1 block text-xs text-ink/70">{t.photoPlaceWebConsentNote}</span>{!photoPlaceWebLookupAvailable && <span className="mt-1 block text-xs text-ink/70">{t.photoPlaceWebConsentUnavailable}</span>}</span>
+        </label>
+        <label className="mb-4 flex max-w-2xl items-start gap-3 rounded-sm border border-ink/20 px-4 py-3 text-sm">
+          <input type="checkbox" checked={photoPlaceReferenceConsent} onChange={(event) => setPhotoPlaceReferenceConsent(event.currentTarget.checked)} disabled={busy || !photoPlaceReferenceAvailable} className="mt-1 size-4 shrink-0 accent-seeker" />
+          <span><span className="block font-bold">{t.photoPlaceReferenceConsentLabel}</span><span className="mt-1 block text-xs text-ink/70">{t.photoPlaceReferenceConsentNote}</span>{!photoPlaceReferenceAvailable && <span className="mt-1 block text-xs text-ink/70">{t.photoPlaceReferenceConsentUnavailable}</span>}</span>
+        </label>
         {afterResult ? (
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
             <button type="button" onClick={start} disabled={busy} aria-describedby="rediagnose-note" className="rounded-sm border border-ink/50 px-4 py-2 hover:bg-ink/10 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-ink disabled:cursor-not-allowed disabled:opacity-60">{t.rediagnose}</button>
@@ -276,6 +302,7 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
       {!busy && result && (
         <ConclusionBoard
           clues={result.clues}
+          photoPlaceResults={result.photoPlaceResults?.filter((item) => !excluded.has(item.post_id))}
           conclusions={simulation ? validNameConclusions(simulation.after) : result.conclusions}
           unknown={simulation?.broken}
           profileClaims={visibleProfileClaims}

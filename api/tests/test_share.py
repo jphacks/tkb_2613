@@ -96,6 +96,8 @@ def test_features_tell_the_screen_whether_result_links_are_on(tmp_path: Path) ->
                 "share_enabled": enabled,
                 "auth_mode": "app_password",
                 "public_web_lookup_available": True,  # 既定はモック
+                "photo_place_web_lookup_available": False,
+                "commons_reference_lookup_available": False,  # 既定off・モックでは使わない
             }
             assert res.headers["cache-control"] == "no-store, no-transform"
 

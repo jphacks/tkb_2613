@@ -26,7 +26,10 @@ make down
 ```
 
 - web と api だけを動かす。VLM と OCR はチームのサーバーで動かし、`.env` の `VLM_BASE_URL`、`OCR_BASE_URL` で指定する
+- リポジトリ直下の `.env` は API コンテナだけに渡す。`BRAVE_SEARCH_API_KEY` はそこへ設定し、web コンテナには渡さない。web には OAuth に必要な `AUTH_MODE`、`SESSION_TTL_MINUTES`、`PUBLIC_URL` と、起動時に別途作る一時 Secret だけを渡す
+- Wikimedia Commons の位置付き参照写真照合は `COMMONS_REFERENCE_LOOKUP_ENABLED=1` で有効化できる（既定off）。`MOCK_MODE=0` と `DIAGNOSE_DAILY_LIMIT > 0` が必要で、診断ごとの独立同意後だけ動作する。1診断につき最大3候補と3 thumbnail、検索距離1 km、最大512 KiB/thumbnail。費用はかからないが外部HTTP回数は固定上限で制限する。Commonsへ送るのは一意なローカル候補の座標のみで、本人の写真・本文・投稿ID等は送らない
 - api の設定（`MOCK_MODE`、`CORS_ORIGINS`、`COOKIE_SECURE` など）はリポジトリ直下の `.env` から読む。`.env` に書いていない項目は既定値（モック、CORS は `http://localhost:3000`、Cookie の Secure なし）。実際のモデルにつなぐときは `.env` で `MOCK_MODE=0` にする
+- 推理用の駅・郵便番号・市区町村メッシュ表は、未指定なら `data/processed` に3表すべてがあるときはそこを使い、そうでなければ `data/processed/national` の完全な3表を使う。`GAZETTEER_DIR` を設定するとそのパスを優先する。Compose は `data/processed` 全体を API に読み取り専用でマウントするため、`national` も読める。モック診断でも同じ表を使う
 - `make up` は compose の変数（`WEB_BIND`）も `.env` から読む。`docker compose` を直接使うときは `--env-file .env` を付ける
 - コンテナのファイルシステムは読み取り専用。本人が明示的に作った閲覧リンクの結果だけ、API の `shared-results` ボリュームに2時間保存する。投稿の画像バイト列は保存しない
 - ポートは既定で `127.0.0.1` にだけ公開する。api（8001）はどの環境でも `127.0.0.1` のまま

@@ -71,6 +71,47 @@ export interface RiskyPost {
   readonly broken: readonly string[];
 }
 
+export interface PhotoPlaceSource {
+  readonly source_id: string;
+  readonly provider: string;
+  readonly dataset: string;
+  readonly license_id: string | null;
+  readonly record_id: string | null;
+  readonly version: string | null;
+  readonly attribution: string | null;
+  readonly source_url?: string | null;
+}
+
+export interface PhotoPlaceEvidence {
+  readonly kind: "clue" | "reference";
+  readonly clue_index: number | null;
+  readonly reference_id: string | null;
+}
+
+export interface PhotoPlaceCandidate {
+  readonly place_id: string;
+  readonly label: string;
+  readonly place_type: "station" | "facility" | "landmark" | "address" | "area" | "unknown";
+  readonly photo_relation: "visible_in_frame" | "camera_nearby" | "camera_at";
+  readonly area_label: string | null;
+  readonly score: number | null;
+  readonly evidence: readonly PhotoPlaceEvidence[];
+  readonly source_ids: readonly string[];
+  readonly sources: readonly PhotoPlaceSource[];
+  /** Brave候補の名称・都道府県・市区町村が、同じ結果内の公的記録1件と一致したときのその place_id。表示用の裏付けだけで、状態や推論は変えない。古い応答では省略される。 */
+  readonly corroborated_by?: readonly string[];
+}
+
+export interface PhotoPlaceResult {
+  readonly post_id: string;
+  readonly image_index: number;
+  readonly status: "candidate" | "ambiguous" | "unknown" | "unavailable";
+  readonly granularity: "station" | "facility" | "address" | "area" | "unknown";
+  readonly candidates: readonly PhotoPlaceCandidate[];
+  readonly reason_codes: readonly string[];
+  readonly lookup_status: "local_only" | "web_searched" | "reference_checked" | "unavailable";
+}
+
 /** 同じログインセッションで開き直したときに取得する完了済みの診断。 */
 export interface DiagnosisSnapshot {
   readonly posts: readonly Post[];
@@ -81,6 +122,7 @@ export interface DiagnosisSnapshot {
    */
   readonly deleted?: readonly string[];
   readonly conclusions: readonly Conclusion[];
+  readonly photo_place_results?: readonly PhotoPlaceResult[];
   readonly plan: Simulation & { readonly posts: readonly RiskyPost[] };
   readonly profile_claims?: readonly ProfileCandidateSet[];
   readonly profile_relations?: readonly ProfileRelation[];
@@ -106,6 +148,7 @@ export type DiagnoseEvent =
       readonly event: "conclusions";
       readonly clues: readonly Clue[];
       readonly conclusions: readonly Conclusion[];
+      readonly photo_place_results?: readonly PhotoPlaceResult[];
       readonly profile_claims?: readonly ProfileCandidateSet[];
       readonly profile_relations?: readonly ProfileRelation[];
       /** Up to three diagnosis-order-stable post IDs selected by exact claim-path removal. */
@@ -147,6 +190,63 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isClueList(value: unknown): value is readonly Clue[] {
   return Array.isArray(value) && value.every(isClue);
+}
+
+function isPhotoPlaceResultList(value: unknown, clues: readonly Clue[]): value is readonly PhotoPlaceResult[] {
+  if (!Array.isArray(value)) return false;
+  const imageKeys = new Set<string>();
+  return value.every((entry: unknown) => {
+    if (!isRecord(entry) || typeof entry.post_id !== "string" || !Number.isInteger(entry.image_index) ||
+      (entry.image_index as number) < 0 ||
+      !["candidate", "ambiguous", "unknown", "unavailable"].includes(entry.status as string) ||
+      !["station", "facility", "address", "area", "unknown"].includes(entry.granularity as string) ||
+      !["local_only", "web_searched", "reference_checked", "unavailable"].includes(entry.lookup_status as string) ||
+      !Array.isArray(entry.candidates) || !Array.isArray(entry.reason_codes) ||
+      !entry.reason_codes.every((reason) => typeof reason === "string")) return false;
+    const key = `${entry.post_id}:${entry.image_index}`;
+    if (imageKeys.has(key)) return false;
+    imageKeys.add(key);
+    const candidates = entry.candidates;
+    if (entry.status === "candidate" && candidates.length !== 1) return false;
+    if (entry.status === "ambiguous" && candidates.length < 2) return false;
+    if (["unknown", "unavailable"].includes(entry.status as string) && candidates.length !== 0) return false;
+    const ids = new Set<string>();
+    return candidates.every((candidate: unknown) => {
+      if (!isRecord(candidate) || typeof candidate.place_id !== "string" || !candidate.place_id ||
+        typeof candidate.label !== "string" || !candidate.label ||
+        !["station", "facility", "landmark", "address", "area", "unknown"].includes(candidate.place_type as string) ||
+        !["visible_in_frame", "camera_nearby", "camera_at"].includes(candidate.photo_relation as string) ||
+        !(candidate.area_label === null || typeof candidate.area_label === "string") ||
+        !(candidate.score === null || (typeof candidate.score === "number" && candidate.score >= 0 && candidate.score <= 1)) ||
+        !Array.isArray(candidate.source_ids) || !candidate.source_ids.length ||
+        !candidate.source_ids.every((id) => typeof id === "string" && id.length > 0) ||
+        !Array.isArray(candidate.evidence) || !candidate.evidence.length || !Array.isArray(candidate.sources)) return false;
+      if (ids.has(candidate.place_id)) return false;
+      ids.add(candidate.place_id);
+      const validEvidence = candidate.evidence.every((item: unknown) => {
+        if (!isRecord(item)) return false;
+        if (item.kind === "clue" && Number.isInteger(item.clue_index) && (item.clue_index as number) >= 0 && item.reference_id === null) {
+          const clue = clues[item.clue_index as number];
+          return clue?.post_id === entry.post_id && clue.image_index === entry.image_index;
+        }
+        return item.kind === "reference" && item.clue_index === null && typeof item.reference_id === "string" && item.reference_id.length > 0;
+      });
+      const validSources = candidate.sources.every((source: unknown) => isRecord(source) &&
+        typeof source.source_id === "string" && typeof source.provider === "string" && typeof source.dataset === "string" &&
+        (source.license_id === null || typeof source.license_id === "string") &&
+        (source.record_id === null || typeof source.record_id === "string") &&
+        (source.version === null || typeof source.version === "string") &&
+        (source.attribution === null || typeof source.attribution === "string") &&
+        (!Object.hasOwn(source, "source_url") || source.source_url === null ||
+          (typeof source.source_url === "string" && source.source_url.startsWith("https://"))));
+      return validEvidence && validSources;
+    }) && candidates.every((candidate: unknown) => {
+      if (!isRecord(candidate) || !Object.hasOwn(candidate, "corroborated_by")) return true;
+      const refs = candidate.corroborated_by;
+      return Array.isArray(refs) && refs.length <= 1 && refs.every((id) =>
+        typeof id === "string" && id !== candidate.place_id && ids.has(id));
+    });
+  });
 }
 
 function isExternalLookupStatus(value: unknown): value is ExternalLookupStatus {
@@ -233,6 +333,7 @@ export function isDiagnosisSnapshot(value: unknown): value is DiagnosisSnapshot 
     conclusionsEvent = toDiagnoseEvent("conclusions", JSON.stringify({
       clues: value.clues,
       conclusions: value.conclusions,
+      ...(Object.hasOwn(value, "photo_place_results") ? { photo_place_results: value.photo_place_results } : {}),
       ...(Object.hasOwn(value, "profile_claims") ? { profile_claims: value.profile_claims } : {}),
       ...(Object.hasOwn(value, "profile_relations") ? { profile_relations: value.profile_relations } : {}),
       ...(Object.hasOwn(value, "profile_claim_suggestions") ? { profile_claim_suggestions: value.profile_claim_suggestions } : {}),
@@ -292,6 +393,8 @@ export function toDiagnoseEvent(
     const webLookupStatus = value.web_lookup_status ?? "not_run";
     const externalLookupStatus = value.external_lookup_status ?? "not_requested";
     const externalProfileResults = value.external_profile_results ?? [];
+    const hasPhotoPlaceResults = Object.hasOwn(value, "photo_place_results");
+    const photoPlaceResults = value.photo_place_results ?? [];
     const webFactIds = Array.isArray(webFacts) && webFacts.every(isWebFact)
       ? new Set(webFacts.map((fact) => fact.id))
       : new Set<string>();
@@ -310,6 +413,7 @@ export function toDiagnoseEvent(
     );
     if (
       Array.isArray(conclusions) && conclusions.every((c) => isConclusion(c, clueCount)) &&
+      (!hasPhotoPlaceResults || isPhotoPlaceResultList(photoPlaceResults, value.clues)) &&
       profileClaimsValid && typeof profileText === "string" &&
       (!hasProfileRelations || isProfileRelationList(profileRelations)) &&
       Array.isArray(profileClaimSuggestions) && profileClaimSuggestions.length <= 3 &&
@@ -331,6 +435,7 @@ export function toDiagnoseEvent(
         event,
         clues: value.clues,
         conclusions: conclusions as Conclusion[],
+        ...(hasPhotoPlaceResults ? { photo_place_results: photoPlaceResults as readonly PhotoPlaceResult[] } : {}),
         ...(Object.hasOwn(value, "profile_claims") ? { profile_claims: typedProfileClaims } : {}),
         ...(hasProfileRelations ? { profile_relations: profileRelations as readonly ProfileRelation[] } : {}),
         ...(Object.hasOwn(value, "profile_claim_suggestions") ? { profile_claim_suggestions: profileClaimSuggestions } : {}),

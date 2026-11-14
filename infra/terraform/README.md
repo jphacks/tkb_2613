@@ -164,6 +164,8 @@ journalctl -u tkb-app -n 50 --no-pager
 
 tar に入れる表（11個。1つでも欠けたら上げない）：`stations`・`postal`・`area_codes`・`muni_mesh`・`households_500m`（e-Stat のメッシュ統計から）・`schools`・`shelters`・`bus_stops`・`school_districts`・`ridership` の `.parquet` と、法人番号の `corporations.sqlite`。固めると約 75MB、展開すると約 220MB。
 
+任意で、写真場所のPOI索引 `places.sqlite3`（国土数値情報 P05 の役場・公的集会施設など。作り方は [data-prep/SOURCES.md](../../data-prep/SOURCES.md)）も入れる。`data/processed/places.sqlite3` があればそれを、なければ `data/processed/national/places.sqlite3` を使い、どちらの場合も tar では直下に置く。本番の api は11個がそろった `data/processed` を選び、POI索引もその直下だけを見るため、`national/` の下のままでは使われない。索引がなければ写真場所の候補はいつも「不明」になる（他の推理には影響しない）。P05 全国版で約 100MB 増える。索引の schema version（`PRAGMA user_version`）が api と合わないものは api が読まないので、api を更新したら索引も作り直して届け直す。
+
 ### 1. 手元で表を作る
 
 e-Stat の地域メッシュ統計（`data-prep/raw/estat/`）と国税庁の法人番号の zip（`data-prep/raw/houjin/`）は、どちらもブラウザで落として手で置く（[data-prep/README.md](../../data-prep/README.md)）。置いたら：
@@ -220,7 +222,7 @@ aws s3 rm "s3://$BUCKET/processed/<上げたファイル名>"
   - `home_area=弥生`、`home_block=弥生二丁目付近`
 - ブラウザで `https://<配信ID>.cloudfront.net/demo` を開き、推理の結論に「最寄り駅：根津駅」と「ゴミの収集地区：文京区 弥生1・2丁目」が出る
 - アプリの EC2 で `docker stats --no-stream tkb_2613-api-1` のメモリが、表を入れる前より約 72MB 増えた程度（法人番号の SQLite はメモリに載せず、引くたびにディスクから読む）
-- `ls -l /opt/tkb_2613/data/processed` が 11 個で、どれも `-rw-r--r--`
+- `ls -l /opt/tkb_2613/data/processed` が 11 個（POI索引を入れたら `places.sqlite3` を足して 12 個）で、どれも `-rw-r--r--`
 
 ### 表を戻す
 

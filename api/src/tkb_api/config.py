@@ -1,3 +1,4 @@
+import sqlite3
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal, Self
@@ -7,9 +8,43 @@ from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from tkb_api.limits import PublicWindow
+from tkb_common.place_names import PLACE_INDEX_SCHEMA_VERSION
+from tkb_engine.gazetteer import resolve_places_index_path
 
 # 偽の X API を許す手元のホスト
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+GAZETTEER_REQUIRED_FILES = ("stations.parquet", "postal.parquet", "muni_mesh.parquet")
+
+
+def _has_complete_gazetteer(directory: Path) -> bool:
+    return all((directory / filename).is_file() for filename in GAZETTEER_REQUIRED_FILES)
+
+
+def _has_compatible_place_index(directory: Path) -> bool:
+    """Require local POI and mesh indexes before advertising Commons lookup."""
+    if not (directory / "muni_mesh.parquet").is_file():
+        return False
+    path = resolve_places_index_path(directory)
+    if path is None:
+        return False
+    try:
+        uri = f"{path.resolve().as_uri()}?mode=ro&immutable=1"
+        with sqlite3.connect(uri, uri=True) as db:
+            row = db.execute("PRAGMA user_version").fetchone()
+    except (OSError, sqlite3.Error, ValueError):
+        return False
+    return row is not None and row[0] == PLACE_INDEX_SCHEMA_VERSION
+
+
+def _default_gazetteer_dir() -> Path:
+    """Prefer complete legacy tables, then the national dataset, else legacy path."""
+    processed = Path("data/processed")
+    national = processed / "national"
+    if _has_complete_gazetteer(processed):
+        return processed
+    if _has_complete_gazetteer(national):
+        return national
+    return processed
 
 
 class Settings(BaseSettings):
@@ -30,6 +65,8 @@ class Settings(BaseSettings):
     model_allowed_host_suffixes: str = ""
     # 公開Web検索の秘密鍵。明示的な診断同意がある場合のみ使用し、クライアントへ返さない。
     brave_search_api_key: SecretStr = SecretStr("")
+    # Optional Commons geosearch and thumbnail comparison; off until explicitly enabled.
+    commons_reference_lookup_enabled: bool = False
     cors_origins: list[str] = ["http://localhost:3000"]
     # Bluesky のログイン先
     bsky_service: str = "https://bsky.social"
@@ -51,7 +88,7 @@ class Settings(BaseSettings):
     mock_event_interval_seconds: float = 0.8
     # 推理ルールが引く data-prep の表（stations・postal・muni_mesh）。make data で作る。
     # 読めないときは、表を使うルール（R1 の最寄り駅など）だけを飛ばす
-    gazetteer_dir: Path = Path("data/processed")
+    gazetteer_dir: Path = Field(default_factory=_default_gazetteer_dir)
     # 診断の SSE で、イベントの間がこの秒数より空いたら keep-alive のコメントを送る
     # （Vercel は 120 秒、Cloudflare は 100 秒、何も届かないと接続を切るため）
     sse_keepalive_seconds: float = Field(default=15, gt=0)
@@ -162,6 +199,25 @@ class Settings(BaseSettings):
         実モードは BRAVE_SEARCH_API_KEY が空でないときだけ真。キーの値や長さは外へ出さない。
         """
         return self.mock_mode or bool(self.brave_search_api_key.get_secret_value().strip())
+
+    @property
+    def photo_place_web_lookup_available(self) -> bool:
+        """Enable paid photo-place search only with a finite positive daily diagnosis cap."""
+        return (
+            not self.mock_mode
+            and self.diagnose_daily_limit > 0
+            and bool(self.brave_search_api_key.get_secret_value().strip())
+        )
+
+    @property
+    def commons_reference_lookup_available(self) -> bool:
+        """Require explicit live opt-in, a finite cap, and a compatible local POI index."""
+        return (
+            not self.mock_mode
+            and self.diagnose_daily_limit > 0
+            and self.commons_reference_lookup_enabled
+            and _has_compatible_place_index(self.gazetteer_dir)
+        )
 
 
 @lru_cache

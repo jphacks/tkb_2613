@@ -4,7 +4,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { messages } from "@/lib/messages";
 import type { Clue } from "@/types/clue";
-import type { Conclusion } from "@/types/diagnose";
+import type { Conclusion, PhotoPlaceResult } from "@/types/diagnose";
 import { openDataCitations, profileRelationsAfterDeletion, PROFILE_ATTRIBUTE_CATALOG, type ExternalLookupStatus, type ExternalProfileResult, type ProfileCandidateSet, type ProfileEvidence, type ProfileEvidencePath, type ProfileRelation, type WebFact } from "@/types/profile";
 import type { Post } from "@/types/post";
 import { ClaimStrings } from "./ClaimStrings";
@@ -19,6 +19,7 @@ const SAG = 28;
 interface ConclusionBoardProps {
   clues: readonly Clue[];
   conclusions: readonly Conclusion[];
+  photoPlaceResults?: readonly PhotoPlaceResult[];
   /** 消したらどうなるかで推定できなくなった項目（attribute）。「不明」のカードで出す */
   unknown?: readonly string[];
   profileClaims?: readonly ProfileCandidateSet[];
@@ -112,7 +113,7 @@ function layoutStrings(
  * 推定には根拠の手がかりも文字で添える（糸は飾りなので読み上げない）。
  */
 export function ConclusionBoard({
-  clues, conclusions, unknown = [], profileClaims = [], profileRelations = [], deletedPostIds = [], profileClaimSuggestions = [], posts = [],
+  clues, conclusions, photoPlaceResults = [], unknown = [], profileClaims = [], profileRelations = [], deletedPostIds = [], profileClaimSuggestions = [], posts = [],
   webFacts = [], externalLookupStatus = "not_requested", externalProfileResults = [], ownerProfileText = "", selfReportClues = [],
 }: ConclusionBoardProps) {
   // R8 copies observed name text directly. Its legacy Conclusion has no provenance
@@ -191,6 +192,39 @@ export function ConclusionBoard({
       <h3 id="board-heading" className="font-display text-2xl">
         {t.heading}
       </h3>
+      {photoPlaceResults.length > 0 && <section aria-labelledby="photo-place-heading" className="rounded-sm border border-ink/20 px-4 py-3">
+        <h4 id="photo-place-heading" className="font-display text-lg">{t.photoPlaces.heading}</h4>
+        <p className="mt-1 text-xs text-ink/70">{t.photoPlaces.explanation}</p>
+        {photoPlaceResults.some((result) => result.lookup_status === "web_searched") && <p className="mt-1 text-xs text-ink/70">{t.photoPlaces.externalNotice}</p>}
+        {photoPlaceResults.some((result) => result.candidates.some((candidate) => candidate.evidence.some((item) => item.kind === "reference"))) && <p className="mt-1 text-xs text-ink/70">{t.photoPlaces.referenceNotice}</p>}
+        <ul className="mt-3 space-y-2">
+          {photoPlaceResults.filter((result) => posts.length === 0 || posts.some((post) => post.post_id === result.post_id)).map((result) => {
+            const image = posts.find((post) => post.post_id === result.post_id)?.images.find((item) => item.index === result.image_index);
+            const status = result.status === "candidate" ? t.photoPlaces.candidate : result.status === "ambiguous" ? t.photoPlaces.ambiguous : result.status === "unavailable" ? t.photoPlaces.unavailable : t.photoPlaces.unknown;
+            return <li key={`${result.post_id}:${result.image_index}`} className="border-l-2 border-seeker pl-3">
+              <p className="text-xs font-bold">{t.photoPlaces.image(result.image_index + 1)} · {status}</p>
+              {image?.alt && <p className="text-xs text-ink/60">{image.alt}</p>}
+              {result.reason_codes.includes("too_many_matches") && <p className="text-sm text-ink/70">{t.photoPlaces.tooManyMatches}</p>}
+              {result.candidates.length === 0 ? <p className="text-sm text-ink/70">{t.photoPlaces.reason}</p> : <ul className="mt-1 space-y-2">
+                {result.candidates.map((candidate) => <li key={candidate.place_id} className="rounded-sm bg-paper-deep px-3 py-2">
+                  <p className="font-bold">{candidate.label}<span className="ml-2 text-xs font-normal text-ink/60">{candidate.photo_relation === "visible_in_frame" ? t.photoPlaces.visible : candidate.photo_relation}</span></p>
+                  {candidate.area_label && <p className="text-sm">{candidate.area_label}</p>}
+                  {candidate.corroborated_by?.map((id) => {
+                    const record = result.candidates.find((other) => other.place_id === id);
+                    return record ? <p key={id} className="text-xs text-ink/70">{t.photoPlaces.corroborated(record.label, record.area_label)}</p> : null;
+                  })}
+                  <p className="text-xs text-ink/60">{candidate.place_id}</p>
+                  <ul aria-label={t.reasonsLabel} className="mt-1 text-xs">{candidate.evidence.map((item, index) => {
+                    const clue = item.clue_index === null ? undefined : clues[item.clue_index];
+                    return <li key={`${index}:${item.clue_index}:${item.reference_id}`}>{clue ? t.photoPlaces.clue(item.clue_index ?? 0, clue.value, clue.source) : t.photoPlaces.reference(item.reference_id ?? "")}</li>;
+                  })}</ul>
+                  {candidate.sources.length > 0 ? <ul aria-label={t.photoPlaces.source} className="mt-1 text-[10px] text-ink/60">{candidate.sources.map((source) => <li key={source.source_id}>{t.photoPlaces.license(source.provider, source.dataset, source.license_id, source.record_id, source.version)}{source.attribution ? ` · ${source.attribution}` : ""}{source.source_url && <a href={source.source_url} target="_blank" rel="noopener noreferrer" className="ml-1 underline">{source.provider === "Brave Search Place Search" ? t.photoPlaces.externalSource : source.source_url}</a>}</li>)}</ul> : <p className="mt-1 text-[10px] text-ink/60">{t.photoPlaces.noSource}</p>}
+                </li>)}
+              </ul>}
+            </li>;
+          })}
+        </ul>
+      </section>}
       {!found ? (
         <p className="text-ink/70">{t.empty}</p>
       ) : (

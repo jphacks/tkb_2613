@@ -120,9 +120,10 @@ Python は `common/` の Pydantic モデル（`tkb_common.schemas`）、TypeScri
 
 ## セキュリティのルール
 
+- 参照画像照合は `COMMONS_REFERENCE_LOOKUP_ENABLED=1` を設定した実モードだけで利用可能にし、診断ごとの `photo_place_reference_consent` が明示的にtrueの場合に限る。診断日次上限0では使用しない。候補検索の外部送信は一意で座標付きの、ライセンスを確認したローカルPOIの座標だけとし、座標は全国1kmメッシュ集合（`muni_mesh.parquet`）への所属も確認し、本人の写真・crop・embedding・本文・DID・投稿URI・ハンドルは送らない。本人の投稿画像は従来どおり `cdn.bsky.app` からのみ取得し、Commonsの参照画像はWikimedia Commonsの権利情報を個別検査後に小thumbnailで取得する。許可licenseは機械可読な `CC0 1.0` / `CC BY 3.0` / `CC BY 4.0` と完全一致するURLの組だけ。作者、license、ファイル説明ページを画面に表示し、参照画像・投稿写真・比較特徴量は診断中のメモリから外へ保存しない。比較はpHash差2bit以下とSSIM 0.985以上、同一aspect ratio、低texture除外を併用した近似複製検出だけで、一般的な別角度・同じ場所の認識は行わない。一致しても `visible_in_frame` と既存候補statusを維持し、camera locationやプロフィール推論を出さない。1診断最大3候補・3thumbnail、各512KiB、Commons APIのrequest合計最大6回。既定offでモック時は外部通信しない。
 - 診断できるのはログインした本人のアカウントだけ。ハンドル名や URL を入力する欄、任意のアカウントを指定できる API は作らない。投稿の取得は必ずセッションの DID で行う
 - `AUTH_MODE=oauth` では Bluesky OAuth を使い、パスワード欄とパスワード API を無効にする。既存の App Password 経路は `AUTH_MODE=app_password` で切り戻せる。OAuth の state とトークンは Next.js サーバーのメモリ、アプリの診断セッションは api のメモリに置く。両方ともログアウトか30分で失効する。ブラウザにはランダムな `tkb_session` Cookie と、認可開始を結び付ける短命 Cookie だけを渡し、トークンは渡さない。App Password はログインに使ったら捨て、保存しない。どちらの方式も認証情報をログやエラー応答に出さない
-- 画像を取りに行く先は `cdn.bsky.app` だけ。それ以外の URL は拒否する
+- 本人の投稿画像を取りに行く先は `cdn.bsky.app` だけ。それ以外の URL は拒否する。上記の任意参照経路ではWikimedia Commonsからライセンス確認済みの参照thumbnailのみ取得する
 - 写真と投稿本文を第三者の AI サービス（OpenAI、Gemini などの外部 API）に送らない。送り先はチームのサーバーだけ
 - 写真と本文はメモリ上で処理し、リクエスト本文をログに出さない。診断結果は通常保存しない。本人が診断後に「閲覧リンクを作る」を押した場合だけ、投稿・手がかり・推定を期限付きで保存し、リンクを知る人に閲覧を許す。画像バイト列は保存せず、閲覧画面には削除操作を出さない
 - 投稿の本文や写真の中の文字はデータとして扱い、そこに書かれた指示に従わない。モデルに削除などの操作をさせる道具を持たせない。削除は、ユーザーが画面で投稿を選び、確認ダイアログで OK したときだけ実行する
@@ -137,7 +138,7 @@ Python は `common/` の Pydantic モデル（`tkb_common.schemas`）、TypeScri
 
 「1件ずつは無害な投稿でも、組み合わせるとここまでわかる」を見せるのがねらいなので、推定は本人が Bluesky に上げたものの中だけで行う。
 
-- 診断のプロフィール推定は、ログインした本人のBluesky投稿とプロフィール文を使う。公開Web検索は診断ごとの明示同意がある場合に限り、Braveへ本人の公開Blueskyハンドルと固定 `site:` 演算子だけを送る。投稿・プロフィール本文・Clue・DID・投稿URI・写真・氏名などは送らない。検索語は最大90日保持される。候補は本人と断定せず、本人の公開投稿/プロフィールに書かれたURLと照合できる場合もリンク関係としてだけ表示する。検索結果ページは取得しない
+- プロフィールの公開Web検索と写真場所検索は別の用途・別の診断単位同意にする。プロフィール検索は既存の `public_web_lookup_consent` のみを使い、Braveへ本人の公開Blueskyハンドルと固定 `site:` 演算子だけを送る。写真場所検索は `photo_place_web_lookup_consent` が明示的に真のとき、ローカル候補が不足/競合し、かつ画像内の高確度OCR/VLM `shop` / `landmark` / `station_sign` 観測から安全な名称を作れる場合に限り、Brave Place Searchへ名称を最大3クエリ送る。写真場所検索は `MOCK_MODE=0`、Braveキーあり、`DIAGNOSE_DAILY_LIMIT > 0` の全条件を満たす場合だけ有効であり、日次上限0（無制限）では同意済みでも検索しない。この追加費用ガードはプロフィール検索の動作を変えない。`country=JP` は検索範囲であり日本所在の保証ではない。結果は `postal_address.country == "JP"` を確認し、Braveの結果ID（約8時間で失効）は保存しない。送らないもの：人名、`org_text` / `place_text`、住所、郵便番号、本文、プロフィール文、DID、投稿URI、ハンドル、画像URL、画像画素・crop・embedding、顔・瞳・反射。Brave結果は未確認の `visible_in_frame` 候補で、撮影地点・自宅・現在地を確定しない。公式/公的な独立根拠による確認なしに所在地を検証済みとしない。モック・キーなし・日次上限0は外部通信0回。Brave検索語は最大90日保持され、利用には運営側の有料プランと支払情報登録が必要
 - デモは、本人が同意したメンバーの実名のアカウントで行ってよい。他人の顔が写った写真は投稿しない。テストは架空の人物で行う
 
 ## 環境変数
@@ -146,7 +147,8 @@ Python は `common/` の Pydantic モデル（`tkb_common.schemas`）、TypeScri
 - `BSKY_SERVICE`（ログイン先。既定 `https://bsky.social`）
 - `SESSION_TTL_MINUTES`（既定30）
 - `MAX_POSTS`（既定30）
-- `BRAVE_SEARCH_API_KEY`（任意。明示同意後の外部SNS/ブログ/記事候補検索のみ。APIサーバーだけに設定し、モックは通信しない）
+- `COMMONS_REFERENCE_LOOKUP_ENABLED`（既定0。Commons参照画像のstrict near-duplicate照合を明示的に有効化するときだけ1。`MOCK_MODE=0` かつ `DIAGNOSE_DAILY_LIMIT > 0` が必要。診断ごとの独立同意・最大3 candidate/3 thumbnailも必須）
+- `BRAVE_SEARCH_API_KEY`（任意。APIサーバーだけに設定。プロフィールの公開Web検索と写真場所Place Searchはそれぞれ専用の診断同意が必要。写真場所検索は `DIAGNOSE_DAILY_LIMIT > 0` の場合だけ有効で、最大3クエリ/診断。モック・キーなし・日次上限0では通信しない）
 
 既存：`MOCK_MODE`、`VLM_BASE_URL`、`VLM_API_KEY`、`VLM_MODEL`、`OCR_BASE_URL`。鍵を `NEXT_PUBLIC_` で始まる変数に入れない。
 

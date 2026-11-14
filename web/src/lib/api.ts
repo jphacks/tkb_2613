@@ -238,6 +238,10 @@ export interface Features {
   readonly auth_mode?: "oauth" | "app_password";
   /** 公開Web検索（Brave）が使えるか。キーの値は返らない。ないときは使えない側に倒す */
   readonly public_web_lookup_available?: boolean;
+  /** Photo Place Search requires its own per-diagnosis consent and is unavailable in mocks. */
+  readonly photo_place_web_lookup_available?: boolean;
+  /** Wikimedia Commons reference matching requires a separate per-diagnosis consent. */
+  readonly commons_reference_lookup_available?: boolean;
 }
 
 /**
@@ -255,10 +259,16 @@ export async function getFeatures({ baseUrl = DEFAULT_BASE_URL, signal }: Reques
         ? data.auth_mode : undefined;
       const publicWeb = "public_web_lookup_available" in data && typeof data.public_web_lookup_available === "boolean"
         ? data.public_web_lookup_available : undefined;
+      const photoPlaceWeb = "photo_place_web_lookup_available" in data && typeof data.photo_place_web_lookup_available === "boolean"
+        ? data.photo_place_web_lookup_available : undefined;
+      const commonsReference = "commons_reference_lookup_available" in data && typeof data.commons_reference_lookup_available === "boolean"
+        ? data.commons_reference_lookup_available : undefined;
       return {
         share_enabled: data.share_enabled,
         ...(mode ? { auth_mode: mode } : {}),
         ...(publicWeb === undefined ? {} : { public_web_lookup_available: publicWeb }),
+        ...(photoPlaceWeb === undefined ? {} : { photo_place_web_lookup_available: photoPlaceWeb }),
+        ...(commonsReference === undefined ? {} : { commons_reference_lookup_available: commonsReference }),
       };
     }
     return off;
@@ -348,14 +358,24 @@ export async function* diagnose({
   baseUrl = DEFAULT_BASE_URL,
   signal,
   publicWebLookupConsent = false,
-}: RequestOptions & { publicWebLookupConsent?: boolean } = {}): AsyncGenerator<DiagnoseEvent> {
+  photoPlaceWebLookupConsent = false,
+  photoPlaceReferenceConsent = false,
+}: RequestOptions & {
+  publicWebLookupConsent?: boolean;
+  photoPlaceWebLookupConsent?: boolean;
+  photoPlaceReferenceConsent?: boolean;
+} = {}): AsyncGenerator<DiagnoseEvent> {
   let res: Response;
   try {
     res = await fetch(`${baseUrl}/api/diagnose`, {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ public_web_lookup_consent: publicWebLookupConsent }),
+      body: JSON.stringify({
+        public_web_lookup_consent: publicWebLookupConsent,
+        photo_place_web_lookup_consent: photoPlaceWebLookupConsent,
+        photo_place_reference_consent: photoPlaceReferenceConsent,
+      }),
       signal,
     });
   } catch {
