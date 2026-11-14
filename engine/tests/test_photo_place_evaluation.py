@@ -1,19 +1,30 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
-EVAL_DIR = Path(__file__).resolve().parents[2] / "eval"
-if str(EVAL_DIR) not in sys.path:
-    sys.path.insert(0, str(EVAL_DIR))
+ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_FIXTURE = ROOT / "eval" / "fixtures" / "photo_place_synthetic.json"
+EVALUATOR = ROOT / "eval" / "photo_place_evaluation.py"
 
-from photo_place_evaluation import DEFAULT_FIXTURE, _load_document, evaluate_document  # noqa: E402
+
+def _run_evaluator(fixture: Path = DEFAULT_FIXTURE) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(  # noqa: S603 - fixed local interpreter/script; fixture is a local file
+        [sys.executable, str(EVALUATOR), str(fixture)],
+        cwd=ROOT,
+        capture_output=True,
+        check=False,
+        text=True,
+    )
 
 
 def test_synthetic_photo_place_harness_measures_abstention_and_deletion() -> None:
-    report = evaluate_document(_load_document(DEFAULT_FIXTURE))
+    process = _run_evaluator()
+    assert process.returncode == 0, process.stderr
+    report = json.loads(process.stdout)
 
     assert report["evaluation_kind"] == "synthetic_no_images"
     assert report["metrics"] == {
@@ -31,11 +42,14 @@ def test_synthetic_photo_place_harness_measures_abstention_and_deletion() -> Non
     assert report["cases"][0]["deletion_paths_dropped"] == 2
 
 
-def test_candidate_recall_uses_independent_expected_place_ids() -> None:
-    document = _load_document(DEFAULT_FIXTURE)
+def test_candidate_recall_uses_independent_expected_place_ids(tmp_path: Path) -> None:
+    document = json.loads(DEFAULT_FIXTURE.read_text(encoding="utf-8"))
     document["cases"][0]["expected_place_ids"] = ["fixture:not-the-returned-place"]
-
-    report = evaluate_document(document)
+    fixture = tmp_path / "metric-check.json"
+    fixture.write_text(json.dumps(document), encoding="utf-8")
+    process = _run_evaluator(fixture)
+    assert process.returncode == 0, process.stderr
+    report = json.loads(process.stdout)
 
     assert report["metrics"]["candidate_coverage"] == 1.0
     assert report["metrics"]["correct_candidate_rate"] == 0.875
@@ -43,13 +57,14 @@ def test_candidate_recall_uses_independent_expected_place_ids() -> None:
 
 
 def test_fixture_loader_rejects_image_based_evaluations(tmp_path: Path) -> None:
-    fixture: dict[str, Any] = {"evaluation_kind": "public_images", "places": [], "cases": []}
+    fixture: dict[str, Any] = {
+        "evaluation_kind": "public_images",
+        "annotation_kind": "manual",
+        "places": [],
+        "cases": [],
+    }
     path = tmp_path / "unsafe.json"
     path.write_text(json.dumps(fixture), encoding="utf-8")
-
-    try:
-        _load_document(path)
-    except ValueError as exc:
-        assert "synthetic_no_images" in str(exc)
-    else:
-        raise AssertionError("image-based evaluation fixture should be rejected")
+    process = _run_evaluator(path)
+    assert process.returncode != 0
+    assert "synthetic_no_images" in process.stderr
