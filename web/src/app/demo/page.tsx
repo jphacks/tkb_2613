@@ -9,7 +9,7 @@ import { Reveal } from "@/components/reveal/Reveal";
 import { ApiError, getDemoDiagnosis, simulateDemo } from "@/lib/api";
 import { messages } from "@/lib/messages";
 import { validNameConclusions } from "@/lib/reveal";
-import type { DemoDiagnosis, Simulation } from "@/types/diagnose";
+import { legacySimulationConclusions, type DemoDiagnosis, type Simulation } from "@/types/diagnose";
 
 const t = messages.demo;
 const r = messages.risky;
@@ -54,7 +54,7 @@ export default function DemoPage() {
             <Reveal posts={result.posts} clues={result.clues} conclusions={conclusions} />
             <ConclusionBoard
               clues={result.clues}
-              conclusions={simulation ? validNameConclusions(simulation.after) : conclusions}
+              conclusions={simulation ? validNameConclusions(legacySimulationConclusions(simulation.after)) : conclusions}
               unknown={simulation?.broken}
             />
             <DemoCandidates result={result} onSimulated={setSimulation} />

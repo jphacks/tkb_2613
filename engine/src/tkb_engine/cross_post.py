@@ -3,6 +3,7 @@
 import re
 import unicodedata
 from collections.abc import Collection, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta, timezone
 from itertools import combinations
 
@@ -629,6 +630,63 @@ def claims_after_deletion(
 
 PROFILE_PLAN_MAX_POSTS = 3
 
+PROFILE_ATTRIBUTE_WEIGHTS: dict[ProfileAttribute, int] = {
+    ProfileAttribute.FULL_NAME: 120,
+    ProfileAttribute.FACIAL_APPEARANCE: 120,
+    ProfileAttribute.HOME_BUILDING: 120,
+    ProfileAttribute.HOME_ROOM: 120,
+    ProfileAttribute.BIRTHDAY: 100,
+    ProfileAttribute.RESIDENTIAL_AREA: 100,
+    ProfileAttribute.HOME_NEAREST_STATION: 100,
+    ProfileAttribute.ACTUAL_HOME_ABSENCE: 100,
+    ProfileAttribute.ANNOUNCED_LONG_ABSENCE: 100,
+    ProfileAttribute.REALTIME_LOCATION: 100,
+    ProfileAttribute.EMPLOYER_NAME: 85,
+    ProfileAttribute.WORKPLACE_BUILDING_CANDIDATE: 85,
+    ProfileAttribute.SCHOOL: 85,
+    ProfileAttribute.CHILD_SCHOOL: 85,
+    ProfileAttribute.CHILD_AGE: 85,
+    ProfileAttribute.PARTIAL_PLATE: 85,
+    ProfileAttribute.GIVEN_NAME: 65,
+    ProfileAttribute.NICKNAME: 65,
+    ProfileAttribute.OTHER_SOCIAL_ACCOUNT: 65,
+    ProfileAttribute.REGULAR_STATION: 65,
+    ProfileAttribute.WORKPLACE_AREA: 65,
+    ProfileAttribute.PARTNER_ATTRIBUTES: 65,
+    ProfileAttribute.AGE: 45,
+    ProfileAttribute.OCCUPATION: 45,
+    ProfileAttribute.FREQUENT_SHOP: 45,
+    ProfileAttribute.REGULAR_LINE: 45,
+    ProfileAttribute.VEHICLE_MODEL: 45,
+    ProfileAttribute.PARTNER_STATUS: 45,
+    ProfileAttribute.ACTIVE_TIME: 25,
+    ProfileAttribute.ROUTINE: 25,
+}
+
+
+@dataclass(frozen=True, slots=True)
+class ProfileCandidateSimulation:
+    """Result of recalculating 29-attribute candidate sets after deleting posts."""
+
+    delete: list[str]
+    broken: list[str]
+    after: list[ProfileCandidateSet]
+
+
+def broken_profile_attributes(
+    before: Sequence[ProfileCandidateSet],
+    after: Sequence[ProfileCandidateSet],
+) -> list[str]:
+    """Return attribute names that had supported candidates before deletion and none after."""
+    after_supported = {
+        candidate_set.attribute for candidate_set in after if candidate_set.candidates
+    }
+    return [
+        candidate_set.attribute.value
+        for candidate_set in before
+        if candidate_set.candidates and candidate_set.attribute not in after_supported
+    ]
+
 
 def plan_profile_claim_deletion(claims: Sequence[ProfileItem], posts: Sequence[Post]) -> list[str]:
     """Choose up to max_posts that remove the most currently supported claims.
@@ -699,7 +757,7 @@ def plan_profile_claim_deletion(claims: Sequence[ProfileItem], posts: Sequence[P
 def plan_profile_candidate_deletion(
     candidate_sets: Sequence[ProfileCandidateSet], posts: Sequence[Post]
 ) -> list[str]:
-    """Prefer attributes that become unsupported, then reduce remaining candidates.
+    """Prefer higher-weight collapsed attributes, then reduce remaining candidates.
 
     Removing a currently top-ranked value while another grounded value survives is a rank
     change, not a broken attribute. All values in the full pool are re-evaluated per subset.
@@ -730,7 +788,7 @@ def plan_profile_candidate_deletion(
     for count in range(1, limit + 1):
         for selected in combinations(candidate_indexes, count):
             deleted = {post_order[index] for index in selected}
-            collapsed_attributes = 0
+            collapsed_weight = 0
             reduced_candidates = 0
             for candidate_set in eligible_sets:
                 surviving_count = 0
@@ -742,14 +800,58 @@ def plan_profile_candidate_deletion(
                     )
                     surviving_count += survives
                 if surviving_count == 0:
-                    collapsed_attributes += 1
+                    collapsed_weight += PROFILE_ATTRIBUTE_WEIGHTS[candidate_set.attribute]
                 reduced_candidates += len(candidate_set.candidate_pool) - surviving_count
             if not reduced_candidates:
                 continue
-            score = (-collapsed_attributes, -reduced_candidates, count, selected)
+            score = (-collapsed_weight, -reduced_candidates, count, selected)
             if best_score is None or score < best_score:
                 best_score, best_indexes = score, selected
     return [post_order[index] for index in best_indexes]
+
+
+def simulate_profile_candidate_sets(
+    candidate_sets: Sequence[ProfileCandidateSet],
+    posts: Sequence[Post],
+    delete_post_ids: Sequence[str],
+    *,
+    clues: Sequence[Clue] = (),
+    excluded_post_ids: Collection[str] = (),
+    diagnosis_at: datetime | None = None,
+) -> ProfileCandidateSimulation:
+    """Recalculate candidate sets from excluded baseline after deleting selected posts."""
+    excluded = set(excluded_post_ids)
+    requested = list(dict.fromkeys(delete_post_ids))
+    delete_set = set(requested) - excluded
+    remaining_posts = [post for post in posts if post.post_id not in excluded]
+    remaining_clues = [clue for clue in clues if clue.post_id not in excluded]
+    before = (
+        recalculate_profile_candidate_sets(
+            candidate_sets,
+            excluded,
+            remaining_posts,
+            clues=remaining_clues,
+            diagnosis_at=diagnosis_at,
+        )
+        if excluded
+        else list(candidate_sets)
+    )
+    if not delete_set:
+        return ProfileCandidateSimulation(delete=requested, broken=[], after=before)
+    after_posts = [post for post in remaining_posts if post.post_id not in delete_set]
+    after_clues = [clue for clue in remaining_clues if clue.post_id not in delete_set]
+    after = recalculate_profile_candidate_sets(
+        before,
+        delete_set,
+        after_posts,
+        clues=after_clues,
+        diagnosis_at=diagnosis_at,
+    )
+    return ProfileCandidateSimulation(
+        delete=requested,
+        broken=broken_profile_attributes(before, after),
+        after=after,
+    )
 
 
 def recalculate_profile_candidate_sets(

@@ -28,6 +28,8 @@ from tkb_common.schemas import (
     ProfileStatus,
 )
 from tkb_engine.cross_post import (
+    PROFILE_ATTRIBUTE_WEIGHTS,
+    broken_profile_attributes,
     evaluate_profile_candidates,
     infer_child_age_claim,
     infer_child_age_claims,
@@ -45,6 +47,7 @@ from tkb_engine.cross_post import (
     profile_relations_after_deletion,
     recalculate_after_deletion,
     recalculate_profile_candidate_sets,
+    simulate_profile_candidate_sets,
 )
 from tkb_engine.gazetteer import Gazetteer
 
@@ -2471,3 +2474,70 @@ def test_rules_x1_emits_commute_destination_is_school_relation() -> None:
     assert relation.right.attribute is ProfileAttribute.SCHOOL
     assert relation.right.value == "文京大学（文京区）"
     assert len(relation.evidence_paths[0].evidence) >= 2
+
+
+def test_profile_attribute_weights_cover_all_attributes() -> None:
+    assert set(PROFILE_ATTRIBUTE_WEIGHTS) == set(ProfileAttribute)
+
+
+def test_candidate_planner_prefers_higher_weighted_attribute_on_tie() -> None:
+    p_routine = post("weight-routine", "毎週火曜のジム")
+    p_active = post("weight-active", "朝8時")
+    p_home = post("weight-home", "茗荷谷が最寄り")
+    p_name = post("weight-name", "田中花子")
+    p_shared = post("weight-shared", "補足")
+    routine = _claim_with_paths(ProfileAttribute.ROUTINE, [[p_routine, p_shared]]).model_copy(
+        update={"value": "火曜のジム"}
+    )
+    active = _claim_with_paths(ProfileAttribute.ACTIVE_TIME, [[p_active, p_shared]]).model_copy(
+        update={"value": "朝8時"}
+    )
+    nearest = _claim_with_paths(
+        ProfileAttribute.HOME_NEAREST_STATION, [[p_home, p_shared]]
+    ).model_copy(update={"value": "茗荷谷駅"})
+    full_name = _claim_with_paths(ProfileAttribute.FULL_NAME, [[p_name, p_shared]]).model_copy(
+        update={"value": "田中花子"}
+    )
+    sets = evaluate_profile_candidates(
+        [routine, active, nearest, full_name],
+        [p_routine, p_active, p_home, p_name, p_shared],
+    )
+
+    # Without p_shared in the candidate post slice, max 3 deletions cannot collapse all 4;
+    # higher-weight attributes (home_nearest_station=100, full_name=120) must outrank active_time.
+    assert plan_profile_candidate_deletion(sets, [p_routine, p_active, p_home, p_name]) == [
+        p_routine.post_id,
+        p_home.post_id,
+        p_name.post_id,
+    ]
+
+
+def test_simulate_profile_candidate_sets_tracks_broken_and_excluded_baseline() -> None:
+    p1 = post("sim-1", "根拠1")
+    p2 = post("sim-2", "根拠2")
+    p3 = post("sim-3", "根拠3")
+    residence = _claim_with_paths(ProfileAttribute.RESIDENTIAL_AREA, [[p1, p3]]).model_copy(
+        update={"value": "文京区"}
+    )
+    routine = _claim_with_paths(ProfileAttribute.ROUTINE, [[p2, p3]]).model_copy(
+        update={"value": "火曜のジム"}
+    )
+    sets = evaluate_profile_candidates([residence, routine], [p1, p2, p3])
+
+    noop = simulate_profile_candidate_sets(sets, [p1, p2, p3], [])
+    assert noop.broken == []
+    assert noop.after == sets
+
+    first = simulate_profile_candidate_sets(sets, [p1, p2, p3], [p1.post_id])
+    assert first.broken == [ProfileAttribute.RESIDENTIAL_AREA.value]
+    assert broken_profile_attributes(sets, first.after) == [ProfileAttribute.RESIDENTIAL_AREA.value]
+
+    # Starting with p1 already excluded, deleting p2 only reports routine as newly broken.
+    second = simulate_profile_candidate_sets(
+        sets,
+        [p1, p2, p3],
+        [p2.post_id],
+        excluded_post_ids=[p1.post_id],
+    )
+    assert second.broken == [ProfileAttribute.ROUTINE.value]
+    assert all(not cs.candidates for cs in second.after)

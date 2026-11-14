@@ -7,7 +7,7 @@ import { ApiError, deletePosts, simulate } from "@/lib/api";
 import { messages } from "@/lib/messages";
 import { isLikelyNameText, validNameConclusions } from "@/lib/reveal";
 import type { Clue } from "@/types/clue";
-import type { Deletion, RiskyPost, Simulation } from "@/types/diagnose";
+import { legacySimulationConclusions, type Deletion, type RiskyPost, type Simulation } from "@/types/diagnose";
 import type { Post } from "@/types/post";
 import { profileCandidateAfterDeletion, type ProfileCandidateSet } from "@/types/profile";
 
@@ -159,11 +159,12 @@ export function RiskyPosts({ posts, risky, clues = [], clueCount, profileClaims 
   const profileCandidateLeft = shown !== null && profileClaims.some((claimSet) =>
     profileCandidateAfterDeletion(claimSet, gone).candidates.length > 0,
   );
+  const shownAfterConclusions = shown !== null ? legacySimulationConclusions(shown.after) : [];
   const escaped = shown !== null && !directCluesLeft && IMPORTANT_ATTRIBUTES
     .filter((attribute) => !LEGACY_NAME_ATTRIBUTES.has(attribute))
-    .every((attribute) => !shown.after.some((conclusion) => conclusion.attribute === attribute)) && !profileCandidateLeft;
+    .every((attribute) => !shownAfterConclusions.some((conclusion) => conclusion.attribute === attribute)) && !profileCandidateLeft;
   const counts = shown !== null && conclusions !== undefined
-    ? { before: new Set(conclusions.map((item) => item.attribute)).size, after: new Set(validNameConclusions(shown.after).map((item) => item.attribute)).size }
+    ? { before: new Set(conclusions.map((item) => item.attribute)).size, after: new Set(validNameConclusions(shownAfterConclusions).map((item) => item.attribute)).size }
     : null;
 
   return (

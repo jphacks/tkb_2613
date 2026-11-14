@@ -167,7 +167,28 @@ describe("toDiagnoseEvent", () => {
     );
   });
 
-  it("reads a plan event", () => {
+  it("reads a plan event with 29 profile candidate sets", () => {
+    const profileClaims = PROFILE_DIAGNOSED_ATTRIBUTES.map((attribute) => ({
+      attribute,
+      status: "unknown",
+      candidates: [],
+      candidate_pool: [],
+      reason: "no_grounded_rule",
+      conflicting_evidence: [],
+    }));
+    const data = {
+      delete: [POST.post_id],
+      broken: ["routine"],
+      after: profileClaims,
+      posts: [{ post_id: POST.post_id, broken: ["routine"] }],
+    };
+    expect(toDiagnoseEvent("plan", JSON.stringify(data))).toEqual({
+      event: "plan",
+      ...data,
+    });
+  });
+
+  it("reads a legacy plan event", () => {
     const data = {
       delete: [POST.post_id],
       broken: ["routine"],

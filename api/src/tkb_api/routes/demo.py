@@ -4,9 +4,10 @@
 モデル・Bluesky・セッションには接続せず、Cookie も読まない（MOCK_MODE=0 でも同じ）。
 削除の API はない。
 
-  GET  /api/demo/diagnosis  → {"demo": true, "posts", "clues", "conclusions", "plan"}
+  GET  /api/demo/diagnosis  → {"demo": true, "posts", "clues", "conclusions",
+                              "profile_claims", "profile_relations",
+                              "profile_claim_suggestions", "plan"}
   POST /api/demo/simulate   {"delete": [投稿ID]} → {"delete", "broken", "after"}
-    after の clue_indices は、GET /api/demo/diagnosis の clues での番号
 
 GET /api/demo/diagnosis の応答は、表（DEMO_FIXTURE_PATH）と地名の表（Gazetteer）が同じなら
 毎回同じなので、一度だけ計算して JSON のバイト列のまま使い回す。起動時（lifespan）に
@@ -25,10 +26,18 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 
 from tkb_api.config import Settings, get_settings
-from tkb_api.pipeline import conclusions_json, plan_json, simulate_json
+from tkb_api.pipeline import (
+    conclusions_json,
+    plan_claims_json,
+    simulate_claims_json,
+)
 from tkb_api.routes.diagnose import get_gazetteer
 from tkb_api.schemas import SimulateRequest
-from tkb_common.schemas import Clue, Post
+from tkb_common.schemas import Clue, Post, ProfileCandidateSet
+from tkb_engine.cross_post import (
+    infer_owner_candidate_sets_with_web,
+    infer_owner_profile_relations,
+)
 from tkb_engine.gazetteer import Gazetteer
 
 router = APIRouter(prefix="/api/demo")
@@ -61,6 +70,7 @@ DemoData = Annotated[tuple[tuple[Post, ...], tuple[Clue, ...]], Depends(get_demo
 class _CachedDiagnosis:
     fixture_path: Path
     gazetteer: Gazetteer
+    profile_claims: tuple[ProfileCandidateSet, ...]
     body: bytes
 
 
@@ -70,21 +80,32 @@ _cached: _CachedDiagnosis | None = None
 
 def _render_diagnosis(
     posts: tuple[Post, ...], clues: tuple[Clue, ...], gazetteer: Gazetteer
-) -> bytes:
+) -> tuple[tuple[ProfileCandidateSet, ...], bytes]:
+    profile_claims = tuple(
+        infer_owner_candidate_sets_with_web(list(posts), list(clues), [], gazetteer=gazetteer)
+    )
+    profile_relations = infer_owner_profile_relations(
+        list(posts), profile_claims, clues=list(clues), gazetteer=gazetteer
+    )
+    plan = plan_claims_json(profile_claims, clues, posts)
     doc = {
         "demo": True,
         "posts": [post.model_dump(mode="json") for post in posts],
         "clues": [clue.model_dump(mode="json") for clue in clues],
         "conclusions": conclusions_json(clues, posts, gazetteer),
-        "plan": plan_json(clues, posts, gazetteer),
+        "profile_claims": [item.model_dump(mode="json") for item in profile_claims],
+        "profile_relations": [item.model_dump(mode="json") for item in profile_relations],
+        "profile_claim_suggestions": list(plan["delete"]),
+        "plan": plan,
     }
     # FastAPI の JSONResponse と同じ書き出し方
-    return json.dumps(doc, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode()
+    body = json.dumps(doc, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode()
+    return profile_claims, body
 
 
-def _diagnosis_body(
+def _diagnosis_entry(
     fixture_path: Path, data: tuple[tuple[Post, ...], tuple[Clue, ...]], gazetteer: Gazetteer
-) -> bytes:
+) -> _CachedDiagnosis:
     """表のパスと Gazetteer（同じオブジェクトか）が前回と同じなら、前回の応答を返す。
 
     テストで設定や Gazetteer を差し替えたときは、古い応答を返さずに計算し直す。
@@ -92,21 +113,22 @@ def _diagnosis_body(
     """
     global _cached
 
-    def hit(entry: _CachedDiagnosis | None) -> bytes | None:
+    def hit(entry: _CachedDiagnosis | None) -> _CachedDiagnosis | None:
         if entry is None or entry.fixture_path != fixture_path or entry.gazetteer is not gazetteer:
             return None
-        return entry.body
+        return entry
 
-    body = hit(_cached)
-    if body is not None:
-        return body
+    entry = hit(_cached)
+    if entry is not None:
+        return entry
     with _cache_lock:
-        body = hit(_cached)
-        if body is None:
+        entry = hit(_cached)
+        if entry is None:
             posts, clues = data
-            body = _render_diagnosis(posts, clues, gazetteer)
-            _cached = _CachedDiagnosis(fixture_path, gazetteer, body)
-        return body
+            profile_claims, body = _render_diagnosis(posts, clues, gazetteer)
+            entry = _CachedDiagnosis(fixture_path, gazetteer, profile_claims, body)
+            _cached = entry
+        return entry
 
 
 def warm_diagnosis_cache(settings: Settings) -> None:
@@ -116,7 +138,7 @@ def warm_diagnosis_cache(settings: Settings) -> None:
     except HTTPException:
         logging.getLogger(__name__).warning("体験デモのデータを読み込めませんでした")
         return
-    _diagnosis_body(settings.demo_fixture_path, data, get_gazetteer(settings))
+    _diagnosis_entry(settings.demo_fixture_path, data, get_gazetteer(settings))
 
 
 @router.get("/diagnosis")
@@ -125,7 +147,7 @@ def diagnosis(
     settings: Annotated[Settings, Depends(get_settings)],
     gazetteer: Annotated[Gazetteer, Depends(get_gazetteer)],
 ) -> Response:
-    body = _diagnosis_body(settings.demo_fixture_path, data, gazetteer)
+    body = _diagnosis_entry(settings.demo_fixture_path, data, gazetteer).body
     return Response(content=body, media_type="application/json")
 
 
@@ -133,6 +155,7 @@ def diagnosis(
 def simulate(
     body: SimulateRequest,
     data: DemoData,
+    settings: Annotated[Settings, Depends(get_settings)],
     gazetteer: Annotated[Gazetteer, Depends(get_gazetteer)],
 ) -> dict[str, Any]:
     posts, clues = data
@@ -142,4 +165,5 @@ def simulate(
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT, "デモの投稿の中から選んでください"
         )
-    return simulate_json(clues, posts, gazetteer, body.delete)
+    profile_claims = _diagnosis_entry(settings.demo_fixture_path, data, gazetteer).profile_claims
+    return simulate_claims_json(profile_claims, clues, posts, body.delete)
