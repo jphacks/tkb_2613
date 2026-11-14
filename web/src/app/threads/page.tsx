@@ -11,7 +11,16 @@ import { checkThreadsPublicText } from "@/lib/threads-public-check";
 import { useThreadsLang } from "@/lib/useThreadsLang";
 import { isDiagnosisSnapshot, isSimulation, type DiagnosisSnapshot, type Simulation } from "@/types/diagnose";
 import { isPost, type Post } from "@/types/post";
-import { profileClaimsAfterDeletion } from "@/types/profile";
+import {
+  PROFILE_DIAGNOSED_ATTRIBUTES,
+  isProfileCandidateSetList,
+  isProfileItem,
+  profileClaimsAfterDeletion,
+  type ClaimAssessment,
+  type ProfileCandidate,
+  type ProfileCandidateSet,
+  type ProfileItem,
+} from "@/types/profile";
 
 type PostError = { readonly post_id: string; readonly error: string };
 type ThreadsDiagnosis = DiagnosisSnapshot & {
@@ -80,11 +89,65 @@ function isPostErrors(value: unknown): value is readonly PostError[] {
     isRecord(item) && typeof item.post_id === "string" && typeof item.error === "string"));
 }
 
+const EMPTY_ASSESSMENT: ClaimAssessment = {
+  minimal_scope: "bluesky", offline_subtype: null, psychological_resistance: null,
+  persona_context: null, inference_ease: null, inference_ease_basis: null,
+  harm_severity: null, harm_scenario: null, harm_prerequisites: [], harm_status: "unknown",
+};
+
+/** Threads still returns ProfileItem rows; adapt them at this route boundary. */
+function threadsCandidateSets(raw: unknown, posts: readonly Post[]): readonly ProfileCandidateSet[] | null {
+  if (!Array.isArray(raw)) return null;
+  const claims: ProfileItem[] = [];
+  for (const value of raw) {
+    if (!isRecord(value)) return null;
+    const paths = Array.isArray(value.evidence_paths)
+      ? value.evidence_paths.map((path: unknown) => isRecord(path)
+        ? { ...path, provenance: path.provenance ?? "combined_inference" } : path)
+      : value.evidence_paths;
+    const claim = { ...value, evidence_paths: paths };
+    if (!isProfileItem(claim)) return null;
+    claims.push(claim);
+  }
+  return PROFILE_DIAGNOSED_ATTRIBUTES.map((attribute) => {
+    const ranked = claims.filter((claim) => claim.attribute === attribute && claim.value !== null &&
+      (claim.evidence_paths?.length ?? 0) > 0)
+      .sort((a, b) => b.confidence - a.confidence || (a.value ?? "").localeCompare(b.value ?? ""));
+    const candidate_pool: ProfileCandidate[] = ranked.flatMap((claim, index) => {
+      if (claim.value === null || !claim.evidence_paths) return [];
+      const observed_at = attribute === "realtime_location"
+        ? posts.find((post) => claim.evidence.some((ref) => ref.post_id === post.post_id))?.created_at ?? null
+        : null;
+      if (attribute === "realtime_location" && observed_at === null) return [];
+      return [{
+        rank: index + 1, value: claim.value, confidence: claim.confidence, status: claim.status,
+        evidence: claim.evidence, evidence_paths: claim.evidence_paths,
+        assessment: claim.assessment ?? EMPTY_ASSESSMENT, observed_at, counter_evidence: [],
+      }];
+    });
+    const leading = candidate_pool[0];
+    const candidates = leading ? candidate_pool.filter((candidate) =>
+      candidate.status === leading.status &&
+      (leading.status === "weak" || leading.confidence - candidate.confidence <= 0.15)).slice(0, 3) : [];
+    return {
+      attribute, status: candidates.length > 1 ? "ambiguous" : candidates.length ? "candidate" : "unknown",
+      candidates, candidate_pool, conflicting_evidence: [],
+      reason: candidates.length ? null : "no_grounded_rule",
+    };
+  });
+}
+
 function requireDiagnosis(value: unknown): ThreadsDiagnosis {
-  if (!isDiagnosisSnapshot(value) || !isPostErrors((value as { post_errors?: unknown }).post_errors)) {
+  if (!isRecord(value) || !isPostErrors(value.post_errors)) {
     throw new ThreadsError("diagnosisUnreadable");
   }
-  return value as ThreadsDiagnosis;
+  if (isDiagnosisSnapshot(value) && (value.profile_claims === undefined ||
+    isProfileCandidateSetList(value.profile_claims))) return value as ThreadsDiagnosis;
+  const profileClaims = threadsCandidateSets(value.profile_claims, Array.isArray(value.posts)
+    ? value.posts.filter(isPost) : []);
+  const adapted = profileClaims === null ? value : { ...value, profile_claims: profileClaims };
+  if (!isDiagnosisSnapshot(adapted)) throw new ThreadsError("diagnosisUnreadable");
+  return adapted as ThreadsDiagnosis;
 }
 
 export default function ThreadsPage() {

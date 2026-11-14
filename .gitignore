@@ -16,6 +16,7 @@ data-prep/raw/
 data-prep/out/
 data/
 eval/photos/
+eval/local/
 *.safetensors
 *.gguf
 *.onnx

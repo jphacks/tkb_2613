@@ -14,6 +14,8 @@ export interface PostImage {
   readonly alt: string;
   readonly width: number;
   readonly height: number;
+  /** モック専用のローカル画像ファイル名。実モードでは常に未設定。 */
+  readonly mock_asset?: string | null;
 }
 
 export interface Post {
@@ -46,6 +48,10 @@ function isPostImage(value: unknown, index: number): value is PostImage {
     typeof value.url === "string" &&
     value.url.startsWith(BSKY_CDN_PREFIX) &&
     typeof value.alt === "string" &&
+    (value.mock_asset === undefined ||
+      value.mock_asset === null ||
+      (typeof value.mock_asset === "string" &&
+        /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.mock_asset))) &&
     isPositiveInt(value.width) &&
     isPositiveInt(value.height)
   );

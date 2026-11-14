@@ -11,7 +11,7 @@ import logging
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Sequence
 from dataclasses import asdict
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -29,7 +29,11 @@ from tkb_common.schemas import (
 )
 from tkb_detect.batch import PostExtraction, extract_posts
 from tkb_detect.extract import Extractor
-from tkb_engine.cross_post import infer_owner_claims_with_web, plan_profile_claim_deletion
+from tkb_engine.cross_post import (
+    infer_owner_candidate_sets_with_web,
+    infer_owner_profile_relations,
+    plan_profile_candidate_deletion,
+)
 from tkb_engine.gazetteer import Gazetteer, Knowledge
 from tkb_engine.planner import Simulation, plan, simulate
 from tkb_engine.rules import Conclusion, infer
@@ -238,6 +242,7 @@ async def diagnose_events(
     external_lookup_status: ExternalLookupStatus = ExternalLookupStatus.NOT_REQUESTED,
     external_lookup: Callable[[], Awaitable[ExternalLookupResult]] | None = None,
     diagnosis_date: date | None = None,
+    diagnosis_at: datetime | None = None,
 ) -> AsyncIterator[Event]:
     """診断のイベントを順に返す。
 
@@ -291,7 +296,7 @@ async def diagnose_events(
         if owner_profile_text and owner_profile_analyzer
         else []
     )
-    profile_claims = infer_owner_claims_with_web(
+    profile_claims = infer_owner_candidate_sets_with_web(
         list(posts),
         all_clues,
         list(web_facts),
@@ -299,14 +304,17 @@ async def diagnose_events(
         self_report_clues,
         gazetteer=gazetteer,
         diagnosis_date=diagnosis_date,
+        diagnosis_at=diagnosis_at,
     )
-    profile_claim_suggestions = plan_profile_claim_deletion(profile_claims, posts)
+    profile_claim_suggestions = plan_profile_candidate_deletion(profile_claims, posts)
+    profile_relations = infer_owner_profile_relations(list(posts), profile_claims)
     yield (
         "conclusions",
         {
             "clues": [c.model_dump(mode="json") for c in all_clues],
             "conclusions": [asdict(c) for c in conclusions],
             "profile_claims": [item.model_dump(mode="json") for item in profile_claims],
+            "profile_relations": [item.model_dump(mode="json") for item in profile_relations],
             "profile_claim_suggestions": profile_claim_suggestions,
             "web_facts": [fact.model_dump(mode="json") for fact in web_facts],
             "web_lookup_status": web_lookup_status,
@@ -325,6 +333,7 @@ async def diagnose_events(
             {
                 "clues": all_clues,
                 "profile_claims": profile_claims,
+                "profile_relations": profile_relations,
                 "profile_claim_suggestions": profile_claim_suggestions,
                 "web_facts": list(web_facts),
                 "web_lookup_status": web_lookup_status,

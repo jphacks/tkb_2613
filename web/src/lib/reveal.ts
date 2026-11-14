@@ -109,11 +109,13 @@ export function pickSpotlight(
   posts: readonly Post[],
   clues: readonly Clue[],
   conclusions: readonly Conclusion[],
+  excludedPostIds: ReadonlySet<string> = new Set(),
 ): RevealItem[] {
   const seen = new Set<ClueType>();
   const inferredName = conclusions.find((c) => NAME_ATTRIBUTES.includes(c.attribute) && isLikelyNameText(c.value))?.value.replace(/\s+/g, "") ?? null;
   return revealItems(posts, clues, conclusions)
     .filter((item) => {
+      if (excludedPostIds.has(item.clue.post_id)) return false;
       if (item.clue.type === "face") {
         return item.clue.confidence >= FACE_MIN_CONFIDENCE && Boolean(item.image && item.clue.region);
       }
