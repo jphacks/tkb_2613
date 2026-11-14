@@ -62,7 +62,7 @@ from tkb_api.pipeline import (
     fetch_single_image,
     load_gazetteer,
     mock_extractions,
-    plan_json,
+    plan_claims_json,
     real_extractions,
 )
 from tkb_api.public_web_identity import (
@@ -411,7 +411,12 @@ def read_diagnosis(
         ],
         "deleted": list(deleted),
         "conclusions": conclusions_json(clues, posts, gazetteer, deleted),
-        "plan": plan_json(clues, posts, gazetteer, deleted),
+        "plan": plan_claims_json(
+            profile_claims,
+            remaining_clues,
+            remaining_posts,
+            diagnosis_at=diagnosis.diagnosis_at,
+        ),
         "profile_claims": [claim.model_dump(mode="json") for claim in profile_claims],
         "profile_relations": [relation.model_dump(mode="json") for relation in profile_relations],
         "profile_claim_suggestions": [

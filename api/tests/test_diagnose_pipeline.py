@@ -571,18 +571,18 @@ async def test_events_run_inference_and_planning_off_the_event_loop(
 
     loop_thread = threading.get_ident()
     threads: dict[str, int] = {}
-    real_plan_json = pipeline.plan_json
+    real_plan_claims_json = pipeline.plan_claims_json
 
     def infer(*args: Any) -> Any:
         threads["infer"] = threading.get_ident()
         return real_infer(*args)
 
-    def plan_json(*args: Any) -> Any:
-        threads["plan_json"] = threading.get_ident()
-        return real_plan_json(*args)
+    def plan_claims_json(*args: Any, **kwargs: Any) -> Any:
+        threads["plan_claims_json"] = threading.get_ident()
+        return real_plan_claims_json(*args, **kwargs)
 
     monkeypatch.setattr(pipeline, "infer", infer)
-    monkeypatch.setattr(pipeline, "plan_json", plan_json)
+    monkeypatch.setattr(pipeline, "plan_claims_json", plan_claims_json)
     post = _post(0)
     events = [
         e
@@ -592,5 +592,5 @@ async def test_events_run_inference_and_planning_off_the_event_loop(
     ]
 
     assert [name for name, _ in events][-3:] == ["conclusions", "plan", "done"]
-    assert set(threads) == {"infer", "plan_json"}
+    assert set(threads) == {"infer", "plan_claims_json"}
     assert loop_thread not in threads.values()

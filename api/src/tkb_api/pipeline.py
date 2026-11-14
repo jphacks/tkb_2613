@@ -26,6 +26,7 @@ from tkb_common.schemas import (
     ExternalProfileResult,
     PhotoPlaceResult,
     Post,
+    ProfileCandidateSet,
     WebFact,
 )
 from tkb_detect.batch import PostExtraction, extract_posts
@@ -34,6 +35,8 @@ from tkb_engine.cross_post import (
     infer_owner_candidate_sets_with_web,
     infer_owner_profile_relations,
     plan_profile_candidate_deletion,
+    recalculate_profile_candidate_sets,
+    simulate_profile_candidate_sets,
 )
 from tkb_engine.gazetteer import Gazetteer, Knowledge
 from tkb_engine.photo_place import infer_photo_places
@@ -246,6 +249,87 @@ def plan_json(
     return {**simulation_json(proposal, clues, excluded), "posts": per_post}
 
 
+def simulate_claims_json(
+    candidate_sets: Sequence[ProfileCandidateSet],
+    clues: Sequence[Clue],
+    posts: Sequence[Post],
+    delete: Sequence[str],
+    excluded: Sequence[str] = (),
+    *,
+    diagnosis_at: datetime | None = None,
+) -> dict[str, Any]:
+    """excluded を除いた状態から、delete を消したときの 29 項目候補集合の変化を返す。"""
+    sim = simulate_profile_candidate_sets(
+        candidate_sets,
+        posts,
+        delete,
+        clues=clues,
+        excluded_post_ids=excluded,
+        diagnosis_at=diagnosis_at,
+    )
+    return {
+        "delete": sim.delete,
+        "broken": sim.broken,
+        "after": [item.model_dump(mode="json") for item in sim.after],
+    }
+
+
+def plan_claims_json(
+    candidate_sets: Sequence[ProfileCandidateSet],
+    clues: Sequence[Clue],
+    posts: Sequence[Post],
+    excluded: Sequence[str] = (),
+    *,
+    diagnosis_at: datetime | None = None,
+    proposed_delete: Sequence[str] | None = None,
+) -> dict[str, Any]:
+    """29 項目の候補集合を基準に、最小削除提案と投稿ごとの影響項目を返す。"""
+    remaining_clues, remaining_posts = _remaining(clues, posts, excluded)
+    excluded_set = set(excluded)
+    before = (
+        recalculate_profile_candidate_sets(
+            candidate_sets,
+            excluded_set,
+            remaining_posts,
+            clues=remaining_clues,
+            diagnosis_at=diagnosis_at,
+        )
+        if excluded_set
+        else list(candidate_sets)
+    )
+    delete_ids = (
+        list(proposed_delete)
+        if proposed_delete is not None
+        else plan_profile_candidate_deletion(before, remaining_posts)
+    )
+    proposal = simulate_profile_candidate_sets(
+        before,
+        remaining_posts,
+        delete_ids,
+        clues=remaining_clues,
+        diagnosis_at=diagnosis_at,
+    )
+    per_post = [
+        {
+            "post_id": post_id,
+            "broken": simulate_profile_candidate_sets(
+                before,
+                remaining_posts,
+                [post_id],
+                clues=remaining_clues,
+                diagnosis_at=diagnosis_at,
+            ).broken,
+        }
+        for post_id in proposal.delete
+    ]
+    return {
+        "delete": proposal.delete,
+        "broken": proposal.broken,
+        "after": [item.model_dump(mode="json") for item in proposal.after],
+        "posts": per_post,
+    }
+
+
 async def diagnose_events(
     posts: Sequence[Post],
     extractions: AsyncIterator[PostExtraction],
@@ -403,7 +487,17 @@ async def diagnose_events(
                 "self_report_clues": self_report_clues,
             }
         )
-    yield "plan", await asyncio.to_thread(plan_json, all_clues, posts, gazetteer)
+    yield (
+        "plan",
+        await asyncio.to_thread(
+            plan_claims_json,
+            profile_claims,
+            all_clues,
+            posts,
+            diagnosis_at=diagnosis_at,
+            proposed_delete=profile_claim_suggestions,
+        ),
+    )
     logger.info(
         "診断の時間：手がかりの取り出し %.1f 秒"
         "（投稿 %d 件、写真 %d 枚、手がかり %d 件、失敗 %d 件）、推理と危ない投稿 %.2f 秒",
