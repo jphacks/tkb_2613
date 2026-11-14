@@ -168,6 +168,8 @@ X の状態変更 API は同一オリジンの `Origin` ヘッダーを要求す
 
 `POST /api/threads/diagnose` は同じセッションで診断中なら `409`（`{"detail":"診断中です"}`）を返し、診断済みなら保存した結果をそのまま返す。投稿の取得（`GET /api/threads/posts`）の処理中も `409` になる。
 
+`GET /api/threads/session` は `{"username":string,"mock":boolean,"busy":boolean}` を返す。`busy` は診断または投稿の取得が実行中のとき true。
+
 `GET /api/threads/progress`（要セッション）は診断の進み具合を返す。画面は診断中・`409` のあと・再読み込みのあとにこれを約1.5秒ごとに聞き、`done` になったら `GET /api/threads/diagnosis` で結果を読む。
 
 ```json

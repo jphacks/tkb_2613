@@ -155,7 +155,7 @@ describe("Threads AI diagnosis in progress", () => {
     render(<ThreadsPage />);
     fireEvent.click(await openAiCard());
 
-    expect(await screen.findByText("前に始めたAI診断が続いています。終わると結果を表示します。")).toBeInTheDocument();
+    expect(await screen.findByText(/診断を実行中です。ページを再読み込みしても処理は続きます/)).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 
     state.progress = { ...IDLE, state: "done" };
@@ -170,7 +170,7 @@ describe("Threads AI diagnosis in progress", () => {
     render(<ThreadsPage />);
     fireEvent.click(await openAiCard());
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("すでにAI診断中です。終わるまでお待ちください。");
+    expect(await screen.findByRole("alert")).toHaveTextContent("診断を実行中です。終わるまでお待ちください。");
   });
 
   it("comes back to the running diagnosis after a reload and shows its result", async () => {
@@ -178,7 +178,7 @@ describe("Threads AI diagnosis in progress", () => {
     render(<ThreadsPage />);
 
     expect(await screen.findByText(messages.loading.calling)).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("前に始めたAI診断が続いています");
+    expect(screen.getByRole("status")).toHaveTextContent("診断を実行中です。ページを再読み込みしても処理は続きます");
     expect(screen.getByText(/経過 2:0\d/)).toBeInTheDocument();
     expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", String(POSTS.length));
 

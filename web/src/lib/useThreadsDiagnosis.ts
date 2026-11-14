@@ -24,6 +24,8 @@ interface Handlers<T> {
 
 /** 診断中に進み具合を聞きに行く間隔 */
 export const PROGRESS_POLL_MS = 1500;
+/** 前の診断を待つ上限。POST /diagnose の待ち時間の上限（page.tsx の call）と同じ */
+const FOLLOW_LIMIT_MS = 2_100_000;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -71,18 +73,23 @@ export function useThreadsDiagnosis<T>(
   }, [call, parse]);
 
   /** 診断が終わるまで progress を聞き続け、終わったら結果を読み込む。失敗なら ThreadsError を投げる */
-  const waitForDiagnosis = useCallback(async () => {
+  const waitForDiagnosis = useCallback(async (alreadyRunning = false) => {
+    const deadline = Date.now() + FOLLOW_LIMIT_MS;
+    let sawRunning = alreadyRunning;
     while (mounted.current) {
       const progress = await call("progress");
       if (!isThreadsProgress(progress)) throw new ThreadsError("diagnosisUnreadable");
       if (progress.state === "running") {
+        if (Date.now() > deadline) throw new ThreadsError("timeout");
+        sawRunning = true;
         applyProgress(progress);
         await sleep(PROGRESS_POLL_MS);
         continue;
       }
       if (progress.state === "failed") throw new ThreadsError(progressErrorKey(progress.error));
-      // 409 の理由が診断ではない処理（投稿の取得）だった
-      if (progress.state === "idle") throw new ThreadsError("diagnosing");
+      // 走っていた診断が結果なしで終わった（中断など）なら、もう一度試せるように知らせる。
+      // 一度も走っていなければ、409 の理由は診断ではない処理（投稿の取得）だった
+      if (progress.state === "idle") throw new ThreadsError(sawRunning ? "diagnosisEnded" : "diagnosing");
       await deliver();
       return;
     }
@@ -127,13 +134,21 @@ export function useThreadsDiagnosis<T>(
 
   /**
    * 結果がないときに呼ぶ。再読み込みの前に始めた診断が続いていれば、終わるまで待って結果を出す。
-   * 前の診断が失敗していれば、その理由（GPU 停止など）を知らせる
+   * 前の診断が失敗していれば、その理由（GPU 停止など）を知らせる。診断を待ったときは true を返す
    */
-  const resume = useCallback(async () => {
+  const resume = useCallback(async (): Promise<boolean> => {
     const progress = await call("progress").catch(() => null);
-    if (!mounted.current || !isThreadsProgress(progress)) return;
-    if (progress.state === "running") await track(waitForDiagnosis, true, progress);
-    else if (progress.state === "failed") latest.current.onError(progressErrorKey(progress.error));
+    if (!mounted.current || !isThreadsProgress(progress)) return false;
+    if (progress.state === "running") {
+      // いま progress を聞いたばかりなので、次は1周期あとに聞く
+      await track(async () => {
+        await sleep(PROGRESS_POLL_MS);
+        await waitForDiagnosis(true);
+      }, true, progress);
+      return true;
+    }
+    if (progress.state === "failed") latest.current.onError(progressErrorKey(progress.error));
+    return false;
   }, [call, track, waitForDiagnosis]);
 
   return { diagnosing, start, resume } as const;

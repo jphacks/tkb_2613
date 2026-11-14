@@ -41,7 +41,7 @@ type ThreadsConfig = {
   max_posts: number;
   image_diagnosis_enabled?: boolean;
 };
-type ThreadsSession = { username: string; mock: boolean };
+type ThreadsSession = { username: string; mock: boolean; busy?: boolean };
 
 const LANGUAGES: readonly { readonly code: ThreadsLang; readonly label: string }[] = [
   { code: "ja", label: "日本語" },
@@ -85,11 +85,11 @@ async function call(path: string, method: "GET" | "POST" | "DELETE" = "GET", bod
     throw new ThreadsError("network");
   }
   if (!response.ok) {
+    // 409 は「すでに診断中」。simulate / rediagnose の 409（診断前）とは別なので、診断と投稿取得だけ見分ける
+    if (response.status === 409 && (path === "diagnose" || path === "posts")) throw new ThreadsError("diagnosing");
     if (response.status === 504) throw new ThreadsError("timeout");
     if (response.status === 503 && path === "diagnose") throw new ThreadsError("modelUnavailable");
     if (response.status === 429 || response.status === 503) throw new ThreadsError("busy");
-    // 同じセッションで診断（または投稿の取得）が進んでいる。二重に始めない
-    if (response.status === 409 && (path === "diagnose" || path === "posts")) throw new ThreadsError("diagnosing");
     if (response.status === 403) throw new ThreadsError("forbidden");
     if (response.status === 401) throw new ThreadsError("loginAgain");
     throw new ThreadsError("failed");
@@ -221,6 +221,11 @@ export default function ThreadsPage() {
         const connected = await call("session");
         if (!active || !isSession(connected)) return;
         setSession(connected);
+        if (connected.busy === true) {
+          // 診断の最中に再読み込みした。progress を見て続きの結果を待つ
+          void resumeDiagnosis();
+          return;
+        }
         try {
           const restored = requireDiagnosis(await call("diagnosis"));
           if (active) { setOriginal(restored); setView(restored); }
@@ -236,7 +241,14 @@ export default function ThreadsPage() {
   async function perform(action: () => Promise<void>) {
     setBusy(true);
     setError(null);
-    try { await action(); }
+    try {
+      try { await action(); }
+      catch (cause) {
+        // すでに診断中なら、汎用エラーにせず、その診断の進み具合を出して完了を待つ
+        if (!(cause instanceof ThreadsError) || cause.key !== "diagnosing") throw cause;
+        if (!(await resumeDiagnosis())) throw cause;
+      }
+    }
     catch (cause) { setError(errorKeyOf(cause, "failed")); }
     finally { setBusy(false); }
   }
@@ -336,9 +348,9 @@ export default function ThreadsPage() {
             setFetchedPosts(data.posts);
             setPublicCheckDone(false);
           })}>{t.reviewPosts}</button>}
-        {busy && <p role="status" className="text-sm text-ink/70">{t.loading}</p>}
+        {busy && !diagnosing && <p role="status" className="text-sm text-ink/70">{t.loading}</p>}
         {diagnosing && <ThreadsDiagnosing t={t} posts={fetchedPosts ?? []} progress={diagnosing.progress}
-          startedAt={diagnosing.startedAt} status={diagnosing.resumed ? t.diagnosingResumed : t.diagnosing} />}
+          startedAt={diagnosing.startedAt} status={diagnosing.resumed ? t.diagnosingNotice : t.diagnosing} />}
         {!original && fetchedPosts && <section aria-label={t.postsAria} className="space-y-4">
           <p className="text-sm text-ink/70">{config?.image_diagnosis_enabled
             ? t.postsFetchedWithImages(fetchedPosts.length) : t.postsFetched(fetchedPosts.length)}</p>
