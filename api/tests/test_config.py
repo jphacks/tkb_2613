@@ -32,9 +32,70 @@ def test_compose_passes_repository_env_only_to_api() -> None:
     api_and_header, web_service = compose.read_text(encoding="utf-8").split("  web:", maxsplit=1)
 
     assert "path: ../.env" in api_and_header
+    assert "../data/processed:/app/data/processed:ro" in api_and_header
     assert "path: ../.env" not in web_service
     assert "BRAVE_SEARCH_API_KEY" not in web_service
     assert "path: /run/tkb_2613/web-secrets.env" in web_service
+
+
+def _touch_gazetteer_tables(directory: Path, filenames: tuple[str, ...]) -> None:
+    directory.mkdir(parents=True, exist_ok=True)
+    for filename in filenames:
+        (directory / filename).touch()
+
+
+def test_default_gazetteer_selects_complete_processed_or_national_tables(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    processed = Path("data/processed")
+    national = processed / "national"
+    required = ("stations.parquet", "postal.parquet", "muni_mesh.parquet")
+
+    assert Settings(_env_file=None).gazetteer_dir == processed
+
+    _touch_gazetteer_tables(national, required)
+    assert Settings(_env_file=None).gazetteer_dir == national
+
+    _touch_gazetteer_tables(processed, ("stations.parquet",))
+    assert Settings(_env_file=None).gazetteer_dir == national
+
+    _touch_gazetteer_tables(processed, required)
+    assert Settings(_env_file=None).gazetteer_dir == processed
+
+
+def test_env_example_does_not_pin_gazetteer_directory() -> None:
+    example = Path(__file__).resolve().parents[2] / ".env.example"
+    active_assignments = [
+        line
+        for line in example.read_text(encoding="utf-8").splitlines()
+        if line.strip().startswith("GAZETTEER_DIR=")
+    ]
+
+    assert active_assignments == []
+
+
+def test_explicit_gazetteer_dir_overrides_autoselection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    explicit = tmp_path / "custom-tables"
+    monkeypatch.setenv("GAZETTEER_DIR", str(explicit))
+
+    assert Settings(_env_file=None).gazetteer_dir == explicit
+
+
+@pytest.mark.parametrize("mock_mode", [True, False])
+def test_gazetteer_dependency_uses_selected_directory_in_mock_and_live_modes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mock_mode: bool
+) -> None:
+    from tkb_api.routes.diagnose import get_gazetteer
+
+    expected = tmp_path / "selected-gazetteer"
+    monkeypatch.setattr("tkb_api.routes.diagnose._cached_gazetteer", lambda directory: directory)
+    settings = Settings(_env_file=None, mock_mode=mock_mode, gazetteer_dir=expected)
+
+    assert get_gazetteer(settings) == expected
 
 
 def test_tests_do_not_read_a_local_env_file(

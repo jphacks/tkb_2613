@@ -10,6 +10,22 @@ from tkb_api.limits import PublicWindow
 
 # 偽の X API を許す手元のホスト
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+GAZETTEER_REQUIRED_FILES = ("stations.parquet", "postal.parquet", "muni_mesh.parquet")
+
+
+def _has_complete_gazetteer(directory: Path) -> bool:
+    return all((directory / filename).is_file() for filename in GAZETTEER_REQUIRED_FILES)
+
+
+def _default_gazetteer_dir() -> Path:
+    """Prefer complete legacy tables, then the national dataset, else legacy path."""
+    processed = Path("data/processed")
+    national = processed / "national"
+    if _has_complete_gazetteer(processed):
+        return processed
+    if _has_complete_gazetteer(national):
+        return national
+    return processed
 
 
 class Settings(BaseSettings):
@@ -51,7 +67,7 @@ class Settings(BaseSettings):
     mock_event_interval_seconds: float = 0.8
     # 推理ルールが引く data-prep の表（stations・postal・muni_mesh）。make data で作る。
     # 読めないときは、表を使うルール（R1 の最寄り駅など）だけを飛ばす
-    gazetteer_dir: Path = Path("data/processed")
+    gazetteer_dir: Path = Field(default_factory=_default_gazetteer_dir)
     # 診断の SSE で、イベントの間がこの秒数より空いたら keep-alive のコメントを送る
     # （Vercel は 120 秒、Cloudflare は 100 秒、何も届かないと接続を切るため）
     sse_keepalive_seconds: float = Field(default=15, gt=0)
