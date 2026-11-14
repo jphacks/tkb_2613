@@ -6,7 +6,7 @@ import argparse
 import ipaddress
 import json
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import closing
 from pathlib import Path
 from typing import Any
@@ -28,7 +28,22 @@ class MeshIndexError(ValueError):
     """The nationwide municipality mesh table is missing or invalid."""
 
 
-def _load_mesh_membership(path: Path) -> frozenset[str]:
+def parse_prefecture_codes(value: str) -> frozenset[str]:
+    """Parse a comma-separated list of two-digit prefecture codes such as `08,09`."""
+    codes = frozenset(part.strip() for part in value.split(",") if part.strip())
+    if not codes or not all(len(code) == 2 and code.isdigit() for code in codes):
+        raise ValueError("prefecture codes must be comma-separated two-digit codes")
+    return codes
+
+
+def _load_mesh_membership(
+    path: Path, prefecture_codes: frozenset[str] | None = None
+) -> frozenset[str]:
+    """Load 1km mesh codes, optionally keeping only meshes of the given prefectures.
+
+    The prefecture is the first two digits of the municipality code. A mesh shared by
+    several municipalities is kept when any of them is in the allowed prefectures.
+    """
     if not path.is_file():
         raise MeshIndexError(
             f"required JP mesh index is missing: {path}; "
@@ -37,13 +52,26 @@ def _load_mesh_membership(path: Path) -> frozenset[str]:
     parquet = pq.ParquetFile(path)
     if "mesh_1km" not in parquet.schema_arrow.names:
         raise MeshIndexError(f"JP mesh index has no mesh_1km column: {path}")
-    codes = {
-        value.strip().removesuffix("*")
-        for value in parquet.read(columns=["mesh_1km"])["mesh_1km"].to_pylist()
-        if isinstance(value, str)
-        and len(value.strip().removesuffix("*")) == 8
-        and value.strip().removesuffix("*").isdigit()
-    }
+    columns = ["mesh_1km"]
+    if prefecture_codes is not None:
+        if "muni_code" not in parquet.schema_arrow.names:
+            raise MeshIndexError(f"JP mesh index has no muni_code column: {path}")
+        columns.append("muni_code")
+    table = parquet.read(columns=columns)
+    meshes = table["mesh_1km"].to_pylist()
+    munis = table["muni_code"].to_pylist() if prefecture_codes is not None else None
+    codes: set[str] = set()
+    for index, value in enumerate(meshes):
+        if not isinstance(value, str):
+            continue
+        code = value.strip().removesuffix("*")
+        if len(code) != 8 or not code.isdigit():
+            continue
+        if prefecture_codes is not None and munis is not None:
+            muni = munis[index]
+            if not isinstance(muni, str) or muni.strip()[:2] not in prefecture_codes:
+                continue
+        codes.add(code)
     if not codes:
         raise MeshIndexError(f"JP mesh index contains no valid 1km mesh codes: {path}")
     return frozenset(codes)
@@ -98,7 +126,9 @@ def _is_private(properties: dict[str, Any]) -> bool:
     return bool(values & _PRIVATE_CATEGORIES)
 
 
-def _geoparquet_features(path: Path, *, batch_size: int) -> Iterator[dict[str, Any]]:
+def _geoparquet_features(
+    path: Path, *, batch_size: int, assume_place_rows: bool = False
+) -> Iterator[dict[str, Any]]:
     """Read prepared Overture Places GeoParquet in bounded Arrow batches.
 
     Inputs must retain Overture's theme/type partition columns so address points
@@ -106,15 +136,27 @@ def _geoparquet_features(path: Path, *, batch_size: int) -> Iterator[dict[str, A
     """
     parquet = pq.ParquetFile(path)
     required = {"id", "theme", "type", "geometry", "names", "addresses", "sources"}
+    if assume_place_rows:
+        # `overturemaps download -t place` output has no partition columns, but every
+        # row is already a Places `place` feature (the CLI reads type=place only).
+        required -= {"theme", "type"}
     missing = required - set(parquet.schema_arrow.names)
     if missing:
         raise ValueError(f"GeoParquet missing required columns: {', '.join(sorted(missing))}")
     selected = sorted(required) + [
-        column for column in ("basic_category", "taxonomy") if column in parquet.schema_arrow.names
+        column
+        for column in ("theme", "type", "basic_category", "taxonomy")
+        if column in parquet.schema_arrow.names and column not in required
     ]
     for batch in parquet.iter_batches(batch_size=batch_size, columns=selected):
         for row in batch.to_pylist():
-            if row.get("theme") != "places" or row.get("type") != "place":
+            if not assume_place_rows and (
+                row.get("theme") != "places" or row.get("type") != "place"
+            ):
+                continue
+            if assume_place_rows and (
+                row.get("theme") not in (None, "places") or row.get("type") not in (None, "place")
+            ):
                 continue
             geometry_value = row.get("geometry")
             if geometry_value is None:
@@ -296,6 +338,9 @@ def _import_features(
     with closing(sqlite3.connect(output_path)) as db:
         # A crash after a batch commit must not make a partial index appear usable.
         db.execute("PRAGMA user_version = 0")
+        # Build-once file: user_version stays 0 until done, so skip journal/fsync for speed.
+        db.execute("PRAGMA journal_mode = OFF")
+        db.execute("PRAGMA synchronous = OFF")
         db.executescript(
             """
             CREATE TABLE poi_place (
@@ -425,9 +470,10 @@ def import_geojsonl(
     country: str = "JP",
     allow_country_missing: bool = False,
     batch_size: int = 1000,
+    prefecture_codes: frozenset[str] | None = None,
 ) -> int:
     """Import local GeoJSONL using the shared bounded SQLite writer."""
-    allowed_meshes = _load_mesh_membership(mesh_index_path)
+    allowed_meshes = _load_mesh_membership(mesh_index_path, prefecture_codes)
     return _import_features(
         _features(input_path),
         output_path,
@@ -456,12 +502,16 @@ def import_geoparquet(
     country: str = "JP",
     allow_country_missing: bool = False,
     batch_size: int = 1000,
+    prefecture_codes: frozenset[str] | None = None,
+    assume_place_rows: bool = False,
 ) -> int:
     """Import prepared Overture Places GeoParquet without a GeoJSONL copy."""
     if batch_size < 1:
         raise ValueError("batch_size must be positive")
-    allowed_meshes = _load_mesh_membership(mesh_index_path)
-    features = _geoparquet_features(input_path, batch_size=batch_size)
+    allowed_meshes = _load_mesh_membership(mesh_index_path, prefecture_codes)
+    features = _geoparquet_features(
+        input_path, batch_size=batch_size, assume_place_rows=assume_place_rows
+    )
     return _import_features(
         features,
         output_path,
@@ -498,6 +548,17 @@ def main() -> None:
         default=DEFAULT_MESH_INDEX,
         help=f"required national muni_mesh.parquet ({DEFAULT_MESH_INDEX})",
     )
+    parser.add_argument(
+        "--prefecture-codes",
+        help="comma-separated two-digit prefecture codes (e.g. 08,09,10,11,12,13,14); "
+        "keep only points whose 1km mesh belongs to these prefectures",
+    )
+    parser.add_argument(
+        "--assume-place-rows",
+        action="store_true",
+        help="GeoParquet from `overturemaps download -t place` has no theme/type columns; "
+        "treat every row as a Places place (rows that do carry the columns are still checked)",
+    )
     parser.add_argument("--provider", required=True)
     parser.add_argument("--dataset", required=True)
     parser.add_argument("--version")
@@ -523,7 +584,21 @@ def main() -> None:
         isinstance(k, str) and isinstance(v, str) for k, v in license_map.items()
     ):
         parser.error("--source-license-map must be a JSON object of dataset name to SPDX ID")
-    importer = import_geoparquet if args.input_format == "geoparquet" else import_geojsonl
+    try:
+        prefecture_codes = (
+            parse_prefecture_codes(args.prefecture_codes) if args.prefecture_codes else None
+        )
+    except ValueError as error:
+        parser.error(str(error))
+    importer: Callable[..., int]
+    extra: dict[str, Any] = {"prefecture_codes": prefecture_codes}
+    if args.input_format == "geoparquet":
+        importer = import_geoparquet
+        extra["assume_place_rows"] = args.assume_place_rows
+    else:
+        importer = import_geojsonl
+        if args.assume_place_rows:
+            parser.error("--assume-place-rows is only for --input-format geoparquet")
     try:
         count = importer(
             args.input,
@@ -536,6 +611,7 @@ def main() -> None:
             attribution=args.attribution,
             country=args.country,
             allow_country_missing=args.allow_country_missing,
+            **extra,
         )
     except MeshIndexError as error:
         parser.error(str(error))
