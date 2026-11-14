@@ -17,7 +17,13 @@ from tkb_data_prep.import_places import (
 )
 
 
-def _feature(place_id: str, *, country: str | None, license_name: str | None) -> dict[str, object]:
+def _feature(
+    place_id: str,
+    *,
+    country: str | None,
+    license_name: str | None,
+    coordinates: tuple[float, float] = (139.0, 35.0),
+) -> dict[str, object]:
     source = {
         "dataset": "provider-dataset",
         "record_id": f"source-{place_id}",
@@ -36,7 +42,7 @@ def _feature(place_id: str, *, country: str | None, license_name: str | None) ->
     return {
         "type": "Feature",
         "id": place_id,
-        "geometry": {"type": "Point", "coordinates": [139.0, 35.0]},
+        "geometry": {"type": "Point", "coordinates": list(coordinates)},
         "properties": properties,
     }
 
@@ -47,7 +53,13 @@ def test_stream_import_indexes_only_licensed_japan_records(tmp_path) -> None:
         _feature("licensed", country="JP", license_name="CC-BY-4.0"),
         _feature("unknown-license", country="JP", license_name=None),
         _feature("other-country", country="US", license_name="CC-BY-4.0"),
+        _feature("far-japan", country="JP", license_name="CC-BY-4.0", coordinates=(155, 35)),
     ]
+    mixed = _feature("mixed-country", country="JP", license_name="CC-BY-4.0")
+    mixed_properties = mixed["properties"]
+    assert isinstance(mixed_properties, dict)
+    mixed_properties["addresses"] = [{"country": "JP"}, {"country": "US"}]
+    features.append(mixed)
     source.write_text("\n".join(json.dumps(feature) for feature in features), encoding="utf-8")
     output = tmp_path / "places.sqlite3"
 
@@ -105,6 +117,49 @@ def test_country_missing_requires_explicit_bounded_input_flag(tmp_path) -> None:
         == 1
     )
 
+    outside_source = tmp_path / "outside-no-country.geojsonl"
+    outside_source.write_text(
+        json.dumps(
+            _feature(
+                "outside-no-country",
+                country=None,
+                license_name="CC-BY-4.0",
+                coordinates=(154.0001, 35),
+            )
+        ),
+        encoding="utf-8",
+    )
+    outside_output = tmp_path / "outside.sqlite3"
+    assert (
+        import_geojsonl(
+            outside_source,
+            outside_output,
+            provider="Provider",
+            dataset="places",
+            allow_country_missing=True,
+        )
+        == 0
+    )
+
+
+def test_japan_bounds_are_inclusive_and_reject_outside_coordinates(tmp_path) -> None:
+    source = tmp_path / "bounds.geojsonl"
+    coordinates = [
+        (122, 20),
+        (154, 46),
+        (121.9999, 35),
+        (154.0001, 35),
+        (139, 19.9999),
+        (139, 46.0001),
+    ]
+    features = [
+        _feature(f"bounds-{i}", country="JP", license_name="CC-BY-4.0", coordinates=point)
+        for i, point in enumerate(coordinates)
+    ]
+    source.write_text("\n".join(json.dumps(feature) for feature in features), encoding="utf-8")
+    output = tmp_path / "bounds.sqlite3"
+    assert import_geojsonl(source, output, provider="Provider", dataset="places") == 2
+
 
 def test_import_refuses_overwrite(tmp_path) -> None:
     source = tmp_path / "places.geojsonl"
@@ -122,6 +177,8 @@ def test_geoparquet_batches_filter_country_private_address_and_unknown_license(t
         ("jp-ok", "places", "place", "JP", "cultural", "CC0-1.0"),
         ("jp-unlicensed", "places", "place", "JP", "cultural", None),
         ("us", "places", "place", "US", "cultural", "CC0-1.0"),
+        ("far-jp", "places", "place", "JP", "cultural", "CC0-1.0"),
+        ("mixed", "places", "place", "JP", "cultural", "CC0-1.0"),
         ("address", "addresses", "address", "JP", "cultural", "CC0-1.0"),
         ("private", "places", "place", "JP", "private_residence", "CC0-1.0"),
         ("apartment", "places", "place", "JP", "apartment", "CC0-1.0"),
@@ -138,12 +195,15 @@ def test_geoparquet_batches_filter_country_private_address_and_unknown_license(t
                     "freeform": "個人住所相当の番地情報",
                 }
             ]
+        elif place_id == "mixed":
+            properties["addresses"] = [{"country": "JP"}, {"country": "US"}]
+        coordinates = Point(155 if place_id == "far-jp" else 139, 35).wkb
         rows.append(
             {
                 "id": place_id,
                 "theme": theme,
                 "type": kind,
-                "geometry": Point(139.0, 35.0).wkb,
+                "geometry": coordinates,
                 **properties,
             }
         )
@@ -177,7 +237,6 @@ def test_area_label_uses_only_unambiguous_japan_locality(tmp_path) -> None:
     assert isinstance(properties, dict)
     properties["addresses"] = [
         {"country": "JP", "locality": "世田谷区", "freeform": "1-2-3"},
-        {"country": "US", "locality": "Other City"},
     ]
     source.write_text(json.dumps(feature), encoding="utf-8")
     output = tmp_path / "area.sqlite3"

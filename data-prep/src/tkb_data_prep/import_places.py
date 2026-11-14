@@ -16,6 +16,7 @@ from shapely.errors import GEOSException
 from tkb_common.place_names import PLACE_INDEX_SCHEMA_VERSION, place_name_keys
 
 DEFAULT_OUTPUT = Path("data/processed/places.sqlite3")
+_JP_BOUNDS = {"longitude": (122.0, 154.0), "latitude": (20.0, 46.0)}
 
 
 def _features(path: Path) -> Iterator[dict[str, Any]]:
@@ -119,7 +120,7 @@ def _area_label(addresses: Any, *, country: str) -> str | None:
         str(address.get("locality")).strip()
         for address in addresses
         if isinstance(address, dict)
-        and str(address.get("country", "")).upper() == country.upper()
+        and str(address.get("country", "")).strip().upper() == country.upper()
         and isinstance(address.get("locality"), str)
         and address["locality"].strip()
         and address["locality"].strip().endswith(("市", "区", "町", "村"))
@@ -215,6 +216,8 @@ def _import_features(
     """Build a stable-ID place/alias index with bounded memory use."""
     if batch_size < 1:
         raise ValueError("batch_size must be positive")
+    if country.strip().upper() != "JP":
+        raise ValueError("the place index currently supports country=JP only")
     if output_path.exists():
         raise FileExistsError(f"refusing to overwrite existing index: {output_path}")
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -245,18 +248,19 @@ def _import_features(
             if not isinstance(properties, dict) or not isinstance(geometry, dict):
                 continue
             addresses = properties.get("addresses", [])
-            countries = (
-                {
-                    str(address.get("country", "")).upper()
-                    for address in addresses
-                    if isinstance(address, dict) and address.get("country")
-                }
-                if isinstance(addresses, list)
-                else set()
-            )
-            if countries and country.upper() not in countries:
+            countries: set[str] = set()
+            has_missing_country = not isinstance(addresses, list) or not addresses
+            if isinstance(addresses, list):
+                has_missing_country = False
+                for address in addresses:
+                    value = address.get("country") if isinstance(address, dict) else None
+                    if isinstance(value, str) and value.strip():
+                        countries.add(value.strip().upper())
+                    else:
+                        has_missing_country = True
+            if len(countries) > 1 or countries - {"JP"}:
                 continue
-            if not countries and not allow_country_missing:
+            if (not countries or has_missing_country) and not allow_country_missing:
                 continue
             coordinates = geometry.get("coordinates", [])
             if (
@@ -269,7 +273,10 @@ def _import_features(
                 longitude, latitude = float(coordinates[0]), float(coordinates[1])
             except (TypeError, ValueError):
                 continue
-            if not (-180 <= longitude <= 180 and -90 <= latitude <= 90):
+            if not (
+                _JP_BOUNDS["longitude"][0] <= longitude <= _JP_BOUNDS["longitude"][1]
+                and _JP_BOUNDS["latitude"][0] <= latitude <= _JP_BOUNDS["latitude"][1]
+            ):
                 continue
             raw_id = feature.get("id") or properties.get("id")
             if not isinstance(raw_id, str) or not raw_id.strip():
@@ -411,11 +418,11 @@ def main() -> None:
         help="JSON mapping source dataset names to verified SPDX IDs",
     )
     parser.add_argument("--attribution")
-    parser.add_argument("--country", default="JP")
+    parser.add_argument("--country", default="JP", help="currently only JP is supported")
     parser.add_argument(
         "--allow-country-missing",
         action="store_true",
-        help="only for inputs already clipped to the requested country",
+        help="allow missing country tags only for points inside the JP bounds",
     )
     args = parser.parse_args()
     license_map = (
