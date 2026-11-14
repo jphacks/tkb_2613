@@ -482,8 +482,8 @@ def test_diagnose_sends_keep_alive_comments_while_waiting_between_events() -> No
 FAKE_BRAVE_KEY = "brave-test-key-not-real"  # テスト用の架空の値
 
 
-@pytest.mark.parametrize(("daily_limit", "available"), [(0, False), (1, True), (3, True)])
-def test_photo_place_lookup_requires_a_positive_daily_diagnosis_limit(
+@pytest.mark.parametrize(("daily_limit", "available"), [(0, True), (1, True), (3, True)])
+def test_photo_place_lookup_does_not_depend_on_the_daily_diagnosis_limit(
     daily_limit: int, available: bool
 ) -> None:
     settings = Settings(
@@ -502,7 +502,7 @@ def test_photo_place_lookup_requires_a_positive_daily_diagnosis_limit(
         (False, "", 3, False, False),
         (False, "   ", 3, False, False),
         (False, FAKE_BRAVE_KEY, 3, True, True),
-        (False, FAKE_BRAVE_KEY, 0, True, False),  # daily limit zero must not disable profile search
+        (False, FAKE_BRAVE_KEY, 0, True, True),  # 1日の回数を無制限にしても写真の場所検索は使える
     ],
 )
 def test_features_tell_whether_public_web_lookup_is_available_without_the_key(
@@ -685,36 +685,3 @@ def test_photo_place_search_consent_does_not_imply_profile_web_consent() -> None
     assert calls == [(0, 1)]
     conclusions = next(data for name, data in _events(result.text) if name == "conclusions")
     assert conclusions["external_lookup_status"] == "not_requested"
-
-
-def test_photo_place_daily_limit_zero_disables_search_even_with_consent_and_key() -> None:
-    calls: list[tuple[int, int]] = []
-
-    async def fake_photo_search(results: list[Any], clues: list[Clue]) -> list[Any]:
-        calls.append((len(results), len(clues)))
-        return results
-
-    raw = json.loads(FIXTURE.read_text(encoding="utf-8"))["posts"][3]
-    post = Post.model_validate({**raw, "images": []})
-
-    async def fetch_posts(_client: AsyncClient, _did: str, _limit: int) -> list[Post]:
-        return [post]
-
-    settings = Settings(
-        mock_mode=False,
-        max_posts=5,
-        diagnose_daily_limit=0,
-        brave_search_api_key=SecretStr(FAKE_BRAVE_KEY),
-    )
-    with _real_client(fetch_posts, settings=settings) as client:
-        client.app.dependency_overrides[get_photo_place_searcher] = lambda: fake_photo_search  # type: ignore[attr-defined]
-        _login(client)
-        features = client.get("/api/features").json()
-        result = client.post(
-            "/api/diagnose",
-            json={"photo_place_web_lookup_consent": True},
-        )
-
-    assert result.status_code == 200
-    assert features["photo_place_web_lookup_available"] is False
-    assert calls == []

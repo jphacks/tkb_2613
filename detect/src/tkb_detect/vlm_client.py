@@ -15,7 +15,9 @@ from tkb_detect.guard import ensure_team_endpoint
 
 MOCK_VLM_TEXT = "（モック）駅名標「新宿」が写っています。"
 MOCK_VLM_JSON = '{"clues": []}'
-DEFAULT_TIMEOUT_S = 60.0
+# 応答の待ち時間は制限しない（遅い GPU でも診断を止めない）。つながらないときだけ早めに諦める
+DEFAULT_TIMEOUT_S: float | None = None
+CONNECT_TIMEOUT_S = 10.0
 # Qwen3 系は既定で思考モードが入り遅くなるため、毎回切る
 CHAT_TEMPLATE_KWARGS = {"enable_thinking": False}
 # 接続の段階の失敗（名前解決の失敗など）は、リクエストがサーバーに届いていないので送り直しても安全。
@@ -29,7 +31,7 @@ class VlmConfig:
     api_key: str
     model: str
     mock_mode: bool = True
-    timeout_s: float = DEFAULT_TIMEOUT_S
+    timeout_s: float | None = DEFAULT_TIMEOUT_S
     # 送り先の許可リスト。None なら環境変数 MODEL_ALLOWED_HOST_SUFFIXES を読む（guard.py）
     allowed_hosts: tuple[str, ...] | None = None
 
@@ -140,7 +142,8 @@ class VlmClient:
         headers = self._headers()
         try:
             # 環境変数のプロキシ（HTTP_PROXY など）を経由させない。送るのはガードで確認した先だけ
-            async with httpx.AsyncClient(timeout=self._config.timeout_s, trust_env=False) as client:
+            timeout = httpx.Timeout(self._config.timeout_s, connect=CONNECT_TIMEOUT_S)
+            async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
                 for delay in (*CONNECT_RETRY_DELAYS_S, None):
                     try:
                         res = await client.post(

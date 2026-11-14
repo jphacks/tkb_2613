@@ -24,8 +24,6 @@ interface Handlers<T> {
 
 /** 診断中に進み具合を聞きに行く間隔 */
 export const PROGRESS_POLL_MS = 1500;
-/** 前の診断を待つ上限。POST /diagnose の待ち時間の上限（page.tsx の call）と同じ */
-const FOLLOW_LIMIT_MS = 2_100_000;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -74,13 +72,11 @@ export function useThreadsDiagnosis<T>(
 
   /** 診断が終わるまで progress を聞き続け、終わったら結果を読み込む。失敗なら ThreadsError を投げる */
   const waitForDiagnosis = useCallback(async (alreadyRunning = false) => {
-    const deadline = Date.now() + FOLLOW_LIMIT_MS;
     let sawRunning = alreadyRunning;
     while (mounted.current) {
       const progress = await call("progress");
       if (!isThreadsProgress(progress)) throw new ThreadsError("diagnosisUnreadable");
       if (progress.state === "running") {
-        if (Date.now() > deadline) throw new ThreadsError("timeout");
         sawRunning = true;
         applyProgress(progress);
         await sleep(PROGRESS_POLL_MS);

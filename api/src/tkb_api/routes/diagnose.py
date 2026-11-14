@@ -574,8 +574,6 @@ async def diagnose(
             reason = (
                 "mock_external_lookup_disabled" if settings.mock_mode else "missing_brave_api_key"
             )
-            if not settings.mock_mode and settings.diagnose_daily_limit <= 0:
-                reason = "photo_place_daily_limit_disabled"
 
             async def unavailable_photo_place_lookup(
                 results: Sequence[PhotoPlaceResult], clues: Sequence[Clue]

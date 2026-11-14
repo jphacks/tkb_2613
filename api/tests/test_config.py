@@ -124,9 +124,9 @@ def test_commons_reference_lookup_requires_enabled_live_cap_and_compatible_index
             mock_mode=False,
             commons_reference_lookup_enabled=True,
             diagnose_daily_limit=0,
-            gazetteer_dir=tmp_path,
+            gazetteer_dir=compatible_dir,
         ).commons_reference_lookup_available
-        is False
+        is True
     )
     assert (
         Settings(
