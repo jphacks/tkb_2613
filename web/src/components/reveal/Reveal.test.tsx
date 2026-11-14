@@ -5,6 +5,7 @@ import { messages } from "@/lib/messages";
 import type { Clue } from "@/types/clue";
 import type { Conclusion } from "@/types/diagnose";
 import type { Post } from "@/types/post";
+import type { ProfileCandidateSet } from "@/types/profile";
 
 import { Reveal } from "./Reveal";
 
@@ -44,6 +45,26 @@ const CONCLUSION: Conclusion = {
   clue_indices: [0],
   note: "",
 };
+
+function nameCandidateSet(attribute: "full_name" | "given_name" | "nickname", values: readonly string[]): ProfileCandidateSet {
+  const assessment = {
+    minimal_scope: "bluesky" as const, offline_subtype: null, psychological_resistance: null, persona_context: null,
+    inference_ease: null, inference_ease_basis: null, harm_severity: null, harm_scenario: null,
+    harm_prerequisites: [], harm_status: "unknown" as const,
+  };
+  const candidates = values.map((value, index) => {
+    const evidence = [{ post_id: POST.post_id, clue_index: null, required: true, source: "profile_text" as const, excerpt: value }];
+    return {
+      rank: index + 1, value, confidence: 0.8 - index * 0.1, status: "found" as const,
+      evidence, evidence_paths: [{ evidence, confidence: 0.8 - index * 0.1, provenance: "direct_disclosure" as const }],
+      assessment, observed_at: null, counter_evidence: [],
+    };
+  });
+  return {
+    attribute, status: candidates.length > 1 ? "ambiguous" : "candidate", candidates, candidate_pool: candidates,
+    reason: null, conflicting_evidence: [],
+  };
+}
 
 /** jsdom は写真を読み込まないので、読み込みを手で終わらせられる代わりを置く */
 class FakeImage {
@@ -104,7 +125,27 @@ describe("Reveal", () => {
     expect(screen.getByRole("article", { name: messages.identity.label }).compareDocumentPosition(cards[0]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(within(cards[0]).getByText("根x")).toBeInTheDocument();
     expect(within(cards[1]).getByText(t.used)).toBeInTheDocument();
-    expect(within(cards[1]).getByText("夜勤明け", { selector: "mark" })).toBeInTheDocument();
+    expect(within(cards[1]).getByText("夜勤明け", { selector: ".redaction-word" })).toBeInTheDocument();
+  });
+
+  it("hides the clue word in the post under a black bar that peels off after every card has landed", () => {
+    const second: Clue = { ...TEXT_CLUE, type: "age_text", value: "ラーメン" };
+    render(<Reveal posts={[{ ...POST, images: [] }]} clues={[TEXT_CLUE, second]} conclusions={[CONCLUSION]} />);
+
+    const cards = within(screen.getByRole("list", { name: t.evidenceLabel })).getAllByRole("listitem");
+    expect(cards).toHaveLength(2);
+    // 今までの <mark> の印は使わない
+    expect(document.querySelector("blockquote mark")).toBeNull();
+    const bars = cards.map((card) => card.querySelector(".redaction-bar") as HTMLElement);
+    for (const bar of bars) {
+      expect(bar).toHaveAttribute("aria-hidden", "true");
+      // 言葉そのものは読み上げにも残す
+      expect(bar.parentElement?.querySelector(".redaction-word")?.textContent).toBeTruthy();
+    }
+    // 2 枚目が叩きつけられ終わる（1.6 + 0.5 + 0.45 = 2.55 秒）まで待ち、上から順に 0.4 秒ずつずらしてはがす
+    expect(bars[0].getAttribute("style")).toContain("2.55s");
+    expect(bars[1].getAttribute("style")).toContain("2.95s");
+    expect(bars[0].getAttribute("style")).toContain("var(--stage-pace, 1)");
   });
 
   it("stretches the gaps between the evidence cards by the presentation pace", () => {
@@ -132,19 +173,49 @@ describe("Reveal", () => {
     ).toHaveAttribute("src", POST.images[0].url);
   });
 
-  it("shows the identity card with the written name, the strong clues and the clue count", () => {
+  it("does not treat a raw written name as the account owner's name", () => {
     const name: Clue = { ...PHOTO_CLUE, type: "name_text", value: "はるき" };
     const blurred: Clue = { ...name, value: "xx はるき 様", confidence: 0.99 };
     render(<Reveal posts={[POST]} clues={[TEXT_CLUE, PHOTO_CLUE, blurred, name]} conclusions={[CONCLUSION]} />);
 
     const card = screen.getByRole("article", { name: messages.identity.label });
-    // 読めない文字の少ない名前を選ぶ
-    expect(within(card).getByText("はるき")).toBeInTheDocument();
+    expect(within(card).getByText(messages.identity.nameUnknown)).toBeInTheDocument();
+    expect(within(card).queryByText("はるき")).not.toBeInTheDocument();
     // 推定の根拠（夜勤明け）は推定の行で見えるので、強い手がかりの行には出さない
     expect(within(card).getByRole("definition")).toHaveTextContent("根x");
     expect(within(card).getByText("夜勤のある仕事")).toBeInTheDocument();
     // 回る数字は飾りなので、読み上げ用の数字で確かめる
     expect(within(card).getByText("4", { selector: ".sr-only" })).toBeInTheDocument();
+  });
+
+  it("uses a single profile name candidate and labels its direct disclosure provenance", () => {
+    render(<Reveal posts={[POST]} clues={[]} conclusions={[]} profileClaims={[nameCandidateSet("full_name", ["内藤大貴"])]} />);
+    const card = screen.getByRole("article", { name: messages.identity.label });
+
+    expect(within(card).getByText("内藤大貴")).toBeInTheDocument();
+    expect(within(card).getByText("自分で直接公開")).toBeInTheDocument();
+    expect(within(card).queryByText(messages.identity.nameUnknown)).not.toBeInTheDocument();
+  });
+
+  it("does not promote rank one when multiple profile name candidates exist", () => {
+    render(<Reveal posts={[POST]} clues={[]} conclusions={[]} profileClaims={[nameCandidateSet("full_name", ["内藤大貴", "佐藤はるき"])]} />);
+    const card = screen.getByRole("article", { name: messages.identity.label });
+
+    expect(within(card).getByText(messages.identity.nameMultiple)).toBeInTheDocument();
+    expect(within(card).queryByText("内藤大貴")).not.toBeInTheDocument();
+    expect(within(card).queryByText("自分で直接公開")).not.toBeInTheDocument();
+  });
+
+  it("prefers one full-name candidate over a separate given-name candidate", () => {
+    render(<Reveal posts={[POST]} clues={[]} conclusions={[]} profileClaims={[
+      nameCandidateSet("full_name", ["内藤大貴"]),
+      nameCandidateSet("given_name", ["大貴"]),
+    ]} />);
+    const card = screen.getByRole("article", { name: messages.identity.label });
+
+    expect(within(card).getByText("内藤大貴")).toBeInTheDocument();
+    expect(within(card).queryByText("大貴")).not.toBeInTheDocument();
+    expect(within(card).getByText("自分で直接公開")).toBeInTheDocument();
   });
 
   it("shows a confident face from the posts in the photo frame once the photo has loaded", () => {

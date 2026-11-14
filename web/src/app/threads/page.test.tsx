@@ -258,7 +258,7 @@ describe("profile claims on the Threads diagnosis", () => {
   }
 
   function profileSection(): HTMLElement {
-    return screen.getByRole("heading", { name: "投稿を横断したプロフィール推定" }).closest("section") as HTMLElement;
+    return screen.getByRole("heading", { name: "プロフィール候補" }).closest("section") as HTMLElement;
   }
 
   function excludeSchoolPost() {
@@ -272,7 +272,7 @@ describe("profile claims on the Threads diagnosis", () => {
     stubDiagnosedApi();
     render(<ThreadsPage />);
 
-    expect(await screen.findByRole("heading", { name: "投稿を横断したプロフィール推定" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "プロフィール候補" })).toBeInTheDocument();
     expect(within(profileSection()).getByText("林町小学校")).toBeInTheDocument();
     expect(within(profileSection()).getByText("文京区")).toBeInTheDocument();
   });
@@ -280,26 +280,26 @@ describe("profile claims on the Threads diagnosis", () => {
   it("drops the claims built on a post while that post is tentatively excluded", async () => {
     stubDiagnosedApi();
     render(<ThreadsPage />);
-    await screen.findByRole("heading", { name: "投稿を横断したプロフィール推定" });
+    await screen.findByRole("heading", { name: "プロフィール候補" });
 
     excludeSchoolPost();
     fireEvent.click(screen.getByRole("button", { name: "仮除外を試す" }));
 
-    await waitFor(() => expect(screen.queryByRole("heading", { name: "投稿を横断したプロフィール推定" })).not.toBeInTheDocument());
-    expect(screen.queryByText("文京区")).not.toBeInTheDocument();
+    await waitFor(() => expect(within(profileSection()).getByText("根拠経路のある候補はありません。")).toBeInTheDocument());
+    expect(within(profileSection()).queryByText("文京区")).not.toBeInTheDocument();
   });
 
   it("uses the claims returned by the rediagnosis and restores them for all posts", async () => {
     stubDiagnosedApi();
     render(<ThreadsPage />);
-    await screen.findByRole("heading", { name: "投稿を横断したプロフィール推定" });
+    await screen.findByRole("heading", { name: "プロフィール候補" });
 
     excludeSchoolPost();
     fireEvent.click(screen.getByRole("button", { name: "選択した投稿を除いて再診断" }));
-    await waitFor(() => expect(screen.queryByRole("heading", { name: "投稿を横断したプロフィール推定" })).not.toBeInTheDocument());
+    await waitFor(() => expect(within(profileSection()).getByText("根拠経路のある候補はありません。")).toBeInTheDocument());
 
     fireEvent.click(screen.getByRole("button", { name: "全投稿の結果に戻す" }));
-    expect(await screen.findByRole("heading", { name: "投稿を横断したプロフィール推定" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "プロフィール候補" })).toBeInTheDocument();
     expect(within(profileSection()).getByText("林町小学校")).toBeInTheDocument();
   });
 
@@ -309,13 +309,17 @@ describe("profile claims on the Threads diagnosis", () => {
 
     const reveal = (await screen.findByRole("heading", { name: "ぜんぶ、みえてる" })).closest("section") as HTMLElement;
     // 身元カードに推定、証拠のカードに本文の手がかりが出る
-    expect(within(reveal).getByRole("article", { name: "推定した身元" })).toBeInTheDocument();
+    expect(within(reveal).getByRole("article", { name: "プロフィールと手がかり" })).toBeInTheDocument();
     expect(within(reveal).getByText("毎週火曜（毎週火曜はジム）")).toBeInTheDocument();
     // 身元カードの推定の値は、地名の漢字が回ってから解読される（Bluesky と同じ）。読み上げには値そのものを渡す
-    const card = within(reveal).getByRole("article", { name: "推定した身元" });
+    const card = within(reveal).getByRole("article", { name: "プロフィールと手がかり" });
     expect(within(card).getByText("毎週火曜（毎週火曜はジム）")).toHaveClass("sr-only");
     expect(card.querySelectorAll(".decode-strip").length).toBeGreaterThan(0);
     expect(within(reveal).getByRole("list", { name: "見つかった証拠" })).toBeInTheDocument();
+    // 証拠のカードの本文では、手がかりの言葉を黒い帯で隠し、はがれると赤くなる（Bluesky と同じ）
+    const evidence = within(reveal).getByRole("list", { name: "見つかった証拠" });
+    expect(within(evidence).getAllByText("毎週火曜はジム", { selector: ".redaction-word" }).length).toBeGreaterThan(0);
+    expect(evidence.querySelector("mark")).toBeNull();
 
     excludeSchoolPost();
     fireEvent.click(screen.getByRole("button", { name: "選択した投稿を除いて再診断" }));
@@ -336,7 +340,7 @@ describe("posts that could not be read", () => {
     render(<ThreadsPage />);
 
     expect(await screen.findByText("1 件の投稿は読み取れなかったため、診断に含めていません。")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "投稿を横断したプロフィール推定" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "プロフィール候補" })).toBeInTheDocument();
   });
 
   it("rejects a malformed post_errors list", async () => {
@@ -351,6 +355,6 @@ describe("posts that could not be read", () => {
     render(<ThreadsPage />);
 
     expect(await screen.findByText("架空のThreadsアカウント")).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "投稿を横断したプロフィール推定" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "プロフィール候補" })).not.toBeInTheDocument();
   });
 });

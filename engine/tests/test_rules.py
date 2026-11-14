@@ -951,10 +951,14 @@ def test_x1_does_not_join_a_school_and_commute_mentioned_only_in_one_post() -> N
 
 def test_x1_demo_fixture_matches_the_published_post_texts() -> None:
     doc = json.loads(
-        (Path(__file__).resolve().parents[2] / "eval/fixtures/demo_x1.json").read_text()
+        (Path(__file__).resolve().parents[2] / "eval/fixtures/demo_x1.json").read_text(
+            encoding="utf-8"
+        )
     )
     plan = json.loads(
-        (Path(__file__).resolve().parents[2] / "eval/demo_account/x1_posts.json").read_text()
+        (Path(__file__).resolve().parents[2] / "eval/demo_account/x1_posts.json").read_text(
+            encoding="utf-8"
+        )
     )
     posts = [Post.model_validate(post) for post in doc["posts"]]
     clues = [Clue.model_validate(clue) for clue in doc["clues"]]

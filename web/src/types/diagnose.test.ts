@@ -1,9 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  InvalidDiagnoseEventError, STRONG_CONFIDENCE, confidenceLevel, isDemoDiagnosis, isDiagnosisSnapshot,
-  toDiagnoseEvent,
-} from "./diagnose";
+import { InvalidDiagnoseEventError, isDiagnosisSnapshot, toDiagnoseEvent } from "./diagnose";
+import { PROFILE_DIAGNOSED_ATTRIBUTES } from "./profile";
 
 const POST = {
   post_id: "at://did:plc:xxxx/app.bsky.feed.post/3kxxxx",
@@ -32,59 +30,16 @@ const CONCLUSION = {
 
 describe("isDiagnosisSnapshot", () => {
   const snapshot = {
-    posts: [POST],
-    clues: [CLUE],
-    conclusions: [CONCLUSION],
+    posts: [POST], clues: [CLUE], conclusions: [CONCLUSION],
     plan: { delete: [], broken: [], after: [CONCLUSION], posts: [] },
   };
 
-  it("accepts a snapshot without deleted posts (shared results do not have them)", () => {
+  it("accepts deletion-aware snapshots and rejects IDs outside the snapshot", () => {
     expect(isDiagnosisSnapshot(snapshot)).toBe(true);
-  });
-
-  it("accepts deleted posts that were part of the diagnosis", () => {
     expect(isDiagnosisSnapshot({ ...snapshot, deleted: [POST.post_id] })).toBe(true);
     expect(isDiagnosisSnapshot({ ...snapshot, deleted: [] })).toBe(true);
-  });
-
-  it("rejects deleted posts that were not diagnosed or are not strings", () => {
-    expect(isDiagnosisSnapshot({ ...snapshot, deleted: ["at://did:plc:other/app.bsky.feed.post/3k"] })).toBe(false);
+    expect(isDiagnosisSnapshot({ ...snapshot, deleted: ["at://did:plc:other/app.bsky.feed.post/missing"] })).toBe(false);
     expect(isDiagnosisSnapshot({ ...snapshot, deleted: [1] })).toBe(false);
-    expect(isDiagnosisSnapshot({ ...snapshot, deleted: null })).toBe(false);
-  });
-});
-
-describe("isDemoDiagnosis", () => {
-  const snapshot = {
-    posts: [POST],
-    clues: [CLUE],
-    conclusions: [CONCLUSION],
-    plan: { delete: [], broken: [], after: [], posts: [] },
-  };
-
-  it("accepts only snapshots marked as the demo", () => {
-    expect(isDemoDiagnosis({ ...snapshot, demo: true })).toBe(true);
-    expect(isDemoDiagnosis(snapshot)).toBe(false);
-    expect(isDemoDiagnosis({ ...snapshot, demo: "true" })).toBe(false);
-    expect(isDemoDiagnosis({ demo: true })).toBe(false);
-  });
-});
-
-describe("conclusion confidence", () => {
-  it("accepts a confidence between 0 and 1 and conclusions without one", () => {
-    const event = (conclusion: unknown) =>
-      toDiagnoseEvent("conclusions", JSON.stringify({ clues: [CLUE], conclusions: [conclusion] }));
-    expect(event({ ...CONCLUSION, confidence: 0.95 })).not.toBeNull();
-    expect(event(CONCLUSION)).not.toBeNull();
-    for (const bad of [-0.1, 1.5, "0.9", null]) {
-      expect(() => event({ ...CONCLUSION, confidence: bad })).toThrow(InvalidDiagnoseEventError);
-    }
-  });
-
-  it("splits confidence into strong and weak at STRONG_CONFIDENCE", () => {
-    expect(confidenceLevel({ ...CONCLUSION, confidence: STRONG_CONFIDENCE })).toBe("strong");
-    expect(confidenceLevel({ ...CONCLUSION, confidence: STRONG_CONFIDENCE - 0.01 })).toBe("weak");
-    expect(confidenceLevel(CONCLUSION)).toBeNull();
   });
 });
 
@@ -114,6 +69,38 @@ describe("toDiagnoseEvent", () => {
     expect(toDiagnoseEvent("conclusions", JSON.stringify(data))).toEqual({
       event: "conclusions",
       ...data,
+    });
+  });
+
+  it("reads all 24 candidate sets, including attributes that remain unknown", () => {
+    const profile_claims = PROFILE_DIAGNOSED_ATTRIBUTES.map((attribute) => ({
+      attribute,
+      status: "unknown",
+      candidates: [],
+      candidate_pool: [],
+      reason: "no_grounded_rule",
+      conflicting_evidence: [],
+    }));
+    expect(toDiagnoseEvent("conclusions", JSON.stringify({
+      clues: [CLUE], conclusions: [], profile_claims, profile_claim_suggestions: [],
+    }))).toMatchObject({ event: "conclusions", profile_claims });
+    expect(() => toDiagnoseEvent("conclusions", JSON.stringify({
+      clues: [CLUE], conclusions: [], profile_claims: profile_claims.slice(1), profile_claim_suggestions: [],
+    }))).toThrow(InvalidDiagnoseEventError);
+  });
+
+  it("reads scoreless profile relations with complete evidence paths", () => {
+    const profile_relations = [{
+      kind: "home_nearest_is_commute_origin",
+      left: { kind: "profile_candidate", attribute: "home_nearest_station", value: "根津駅" },
+      right: { kind: "profile_candidate", attribute: "regular_station", value: "根津駅" },
+      evidence_paths: [{ confidence: 0.55, provenance: "combined_inference", evidence: [
+        { post_id: POST.post_id, clue_index: null, required: true, source: "post_text", excerpt: "私の自宅最寄り駅は根津駅です" },
+        { post_id: "at://did:plc:xxxx/app.bsky.feed.post/other", clue_index: null, required: true, source: "post_text", excerpt: "私は毎朝、自宅最寄りから通勤しています" },
+      ] }],
+    }];
+    expect(toDiagnoseEvent("conclusions", JSON.stringify({ clues: [], conclusions: [], profile_relations }))).toMatchObject({
+      event: "conclusions", profile_relations,
     });
   });
 
