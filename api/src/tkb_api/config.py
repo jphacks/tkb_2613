@@ -46,6 +46,8 @@ class Settings(BaseSettings):
     model_allowed_host_suffixes: str = ""
     # 公開Web検索の秘密鍵。明示的な診断同意がある場合のみ使用し、クライアントへ返さない。
     brave_search_api_key: SecretStr = SecretStr("")
+    # Optional Commons geosearch and thumbnail comparison; off until explicitly enabled.
+    commons_reference_lookup_enabled: bool = False
     cors_origins: list[str] = ["http://localhost:3000"]
     # Bluesky のログイン先
     bsky_service: str = "https://bsky.social"
@@ -186,6 +188,15 @@ class Settings(BaseSettings):
             not self.mock_mode
             and self.diagnose_daily_limit > 0
             and bool(self.brave_search_api_key.get_secret_value().strip())
+        )
+
+    @property
+    def commons_reference_lookup_available(self) -> bool:
+        """Commons requests require a finite daily diagnosis cap and a live-mode opt-in."""
+        return (
+            not self.mock_mode
+            and self.diagnose_daily_limit > 0
+            and self.commons_reference_lookup_enabled
         )
 
 

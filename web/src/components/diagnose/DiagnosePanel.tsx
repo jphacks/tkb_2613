@@ -87,6 +87,8 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
   const [publicWebLookupAvailable, setPublicWebLookupAvailable] = useState(false);
   const [photoPlaceWebLookupConsent, setPhotoPlaceWebLookupConsent] = useState(false);
   const [photoPlaceWebLookupAvailable, setPhotoPlaceWebLookupAvailable] = useState(false);
+  const [photoPlaceReferenceConsent, setPhotoPlaceReferenceConsent] = useState(false);
+  const [photoPlaceReferenceAvailable, setPhotoPlaceReferenceAvailable] = useState(false);
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   const controller = useRef<AbortController | null>(null);
   const restoreController = useRef<AbortController | null>(null);
@@ -102,6 +104,7 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
     getFeatures({ signal: current.signal }).then((features) => {
       if (!current.signal.aborted) setPublicWebLookupAvailable(features.public_web_lookup_available === true);
       if (!current.signal.aborted) setPhotoPlaceWebLookupAvailable(features.photo_place_web_lookup_available === true);
+      if (!current.signal.aborted) setPhotoPlaceReferenceAvailable(features.commons_reference_lookup_available === true);
     });
     return () => current.abort();
   }, []);
@@ -156,8 +159,10 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
   async function start() {
     const consentForThisRun = publicWebLookupConsent;
     const photoPlaceConsentForThisRun = photoPlaceWebLookupConsent;
+    const photoPlaceReferenceConsentForThisRun = photoPlaceReferenceConsent;
     setPublicWebLookupConsent(false);
     setPhotoPlaceWebLookupConsent(false);
+    setPhotoPlaceReferenceConsent(false);
     restoreController.current?.abort();
     controller.current?.abort();
     const current = new AbortController();
@@ -175,6 +180,7 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
         signal: current.signal,
         publicWebLookupConsent: consentForThisRun,
         photoPlaceWebLookupConsent: photoPlaceConsentForThisRun,
+        photoPlaceReferenceConsent: photoPlaceReferenceConsentForThisRun,
       })) {
         switch (event.event) {
           case "post":
@@ -246,6 +252,10 @@ export function DiagnosePanel({ onRevealedChange }: DiagnosePanelProps = {}) {
         <label className="mb-4 flex max-w-2xl items-start gap-3 rounded-sm border border-ink/20 px-4 py-3 text-sm">
           <input type="checkbox" checked={photoPlaceWebLookupConsent} onChange={(event) => setPhotoPlaceWebLookupConsent(event.currentTarget.checked)} disabled={busy || !photoPlaceWebLookupAvailable} className="mt-1 size-4 shrink-0 accent-seeker" />
           <span><span className="block font-bold">{t.photoPlaceWebConsentLabel}</span><span className="mt-1 block text-xs text-ink/70">{t.photoPlaceWebConsentNote}</span>{!photoPlaceWebLookupAvailable && <span className="mt-1 block text-xs text-ink/70">{t.photoPlaceWebConsentUnavailable}</span>}</span>
+        </label>
+        <label className="mb-4 flex max-w-2xl items-start gap-3 rounded-sm border border-ink/20 px-4 py-3 text-sm">
+          <input type="checkbox" checked={photoPlaceReferenceConsent} onChange={(event) => setPhotoPlaceReferenceConsent(event.currentTarget.checked)} disabled={busy || !photoPlaceReferenceAvailable} className="mt-1 size-4 shrink-0 accent-seeker" />
+          <span><span className="block font-bold">{t.photoPlaceReferenceConsentLabel}</span><span className="mt-1 block text-xs text-ink/70">{t.photoPlaceReferenceConsentNote}</span>{!photoPlaceReferenceAvailable && <span className="mt-1 block text-xs text-ink/70">{t.photoPlaceReferenceConsentUnavailable}</span>}</span>
         </label>
         {afterResult ? (
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">

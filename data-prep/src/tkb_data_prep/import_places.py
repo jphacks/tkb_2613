@@ -294,6 +294,7 @@ def _import_features(
                 "aliases": aliases,
                 "longitude": longitude,
                 "latitude": latitude,
+                "country": country.upper(),
                 "area_label": _area_label(addresses, country=country),
                 "basic_category": properties.get("basic_category"),
                 "taxonomy": properties.get("taxonomy"),

@@ -248,6 +248,7 @@ describe("diagnose", () => {
     expect(init?.body).toBe(JSON.stringify({
       public_web_lookup_consent: false,
       photo_place_web_lookup_consent: false,
+      photo_place_reference_consent: false,
     }));
   });
 
@@ -262,6 +263,7 @@ describe("diagnose", () => {
     expect(init?.body).toBe(JSON.stringify({
       public_web_lookup_consent: true,
       photo_place_web_lookup_consent: false,
+      photo_place_reference_consent: false,
     }));
   });
 
@@ -271,6 +273,7 @@ describe("diagnose", () => {
       baseUrl: "http://api.test",
       publicWebLookupConsent: false,
       photoPlaceWebLookupConsent: true,
+      photoPlaceReferenceConsent: true,
     })) {
       // The done event only completes the request.
       expect(event.event).toBe("done");
@@ -279,6 +282,7 @@ describe("diagnose", () => {
     expect(init?.body).toBe(JSON.stringify({
       public_web_lookup_consent: false,
       photo_place_web_lookup_consent: true,
+      photo_place_reference_consent: true,
     }));
   });
 
@@ -434,8 +438,8 @@ describe("getFeatures", () => {
   });
 
   it("reads whether public web lookup is available", async () => {
-    mockFetch(new Response(JSON.stringify({ share_enabled: false, auth_mode: "oauth", public_web_lookup_available: true, photo_place_web_lookup_available: false })));
-    expect(await getFeatures()).toEqual({ share_enabled: false, auth_mode: "oauth", public_web_lookup_available: true, photo_place_web_lookup_available: false });
+    mockFetch(new Response(JSON.stringify({ share_enabled: false, auth_mode: "oauth", public_web_lookup_available: true, photo_place_web_lookup_available: false, commons_reference_lookup_available: true })));
+    expect(await getFeatures()).toEqual({ share_enabled: false, auth_mode: "oauth", public_web_lookup_available: true, photo_place_web_lookup_available: false, commons_reference_lookup_available: true });
   });
 
   it("ignores a public web lookup flag that is not a boolean", async () => {

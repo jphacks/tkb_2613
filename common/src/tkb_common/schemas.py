@@ -519,6 +519,7 @@ class PhotoPlaceRelation(StrEnum):
 class PhotoPlaceLookupStatus(StrEnum):
     LOCAL_ONLY = "local_only"
     WEB_SEARCHED = "web_searched"
+    REFERENCE_CHECKED = "reference_checked"
     UNAVAILABLE = "unavailable"
 
 

@@ -195,6 +195,7 @@ export function ConclusionBoard({
         <h4 id="photo-place-heading" className="font-display text-lg">{t.photoPlaces.heading}</h4>
         <p className="mt-1 text-xs text-ink/70">{t.photoPlaces.explanation}</p>
         {photoPlaceResults.some((result) => result.lookup_status === "web_searched") && <p className="mt-1 text-xs text-ink/70">{t.photoPlaces.externalNotice}</p>}
+        {photoPlaceResults.some((result) => result.candidates.some((candidate) => candidate.evidence.some((item) => item.kind === "reference"))) && <p className="mt-1 text-xs text-ink/70">{t.photoPlaces.referenceNotice}</p>}
         <ul className="mt-3 space-y-2">
           {photoPlaceResults.filter((result) => posts.length === 0 || posts.some((post) => post.post_id === result.post_id)).map((result) => {
             const image = posts.find((post) => post.post_id === result.post_id)?.images.find((item) => item.index === result.image_index);

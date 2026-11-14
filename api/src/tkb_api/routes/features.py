@@ -17,4 +17,5 @@ def read_features(settings: Annotated[Settings, Depends(get_settings)]) -> dict[
         # 真偽値だけを返す。BRAVE_SEARCH_API_KEY の値や長さは返さない
         "public_web_lookup_available": settings.public_web_lookup_available,
         "photo_place_web_lookup_available": settings.photo_place_web_lookup_available,
+        "commons_reference_lookup_available": settings.commons_reference_lookup_available,
     }

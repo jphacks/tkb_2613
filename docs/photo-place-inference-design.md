@@ -1,6 +1,6 @@
 # 写真から場所を推定する汎用設計（提案）
 
-状態: 第一〜第三実装スライス済み。対象は日本全国の投稿写真に写る場所候補であり、写真だけから居住地や現在地を決めない。任意のGeoJSONLデータをストリーミングでSQLite名称索引に取り込み、実行時に照合する経路と、診断単位の写真場所専用同意を必要とするBrave Place Search補完を実装済み。現在は実POIデータを同梱・配置していないため、索引がない環境では外部同意/許可対象Clueがなければ `unknown` を返す。候補周辺の参照画像照合と、撮影地点の視点推定は未実装。
+状態: 第一〜第三実装スライス済み。対象は日本全国の投稿写真に写る場所候補であり、写真だけから居住地や現在地を決めない。任意のGeoJSONLデータをストリーミングでSQLite名称索引に取り込み、実行時に照合する経路と、診断単位の写真場所専用同意を必要とするBrave Place Search補完を実装済み。現在は実POIデータを同梱・配置していないため、索引がない環境では外部同意/許可対象Clueがなければ `unknown` を返す。Commonsの位置付き公開写真を使う参照画像照合は、個別の権利確認と診断単位同意を経た極めて近い複製検出までを実装した。別角度/視点照合と撮影地点推定は未実装。
 
 初回スライスでは、投稿画像ごとの `PhotoPlaceResult` を共通Pydantic型とTypeScript型で追加し、`conclusions` SSEと診断snapshotに含めた。駅名はGazetteer掲載名への完全一致に加え、同じ画像上で重なる高確度OCRとVLMの駅名観測を要求する。既存郵便Gazetteerは完全な郵便番号/住所の文字候補にだけ使い、文字が写真に写ること自体からカメラ位置を推定しない。任意POIは出典・ライセンスが確認されたローカルSQLite索引だけから候補化し、GeoJSONLはストリーミング取込する。権利不明行は検索aliasに登録しない。同名候補は最大50件まで表示し、超過時も `ambiguous` と明示する。複数候補は `ambiguous`、根拠不足や未配置索引は `unknown`。写真場所とプロフィール推論は別経路で、PhotoPlaceResult単独から居住地/現在地候補を生成しない。
 
@@ -81,7 +81,7 @@ POI索引は名称/住所/座標で候補を作る。視覚照合は候補周辺
 | Overture Maps Places | 名称/住所/座標/カテゴリを持つ全国POI候補索引。地理範囲で部分取得し、写真のOCR名称等を照合する | [公式Placesガイド](https://docs.overturemaps.org/guides/places/)でデータ構造・配布単位・ライセンスと更新日を確認し、取得時のメタデータを記録する。地域別カバレッジは未検証であり、網羅性を前提にしない。これはテキスト/座標のPOI索引で、参照画像DBではない。 |
 | OpenStreetMapデータ | 道路・POI等のローカル候補索引 | ODbLの帰属表示と派生データベースの共有条件を確認し、他ライセンスのデータと混同しない。公開タイルを大量取得しない。 |
 Mapillaryの地理付き街路画像 | 候補を絞った地域の視点画像との内部比較 | Mapillaryの説明では街路画像とAPI/GIS連携を提供し、画像はCC BY-SAで帰属表示が必要。取得画像/特徴量の保存・変換・表示がライセンスとAPI条件に沿うか確認し、画像ごとのURL、作者、ライセンス、取得日を保持する。地域全体を先に保存しない。 |
-| Wikimedia Commonsの位置付き画像 | 地名/座標周辺のランドマーク画像を候補検証 | GeoDataで座標周辺検索できる。ファイルごとにライセンス・作者・帰属条件が異なるため、ファイルページごとに確認し、条件不明/非互換は使わない。 |
+| Wikimedia Commonsの位置付き画像 | 地名/座標周辺のランドマーク画像を候補検証 | GeoDataで座標周辺検索できる。ファイルごとにライセンス・作者・帰属条件が異なるため、ファイルページごとに確認し、条件不明/非互換は使わない。初期実装は`CC0 1.0` / `CC BY 3.0` / `CC BY 4.0`に限定し、SA/GFDL等は使わない。画像と比較特徴は診断内メモリのみ。 |
 
 ライセンス記録は最低限 `provider`, `asset_id`, `canonical_url`, `creator`, `license_id/version`, `dataset_version/update_date`, `attribution_text`, `retrieved_at`, `allowed_operations`, `cache_expiry`, `terms_checked_at` を含める。画像本体と派生特徴量の保持が許されるか個別に判断する。出典を追跡できない参照画像・検索結果画像は比較対象にしない。
 
@@ -131,7 +131,7 @@ Mapillaryの地理付き街路画像 | 候補を絞った地域の視点画像�
 1. **データ/権利棚卸し**: `data-prep/SOURCES.md` を基準に各地理データ、画像サービスの利用・キャッシュ・加工条件を確認する。全国の利用可能範囲と欠落地域を記録する。未確認のものは取り込まない。
 2. **観測と共通型**: 既存OCR/VLM出力を再利用して `PhotoPlaceResult` / evidence/source IDを `common/` とweb型へ追加する。初期版はモックで、unknown/ambiguousも表現する。API/SSE契約を同じ変更で同期する。
 3. **ローカル地理索引**: ライセンス条件が明確な全国地名/行政界/地物データを正規化し、SQLite R*Tree等の範囲検索または適切なローカル索引に入れる。全国画像を保管せず、候補生成と曖昧性判定を先に評価する。
-4. **許諾済み参照画像照合**: 地理範囲を狭めてから個別に許諾確認した参照画像を取得し、チーム内比較器で評価する。キャッシュ保持期間と削除手順を実装し、出典をUI/根拠へ結び付ける。
+4. **許諾済み参照画像照合**: 初期段階としてCommons GeoDataの位置付きファイルを、座標付き一意ローカルPOIと別診断同意から検索する。`CC0 1.0` / `CC BY 3.0` / `CC BY 4.0` のみ完全一致するlicense URLと作者を確認し、最大256px/512KiBのthumbnailを最大3枚、診断中のメモリで比較する。投稿写真は外部送信せず、pHash距離2bit以下とSSIM 0.985以上などの厳格な近似複製だけをreference evidenceとする。画像は保持しない。別角度の視点照合は別段階。
 5. **外部補完（実装済み）**: 現行 `AGENTS.md` / `CLAUDE.md` / API契約を更新し、診断単位の専用同意、最大3 query、短いtimeout、テキストallowlist、mock transportテストを追加した。実請求APIは呼ばない。外部結果は未確認候補に留める。
 6. **関係ルールと評価**: 写真場所候補を居住地推論から分離したまま、別投稿関係ルールを追加し、反例/削除再計算/未知ケースを評価する。実測前に確度を確率表示しない。
 7. **API統合とリリース判断**: `docs/api-sse-contract.md`、共通スキーマ、web側検証、デモ表示を同期し、受け入れ基準とプライバシー試験を満たす範囲だけ有効化する。
@@ -148,6 +148,7 @@ Mapillaryの地理付き街路画像 | 候補を絞った地域の視点画像�
 
 ## 11. 実装状況（2026-11-14）
 
+- **Commons参照画像（初期スライス）**: `COMMONS_REFERENCE_LOOKUP_ENABLED=1`、実モード、有限の日次診断上限、診断単位の独立同意 `photo_place_reference_consent` がそろう場合のみ実行する。一意で座標付きのローカルPOI候補だけをCommons GeoDataへ照会し、ファイルごとに厳密許可license URLと作者を検査する。CC0 1.0 / CC BY 3.0 / CC BY 4.0以外、作者/説明ページ/URLが欠けるものは取得しない。最大3地点/診断、最大3 thumbnail・512KiBずつ、API合計6要求まで。本人画像はBluesky CDNから対象画像1枚だけ4MiB上限で取り直し、Commonsへ画像/本文/IDを送らず、参照画像と比較バッファはメモリで処理して破棄する。参照証拠はpHash距離2bit以下、色付きSSIM 0.985以上、aspect ratio差0.005以内、低textureでない条件をすべて満たすときだけ追加する。画像取得のみでは証拠を付けず、候補status/score/`visible_in_frame`を変えない。一般の別角度認識は未実装。既定offでモックは通信しない。
 - **共通型/API**: Python/TypeScriptのPhotoPlaceResult、出典・clue evidence検証を追加し、diagnoseの `conclusions` SSEとログインセッション内のメモリsnapshotに追加した。古いsnapshotではこのフィールドが省略されても復元できる。GET診断復元にも含む。
 - **ローカル画像観測**: 駅は駅名OCRとVLMの重なった観測に既存駅Gazetteerの完全一致を要求する。郵便番号は既存Japan Post表に一致させる。施設/地標は写真の `shop/landmark/org_text/place_text` の明示名/aliasを共有normalizerで照合する。正規化キーの衝突は複数候補として `ambiguous` にする。`name_text` は人物名なので対象外。結果は `visible_in_frame` のみで、撮影地点やプロフィール位置には変換しない。
 - **任意SQLite POI**: `data-prep/src/tkb_data_prep/import_places.py` はローカルGeoJSONLまたはPyArrowのバッチ読込に対応したGeoParquetを既存SQLite索引へ取り込む。GeoParquetでは `theme=places` と `type=place` の両partition列を必須にし、WKB Point、`addresses[].country=JP`、私有住居カテゴリdenylistを適用する。Overture [Place schema](https://docs.overturemaps.org/schema/reference/places/place/) と [Address schema](https://docs.overturemaps.org/schema/reference/places/types/address/) の `addresses[].locality` から、市区町村接尾辞で明示され一意な値だけを粗い `area_label` として保存する。公式定義上localityは近隣地区の場合もあるため、市区町村と判定できない値や競合値はnull。住所freeform・番地・郵便番号は保存しない。既存CLIと互換のためGeoJSONLが既定で、GeoParquetは `--input-format geoparquet` を指定する。API/Gazetteer既定ディレクトリは `data/processed/places.sqlite3`。既存DBは上書きしない。`name_key` のindexでlookupする。索引がなければPOIはunknown。名称キーは `tkb_common.place_names.place_name_keys` をimport/search双方で共有し、NFKC、空白・中黒の差、かな文字種の差だけを正規化する。漢字の読みや意味は推測しない。SQLite `user_version` でキー仕様を示し、非対応versionは検索せずunknown理由を返すため、仕様更新後は索引を再生成する。公開POIデータのみ保存対象で、投稿画像・本文・診断結果は引き続き保存しない。DBレコードは `place_id, names/aliases, coordinates, area_label, basic_category/taxonomy, sources` を保持する。
@@ -155,5 +156,5 @@ Mapillaryの地理付き街路画像 | 候補を絞った地域の視点画像�
 - 同名候補は最大50件を表示し、上限超過時は `too_many_matches` を付け、画面に候補の省略と曖昧さを示す。未校正scoreは保存型にあっても画面へ表示しない。
 - **独立性**: `photo_place_results` は29属性の `profile_claims` / `profile_relations` の入力ではない。仮除外/実削除された投稿の写真候補は画面から除く。候補が現れても撮影地点・居住地・現在地を示さない。
 - **Brave Place Search（実装済み）**: `api/src/tkb_api/photo_place_web.py` のtransport注入可能クライアント。診断ごとの `photo_place_web_lookup_consent` のみで起動し、既存ハンドル検索同意とは独立。最大3クエリ、画像OCR/VLM `shop/landmark/station_sign` の名称のみを送る。結果title完全一致と `postal_address.country=JP` を要求し、`source_url` は公開HTTPS検査後に表示。Brave短期ID/snippet/thumbnailは保持しない。mock・キーなしは通信しない。有料APIの実呼び出しは行っていない。
-- **未実装**: 地理候補周辺の参照画像取得/視点照合、`camera_nearby` / `camera_at`の成立ルール、写真場所と「家の近く」等の独立投稿文脈を結ぶprofile inference、外部候補の公式/公的な独立検証。POI本体は取得していない。
+- **未実装**: 別角度を含む参照画像/視点照合、`camera_nearby` / `camera_at`の成立ルール、写真場所と「家の近く」等の独立投稿文脈を結ぶprofile inference、外部候補の公式/公的な独立検証。POI本体は取得していない。
 - データ供給源の参照条件と任意取込手順は [`data-prep/SOURCES.md`](../data-prep/SOURCES.md)。API/SSE形は [`docs/api-sse-contract.md`](api-sse-contract.md)。テスト結果は実行環境での確認後に作業報告へ記録する。

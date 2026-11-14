@@ -39,6 +39,7 @@ from starlette.background import BackgroundTask
 
 from tkb_api import bluesky
 from tkb_api.bluesky import BlueskySession, Diagnosis, PostsFetcher, SessionStore
+from tkb_api.commons_reference import search_commons_references
 from tkb_api.config import Settings, get_settings
 from tkb_api.errors import BLUESKY_BUSY_MESSAGE, refusal
 from tkb_api.limits import (
@@ -58,6 +59,7 @@ from tkb_api.photo_place_web import (
 from tkb_api.pipeline import (
     conclusions_json,
     diagnose_events,
+    fetch_single_image,
     load_gazetteer,
     mock_extractions,
     plan_json,
@@ -235,6 +237,9 @@ ExternalProfileSearcher = Callable[[str], Awaitable[ExternalLookupResult]]
 PhotoPlaceSearcher = Callable[
     [Sequence[PhotoPlaceResult], Sequence[Clue]], Awaitable[list[PhotoPlaceResult]]
 ]
+PhotoPlaceReferenceSearcher = Callable[
+    [Sequence[PhotoPlaceResult], Sequence[Clue], Sequence[Post]], Awaitable[list[PhotoPlaceResult]]
+]
 
 
 class DiagnoseRequest(BaseModel):
@@ -242,6 +247,7 @@ class DiagnoseRequest(BaseModel):
 
     public_web_lookup_consent: StrictBool = False
     photo_place_web_lookup_consent: StrictBool = False
+    photo_place_reference_consent: StrictBool = False
 
 
 def get_fetch_profile_text() -> ProfileTextFetcher:
@@ -495,6 +501,9 @@ async def diagnose(
     photo_place_web_lookup_consent = (
         payload.photo_place_web_lookup_consent if payload is not None else False
     )
+    photo_place_reference_consent = (
+        payload.photo_place_reference_consent if payload is not None else False
+    )
     now = clock()
     _ensure_open(settings, now)
     lease = _acquire(limiter, settings, session_id, session.did, now)
@@ -580,6 +589,22 @@ async def diagnose(
 
             photo_place_lookup = unavailable_photo_place_lookup
 
+    photo_place_reference_lookup: PhotoPlaceReferenceSearcher | None = None
+    if photo_place_reference_consent and settings.commons_reference_lookup_available:
+
+        async def lookup_commons_references(
+            results: Sequence[PhotoPlaceResult], clues: Sequence[Clue], posts: Sequence[Post]
+        ) -> list[PhotoPlaceResult]:
+            return await search_commons_references(
+                results,
+                clues,
+                posts,
+                gazetteer,
+                fetch_single_image,
+            )
+
+        photo_place_reference_lookup = lookup_commons_references
+
     profile_result: dict[str, Any] = {}
     diagnosis_at = datetime.now(UTC)
 
@@ -626,6 +651,7 @@ async def diagnose(
         external_lookup_status=external_lookup_status,
         external_lookup=external_lookup,
         photo_place_lookup=photo_place_lookup,
+        photo_place_reference_lookup=photo_place_reference_lookup,
     )
     return _sse_response(_with_keep_alive(_stream(stream), settings.sse_keepalive_seconds), lease)
 

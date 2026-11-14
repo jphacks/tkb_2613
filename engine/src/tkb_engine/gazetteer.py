@@ -201,6 +201,44 @@ class Gazetteer:
             for _, record_json in sorted(records.items())[: MAX_PLACE_NAME_MATCHES + 1]
         ]
 
+    def place_coordinates(self, place_id: str) -> tuple[float, float] | None:
+        """Return validated (latitude, longitude) for a licensed local POI ID."""
+        record = self.place_record(place_id)
+        if record is None:
+            return None
+        try:
+            latitude, longitude = float(record["latitude"]), float(record["longitude"])
+        except (KeyError, TypeError, ValueError):
+            return None
+        if not (math.isfinite(latitude) and math.isfinite(longitude)):
+            return None
+        if not (-90 <= latitude <= 90 and -180 <= longitude <= 180):
+            return None
+        return latitude, longitude
+
+    def place_record(self, place_id: str) -> dict[str, Any] | None:
+        """Return a licensed local POI row by stable ID, if it exists in the current index."""
+        if self.places_path is None or not self.places_index_compatible:
+            return None
+        uri = f"{self.places_path.resolve().as_uri()}?mode=ro&immutable=1"
+        try:
+            with closing(sqlite3.connect(uri, uri=True)) as db:
+                row = db.execute(
+                    "SELECT record_json FROM poi_place WHERE place_id = ? AND license_verified = 1",
+                    (place_id,),
+                ).fetchone()
+        except sqlite3.Error:
+            return None
+        if row is None:
+            return None
+        try:
+            record = json.loads(row[0])
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+            return None
+        if not isinstance(record, dict):
+            return None
+        return record
+
     @property
     def places_index_compatible(self) -> bool:
         """Whether the configured SQLite index uses the current shared key schema."""

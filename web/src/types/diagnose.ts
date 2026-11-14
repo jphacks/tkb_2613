@@ -107,7 +107,7 @@ export interface PhotoPlaceResult {
   readonly granularity: "station" | "facility" | "address" | "area" | "unknown";
   readonly candidates: readonly PhotoPlaceCandidate[];
   readonly reason_codes: readonly string[];
-  readonly lookup_status: "local_only" | "web_searched" | "unavailable";
+  readonly lookup_status: "local_only" | "web_searched" | "reference_checked" | "unavailable";
 }
 
 /** 同じログインセッションで開き直したときに取得する完了済みの診断。 */
@@ -198,7 +198,7 @@ function isPhotoPlaceResultList(value: unknown, clues: readonly Clue[]): value i
       (entry.image_index as number) < 0 ||
       !["candidate", "ambiguous", "unknown", "unavailable"].includes(entry.status as string) ||
       !["station", "facility", "address", "area", "unknown"].includes(entry.granularity as string) ||
-      !["local_only", "web_searched", "unavailable"].includes(entry.lookup_status as string) ||
+      !["local_only", "web_searched", "reference_checked", "unavailable"].includes(entry.lookup_status as string) ||
       !Array.isArray(entry.candidates) || !Array.isArray(entry.reason_codes) ||
       !entry.reason_codes.every((reason) => typeof reason === "string")) return false;
     const key = `${entry.post_id}:${entry.image_index}`;

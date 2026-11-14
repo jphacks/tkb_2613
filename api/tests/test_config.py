@@ -85,17 +85,52 @@ def test_explicit_gazetteer_dir_overrides_autoselection(
     assert Settings(_env_file=None).gazetteer_dir == explicit
 
 
+def test_commons_reference_lookup_requires_explicit_enablement_live_mode_and_finite_cap() -> None:
+    assert Settings(_env_file=None).commons_reference_lookup_available is False
+    assert (
+        Settings(
+            _env_file=None,
+            mock_mode=False,
+            commons_reference_lookup_enabled=True,
+            diagnose_daily_limit=3,
+        ).commons_reference_lookup_available
+        is True
+    )
+    assert (
+        Settings(
+            _env_file=None,
+            mock_mode=False,
+            commons_reference_lookup_enabled=True,
+            diagnose_daily_limit=0,
+        ).commons_reference_lookup_available
+        is False
+    )
+    assert (
+        Settings(
+            _env_file=None,
+            mock_mode=True,
+            commons_reference_lookup_enabled=True,
+            diagnose_daily_limit=3,
+        ).commons_reference_lookup_available
+        is False
+    )
+
+
 @pytest.mark.parametrize("mock_mode", [True, False])
 def test_gazetteer_dependency_uses_selected_directory_in_mock_and_live_modes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mock_mode: bool
 ) -> None:
     from tkb_api.routes.diagnose import get_gazetteer
+    from tkb_engine.gazetteer import Gazetteer
 
     expected = tmp_path / "selected-gazetteer"
-    monkeypatch.setattr("tkb_api.routes.diagnose._cached_gazetteer", lambda directory: directory)
+    monkeypatch.setattr(
+        "tkb_api.routes.diagnose._cached_gazetteer",
+        lambda directory: Gazetteer(places_path=directory),
+    )
     settings = Settings(_env_file=None, mock_mode=mock_mode, gazetteer_dir=expected)
 
-    assert get_gazetteer(settings) == expected
+    assert get_gazetteer(settings).places_path == expected
 
 
 def test_tests_do_not_read_a_local_env_file(

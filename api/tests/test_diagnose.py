@@ -508,6 +508,7 @@ def test_features_tell_whether_public_web_lookup_is_available_without_the_key(
     assert res.status_code == 200
     assert res.json()["public_web_lookup_available"] is public_available
     assert res.json()["photo_place_web_lookup_available"] is photo_place_available
+    assert res.json()["commons_reference_lookup_available"] is False
     # キーの値そのものは返さない
     assert FAKE_BRAVE_KEY not in res.text
 
@@ -549,12 +550,23 @@ def test_consent_with_a_brave_key_runs_the_search_with_the_session_handle() -> N
     assert conclusions["external_lookup_status"] == "searched"
 
 
-def test_photo_place_search_has_separate_consent_and_mock_never_calls_searcher() -> None:
+def test_photo_place_search_has_separate_consent_and_mock_never_calls_searcher(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     calls: list[tuple[int, int]] = []
+    reference_calls: list[int] = []
 
     async def fake_photo_search(results: list[Any], clues: list[Clue]) -> list[Any]:
         calls.append((len(results), len(clues)))
         return results
+
+    async def fake_reference_search(
+        results: list[Any], clues: list[Clue], posts: list[Post], *_args: Any
+    ) -> list[Any]:
+        reference_calls.append(len(results))
+        return results
+
+    monkeypatch.setattr("tkb_api.routes.diagnose.search_commons_references", fake_reference_search)
 
     settings = Settings(
         mock_mode=True,
@@ -571,16 +583,52 @@ def test_photo_place_search_has_separate_consent_and_mock_never_calls_searcher()
             json={
                 "public_web_lookup_consent": False,
                 "photo_place_web_lookup_consent": True,
+                "photo_place_reference_consent": True,
             },
         )
 
     assert result.status_code == 200
     assert features["photo_place_web_lookup_available"] is False
+    assert features["commons_reference_lookup_available"] is False
     assert calls == []
+    assert reference_calls == []
     conclusions = next(data for name, data in _events(result.text) if name == "conclusions")
     assert all(
         item["lookup_status"] != "web_searched" for item in conclusions["photo_place_results"]
     )
+
+
+def test_commons_reference_search_requires_its_own_live_consent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reference_calls: list[int] = []
+    raw = json.loads(FIXTURE.read_text(encoding="utf-8"))["posts"][3]
+    post = Post.model_validate({**raw, "images": []})
+
+    async def fetch_posts(_client: AsyncClient, _did: str, _limit: int) -> list[Post]:
+        return [post]
+
+    async def fake_reference_search(
+        results: list[Any], clues: list[Clue], posts: list[Post], *_args: Any
+    ) -> list[Any]:
+        reference_calls.append(len(results))
+        return results
+
+    monkeypatch.setattr("tkb_api.routes.diagnose.search_commons_references", fake_reference_search)
+    settings = Settings(
+        mock_mode=False,
+        commons_reference_lookup_enabled=True,
+        diagnose_daily_limit=3,
+        max_posts=5,
+    )
+    with _real_client(fetch_posts, settings=settings) as client:
+        _login(client)
+        features = client.get("/api/features").json()
+        result = client.post("/api/diagnose", json={"photo_place_reference_consent": True})
+
+    assert result.status_code == 200
+    assert features["commons_reference_lookup_available"] is True
+    assert reference_calls == [0]
 
 
 def test_photo_place_search_consent_does_not_imply_profile_web_consent() -> None:
