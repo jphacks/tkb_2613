@@ -258,6 +258,7 @@ async def test_photo_place_candidate_does_not_become_a_profile_location_claim(
         ],
     }
     with sqlite3.connect(index) as db:
+        db.execute(f"PRAGMA user_version = {PLACE_INDEX_SCHEMA_VERSION}")
         db.executescript(
             """
             CREATE TABLE poi_place (
@@ -490,9 +491,7 @@ async def test_photo_home_area_claim_flows_through_sse_and_deletion_recalculatio
         if claim["attribute"] == ProfileAttribute.RESIDENTIAL_AREA.value
     )
     assert residential["status"] == "candidate"
-    assert [candidate["value"] for candidate in residential["candidates"]] == [
-        "\u6587\u4eac\u533a"
-    ]
+    assert [candidate["value"] for candidate in residential["candidates"]] == ["\u6587\u4eac\u533a"]
     candidate = residential["candidates"][0]
     assert candidate["status"] == "weak"
 
@@ -500,6 +499,7 @@ async def test_photo_home_area_claim_flows_through_sse_and_deletion_recalculatio
         photo_post.post_id,
         area_post.post_id,
     }
+
 
 @pytest.mark.anyio
 async def test_conclusions_event_returns_photo_unknown_without_creating_profile_claims() -> None:
