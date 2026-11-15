@@ -56,7 +56,7 @@ export function ResidenceMap({ residence }: { residence: ResidenceEstimate }) {
   const [withGeo, setWithGeo] = useState(false);
   const noteId = useId();
   const { map, geoprofile } = residence;
-  if (map.cells.length === 0) return null;
+  if (residence.localization_status !== "supported" || map.cells.length === 0) return null;
   const g = grid(map.cells, map.cell_lat, map.cell_lon);
   const value = (c: ResidenceMapCell) => (withGeo ? c.p_geo : c.p);
   const most = Math.max(...map.cells.map(value)) || 1;

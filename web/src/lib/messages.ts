@@ -277,6 +277,11 @@ export const messages = {
   residence: {
     heading: "住まいの点数の地図",
     lead: "投稿を1件ずつ重ねると、住んでいそうな人の数がここまで減ります。数字は国勢調査と道路網から計算した推定です。",
+    localizationConflict: "根拠が一致しない",
+    localizationConflictNote: "プロフィールの地理根拠が一致しないため、場所の地図は表示していません。",
+    localizationInsufficient: "絞り込み不足",
+    localizationInsufficientNote: "絞り込み不足のため、場所の地図は表示していません。",
+    placeUnavailable: "場所を表示できません",
     summary: (text: string) => `住まいの推定：${text}`,
     start: (ageClass: string | null) => (ageClass ? `投稿なし（1都3県の${ageClass}）` : "投稿なし（1都3県のすべての人）"),
     densest: "一番濃いのはここ",

@@ -99,7 +99,7 @@ def _render_diagnosis(
         "profile_relations": [item.model_dump(mode="json") for item in profile_relations],
         "profile_claim_suggestions": list(plan["delete"]),
         "plan": plan,
-        "residence": residence_json(clues, posts, gazetteer),
+        "residence": residence_json(clues, posts, gazetteer, profile_claims=profile_claims),
     }
     # FastAPI の JSONResponse と同じ書き出し方
     body = json.dumps(doc, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode()

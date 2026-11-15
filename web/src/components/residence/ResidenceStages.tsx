@@ -58,10 +58,24 @@ export function ResidenceStages({ residence, posts }: { residence: ResidenceEsti
   const steps = changedSteps(residence.steps);
   const { region } = residence;
   const regionText = t.region(formatPeople(region.people), residence.age_class);
+  const localizationStatus = residence.localization_status ?? "insufficient";
+  const locationLabel = localizationStatus === "supported"
+    ? densestText(residence)
+    : localizationStatus === "conflict"
+      ? t.localizationConflict
+      : t.localizationInsufficient;
+  const localizationNote = localizationStatus === "conflict"
+    ? t.localizationConflictNote
+    : localizationStatus === "insufficient"
+      ? t.localizationInsufficientNote
+      : null;
+  const accessibleLocation = localizationStatus === "supported"
+    ? `${t.densest}：${locationLabel}`
+    : locationLabel;
   return (
     <figure
       ref={ref}
-      aria-label={t.summary(`${t.densest}：${densestText(residence)}。${regionText}`)}
+      aria-label={t.summary(`${accessibleLocation}。${regionText}`)}
       className={`residence space-y-6 border-y-2 border-ink py-6 ${playing ? "residence-playing" : ""}`}
     >
       <figcaption className="space-y-2">
@@ -92,8 +106,8 @@ export function ResidenceStages({ residence, posts }: { residence: ResidenceEsti
         <ResidenceMap residence={residence} />
         <div className="space-y-4">
           <p className="residence-callout border-l-4 border-seeker pl-3">
-            <span className="block text-sm font-bold text-seeker">{t.densest}</span>
-            <span className="block text-xl font-bold">{densestText(residence)}</span>
+            <span className="block text-sm font-bold text-seeker">{localizationNote ?? t.densest}</span>
+            <span className="block text-xl font-bold">{locationLabel}</span>
             <span className="block">{regionText}</span>
             {region.same_birthday !== null && <span className="block text-sm">{t.birthday(formatPeople(region.same_birthday))}</span>}
           </p>

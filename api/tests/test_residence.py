@@ -3,9 +3,24 @@
 表は engine の小さな架空の地図（tkb_engine.scoring.sample）を使う。
 """
 
+from dataclasses import replace
+
 from tkb_api.pipeline import residence_json, simulate_claims_json
 from tkb_common.residence import ResidenceEstimate
-from tkb_common.schemas import Clue, ClueSource, ClueType, Post
+from tkb_common.schemas import (
+    Clue,
+    ClueSource,
+    ClueType,
+    EvidenceSource,
+    Post,
+    ProfileAttribute,
+    ProfileCandidate,
+    ProfileCandidateSet,
+    ProfileCandidateSetStatus,
+    ProfileEvidence,
+    ProfileEvidencePath,
+    ProfileStatus,
+)
 from tkb_engine.gazetteer import CollectionArea, Gazetteer, Knowledge
 from tkb_engine.scoring.sample import build_tables
 
@@ -39,6 +54,32 @@ def photo(n: int, source: ClueSource) -> Clue:
         region=None,
         confidence=0.9,
         source=source,
+    )
+
+
+def station_claim(required_posts: tuple[Post, Post]) -> ProfileCandidateSet:
+    evidence = [
+        ProfileEvidence(
+            post_id=item.post_id,
+            required=True,
+            source=EvidenceSource.POST_TEXT,
+            excerpt="本人の投稿による根拠",
+        )
+        for item in required_posts
+    ]
+    candidate = ProfileCandidate(
+        rank=1,
+        value="東大前駅",
+        confidence=0.9,
+        status=ProfileStatus.FOUND,
+        evidence=evidence,
+        evidence_paths=[ProfileEvidencePath(evidence=evidence, confidence=0.9)],
+    )
+    return ProfileCandidateSet(
+        attribute=ProfileAttribute.HOME_NEAREST_STATION,
+        status=ProfileCandidateSetStatus.CANDIDATE,
+        candidates=[candidate],
+        candidate_pool=[candidate],
     )
 
 
@@ -82,8 +123,9 @@ def test_residence_returns_the_map_steps_influence_and_evidence() -> None:
     assert body is not None
     estimate = ResidenceEstimate.model_validate(body)
     assert estimate.age_class == "20〜24歳"
+    assert estimate.localization_status == "insufficient"
     assert estimate.region.same_birthday is not None
-    assert estimate.region.city in {"文京区", "中野区"}
+    assert estimate.region.city is None and estimate.region.town is None
     assert estimate.steps[0].post_id is None
     assert [s.post_id for s in estimate.steps[1:]] == [
         POSTS[0].post_id,
@@ -96,9 +138,9 @@ def test_residence_returns_the_map_steps_influence_and_evidence() -> None:
     town = next(e for e in estimate.evidence if e.layer == 5)
     assert town.post_id == POSTS[2].post_id
     assert town.clue_indices == [1, 2]  # 診断の clues での番号
-    assert len(estimate.map.cells) == 100
-    assert sum(c.in_region for c in estimate.map.cells) == estimate.region.cells
-    assert {label.kind for label in estimate.map.labels} == {"station", "town"}
+    # A near-home town fragment alone does not authorize a localized map.
+    assert estimate.map.cells == [] and estimate.map.labels == []
+    assert estimate.geoprofile is None
     assert estimate.assumptions and any("OpenStreetMap" in s for s in estimate.sources)
 
 
@@ -112,6 +154,8 @@ def test_residence_leaves_out_excluded_posts_and_keeps_clue_numbers() -> None:
     assert without_photo is not None
     assert all(e["layer"] != 5 for e in without_photo["evidence"])
     assert without_photo["region"]["people"] >= body["region"]["people"]
+    assert without_photo["localization_status"] == "insufficient"
+    assert without_photo["map"]["cells"] == []
 
 
 def test_simulate_recomputes_the_residence_without_the_chosen_posts() -> None:
@@ -124,3 +168,26 @@ def test_simulate_recomputes_the_residence_without_the_chosen_posts() -> None:
     )
     assert without_tables["residence"] is None
     assert "residence" not in simulate_claims_json([], CLUES, POSTS, [POSTS[2].post_id])
+
+
+def test_simulate_drops_map_localization_when_a_required_home_post_is_removed() -> None:
+    scoring = replace(
+        GAZETTEER.scoring,
+        stations=replace(GAZETTEER.scoring.stations, group=["8号線京王線", "1号線京王線"]),
+    )
+    gazetteer = replace(GAZETTEER, scoring=scoring)
+    home_one, home_two = post(11, "自宅の最寄り駅の写真"), post(12, "自宅から駅まで毎朝歩いている")
+    line_post = post(13, "京王線、また止まってる…")
+    posts = [home_one, home_two, line_post]
+    claim = station_claim((home_one, home_two))
+
+    before = residence_json([], posts, gazetteer, profile_claims=[claim])
+    assert before is not None
+    assert before["localization_status"] == "supported"
+    assert before["map"]["cells"]
+
+    simulated = simulate_claims_json([claim], [], posts, [home_one.post_id], gazetteer=gazetteer)
+    after = ResidenceEstimate.model_validate(simulated["residence"])
+    assert after.localization_status == "insufficient"
+    assert after.map.cells == [] and after.map.labels == []
+    assert after.region.station is None and after.region.town is None

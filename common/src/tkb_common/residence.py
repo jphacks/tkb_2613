@@ -103,10 +103,14 @@ class ResidenceGeoprofile(BaseModel):
     buffer_m: float
 
 
+ResidenceLocalizationStatus = Literal["supported", "conflict", "insufficient"]
+
+
 class ResidenceEstimate(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     age_class: str | None  # 例：「20〜24歳」。年齢がわからなければ null（総人口で数える）
+    localization_status: ResidenceLocalizationStatus
     region: ResidenceRegion
     geoprofile: ResidenceGeoprofile | None
     map: ResidenceMap
