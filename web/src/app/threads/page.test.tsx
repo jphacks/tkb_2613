@@ -4,6 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { THREADS_LANG_KEY } from "@/lib/threads-i18n";
 
 import profileFixture from "./fixtures/threads-profile.json";
+import { PROFILE_DIAGNOSED_ATTRIBUTES, isProfileCandidateSetList } from "@/types/profile";
+import { SAMPLE_RESIDENCE } from "@/fixtures/residence";
+import { isDiagnosisSnapshot, isSimulation } from "@/types/diagnose";
 import ThreadsPage from "./page";
 
 function json(body: unknown, status = 200): Response {
@@ -23,7 +26,7 @@ function stubConnectedApi(configStatus = 200) {
     }
     if (path.endsWith("/session") && init?.method === "DELETE") return new Response(null, { status: 204 });
     if (path.endsWith("/session")) return json({ username: "reviewer", mock: false });
-    if (path.endsWith("/diagnosis")) return json({ detail: "診断結果がありません" }, 404);
+    if (path.split("?")[0].endsWith("/diagnosis")) return json({ detail: "診断結果がありません" }, 404);
     if (path.endsWith("/posts")) {
       return json({
         mock: false,
@@ -98,7 +101,7 @@ describe("Threads review flow without a model", () => {
         image_diagnosis_enabled: true,
       });
       if (path.endsWith("/session")) return json({ username: "reviewer", mock: false });
-      if (path.endsWith("/diagnosis")) return json({ detail: "none" }, 404);
+      if (path.split("?")[0].endsWith("/diagnosis")) return json({ detail: "none" }, 404);
       if (path.endsWith("/posts")) return json({
         mock: false,
         posts: [{
@@ -197,7 +200,7 @@ describe("English display language", () => {
         return Promise.resolve(json({ mock_enabled: false, gpu_demo_enabled: false, live_enabled: true, max_posts: 30 }));
       }
       if (path.endsWith("/session")) return Promise.resolve(json({ username: "reviewer", mock: false }));
-      if (path.endsWith("/diagnosis")) return Promise.resolve(json({ detail: "none" }, 404));
+      if (path.split("?")[0].endsWith("/diagnosis")) return Promise.resolve(json({ detail: "none" }, 404));
       return new Promise<Response>((resolve) => { release = resolve; });
     }));
     render(<ThreadsPage />);
@@ -283,9 +286,9 @@ describe("profile claims on the Threads diagnosis", () => {
       const path = String(input);
       if (path.endsWith("/config")) return json({ mock_enabled: true, gpu_demo_enabled: false, live_enabled: false, max_posts: 30 });
       if (path.endsWith("/session")) return json({ username: "架空のThreadsアカウント", mock: true });
-      if (path.endsWith("/diagnosis")) return json(profileFixture.snapshot);
-      if (path.endsWith("/simulate")) return json(profileFixture.simulate);
-      if (path.endsWith("/rediagnose")) return json(profileFixture.rediagnose);
+      if (path.split("?")[0].endsWith("/diagnosis")) return json(profileFixture.snapshot);
+      if (path.split("?")[0].endsWith("/simulate")) return json(profileFixture.simulate);
+      if (path.split("?")[0].endsWith("/rediagnose")) return json(profileFixture.rediagnose);
       throw new Error(`unexpected fetch: ${path} ${init?.method ?? "GET"}`);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -371,10 +374,10 @@ describe("stamps on the inferences lost by excluding posts", () => {
       const path = String(input);
       if (path.endsWith("/config")) return json({ mock_enabled: true, gpu_demo_enabled: false, live_enabled: false, max_posts: 30 });
       if (path.endsWith("/session")) return json({ username: "架空のThreadsアカウント", mock: true });
-      if (path.endsWith("/diagnosis")) return json(snapshot);
+      if (path.split("?")[0].endsWith("/diagnosis")) return json(snapshot);
       // ジムの投稿2件を外すと「決まった外出」が崩れる
-      if (path.endsWith("/simulate")) return json({ ...profileFixture.simulate, delete: GYM_POSTS, broken: ["routine"], after: [] });
-      if (path.endsWith("/rediagnose")) {
+      if (path.split("?")[0].endsWith("/simulate")) return json({ ...profileFixture.simulate, delete: GYM_POSTS, broken: ["routine"], after: [] });
+      if (path.split("?")[0].endsWith("/rediagnose")) {
         const base = profileFixture.rediagnose;
         const posts = base.posts.filter((p) => !GYM_POSTS.includes(p.post_id));
         const clues = base.clues.filter((c) => !GYM_POSTS.includes(c.post_id));
@@ -417,6 +420,69 @@ describe("stamps on the inferences lost by excluding posts", () => {
   });
 });
 
+describe("native candidate format for Threads", () => {
+  const routineEvidence = ["threads:9001", "threads:9002"].map((post_id, index) => ({
+    post_id, clue_index: index, required: true, source: "clue", image_index: null, excerpt: null, web_fact_id: null,
+  }));
+  const routineAssessment = {
+    minimal_scope: "bluesky", offline_subtype: null, psychological_resistance: null, persona_context: null,
+    inference_ease: null, inference_ease_basis: null, harm_severity: null, harm_scenario: null,
+    harm_prerequisites: [], harm_status: "unknown",
+  };
+  const routineCandidate = {
+    rank: 1, value: "毎週火曜のジム", confidence: 0.9, status: "found", evidence: routineEvidence,
+    evidence_paths: [{ evidence: routineEvidence, confidence: 0.9, provenance: "combined_inference" }],
+    assessment: routineAssessment, observed_at: null, counter_evidence: [],
+  };
+  const unknownSets = PROFILE_DIAGNOSED_ATTRIBUTES.map((attribute) => attribute === "routine" ? {
+    attribute, status: "candidate", candidates: [routineCandidate], candidate_pool: [routineCandidate], reason: null, conflicting_evidence: [],
+  } : {
+    attribute, status: "unknown", candidates: [], candidate_pool: [], reason: "no_grounded_rule", conflicting_evidence: [],
+  });
+
+  it("requests candidate snapshots and uses simulation geodata instead of the original map", async () => {
+    const base = profileFixture.snapshot;
+    const snapshot = {
+      posts: base.posts,
+      clues: base.clues,
+      profile_claims: unknownSets,
+      profile_claim_suggestions: ["threads:9001"],
+      plan: { delete: [], broken: [], after: unknownSets, posts: [] },
+      narrowing: null,
+      residence: SAMPLE_RESIDENCE,
+    };
+    expect(isProfileCandidateSetList(unknownSets)).toBe(true);
+    expect(isSimulation(snapshot.plan)).toBe(true);
+    expect(isDiagnosisSnapshot(snapshot)).toBe(true);
+    const simulated = { delete: ["threads:9001"], broken: [], after: unknownSets, narrowing: null, residence: null };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input), "http://localhost");
+      const path = url.pathname;
+      if (path.endsWith("/config")) return json({ mock_enabled: true, gpu_demo_enabled: false, live_enabled: false, max_posts: 30 });
+      if (path.endsWith("/session")) return json({ username: "架空のThreadsアカウント", mock: true });
+      if (path.endsWith("/diagnosis")) return json(snapshot);
+      if (path.endsWith("/simulate")) return json(simulated);
+      if (path.endsWith("/rediagnose")) return json({ ...snapshot, deleted: ["threads:9001"], residence: SAMPLE_RESIDENCE });
+      throw new Error(`unexpected fetch: ${path} ${init?.method ?? "GET"}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ThreadsPage />);
+
+    expect(await screen.findByText(/文京区/)).toBeInTheDocument();
+    expect(screen.getByText("候補を仮に外して比べる")).toBeInTheDocument();
+    expect(screen.getByText("投稿 1 ・候補")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/diagnosis?format=candidates"), expect.anything());
+    const firstCheckbox = screen.getAllByRole("checkbox", { name: "仮除外する" })[0];
+    fireEvent.click(firstCheckbox);
+    fireEvent.click(screen.getByRole("button", { name: "仮除外を試す" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/simulate?format=candidates"), expect.anything()));
+    await waitFor(() => expect(screen.queryByText(/文京区/)).not.toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "選択した投稿を除いて再診断" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/rediagnose?format=candidates"), expect.anything()));
+    expect(await screen.findByText(/文京区/)).toBeInTheDocument();
+  });
+});
+
 describe("posts that could not be read", () => {
   it("tells how many posts were left out of the diagnosis", async () => {
     const snapshot = { ...profileFixture.snapshot, post_errors: [{ post_id: "threads:9006", error: "この投稿は読み取れませんでした" }] };
@@ -424,7 +490,7 @@ describe("posts that could not be read", () => {
       const path = String(input);
       if (path.endsWith("/config")) return json({ mock_enabled: true, gpu_demo_enabled: true, live_enabled: false, max_posts: 30 });
       if (path.endsWith("/session")) return json({ username: "架空のThreadsアカウント", mock: true });
-      if (path.endsWith("/diagnosis")) return json(snapshot);
+      if (path.split("?")[0].endsWith("/diagnosis")) return json(snapshot);
       throw new Error(`unexpected fetch: ${path}`);
     }));
     render(<ThreadsPage />);
@@ -439,7 +505,7 @@ describe("posts that could not be read", () => {
       const path = String(input);
       if (path.endsWith("/config")) return json({ mock_enabled: true, gpu_demo_enabled: false, live_enabled: false, max_posts: 30 });
       if (path.endsWith("/session")) return json({ username: "架空のThreadsアカウント", mock: true });
-      if (path.endsWith("/diagnosis")) return json(snapshot);
+      if (path.split("?")[0].endsWith("/diagnosis")) return json(snapshot);
       throw new Error(`unexpected fetch: ${path}`);
     }));
     render(<ThreadsPage />);
@@ -475,7 +541,7 @@ describe("a diagnosis that is already running", () => {
         if (progressCalls === 1) return json(RUNNING);
         return json(options.endsWithResult ? { ...IDLE, state: "done" } : IDLE);
       }
-      if (path.endsWith("/diagnosis")) {
+      if (path.split("?")[0].endsWith("/diagnosis")) {
         // ログイン直後の復元では結果なし。POST のあと（または再読み込みで見守った後）だけ結果がある
         const ready = options.reload || diagnosePosted;
         return options.endsWithResult && ready ? json(profileFixture.snapshot) : json({ detail: "診断結果がありません" }, 404);
@@ -483,7 +549,7 @@ describe("a diagnosis that is already running", () => {
       if (path.endsWith("/posts")) {
         return json({ mock: false, posts: [{ post_id: "threads:review-1", text: POST_TEXT, created_at: "2026-11-12T12:00:00+09:00", images: [] }] });
       }
-      if (path.endsWith("/diagnose") && method === "POST") { diagnosePosted = true; return json({ detail: "診断中です" }, 409); }
+      if (path.split("?")[0].endsWith("/diagnose") && method === "POST") { diagnosePosted = true; return json({ detail: "診断中です" }, 409); }
       throw new Error(`unexpected fetch: ${path} ${method}`);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -491,7 +557,7 @@ describe("a diagnosis that is already running", () => {
   }
 
   const diagnoseCalls = (fetchMock: ReturnType<typeof vi.fn>) =>
-    fetchMock.mock.calls.filter(([path]) => String(path).endsWith("/diagnose")).length;
+    fetchMock.mock.calls.filter(([path]) => String(path).split("?")[0].endsWith("/diagnose")).length;
 
   beforeEach(() => { vi.useFakeTimers({ shouldAdvanceTime: true }); });
   afterEach(() => { vi.useRealTimers(); });

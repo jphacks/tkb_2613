@@ -5,17 +5,22 @@ import Link from "next/link";
 
 import { ConclusionBoard } from "@/components/conclusion-board/ConclusionBoard";
 import { EscapeStamps, brokenInferences, countAttributes, lostAttributes } from "@/components/escape-stamps/EscapeStamps";
+import { NarrowingStages } from "@/components/narrowing/NarrowingStages";
 import { PostCard } from "@/components/post-list/PostCard";
 import { Reveal } from "@/components/reveal/Reveal";
+import { ResidenceStages } from "@/components/residence/ResidenceStages";
 import { ThreadsDiagnosing } from "@/components/threads/ThreadsDiagnosing";
 import { THREADS_TEXT, ThreadsError, type ThreadsErrorKey, type ThreadsLang } from "@/lib/threads-i18n";
 import { checkThreadsPublicText } from "@/lib/threads-public-check";
 import { useThreadsDiagnosis } from "@/lib/useThreadsDiagnosis";
 import { useThreadsLang } from "@/lib/useThreadsLang";
-import { isDiagnosisSnapshot, isThreadsSimulation, type Conclusion, type DiagnosisSnapshot, type RiskyPost, type ThreadsSimulation } from "@/types/diagnose";
+import { isDiagnosisSnapshot, isSimulation, isThreadsSimulation, type Conclusion, type DiagnosisSnapshot, type RiskyPost, type Simulation, type ThreadsSimulation } from "@/types/diagnose";
+import { isResidenceEstimate } from "@/types/residence";
+import { visibleNarrowing } from "@/types/narrowing";
 import { isPost, type Post } from "@/types/post";
 import {
   PROFILE_DIAGNOSED_ATTRIBUTES,
+  PROFILE_ATTRIBUTE_CATALOG,
   isProfileItem,
   profileClaimsAfterDeletion,
   type ClaimAssessment,
@@ -27,8 +32,8 @@ import {
 type PostError = { readonly post_id: string; readonly error: string };
 type ThreadsDiagnosis = Omit<DiagnosisSnapshot, "plan"> & {
   /** Thread compatibility still returns its own legacy inference list. */
-  readonly conclusions: readonly Conclusion[];
-  readonly plan: ThreadsSimulation & { readonly posts: readonly RiskyPost[] };
+  readonly conclusions?: readonly Conclusion[];
+  readonly plan: Simulation & { readonly posts: readonly RiskyPost[] };
   readonly elapsed_ms?: number;
   readonly mock?: boolean;
   /** 読み取りに失敗して診断から外した投稿（api の post_errors）。再診断の応答にはない */
@@ -70,7 +75,9 @@ function errorKeyOf(cause: unknown, fallback: ThreadsErrorKey): ThreadsErrorKey 
 async function call(path: string, method: "GET" | "POST" | "DELETE" = "GET", body?: unknown): Promise<unknown> {
   let response: Response;
   try {
-    response = await fetch(`/api/threads/${path}`, {
+    const candidatePath = ["diagnose", "diagnosis", "simulate", "rediagnose"].includes(path.split("?")[0])
+      ? `${path.split("?")[0]}?format=candidates` : path;
+    response = await fetch(`/api/threads/${candidatePath}`, {
       method,
       credentials: "same-origin",
       cache: "no-store",
@@ -160,6 +167,10 @@ function threadsCandidateSets(raw: unknown, posts: readonly Post[]): readonly Pr
 }
 
 function requireDiagnosis(value: unknown): ThreadsDiagnosis {
+  // Candidate format is the native shared snapshot used by Bluesky and demo.
+  if (isDiagnosisSnapshot(value) && isPostErrors((value as unknown as Record<string, unknown>).post_errors)) {
+    return value as ThreadsDiagnosis;
+  }
   if (!isRecord(value) || !isPostErrors(value.post_errors) || !isLegacyConclusions(value.conclusions)) {
     throw new ThreadsError("diagnosisUnreadable");
   }
@@ -186,7 +197,7 @@ export default function ThreadsPage() {
   const [original, setOriginal] = useState<ThreadsDiagnosis | null>(null);
   const [view, setView] = useState<ThreadsDiagnosis | null>(null);
   const [selected, setSelected] = useState<readonly string[]>([]);
-  const [preview, setPreview] = useState<ThreadsSimulation | null>(null);
+  const [preview, setPreview] = useState<Simulation | null>(null);
   const [fetchedPosts, setFetchedPosts] = useState<readonly Post[] | null>(null);
   const [publicCheckDone, setPublicCheckDone] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -261,19 +272,31 @@ export default function ThreadsPage() {
   }
 
   const current = view ?? original;
-  // 仮除外を試している間は、選んだ投稿を根拠から除いた推定を出す（Bluesky の画面・GET /api/diagnosis と同じ規則）。
-  // 再診断の結果は api が除いて返すので、そのまま使う
-  const previewExcluded = new Set(preview?.delete ?? []);
-  const profileClaims = profileClaimsAfterDeletion(current?.profile_claims ?? [], previewExcluded);
-  const profileClaimSuggestions = (current?.profile_claim_suggestions ?? []).filter((id) => !previewExcluded.has(id));
+  const effectiveExcluded = new Set(preview?.delete ?? current?.deleted ?? []);
+  // 仮除外の結果はAPIの再計算済み候補を使う。再診断の応答も候補をそのまま使う。
+  const previewExcluded = effectiveExcluded;
+  const profileClaims = preview ? preview.after : current?.profile_claims ?? [];
+  const profileClaimSuggestions = (current?.profile_claim_suggestions ?? []).filter((id) => !effectiveExcluded.has(id));
   const publicFindings = fetchedPosts ? checkThreadsPublicText(fetchedPosts) : [];
   // 仮除外の試算か、仮除外後の再診断で推定できた項目が減ったら、崩れた推定に判子を押して数を減らす（Bluesky と同じ）
-  const lost = !original ? [] : preview ? preview.broken : view && view !== original ? lostAttributes(original.conclusions, view.conclusions) : [];
+  const native = !!original && !original.conclusions;
+  const candidateAttributes = (sets: DiagnosisSnapshot["profile_claims"]) => sets
+    .filter((set) => set.status === "candidate" || set.status === "ambiguous")
+    .map((set) => set.attribute);
+  const lost = !original ? [] : preview ? preview.broken : view && view !== original
+    ? native
+      ? candidateAttributes(original.profile_claims).filter((attribute) => !candidateAttributes(view.profile_claims).includes(attribute))
+      : lostAttributes(original.conclusions ?? [], view.conclusions ?? [])
+    : [];
+  const beforeCount = original ? native ? candidateAttributes(original.profile_claims).length : countAttributes(original.conclusions ?? []) : 0;
   const escape = original && lost.length > 0 ? {
     key: `${preview ? "simulated" : "rediagnosed"}:${(preview?.delete ?? selected).join(",")}`,
-    before: countAttributes(original.conclusions),
-    after: countAttributes(original.conclusions.filter((c) => !lost.includes(c.attribute))),
-    broken: brokenInferences(original.conclusions, lost),
+    before: beforeCount,
+    after: beforeCount - lost.length,
+    broken: native ? lost.map((attribute) => ({
+      label: PROFILE_ATTRIBUTE_CATALOG[attribute as keyof typeof PROFILE_ATTRIBUTE_CATALOG]?.label ?? attribute,
+      value: original.profile_claims.find((set) => set.attribute === attribute)?.candidates[0]?.value ?? "",
+    })) : brokenInferences(original.conclusions ?? [], lost),
   } : null;
   return (
     <main className="mx-auto max-w-4xl px-5 py-12">
@@ -400,20 +423,34 @@ export default function ThreadsPage() {
 
       {original && current && <div className="mt-12 space-y-10">
         {/* 全投稿の診断が出た瞬間だけ、Bluesky と同じ演出で「ここまでわかった」を叩きつける（文言は日本語のまま） */}
-        {view === original && <Reveal posts={original.posts} clues={original.clues} conclusions={original.conclusions} />}
+        {native && <Reveal posts={current.posts.filter((post) => !effectiveExcluded.has(post.post_id))} clues={current.clues}
+          conclusions={current.conclusions ?? []} profileClaims={profileClaims} excludedPostIds={effectiveExcluded}>
+          {(() => {
+            const location = preview ?? current;
+            return isResidenceEstimate(location.residence, current.clues.length)
+              ? <ResidenceStages residence={location.residence!}
+                posts={current.posts.filter((post) => !effectiveExcluded.has(post.post_id))} />
+              : <NarrowingStages narrowing={visibleNarrowing(location.narrowing, effectiveExcluded)} />;
+          })()}
+        </Reveal>}
+        {!native && view === original && <Reveal posts={original.posts} clues={original.clues} conclusions={original.conclusions ?? []} />}
         <div aria-live="polite" className="border-l-4 border-seeker bg-paper-deep p-4">
           <p className="font-bold">{view === original ? t.resultFull : t.resultRe}</p>
-          <p className="text-sm text-ink/70">{t.resultCount(current.posts.length, current.clues.length, current.conclusions.length)}
+          <p className="text-sm text-ink/70">{t.resultCount(current.posts.filter((post) => !effectiveExcluded.has(post.post_id)).length,
+            current.clues.filter((clue) => !effectiveExcluded.has(clue.post_id)).length,
+            current.conclusions ? current.conclusions.length : candidateAttributes(profileClaims).length)}
             {typeof original.elapsed_ms === "number" && view === original ? t.elapsed(original.elapsed_ms) : ""}</p>
           {(original.post_errors?.length ?? 0) > 0 && <p className="mt-1 text-sm">{t.postErrors(original.post_errors?.length ?? 0)}</p>}
         </div>
         <ConclusionBoard key={view === original ? "full" : "rediagnosed"} clues={current.clues}
-          conclusions={current.conclusions} unknown={preview?.broken} posts={current.posts}
-          profileClaims={profileClaims} profileClaimSuggestions={profileClaimSuggestions} />
+          photoPlaceResults={current.photo_place_results?.filter((item) => !effectiveExcluded.has(item.post_id))}
+          conclusions={current.conclusions ?? []} unknown={preview?.broken} posts={current.posts}
+          profileClaims={profileClaims} profileClaimSuggestions={profileClaimSuggestions}
+          profileRelations={current.profile_relations} deletedPostIds={[...effectiveExcluded]} />
 
-        <section aria-labelledby="threads-evidence-heading" className="space-y-4">
+        {(current.conclusions?.length ?? 0) > 0 && <section aria-labelledby="threads-evidence-heading" className="space-y-4">
           <h2 id="threads-evidence-heading" className="font-display text-xl">{t.evidenceTitle}</h2>
-          {current.conclusions.map((conclusion, index) => <article key={`${conclusion.rule}-${index}`}
+          {(current.conclusions ?? []).map((conclusion, index) => <article key={`${conclusion.rule}-${index}`}
             className="border border-ink/20 bg-paper-deep p-4">
             <h3 className="font-bold">{conclusion.attribute}：{conclusion.value}</h3>
             <ul className="mt-3 space-y-2 text-sm">
@@ -427,7 +464,7 @@ export default function ThreadsPage() {
               })}
             </ul>
           </article>)}
-        </section>
+        </section>}
 
         <section aria-labelledby="threads-posts-heading" className="space-y-4">
           <h2 id="threads-posts-heading" className="font-display text-xl">{t.postsTitle}</h2>
@@ -435,7 +472,7 @@ export default function ThreadsPage() {
           <ol className="space-y-5">{original.posts.map((post) => <li key={post.post_id}
             className={selected.includes(post.post_id) ? "rounded-sm border border-seeker p-3" : "p-3"}>
             <label className="mb-3 flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={selected.includes(post.post_id)} onChange={() => toggle(post.post_id)} />
+              <input type="checkbox" disabled={busy} checked={selected.includes(post.post_id)} onChange={() => toggle(post.post_id)} />
               {t.exclude}
             </label>
             {post.images.length > 0 && <p className="mb-2 text-xs font-bold text-seeker">{t.imageDiagnosis}</p>}
@@ -445,15 +482,18 @@ export default function ThreadsPage() {
             <button type="button" disabled={!selected.length || busy} className="rounded-sm border border-ink px-4 py-2 disabled:opacity-50"
               onClick={() => void perform(async () => {
                 const result = await call("simulate", "POST", { delete: selected });
-                if (!isThreadsSimulation(result, original.clues.length)) throw new ThreadsError("simulationUnreadable");
-                setPreview(result);
+                if (isSimulation(result, original.clues.length)) { setView(original); setPreview(result); }
+                else if (isThreadsSimulation(result, original.clues.length) && result.after.every((item) => isRecord(item) && "rule" in item)) {
+                  setView(original);
+                  setPreview({ ...result, after: profileClaimsAfterDeletion(original.profile_claims, new Set(result.delete)) });
+                } else throw new ThreadsError("simulationUnreadable");
               })}>{t.simulate}</button>
             <button type="button" disabled={!selected.length || busy} className="rounded-sm bg-seeker px-4 py-2 font-bold text-paper disabled:opacity-50"
               onClick={() => void perform(async () => {
                 const result = requireDiagnosis(await call("rediagnose", "POST", { delete: selected }));
                 setView(result); setPreview(null);
               })}>{t.rediagnose}</button>
-            {view !== original && <button type="button" className="underline" onClick={() => { setView(original); setPreview(null); setSelected([]); }}>{t.showAll}</button>}
+            {view !== original && <button type="button" disabled={busy} className="underline disabled:opacity-50" onClick={() => { setView(original); setPreview(null); setSelected([]); }}>{t.showAll}</button>}
           </div>
           {escape && <EscapeStamps key={escape.key} before={escape.before} after={escape.after} broken={escape.broken} />}
           {preview && <p role="status">{t.brokenItems(preview.broken.length ? preview.broken.join(t.listSeparator) : t.none)}</p>}

@@ -11,12 +11,13 @@ import secrets
 import time
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime
 from threading import RLock
 from typing import Any, Literal
 from urllib.parse import parse_qs, urlencode, urlparse
 
 import httpx
-from fastapi import APIRouter, HTTPException, Request, Response, status
+from fastapi import APIRouter, HTTPException, Query, Request, Response, status
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, ConfigDict
 
@@ -25,8 +26,11 @@ from tkb_api.origin import check_origin
 from tkb_api.pipeline import (
     Event,
     diagnose_events,
+    plan_claims_json,
     plan_json,
     real_extractions,
+    residence_json,
+    simulate_claims_json,
     simulation_json,
 )
 from tkb_api.routes.diagnose import _cached_gazetteer
@@ -47,12 +51,18 @@ from tkb_common.schemas import (
     ProfileCandidateSet,
     ProfileEvidence,
     ProfileItem,
+    ProfileRelation,
 )
 from tkb_detect.batch import PostExtraction, extract_posts
 from tkb_detect.errors import DetectError
 from tkb_detect.extract import Extractor, build_extractor
-from tkb_engine.cross_post import claims_after_deletion
+from tkb_engine.cross_post import (
+    claims_after_deletion,
+    profile_relations_after_deletion,
+    recalculate_profile_candidate_sets,
+)
 from tkb_engine.gazetteer import Gazetteer
+from tkb_engine.narrowing import narrowing
 from tkb_engine.planner import simulate as simulate_deletion
 from tkb_engine.rules import infer
 
@@ -98,7 +108,11 @@ class ThreadsSession:
     posts: list[Post] = field(default_factory=list)
     clues: list[Clue] = field(default_factory=list)
     profile_claims: list[ProfileItem] = field(default_factory=list)
+    profile_candidate_sets: list[ProfileCandidateSet] = field(default_factory=list)
     profile_claim_suggestions: list[str] = field(default_factory=list)
+    profile_relations: list[ProfileRelation] = field(default_factory=list)
+    candidate_snapshot: dict[str, Any] | None = None
+    diagnosis_at: datetime | None = None
     busy: bool = False
     fetched: bool = False
     demo_backend: Literal["preset", "vlm"] = "preset"
@@ -460,10 +474,17 @@ async def session(request: Request) -> dict[str, str | bool]:
 
 
 @router.get("/diagnosis")
-async def diagnosis(request: Request) -> dict[str, Any]:
+async def diagnosis(
+    request: Request,
+    response_format: Literal["legacy", "candidates"] = Query("legacy", alias="format"),
+) -> dict[str, Any]:
     current = _session(request)
     if current.snapshot is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "診断結果がありません")
+    if response_format == "candidates":
+        if current.candidate_snapshot is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "候補形式の診断結果がありません")
+        return current.candidate_snapshot
     return current.snapshot
 
 
@@ -614,7 +635,10 @@ POST_ERROR_MESSAGE = "この投稿は読み取れませんでした"
 
 
 def _infer_events(
-    posts: list[Post], extractions: list[PostExtraction], gazetteer: Gazetteer
+    posts: list[Post],
+    extractions: list[PostExtraction],
+    gazetteer: Gazetteer,
+    diagnosis_at: datetime | None = None,
 ) -> list[Event]:
     """推理（infer・プロフィールの推定・plan）を、Bluesky と同じ diagnose_events でまとめて行う。
 
@@ -623,7 +647,12 @@ def _infer_events(
     """
 
     async def collect() -> list[Event]:
-        return [event async for event in diagnose_events(posts, _replayed(extractions), gazetteer)]
+        return [
+            event
+            async for event in diagnose_events(
+                posts, _replayed(extractions), gazetteer, diagnosis_at=diagnosis_at
+            )
+        ]
 
     events = asyncio.run(collect())
     # Threads retains its legacy Conclusion response. The Bluesky pipeline no
@@ -681,11 +710,20 @@ async def _reachable_text_extractor(settings: Settings) -> Extractor:
 
 
 @router.post("/diagnose")
-async def diagnose(request: Request) -> dict[str, Any]:
+async def diagnose(
+    request: Request,
+    response_format: Literal["legacy", "candidates"] = Query("legacy", alias="format"),
+) -> dict[str, Any]:
     _origin(request)
     settings = _settings(request)
     current = _session(request)
     if current.snapshot is not None:
+        if response_format == "candidates":
+            if current.candidate_snapshot is None:
+                raise HTTPException(
+                    status.HTTP_500_INTERNAL_SERVER_ERROR, "候補形式の診断結果がありません"
+                )
+            return current.candidate_snapshot
         return current.snapshot
     kind = _kind(current)
     with _store(request).lock:
@@ -707,6 +745,7 @@ async def diagnose(request: Request) -> dict[str, Any]:
         current.posts_read = 0
         current.read_post_ids = []
         current.last_error = None
+        current.diagnosis_at = datetime.now(UTC)
     logger.info("Threads診断：開始 kind=%s image=%s", kind, settings.threads_image_diagnosis)
     begun = time.monotonic()
     try:
@@ -719,6 +758,12 @@ async def diagnose(request: Request) -> dict[str, Any]:
             len(snapshot["post_errors"]),
             time.monotonic() - begun,
         )
+        if response_format == "candidates":
+            if current.candidate_snapshot is None:
+                raise HTTPException(
+                    status.HTTP_500_INTERNAL_SERVER_ERROR, "候補形式の診断結果がありません"
+                )
+            return current.candidate_snapshot
         return snapshot
     except HTTPException as exc:
         current.last_error = (
@@ -790,14 +835,25 @@ async def _run_diagnosis(current: ThreadsSession, settings: Settings) -> dict[st
     posts = [post for post in posts if post.post_id not in failed]
     current.stage = "inferring"
     events = await asyncio.to_thread(
-        _infer_events, posts, [e for e in extracted if e.post_id not in failed], gazetteer
+        _infer_events,
+        posts,
+        [e for e in extracted if e.post_id not in failed],
+        gazetteer,
+        current.diagnosis_at,
     )
-    results = {name: data for name, data in events if name in {"conclusions", "plan"}}
+    results = {name: data for name, data in events if name in {"conclusions", "plan", "residence"}}
     conclusion = results["conclusions"]
     current.posts = posts
     current.clues = [Clue.model_validate(item) for item in conclusion["clues"]]
     current.profile_claims = _threads_profile_items(conclusion["profile_claims"])
+    current.profile_candidate_sets = [
+        ProfileCandidateSet.model_validate(item) for item in conclusion["profile_claims"]
+    ]
+    current.profile_relations = [
+        ProfileRelation.model_validate(item) for item in conclusion.get("profile_relations", [])
+    ]
     current.profile_claim_suggestions = list(conclusion["profile_claim_suggestions"])
+    elapsed_ms = round((time.monotonic() - started) * 1000)
     current.snapshot = {
         "posts": [post.model_dump(mode="json") for post in posts],
         "clues": conclusion["clues"],
@@ -806,7 +862,22 @@ async def _run_diagnosis(current: ThreadsSession, settings: Settings) -> dict[st
         "profile_claims": [claim.model_dump(mode="json") for claim in current.profile_claims],
         "profile_claim_suggestions": current.profile_claim_suggestions,
         "post_errors": post_errors,
-        "elapsed_ms": round((time.monotonic() - started) * 1000),
+        "elapsed_ms": elapsed_ms,
+        "mock": current.token is None,
+    }
+    current.candidate_snapshot = {
+        "posts": [post.model_dump(mode="json") for post in posts],
+        "clues": conclusion["clues"],
+        "deleted": [],
+        "photo_place_results": conclusion.get("photo_place_results", []),
+        "plan": results["plan"],
+        "profile_claims": conclusion["profile_claims"],
+        "narrowing": conclusion.get("narrowing"),
+        "residence": results.get("residence", {}).get("residence"),
+        "profile_relations": [item.model_dump(mode="json") for item in current.profile_relations],
+        "profile_claim_suggestions": current.profile_claim_suggestions,
+        "post_errors": post_errors,
+        "elapsed_ms": elapsed_ms,
         "mock": current.token is None,
     }
     return current.snapshot
@@ -821,11 +892,26 @@ def _selected(body: SimulateRequest, current: ThreadsSession) -> None:
 
 
 @router.post("/simulate")
-async def simulate(body: SimulateRequest, request: Request) -> dict[str, Any]:
+async def simulate(
+    body: SimulateRequest,
+    request: Request,
+    response_format: Literal["legacy", "candidates"] = Query("legacy", alias="format"),
+) -> dict[str, Any]:
     _origin(request)
     current = _session(request)
     _selected(body, current)
     gazetteer = _cached_gazetteer(_settings(request).gazetteer_dir)
+
+    if response_format == "candidates":
+        return await asyncio.to_thread(
+            simulate_claims_json,
+            current.profile_candidate_sets,
+            current.clues,
+            current.posts,
+            body.delete,
+            diagnosis_at=current.diagnosis_at,
+            gazetteer=gazetteer,
+        )
 
     def run() -> dict[str, Any]:
         return simulation_json(
@@ -836,13 +922,70 @@ async def simulate(body: SimulateRequest, request: Request) -> dict[str, Any]:
 
 
 @router.post("/rediagnose")
-async def rediagnose(body: SimulateRequest, request: Request) -> dict[str, Any]:
+async def rediagnose(
+    body: SimulateRequest,
+    request: Request,
+    response_format: Literal["legacy", "candidates"] = Query("legacy", alias="format"),
+) -> dict[str, Any]:
     """仮除外後の投稿・手がかりだけから推論し直す。Threads API とモデルは再呼出ししない。"""
     _origin(request)
     current = _session(request)
     _selected(body, current)
     gazetteer = _cached_gazetteer(_settings(request).gazetteer_dir)
+    if response_format == "candidates":
+        return await asyncio.to_thread(_candidate_rediagnosed, current, set(body.delete), gazetteer)
     return await asyncio.to_thread(_rediagnosed, current, set(body.delete), gazetteer)
+
+
+def _candidate_rediagnosed(
+    current: ThreadsSession, gone: set[str], gazetteer: Gazetteer
+) -> dict[str, Any]:
+    """Build a candidate-format preview from the immutable original diagnosis."""
+    if current.candidate_snapshot is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "候補形式の診断結果がありません")
+    gone_in_input_order = [post.post_id for post in current.posts if post.post_id in gone]
+    remaining_posts = [post for post in current.posts if post.post_id not in gone]
+    candidate_sets = recalculate_profile_candidate_sets(
+        current.profile_candidate_sets,
+        gone,
+        remaining_posts,
+        clues=current.clues,
+        diagnosis_at=current.diagnosis_at,
+    )
+    relations = profile_relations_after_deletion(current.profile_relations, gone, candidate_sets)
+    plan = plan_claims_json(
+        current.profile_candidate_sets,
+        current.clues,
+        current.posts,
+        excluded=gone_in_input_order,
+        diagnosis_at=current.diagnosis_at,
+    )
+    return {
+        **current.candidate_snapshot,
+        "deleted": gone_in_input_order,
+        "profile_claims": [item.model_dump(mode="json") for item in candidate_sets],
+        "profile_relations": [item.model_dump(mode="json") for item in relations],
+        "profile_claim_suggestions": plan["delete"],
+        "plan": plan,
+        "narrowing": narrowing(
+            current.clues,
+            remaining_posts,
+            candidate_sets,
+            gazetteer,
+        ),
+        "residence": residence_json(
+            current.clues,
+            current.posts,
+            gazetteer,
+            gone_in_input_order,
+            profile_claims=candidate_sets,
+        ),
+        "photo_place_results": [
+            result
+            for result in current.candidate_snapshot["photo_place_results"]
+            if result.get("post_id") not in gone
+        ],
+    }
 
 
 def _rediagnosed(current: ThreadsSession, gone: set[str], gazetteer: Gazetteer) -> dict[str, Any]:

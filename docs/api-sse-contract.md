@@ -161,7 +161,7 @@ SSEブロックは `event: <name>\ndata: <JSON>\n\n`。JSONはUTF-8で送られ�
 ## まだ実装されていない目標機能
 
 - （旧目標・現行契約ではない）16項目プロフィールの `found/weak/unknown` 共通出力。現行は `home_room` を除くカタログ属性の候補セットを返し、候補スコアと根拠を含む。
-- （旧目標・現行契約ではない）16項目プロフィールでの削除候補・仮除外。現行は Bluesky 診断・`/api/demo/*` とも候補カタログセットと重みづけプランに一本化済み（Threads `/api/threads/simulate` は互換のため `Conclusion[]` を継続）。
+- （旧目標・現行契約ではない）16項目プロフィールでの削除候補・仮除外。現行は Bluesky 診断・`/api/demo/*` とも候補カタログセットと重みづけプランに一本化済み。Threads は従来形式を既定で維持し、`?format=candidates` を指定した場合に同じ候補カタログ形式を返す。
 - Blueskyログイン時以外の本番画像/本文抽出の統合完了確認。独立detectエンドポイントはモックのみで、本番は501。
 - SSEの全体失敗イベント、途中切断後の再開・再送プロトコル。
 
@@ -189,7 +189,18 @@ X の状態変更 API は同一オリジンの `Origin` ヘッダーを要求す
 
 ## Threads 専用の読み取り診断
 
-`/api/threads/diagnose` と `/api/threads/diagnosis` は、共通パイプラインの24属性候補セットを Threads 画面向けの従来の `ProfileItem[]` に変換して返す。表示対象の候補だけを平坦化し、候補のない属性は省略する。`/api/threads/rediagnose` は仮除外後の根拠経路を再評価し、返却する `clues` に合わせて根拠番号を振り直す。Threads の結果は専用セッションのメモリに置き、投稿の実削除は行わない。
+Threads は投稿の取得・手がかり抽出の後、Bluesky と同じ `diagnose_events`、候補セット推理、削除プラン、地図計算を使う。Threads 固有の抽出設定（本文のみが既定で、画像診断を有効にした場合は画像1枚目も読む）と認証・セッションは変えない。診断結果は専用セッションのメモリに置き、投稿の実削除は行わない。
+
+以下のルートは `?format=candidates` で共通の候補セット形式を返す。クエリを省略した既定形式は互換用として変えない。
+
+| メソッド・パス | 候補形式での動作 |
+| --- | --- |
+| `POST /api/threads/diagnose?format=candidates` | `DiagnosisSnapshot` 形式。`posts`・`clues`・`deleted: []`・ローカル `photo_place_results`・`plan`・`profile_claims`・`narrowing`・`residence`・`profile_relations`・`profile_claim_suggestions` と、Threads 固有の `mock`・`post_errors`・`elapsed_ms` を返す。Bluesky と同じ診断イベントの結果から作るため、候補形式を後から取得しても投稿抽出や推理を再実行しない。結果のない値は共有スキーマどおり null または空配列。 |
+| `GET /api/threads/diagnosis?format=candidates` | 上記の完了済みスナップショットを返す。 |
+| `POST /api/threads/simulate?format=candidates` | `simulate_claims_json` による共通 `Simulation`（`delete`・`broken`・`after`、利用可能なら `narrowing`・`residence`）。再抽出・外部検索・Threads API 呼び出し・投稿削除はしない。 |
+| `POST /api/threads/rediagnose?format=candidates` | 元の `posts`・`clues` 配列と全体 clue index を保ち、仮除外 ID を `deleted` に返す。候補・プラン・地図・関係は元の保存済み候補と除外集合から再計算し、除外投稿への根拠を返さない。元の診断スナップショットは変更しない。 |
+
+候補形式の再計算は診断開始時の `diagnosis_at` を使い、時刻依存候補が再読み込み・仮除外で変化しないようにする。旧形式の `/api/threads/diagnose`・`/diagnosis` は `ProfileItem[]` に平坦化した `profile_claims` と `conclusions` を保つ。旧形式の `/rediagnose` は従来どおり仮除外後の投稿と手がかりを返し、その並びに合わせて clue index を詰め直す。旧形式の `/simulate` も `Conclusion[]` の `after` を維持する。
 
 `POST /api/threads/diagnose` は同じセッションで診断中なら `409`（`{"detail":"診断中です"}`）を返し、診断済みなら保存した結果をそのまま返す。投稿の取得（`GET /api/threads/posts`）の処理中も `409` になる。
 
