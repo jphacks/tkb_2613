@@ -171,9 +171,11 @@ def test_simulate_recomputes_the_residence_without_the_chosen_posts() -> None:
 
 
 def test_simulate_drops_map_localization_when_a_required_home_post_is_removed() -> None:
+    base_scoring = GAZETTEER.scoring
+    assert base_scoring is not None
     scoring = replace(
-        GAZETTEER.scoring,
-        stations=replace(GAZETTEER.scoring.stations, group=["8号線京王線", "1号線京王線"]),
+        base_scoring,
+        stations=replace(base_scoring.stations, group=["8号線京王線", "1号線京王線"]),
     )
     gazetteer = replace(GAZETTEER, scoring=scoring)
     home_one, home_two = post(11, "自宅の最寄り駅の写真"), post(12, "自宅から駅まで毎朝歩いている")
