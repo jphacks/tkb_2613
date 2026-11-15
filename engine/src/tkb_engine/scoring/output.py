@@ -46,16 +46,18 @@ def _round(value: float) -> float:
     return round(value, SIGNIFICANT - 1 - math.floor(math.log10(abs(value))))
 
 
-def region_model(tables: ScoringTables, region: Region) -> ResidenceRegion:
+def region_model(
+    tables: ScoringTables, region: Region, *, show_place: bool = True
+) -> ResidenceRegion:
     described = describe_cell(tables, region.top_cell)
     minutes = described["station_walk_minutes"]
     return ResidenceRegion(
         people=_round(region.people),
         cells=region.cells,
-        city=_str(described["city"]),
-        town=_str(described["town"]),
-        station=_str(described["station"]),
-        station_walk_minutes=minutes if isinstance(minutes, int) else None,
+        city=_str(described["city"]) if show_place else None,
+        town=_str(described["town"]) if show_place else None,
+        station=_str(described["station"]) if show_place else None,
+        station_walk_minutes=minutes if show_place and isinstance(minutes, int) else None,
         same_birthday=None if region.same_birthday is None else _round(region.same_birthday),
     )
 
@@ -72,7 +74,10 @@ def residence_model(
     with_geo = result.with_geoprofile
     return ResidenceEstimate(
         age_class=age_label(result.age),
-        region=region_model(tables, result.region),
+        localization_status=result.localization_status,
+        region=region_model(
+            tables, result.region, show_place=result.localization_status == "supported"
+        ),
         geoprofile=(
             ResidenceGeoprofile(
                 region=region_model(tables, with_geo[1]),
@@ -80,7 +85,9 @@ def residence_model(
                 other_bases=[p.name for p in geo.other_bases],
                 buffer_m=round(geo.buffer_m, 1),
             )
-            if geo is not None and with_geo is not None
+            if result.localization_status == "supported"
+            and geo is not None
+            and with_geo is not None
             else None
         ),
         map=_map(result, tables),
@@ -125,6 +132,8 @@ def residence_model(
 
 
 def _map(result: Estimate, tables: ScoringTables) -> ResidenceMap:
+    if result.localization_status != "supported":
+        return ResidenceMap(cell_lat=CELL_LAT, cell_lon=CELL_LON, cells=[], labels=[])
     top = result.region.top_cell
     lat0, lon0 = float(tables.lat[top]), float(tables.lon[top])
     half_lat = MAP_HALF_WIDTH_M / METERS_PER_DEG_LAT

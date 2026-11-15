@@ -58,6 +58,30 @@ describe("ResidenceStages", () => {
     expect(figure.textContent).not.toMatch(/確定|特定した/);
   });
 
+  it.each([
+    ["insufficient" as const, "絞り込み不足"],
+    ["conflict" as const, "根拠が一致しない"],
+  ])("%s のとき場所と旧キャッシュ地図を隠す", (localization_status, label) => {
+    const { container } = render(
+      <ResidenceStages residence={{ ...SAMPLE_RESIDENCE, localization_status }} posts={POSTS} />,
+    );
+
+    expect(screen.getByText(label, { exact: true })).toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: "確率の地図" })).toBeNull();
+    expect(screen.queryByText(/弥生一丁目|東大前まで徒歩/)).toBeNull();
+    expect(container.querySelectorAll(".residence-cell")).toHaveLength(0);
+  });
+
+  it("statusのない旧キャッシュは絞り込み不足として場所と地図を隠す", () => {
+    const { container } = render(
+      <ResidenceStages residence={{ ...SAMPLE_RESIDENCE, localization_status: undefined }} posts={POSTS} />,
+    );
+
+    expect(screen.getByText("絞り込み不足", { exact: true })).toBeInTheDocument();
+    expect(screen.queryByText(/弥生一丁目|東大前まで徒歩/)).toBeNull();
+    expect(container.querySelectorAll(".residence-cell")).toHaveLength(0);
+  });
+
   it("投稿を重ねるたびに減る人数を、前の段に線を引いて並べる", () => {
     const { container } = render(<ResidenceStages residence={SAMPLE_RESIDENCE} posts={POSTS} />);
 

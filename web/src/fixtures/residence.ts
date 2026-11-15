@@ -24,6 +24,7 @@ function grid(): ResidenceEstimate["map"]["cells"] {
 
 export const SAMPLE_RESIDENCE: ResidenceEstimate = {
   age_class: "20〜24歳",
+  localization_status: "supported",
   region: {
     people: 28,
     cells: 2,

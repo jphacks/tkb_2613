@@ -202,6 +202,8 @@ def residence_json(
     posts: Sequence[Post],
     gazetteer: Gazetteer,
     excluded: Sequence[str] = (),
+    *,
+    profile_claims: Sequence[ProfileCandidateSet] = (),
 ) -> dict[str, Any] | None:
     """住まいの推定（点数の地図）。excluded（消した・仮に除いた投稿）を除いて計算する。
 
@@ -212,7 +214,11 @@ def residence_json(
         return None
     remaining_clues, remaining_posts = _remaining(clues, posts, excluded)
     result = estimate(
-        remaining_posts, remaining_clues, tables, gazetteer.knowledge.collection_areas
+        remaining_posts,
+        remaining_clues,
+        tables,
+        gazetteer.knowledge.collection_areas,
+        profile_claims,
     )
     if result is None:
         return None
@@ -283,7 +289,9 @@ def simulate_claims_json(
         gone = set(excluded) | set(delete)
         _, remaining_posts = _remaining(clues, posts, gone)
         result["narrowing"] = narrowing(clues, remaining_posts, sim.after, gazetteer)
-        result["residence"] = residence_json(clues, posts, gazetteer, sorted(gone))
+        result["residence"] = residence_json(
+            clues, posts, gazetteer, sorted(gone), profile_claims=sim.after
+        )
     return result
 
 
@@ -519,7 +527,15 @@ async def diagnose_events(
     )
     yield (
         "residence",
-        {"residence": await asyncio.to_thread(residence_json, all_clues, posts, gazetteer)},
+        {
+            "residence": await asyncio.to_thread(
+                residence_json,
+                all_clues,
+                posts,
+                gazetteer,
+                profile_claims=profile_claims,
+            )
+        },
     )
     logger.info(
         "診断の時間：手がかりの取り出し %.1f 秒"

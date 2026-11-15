@@ -3,7 +3,20 @@ from dataclasses import replace
 import numpy as np
 import pytest
 
-from tkb_common.schemas import Clue, ClueSource, ClueType, Post
+from tkb_common.schemas import (
+    Clue,
+    ClueSource,
+    ClueType,
+    EvidenceSource,
+    Post,
+    ProfileAttribute,
+    ProfileCandidate,
+    ProfileCandidateSet,
+    ProfileCandidateSetStatus,
+    ProfileEvidence,
+    ProfileEvidencePath,
+    ProfileStatus,
+)
 from tkb_engine.gazetteer import CollectionArea
 from tkb_engine.scoring.constants import COVERAGE
 from tkb_engine.scoring.estimate import (
@@ -13,6 +26,7 @@ from tkb_engine.scoring.estimate import (
     estimate,
     rank_percent,
 )
+from tkb_engine.scoring.output import residence_model
 from tkb_engine.scoring.tables import ScoringTables, Shelter
 
 AREAS = [CollectionArea("文京区", "弥生1・2丁目", "月木", ["弥生1・2丁目"])]
@@ -47,6 +61,34 @@ def photo(n: int, source: ClueSource) -> Clue:
         region=None,
         confidence=0.9,
         source=source,
+    )
+
+
+def profile_candidate_set(
+    attribute: ProfileAttribute, value: str, post_ids: tuple[str, str]
+) -> ProfileCandidateSet:
+    evidence = [
+        ProfileEvidence(
+            post_id=post_id,
+            required=True,
+            source=EvidenceSource.POST_TEXT,
+            excerpt="本人の投稿による根拠",
+        )
+        for post_id in post_ids
+    ]
+    candidate = ProfileCandidate(
+        rank=1,
+        value=value,
+        confidence=0.9,
+        status=ProfileStatus.FOUND,
+        evidence=evidence,
+        evidence_paths=[ProfileEvidencePath(evidence=evidence, confidence=0.9)],
+    )
+    return ProfileCandidateSet(
+        attribute=attribute,
+        status=ProfileCandidateSetStatus.CANDIDATE,
+        candidates=[candidate],
+        candidate_pool=[candidate],
     )
 
 
@@ -165,3 +207,124 @@ def test_estimate_counts_a_town_read_from_both_photo_and_text_once(tables: Scori
 
     assert result is not None
     assert [e.signal.value for e in result.evidence] == ["弥生"]
+
+
+def test_keio_line_peak_is_conditioned_on_supported_home_station_and_dependencies(
+    tables: ScoringTables,
+) -> None:
+    world = replace(
+        tables,
+        stations=replace(tables.stations, group=["8号線京王線", "1号線京王線"]),
+    )
+    first, second, line_post = (
+        post(1, "一つめの自宅投稿"),
+        post(2, "別の自宅根拠"),
+        post(3, "京王線、また止まってる…"),
+    )
+    claim = profile_candidate_set(
+        ProfileAttribute.HOME_NEAREST_STATION,
+        "東大前駅",
+        (first.post_id, second.post_id),
+    )
+
+    result = estimate([first, second, line_post], [], world, AREAS, [claim])
+
+    assert result is not None
+    assert result.localization_status == "supported"
+    assert describe_cell(world, result.region.top_cell)["station"] == "東大前"
+    # The two required profile posts enter the timeline even though neither made a scoring signal.
+    assert [post_id for post_id, _ in result.steps] == [
+        None,
+        first.post_id,
+        second.post_id,
+        line_post.post_id,
+    ]
+    assert result.steps[1][1].people == pytest.approx(result.steps[0][1].people)
+    assert result.steps[2][1].people < result.steps[1][1].people
+    assert result.without[first.post_id].people > result.region.people
+    model = residence_model(result, world, [])
+    assert model.localization_status == "supported"
+    assert model.map.cells
+
+
+def test_disjoint_home_station_and_residential_town_hides_location_map(
+    tables: ScoringTables,
+) -> None:
+    posts = [post(n, f"根拠投稿 {n}") for n in range(1, 5)]
+    station_claim = profile_candidate_set(
+        ProfileAttribute.HOME_NEAREST_STATION,
+        "根津駅",
+        (posts[0].post_id, posts[1].post_id),
+    )
+    area_claim = profile_candidate_set(
+        ProfileAttribute.RESIDENTIAL_AREA,
+        "文京区弥生二丁目",
+        (posts[2].post_id, posts[3].post_id),
+    )
+
+    result = estimate(posts, [], tables, AREAS, [station_claim, area_claim])
+
+    assert result is not None
+    assert result.localization_status == "conflict"
+    model = residence_model(result, tables, [])
+    assert model.map.cells == [] and model.map.labels == []
+    assert model.geoprofile is None
+    assert model.region.city is None and model.region.town is None
+    assert model.region.station is None and model.region.station_walk_minutes is None
+
+
+def test_ambiguous_home_station_values_do_not_authorize_an_arbitrary_map(
+    tables: ScoringTables,
+) -> None:
+    world = replace(
+        tables,
+        stations=replace(tables.stations, group=["8号線京王線", "1号線京王線"]),
+    )
+    posts = [post(n, f"駅候補の根拠 {n}") for n in range(1, 5)]
+    first = profile_candidate_set(
+        ProfileAttribute.HOME_NEAREST_STATION,
+        "根津駅",
+        (posts[0].post_id, posts[1].post_id),
+    ).candidates[0]
+    second = (
+        profile_candidate_set(
+            ProfileAttribute.HOME_NEAREST_STATION,
+            "東大前駅",
+            (posts[2].post_id, posts[3].post_id),
+        )
+        .candidates[0]
+        .model_copy(update={"rank": 2, "confidence": 0.85})
+    )
+    ambiguous = ProfileCandidateSet(
+        attribute=ProfileAttribute.HOME_NEAREST_STATION,
+        status=ProfileCandidateSetStatus.AMBIGUOUS,
+        candidates=[first, second],
+        candidate_pool=[first, second],
+    )
+
+    result = estimate([*posts, post(5, "京王線、また止まってる…")], [], world, AREAS, [ambiguous])
+
+    assert result is not None
+    assert result.localization_status == "insufficient"
+    model = residence_model(result, world, [])
+    assert model.map.cells == [] and model.map.labels == []
+
+
+def test_independent_owner_home_town_conflicts_with_profile_station(tables: ScoringTables) -> None:
+    posts = [
+        post(1, "根拠投稿一"),
+        post(2, "根拠投稿二"),
+        post(3, "私の自宅の近所の根津で祭りを見た"),
+    ]
+    station_claim = profile_candidate_set(
+        ProfileAttribute.HOME_NEAREST_STATION,
+        "東大前駅",
+        (posts[0].post_id, posts[1].post_id),
+    )
+
+    result = estimate(posts, [], tables, AREAS, [station_claim])
+
+    assert result is not None
+    assert result.localization_status == "conflict"
+    model = residence_model(result, tables, [])
+    assert model.map.cells == [] and model.map.labels == []

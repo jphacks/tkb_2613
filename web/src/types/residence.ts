@@ -80,6 +80,8 @@ export interface ResidenceGeoprofile {
 
 export interface ResidenceEstimate {
   readonly age_class: string | null;
+  /** Missing on older cached responses; clients must treat those as insufficient. */
+  readonly localization_status?: "supported" | "conflict" | "insufficient";
   readonly region: ResidenceRegion;
   readonly geoprofile: ResidenceGeoprofile | null;
   readonly map: ResidenceMap;
@@ -174,7 +176,9 @@ export function isResidenceEstimate(
   clueCount = Number.POSITIVE_INFINITY,
 ): value is ResidenceEstimate {
   return (
-    isRecord(value) && isNullableString(value.age_class) && isRegion(value.region) &&
+    isRecord(value) && isNullableString(value.age_class) &&
+    (value.localization_status === undefined || value.localization_status === "supported" || value.localization_status === "conflict" || value.localization_status === "insufficient") &&
+    isRegion(value.region) &&
     (value.geoprofile === null || isGeoprofile(value.geoprofile)) && isMap(value.map) &&
     Array.isArray(value.steps) && value.steps.every(isStep) &&
     Array.isArray(value.influence) && value.influence.every(isInfluence) &&

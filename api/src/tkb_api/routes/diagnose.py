@@ -407,7 +407,9 @@ def read_diagnosis(
         ),
         "profile_claims": [claim.model_dump(mode="json") for claim in profile_claims],
         "narrowing": narrowed,
-        "residence": residence_json(clues, posts, gazetteer, deleted),
+        "residence": residence_json(
+            clues, posts, gazetteer, deleted, profile_claims=profile_claims
+        ),
         "profile_relations": [relation.model_dump(mode="json") for relation in profile_relations],
         "profile_claim_suggestions": [
             post_id for post_id in diagnosis.profile_claim_suggestions if post_id not in deleted
