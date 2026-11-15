@@ -47,10 +47,10 @@ function stubApi(initial: Partial<ApiState> = {}) {
     const path = String(input);
     if (path.endsWith("/config")) return json({ mock_enabled: true, gpu_demo_enabled: false, live_enabled: false, max_posts: 30 });
     if (path.endsWith("/session")) return json({ username: "架空のThreadsアカウント", mock: true });
-    if (path.endsWith("/diagnosis")) return state.diagnosis === null ? json({ detail: "none" }, 404) : json(state.diagnosis);
+    if (path.split("?")[0].endsWith("/diagnosis")) return state.diagnosis === null ? json({ detail: "none" }, 404) : json(state.diagnosis);
     if (path.endsWith("/progress")) return json(state.progress);
     if (path.endsWith("/posts")) return json({ mock: true, posts: POSTS });
-    if (path.endsWith("/diagnose") && init?.method === "POST") return state.diagnose();
+    if (path.split("?")[0].endsWith("/diagnose") && init?.method === "POST") return state.diagnose();
     throw new Error(`unexpected fetch: ${path}`);
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -58,7 +58,7 @@ function stubApi(initial: Partial<ApiState> = {}) {
 }
 
 function diagnoseCalls(fetchMock: ReturnType<typeof vi.fn>): number {
-  return fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/diagnose")).length;
+  return fetchMock.mock.calls.filter(([input]) => String(input).split("?")[0].endsWith("/diagnose")).length;
 }
 
 async function openAiCard() {
@@ -94,7 +94,7 @@ describe("Threads AI diagnosis in progress", () => {
 
   it("shows the Bluesky loading screen with real steps, counts, and elapsed time, then the reveal", async () => {
     let finish: (response: Response) => void = () => undefined;
-    const { state } = stubApi({ diagnose: () => new Promise<Response>((resolve) => { finish = resolve; }) });
+    const { state, fetchMock } = stubApi({ diagnose: () => new Promise<Response>((resolve) => { finish = resolve; }) });
     render(<ThreadsPage />);
     fireEvent.click(await openAiCard());
 
@@ -127,6 +127,7 @@ describe("Threads AI diagnosis in progress", () => {
 
     finish(json(profileFixture.snapshot));
     expect(await screen.findByRole("heading", { name: "ぜんぶ、みえてる" })).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith("/api/threads/diagnose?format=candidates", expect.objectContaining({ method: "POST" }));
     expect(screen.queryByText(messages.loading.calling)).not.toBeInTheDocument();
   });
 
