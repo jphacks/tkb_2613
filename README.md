@@ -2,8 +2,8 @@
 
 <div align="center">
 
-<!-- TODO: 画像 #4 デモ動画ができたら、見出し画像のリンク先を新しい動画に差し替える（今は Hack Day のデモ動画） -->
-<a href="https://www.youtube.com/watch?v=piaNsc6ilBI"><img src="docs/images/hero.svg" width="880" alt="みーつけた：その投稿、組み合わせると、どこまで分かる？"></a>
+<!-- 見出し画像を押すと、体験デモ（架空アカウント）を操作した録画が開く。Hack Day のデモ動画は下のバッジから -->
+<a href="docs/videos/mitsuketa-demo.webm"><img src="docs/images/hero.svg" width="880" alt="みーつけた：その投稿、組み合わせると、どこまで分かる？"></a>
 
 **その投稿、組み合わせると、どこまで分かる？**
 
